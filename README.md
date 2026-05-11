@@ -2,6 +2,24 @@
 
 A self-hosted Web UI for a personal [Beancount](https://beancount.github.io/) ledger, with transaction browsing, summaries, budget views, AI-assisted bookkeeping drafts, passkey unlock, web push notifications, and optional Git sync for your private ledger repository.
 
+## Demo
+
+<p align="center">
+  <img src="docs/assets/demo/demo-01.png" alt="Demo screenshot 1" width="260" />
+  <img src="docs/assets/demo/demo-02.png" alt="Demo screenshot 2" width="260" />
+  <img src="docs/assets/demo/demo-03.png" alt="Demo screenshot 3" width="260" />
+</p>
+<p align="center">
+  <img src="docs/assets/demo/demo-04.png" alt="Demo screenshot 4" width="260" />
+  <img src="docs/assets/demo/demo-05.png" alt="Demo screenshot 5" width="260" />
+  <img src="docs/assets/demo/demo-06.png" alt="Demo screenshot 6" width="260" />
+</p>
+<p align="center">
+  <img src="docs/assets/demo/demo-07.png" alt="Demo screenshot 7" width="260" />
+  <img src="docs/assets/demo/demo-08.png" alt="Demo screenshot 8" width="260" />
+  <img src="docs/assets/demo/demo-09.png" alt="Demo screenshot 9" width="260" />
+</p>
+
 ## Repository model
 
 This project is designed for a **two-repository setup**:
