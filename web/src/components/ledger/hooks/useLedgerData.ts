@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { readLedgerCache, writeLedgerCache } from "../storage";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, LedgerNotification, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -13,7 +13,6 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
   const [netWorthRows, setNetWorthRows] = useState<{ date: string; assets: number; liabilities: number; netWorth: number }[]>([]);
   const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>([]);
   const [accounts, setAccounts] = useState<AccountView[]>([]);
-  const [notifications, setNotifications] = useState<LedgerNotification[]>([]);
   const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(null);
   const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>([]);
   const [loadingFresh, setLoadingFresh] = useState(false);
@@ -28,7 +27,6 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     setBudgetRows(cache.budgetRows);
     setReconciliationRows(cache.reconciliationRows ?? []);
     setAccounts(cache.accounts ?? []);
-    setNotifications(cache.notifications ?? []);
     setIncomeStatement(cache.incomeStatement ?? null);
     setAccountStatuses(cache.accountStatuses ?? []);
     setLastSyncedAt(cache.savedAt);
@@ -38,13 +36,12 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     setLoadingFresh(true);
     const params = timeRangeToParams(range);
     try {
-      const [s, t, b, r, a, i, inc, st] = await Promise.all([
+      const [s, t, b, r, a, inc, st] = await Promise.all([
         fetch(`/api/ledger/summary?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/transactions?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/budget?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/reconciliation?${params}`).then((r) => r.json()),
         fetch("/api/ledger/accounts").then((r) => r.json()),
-        fetch(`/api/ledger/notifications?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/income-statement?${params}`).then((r) => r.json()),
         fetch("/api/ledger/account-status").then((r) => r.json()),
       ]);
@@ -56,7 +53,6 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
         budgetRows: b.rows,
         reconciliationRows: r.rows ?? [],
         accounts: a.accounts ?? [],
-        notifications: i.notifications ?? [],
         accountStatuses: st.statuses ?? [],
         incomeStatement: { income: inc.income ?? [], expense: inc.expense ?? [], totalIncome: inc.totalIncome ?? 0, totalExpense: inc.totalExpense ?? 0, netIncome: inc.netIncome ?? 0 },
         savedAt: Date.now(),
@@ -117,8 +113,6 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     netWorthRows,
     reconciliationRows,
     accounts,
-    notifications,
-    setNotifications,
     incomeStatement,
     loadingFresh,
     refreshing,

@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, Bell, BookOpen, GitBranch, Home, Landmark, List, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, X } from "lucide-react";
+import { BarChart3, BookOpen, GitBranch, Home, Landmark, List, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 
@@ -17,7 +17,7 @@ const nav = [
 
 const mobilePrimaryNav = nav.filter((item) => item.mobilePrimary);
 
-export function AppShell({ children, pathname, onAdd, onGit, gitDirty, onNotifications, unreadNotifications = 0 }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; onNotifications?: () => void; unreadNotifications?: number }) {
+export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0 }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   return (
     <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink">
@@ -37,9 +37,8 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, onNotific
           </div>
           <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs tracking-wide text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
           <div className="flex items-center gap-2">
-            {onNotifications && <button onClick={onNotifications} className="relative rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag" title="通知中心"><Bell className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">通知</span>{unreadNotifications > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-xs text-paper ring-2 ring-panel">{unreadNotifications}</span>}</button>}
             <button onClick={onGit} className="relative rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag">
-              {gitDirty && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-brand ring-2 ring-panel" />}
+              {gitDirty && changedFileCount > 0 && <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-xs text-paper ring-2 ring-panel">{changedFileCount}</span>}
               <GitBranch className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">保存到 Git</span>
             </button>
           </div>

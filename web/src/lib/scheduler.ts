@@ -42,7 +42,7 @@ export function startLedgerScheduler() {
   }
 
   if (commitMs > 0) {
-    const timer = setInterval(() => runJob("commit-push", () => gitCommitPullPush("chore: autosave ledger")), commitMs);
+    const timer = setInterval(() => runJob("commit-push", () => gitCommitPullPush("chore: autosave ledger").output), commitMs);
     timer.unref?.();
     globalForScheduler.__ledgerSchedulerTimers.push(timer);
   }
