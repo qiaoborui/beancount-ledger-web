@@ -9,6 +9,14 @@ on:
       - "web/**"
       - "examples/**"
       - "package*.json"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/deploy-raspberry-pi.yml"
+      - "scripts/deploy-web-artifact.sh"
+      - "web/**"
+      - "examples/**"
+      - "package*.json"
   workflow_dispatch:
     inputs:
       target:
@@ -18,7 +26,7 @@ on:
         default: production
 
 concurrency:
-  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
+  group: deploy-${{ github.event_name == 'pull_request' && 'preview' || github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +34,8 @@ jobs:
     name: Build Next.js artifact
     # ARM64 artifact matches Raspberry Pi native dependencies.
     runs-on: ubuntu-24.04-arm
+    # Avoid deploying draft PRs until they are marked ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     outputs:
       target: ${{ steps.target.outputs.target }}
       short_target: ${{ steps.target.outputs.short_target }}
@@ -36,7 +46,9 @@ jobs:
       - name: Select deployment target
         id: target
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.target }}" == "preview" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target="preview"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.target }}" == "preview" ]]; then
             target="preview"
           else
             target="production"

@@ -1,24 +1,51 @@
 import { useCallback, useState } from "react";
+import type { GitChange } from "../GitSaveModal";
 
 export function useGitStatus(showToast: (kind: "info" | "success" | "error", text: string) => void) {
   const [gitDirty, setGitDirty] = useState(false);
+  const [changedFileCount, setChangedFileCount] = useState(0);
+  const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
+  const [gitStatusLoading, setGitStatusLoading] = useState(false);
+  const [gitCommitting, setGitCommitting] = useState(false);
 
   const refreshGitStatus = useCallback(async () => {
+    setGitStatusLoading(true);
     try {
       const data = await fetch("/api/git/status").then((r) => r.json());
-      setGitDirty(Boolean(data.dirty ?? data.status?.trim()));
+      const changes = Array.isArray(data.changes) ? data.changes as GitChange[] : [];
+      const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changes.length;
+      setGitChanges(changes);
+      setChangedFileCount(count);
+      setGitDirty(Boolean(data.dirty ?? data.status?.trim() ?? count));
     } catch {
+      setGitChanges([]);
+      setChangedFileCount(0);
       setGitDirty(false);
+    } finally {
+      setGitStatusLoading(false);
     }
   }, []);
 
-  async function gitCommit() {
-    if (!confirm("提交并推送当前账本修改？")) return;
-    const res = await fetch("/api/git/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "chore: update ledger" }) });
-    const data = await res.json();
-    if (res.ok) { showToast("success", data.output || "已提交并推送"); refreshGitStatus(); }
-    else showToast("error", data.error || "Git 提交失败");
+  async function gitCommit(message = "chore: update ledger") {
+    if (!changedFileCount) {
+      showToast("info", "当前没有需要提交的变更");
+      return;
+    }
+    setGitCommitting(true);
+    try {
+      const res = await fetch("/api/git/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Git 提交失败");
+      const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changedFileCount;
+      showToast("success", count > 0 ? `已提交并推送 ${count} 个文件` : data.output || "已提交并推送");
+      await refreshGitStatus();
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Git 提交失败");
+      throw error;
+    } finally {
+      setGitCommitting(false);
+    }
   }
 
-  return { gitDirty, refreshGitStatus, gitCommit };
+  return { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, gitCommit };
 }

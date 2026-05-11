@@ -17,17 +17,16 @@ import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
 import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { useToast } from "./ledger/hooks/useToast";
-import { useWebPush } from "./ledger/hooks/useWebPush";
 import { AppSkeleton, LoginScreen, PasskeyBanner, UnlockScreen } from "./ledger/AuthScreens";
 import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
+import { GitSaveModal } from "./ledger/GitSaveModal";
 import { HomePage } from "./ledger/HomePage";
 import { IncomeStatementPage } from "./ledger/IncomeStatementPage";
 import { Toast } from "./ledger/shared";
 import { AccountManager, BalanceAssertionForm, BalanceGrid, BudgetPanel } from "./ledger/AccountPanels";
 import { AccountDetailPage } from "./ledger/AccountDetailPage";
 import { NetWorthPage } from "./ledger/NetWorthPage";
-import { NotificationCenter } from "./ledger/NotificationCenter";
 import { ReconcilePage } from "./ledger/ReconcilePage";
 import { SettingsPage } from "./ledger/SettingsPage";
 import { TransactionList } from "./ledger/TransactionList";
@@ -73,8 +72,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [customStart, setCustomStart] = useState(timeRange.start);
   const [customEnd, setCustomEnd] = useState(timeRange.end);
   const { toast, setToast, showToast } = useToast();
-  const webPush = useWebPush(showToast);
-  const { gitDirty, refreshGitStatus, gitCommit } = useGitStatus(showToast);
+  const { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, gitCommit } = useGitStatus(showToast);
   const {
     privacySettings,
     updatePrivacySetting,
@@ -92,7 +90,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [txnSearchQuery, setTxnSearchQuery] = useState("");
   const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">("prefix");
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
-  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [gitSaveOpen, setGitSaveOpen] = useState(false);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const hasPasskey = passkeyRegistered === true;
   const passkeyStatusLoaded = passkeyRegistered !== null;
@@ -105,8 +103,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     netWorthRows,
     reconciliationRows,
     accounts,
-    notifications,
-    setNotifications,
     incomeStatement,
     accountStatuses,
     loadingFresh,
@@ -158,14 +154,23 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   if (hasPasskey && !unlocked) return <><Toast toast={toast} /><UnlockScreen message={toast?.kind === "error" ? toast.text : ""} onUnlock={loginWithPasskey} /></>;
 
-  const unreadNotificationCount = notifications.filter((notification) => notification.status === "unread").length;
   const header = pageHeader(page, timeRange);
   const canNavigate = timeRange.preset !== "all" && timeRange.preset !== "custom";
 
+  async function openGitSave() {
+    setGitSaveOpen(true);
+    await refreshGitStatus();
+  }
+
+  async function commitGitChanges(message: string) {
+    await gitCommit(message);
+    setGitSaveOpen(false);
+  }
+
   return (
-    <AppShell pathname={pathname} onGit={gitCommit} onAdd={() => setEntryOpen(true)} gitDirty={gitDirty} onNotifications={() => setNotificationCenterOpen(true)} unreadNotifications={unreadNotificationCount}>
+    <AppShell pathname={pathname} onGit={openGitSave} onAdd={() => setEntryOpen(true)} gitDirty={gitDirty} changedFileCount={changedFileCount}>
       <Toast toast={toast} />
-      <NotificationCenter notifications={notifications} open={notificationCenterOpen} onClose={() => setNotificationCenterOpen(false)} onChange={(next) => setNotifications((current) => current.map((item) => next.find((updated) => updated.id === item.id) ?? item))} />
+      <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
       {/* ── 时间范围选择器 ── */}
@@ -246,7 +251,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "net-worth" && <NetWorthPage rows={netWorthChart} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} />}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onSelectCategory={(account) => { setTxnCategoryQuery(account); window.history.pushState(null, "", "/transactions"); }} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return <AccountDetailPage account={detailAccount} />; return <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></>; })()}
-      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} webPush={webPush.state} onEnableWebPush={webPush.subscribe} onDisableWebPush={webPush.unsubscribe} onTestWebPush={webPush.sendTest} />}
+      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
       {page === "reconcile" && <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} />}
       {(page === "home" || page === "transactions") && (

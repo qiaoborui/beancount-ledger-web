@@ -42,24 +42,6 @@ function PreviewCard({ entry, index, busy, onRemove }: { entry: ParsedTransactio
   );
 }
 
-function shouldNotifyAiCompletion(wasHiddenDuringTask: boolean) {
-  return wasHiddenDuringTask;
-}
-
-async function sendAiCompletionPush(options: { failed?: boolean; entries: number; message?: string }) {
-  const body = options.failed ? (options.message || "刚才的 AI 任务处理失败，请回到账本查看。") : options.entries ? `已生成 ${options.entries} 条待确认预览。` : "AI 已完成回答。";
-  await fetch("/api/push/notify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: options.failed ? "AI 记账处理失败" : "AI 记账处理完成",
-      body,
-      url: "/",
-      tag: "ai-bookkeeping-complete",
-    }),
-  }).catch(() => undefined);
-}
-
 export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -112,11 +94,6 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
     setInput("");
     pushMessage("user", text);
     setStatus("thinking");
-    let wasHiddenDuringTask = typeof document !== "undefined" && document.visibilityState === "hidden";
-    const markHidden = () => {
-      if (document.visibilityState === "hidden") wasHiddenDuringTask = true;
-    };
-    document.addEventListener("visibilitychange", markHidden);
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews }) });
       const data = await res.json();
@@ -126,16 +103,13 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
       setPreviews(entries);
       pushMessage("assistant", typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
       setStatus("idle");
-      if (shouldNotifyAiCompletion(wasHiddenDuringTask)) void sendAiCompletionPush({ entries: entries.length });
       showToast("success", entries.length ? `AI 已生成 ${entries.length} 条预览` : hadPreviews ? "AI 已清空预览" : "AI 已回答");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       pushMessage("assistant", `解析失败：${message}`);
       setStatus("error");
-      if (shouldNotifyAiCompletion(wasHiddenDuringTask)) void sendAiCompletionPush({ failed: true, entries: 0, message });
       showToast("error", message || "解析失败");
     } finally {
-      document.removeEventListener("visibilitychange", markHidden);
       textareaRef.current?.focus();
     }
   }
