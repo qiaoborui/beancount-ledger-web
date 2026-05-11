@@ -1,0 +1,11 @@
+2026-01-01 * "期初" "储蓄卡期初余额"
+  Assets:CN:Bank:Checking          10000.00 CNY
+  Equity:Opening-Balances         -10000.00 CNY
+
+2026-01-03 * "咖啡店" "咖啡"
+  Liabilities:CN:CreditCard          -28.00 CNY
+  Expenses:Food:Drinks                28.00 CNY
+
+2026-01-05 * "示例公司" "工资"
+  Assets:CN:Bank:Checking          15000.00 CNY
+  Income:Salary                   -15000.00 CNY

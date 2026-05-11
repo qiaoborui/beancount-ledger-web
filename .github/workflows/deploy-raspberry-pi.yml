@@ -1,0 +1,146 @@
+name: Deploy Raspberry Pi
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-raspberry-pi.yml"
+      - "scripts/deploy-web-artifact.sh"
+      - "web/**"
+      - "examples/**"
+      - "package*.json"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        type: choice
+        options: [production, preview]
+        default: production
+
+concurrency:
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Next.js artifact
+    # ARM64 artifact matches Raspberry Pi native dependencies.
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      target: ${{ steps.target.outputs.target }}
+      short_target: ${{ steps.target.outputs.short_target }}
+      port: ${{ steps.target.outputs.port }}
+      env_file_secret: ${{ steps.target.outputs.env_file_secret }}
+      environment_url: ${{ steps.target.outputs.environment_url }}
+    steps:
+      - name: Select deployment target
+        id: target
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.target }}" == "preview" ]]; then
+            target="preview"
+          else
+            target="production"
+          fi
+
+          if [[ "$target" == "production" ]]; then
+            echo "target=production" >> "$GITHUB_OUTPUT"
+            echo "short_target=prod" >> "$GITHUB_OUTPUT"
+            echo "port=${{ vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
+            echo "env_file_secret=RASPI_PROD_ENV_FILE" >> "$GITHUB_OUTPUT"
+            echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=preview" >> "$GITHUB_OUTPUT"
+            echo "short_target=preview" >> "$GITHUB_OUTPUT"
+            echo "port=${{ vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
+            echo "env_file_secret=RASPI_PREVIEW_ENV_FILE" >> "$GITHUB_OUTPUT"
+            echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          LEDGER_ROOT: ../examples/minimal-ledger
+          RUNTIME_DIR: ../.runtime-build
+          NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY }}
+        run: npm run build
+
+      - name: Pack standalone artifact
+        working-directory: web
+        run: |
+          mkdir -p ../artifact
+          cp -a .next/standalone ../artifact/standalone
+          cp -a .next/static ../artifact/static
+          if [[ -d public ]]; then cp -a public ../artifact/public; fi
+          cat > ../artifact/DEPLOYMENT.txt <<EOF
+          repository=${{ github.repository }}
+          sha=${{ github.sha }}
+          ref=${{ github.ref }}
+          target=${{ steps.target.outputs.target }}
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-standalone-${{ github.sha }}
+          path: artifact
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Raspberry Pi
+    needs: build
+    runs-on: [self-hosted, raspberry-pi]
+    environment:
+      name: ${{ needs.build.outputs.target }}
+      url: ${{ needs.build.outputs.environment_url }}
+    steps:
+      - name: Checkout deployment script
+        uses: actions/checkout@v4
+
+      - name: Clean old artifacts
+        run: rm -rf /tmp/beancount-ledger-web-artifact-*
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-standalone-${{ github.sha }}
+          path: /tmp/beancount-ledger-web-artifact-${{ github.sha }}
+
+      - name: Deploy artifact
+        env:
+          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
+          APP_ENV_FILE: ${{ needs.build.outputs.env_file_secret == 'RASPI_PROD_ENV_FILE' && secrets.RASPI_PROD_ENV_FILE || secrets.RASPI_PREVIEW_ENV_FILE }}
+        run: |
+          chmod +x scripts/deploy-web-artifact.sh
+          scripts/deploy-web-artifact.sh \
+            "${{ needs.build.outputs.short_target }}" \
+            "${{ needs.build.outputs.port }}" \
+            "/tmp/beancount-ledger-web-artifact-${{ github.sha }}"
+
+      - name: Deployment summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Deployment complete
+
+          - Environment: `${{ needs.build.outputs.target }}`
+          - Port: `${{ needs.build.outputs.port }}`
+          - Commit: `${{ github.sha }}`
+          - URL: ${{ needs.build.outputs.environment_url }}
+          EOF

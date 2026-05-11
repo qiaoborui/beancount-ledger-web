@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-serif: "Noto Serif SC", "Songti SC", "STSong", Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-serif);
+  --paper: #f5f4ed;
+  --ivory: #faf9f5;
+  --brand: #1B365D;
+  --ink: #141413;
+  --warm: #3d3d3a;
+  --olive: #504e49;
+  --stone: #6b6a64;
+  --line: #e8e6dc;
+  --line-soft: #e5e3d8;
+  --danger: #7a4b40;
+  --success: #4f5f4b;
+  --warning: #8a6f2f;
+  --paper-shadow: 0 4px 24px rgba(20, 20, 19, 0.04);
+  --float-shadow: 0 8px 32px rgba(20, 20, 19, 0.08);
+}
+
+* { box-sizing: border-box; }
+html {
+  min-height: 100%;
+  background: var(--brand);
+}
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  background: radial-gradient(circle at top left, #faf9f5 0, var(--paper) 42%, #efede3 100%);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(circle at top left, #faf9f5 0, var(--paper) 42%, #efede3 100%);
+}
+button, input, textarea, select { font: inherit; }
+button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease; }
+button:active { transform: translateY(1px); }
+input, textarea, select {
+  border-radius: 10px;
+  color: var(--ink);
+  outline: none;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px #EEF2F7;
+}
+
+.card {
+  background: var(--ivory);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--paper-shadow);
+}
+
+.kami-float { box-shadow: var(--float-shadow); }
+.kami-overlay { background: rgba(20, 20, 19, 0.35); }
+.kami-status-ok { color: var(--success); }
+.kami-status-danger { color: var(--danger); }
+.kami-status-warning { color: var(--warning); }
+
+.amount-income { color: var(--warm); font-variant-numeric: tabular-nums; font-weight: 500; }
+.amount-expense { color: var(--olive); font-variant-numeric: tabular-nums; font-weight: 500; }
+.amount-gold { color: var(--brand); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+.mobile-bottom-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  body { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+}

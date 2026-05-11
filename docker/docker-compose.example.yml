@@ -1,0 +1,19 @@
+services:
+  beancount-ledger-web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      LEDGER_ROOT: /ledger
+      RUNTIME_DIR: /runtime
+      AUTH_SECRET: ${AUTH_SECRET}
+      APP_PASSWORD: ${APP_PASSWORD}
+      LEDGER_AI_PROVIDER: ${LEDGER_AI_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LEDGER_GIT_SCHEDULER: ${LEDGER_GIT_SCHEDULER:-false}
+    volumes:
+      - ./ledger:/ledger
+      - ./runtime:/runtime

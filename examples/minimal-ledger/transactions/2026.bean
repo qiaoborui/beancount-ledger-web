@@ -1,0 +1,11 @@
+2026-01-01 * "Opening" "Initial cash balance"
+  Assets:Cash                      1000.00 CNY
+  Equity:Opening-Balances         -1000.00 CNY
+
+2026-01-02 * "Coffee Shop" "Coffee"
+  Assets:Cash                       -18.00 CNY
+  Expenses:Food:Drinks               18.00 CNY
+
+2026-01-05 * "Example Company" "Salary"
+  Assets:Bank:Checking             8000.00 CNY
+  Income:Salary                   -8000.00 CNY

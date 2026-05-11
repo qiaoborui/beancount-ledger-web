@@ -1,0 +1,130 @@
+import { useCallback, useEffect, useState } from "react";
+import { readLedgerCache, writeLedgerCache } from "../storage";
+import { timeRangeToParams } from "@/lib/timeRange";
+import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, LedgerNotification, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+
+const freshLedgerCacheKeys = new Set<string>();
+
+export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [txns, setTxns] = useState<Txn[]>([]);
+  const [budgetRows, setBudgetRows] = useState<BudgetRow[]>([]);
+  const [netWorthRows, setNetWorthRows] = useState<{ date: string; assets: number; liabilities: number; netWorth: number }[]>([]);
+  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>([]);
+  const [accounts, setAccounts] = useState<AccountView[]>([]);
+  const [notifications, setNotifications] = useState<LedgerNotification[]>([]);
+  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(null);
+  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>([]);
+  const [loadingFresh, setLoadingFresh] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+
+  const applyCache = useCallback((cache: LedgerCache) => {
+    setSummary(cache.summary);
+    setBalances(cache.balances);
+    setNetWorthRows(cache.netWorthRows);
+    setTxns(cache.txns);
+    setBudgetRows(cache.budgetRows);
+    setReconciliationRows(cache.reconciliationRows ?? []);
+    setAccounts(cache.accounts ?? []);
+    setNotifications(cache.notifications ?? []);
+    setIncomeStatement(cache.incomeStatement ?? null);
+    setAccountStatuses(cache.accountStatuses ?? []);
+    setLastSyncedAt(cache.savedAt);
+  }, []);
+
+  const fetchFreshLedger = useCallback(async (range: TimeRange) => {
+    setLoadingFresh(true);
+    const params = timeRangeToParams(range);
+    try {
+      const [s, t, b, r, a, i, inc, st] = await Promise.all([
+        fetch(`/api/ledger/summary?${params}`).then((r) => r.json()),
+        fetch(`/api/ledger/transactions?${params}`).then((r) => r.json()),
+        fetch(`/api/ledger/budget?${params}`).then((r) => r.json()),
+        fetch(`/api/ledger/reconciliation?${params}`).then((r) => r.json()),
+        fetch("/api/ledger/accounts").then((r) => r.json()),
+        fetch(`/api/ledger/notifications?${params}`).then((r) => r.json()),
+        fetch(`/api/ledger/income-statement?${params}`).then((r) => r.json()),
+        fetch("/api/ledger/account-status").then((r) => r.json()),
+      ]);
+      const fresh: LedgerCache = {
+        summary: s.summary,
+        balances: s.balances,
+        netWorthRows: s.netWorthHistory ?? [],
+        txns: t.transactions,
+        budgetRows: b.rows,
+        reconciliationRows: r.rows ?? [],
+        accounts: a.accounts ?? [],
+        notifications: i.notifications ?? [],
+        accountStatuses: st.statuses ?? [],
+        incomeStatement: { income: inc.income ?? [], expense: inc.expense ?? [], totalIncome: inc.totalIncome ?? 0, totalExpense: inc.totalExpense ?? 0, netIncome: inc.netIncome ?? 0 },
+        savedAt: Date.now(),
+      };
+      applyCache(fresh);
+      writeLedgerCache(range, fresh);
+      freshLedgerCacheKeys.add(timeRangeToParams(range));
+      onGitStatusRefresh();
+    } finally {
+      setLoadingFresh(false);
+    }
+  }, [applyCache, onGitStatusRefresh]);
+
+  const load = useCallback(async (forceFresh = false) => {
+    const [me, passkey] = await Promise.all([
+      fetch("/api/auth/me").then((r) => r.json()),
+      fetch("/api/passkey/status").then((r) => r.json()).catch(() => ({ registered: false })),
+    ]);
+    const hasPasskey = Boolean(passkey.registered);
+    onPasskeyRegistered(hasPasskey);
+    onAuthChange(me.authenticated);
+    if (me.authenticated) sessionStorage.setItem("ledger_authed", "1");
+    else sessionStorage.removeItem("ledger_authed");
+    if (!me.authenticated) return;
+    if (hasPasskey && !unlocked) return;
+
+    if (!forceFresh) {
+      const cached = readLedgerCache(timeRange);
+      if (cached) {
+        applyCache(cached);
+        if (freshLedgerCacheKeys.has(timeRangeToParams(timeRange))) return;
+      }
+    }
+
+    await fetchFreshLedger(timeRange);
+  }, [applyCache, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+
+  async function refreshLedger() {
+    if (refreshing || loadingFresh) return;
+    setRefreshing(true);
+    try {
+      await load(true);
+      showToast("success", "已刷新到最新账本");
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "刷新失败");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => { load(); }, [load]);
+
+  return {
+    summary,
+    balances,
+    txns,
+    budgetRows,
+    netWorthRows,
+    reconciliationRows,
+    accounts,
+    notifications,
+    setNotifications,
+    incomeStatement,
+    loadingFresh,
+    refreshing,
+    lastSyncedAt,
+    load,
+    accountStatuses,
+    refreshLedger,
+  };
+}

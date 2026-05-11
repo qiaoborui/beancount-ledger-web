@@ -1,0 +1,9 @@
+option "title" "中文个人记账示例"
+option "operating_currency" "CNY"
+option "booking_method" "FIFO"
+
+include "commodities.bean"
+include "accounts.bean"
+include "budgets.bean"
+include "prices.bean"
+include "transactions/2026.bean"

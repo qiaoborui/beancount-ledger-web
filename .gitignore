@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Next.js
+web/.next/
+web/out/
+web/tsconfig.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+web/.env
+web/.env.*
+!web/.env.example
+
+# Runtime state
+.runtime/
+**/.runtime/
+web/data/
+.web-passkeys.json
+webpush-subscriptions.json
+notifications.json
+.ledger-write.lock
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Fava / local artifacts
+.fava/
+
+# Private ledger data should live in a separate private repository.
+/main.bean
+/accounts.bean
+/budgets.bean
+/commodities.bean
+/prices.bean
+/transactions/
+/imports/
+/ledgers/
