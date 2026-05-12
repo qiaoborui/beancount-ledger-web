@@ -2,6 +2,7 @@
 name: "Telegram Ledger Agent"
 description: "Guide a Telegram-facing ledger assistant with concise replies, intent routing, privacy controls, date handling, and safe confirmation rules."
 globs:
+  - ".agents/skills/telegram-ledger-agent/scripts/*.py"
   - "scripts/bub_query.py"
   - "scripts/bub_append.py"
   - "**/*.bean"
@@ -148,6 +149,10 @@ Example reply:
 
 ## Ledger Access Rules
 
+- Prefer packaged skill helper scripts when available:
+  - `.agents/skills/telegram-ledger-agent/scripts/bub_query.py`
+  - `.agents/skills/telegram-ledger-agent/scripts/bub_append.py`
+- If packaged scripts are unavailable in an older deployment, fall back to repository-level `scripts/bub_query.py` and `scripts/bub_append.py`.
 - Prefer environment variables: `BUB_LEDGER_ROOT`, `LEDGER_ROOT`, `BUB_RUNTIME_ROOT`, `RUNTIME_DIR`, `BEAN_CHECK_BIN`.
 - If no ledger root is configured, report a short configuration error.
 - Do not guess private ledger locations in Telegram.
@@ -194,6 +199,26 @@ Keep errors actionable and private:
 ```text
 写入失败，账本校验没有通过，已回滚。请在维护模式下查看详细错误。
 ```
+
+## Command Recipes
+
+### Read-only Query
+
+```bash
+python3 .agents/skills/telegram-ledger-agent/scripts/bub_query.py summary YYYY-MM
+python3 .agents/skills/telegram-ledger-agent/scripts/bub_query.py recent 5
+python3 .agents/skills/telegram-ledger-agent/scripts/bub_query.py search "keyword" 10
+```
+
+### Confirmed Write
+
+Only after the exact confirmation workflow succeeds:
+
+```bash
+echo '<json_entry>' | python3 .agents/skills/telegram-ledger-agent/scripts/bub_append.py
+```
+
+Never write by directly editing `.bean` files.
 
 ## Confirmation Rules for Writes
 

@@ -3,6 +3,7 @@ name: "Beancount Insights"
 description: "Analyze Beancount ledger data for monthly summaries, budget explanations, spending trends, and anomaly review using safe read-only workflows."
 globs:
   - "**/*.bean"
+  - ".agents/skills/beancount-insights/scripts/*.py"
   - "scripts/bub_query.py"
   - "scripts/budget_report.py"
   - "scripts/check_date_order.py"
@@ -18,10 +19,11 @@ This skill is **read-mostly and analysis-focused**. It must not directly modify 
 
 ## Core Principles
 
-1. **Prefer project helper scripts over direct parsing.**
-   - Use `scripts/bub_query.py` for common read-only queries.
-   - Use `scripts/budget_report.py` for detailed budget reports when available.
-   - Use `scripts/check_date_order.py` only for ordering checks.
+1. **Prefer packaged skill helper scripts over direct parsing.**
+   - Use `.agents/skills/beancount-insights/scripts/bub_query.py` for common read-only queries.
+   - Use `.agents/skills/beancount-insights/scripts/budget_report.py` for detailed budget reports when available.
+   - Use `.agents/skills/beancount-insights/scripts/check_date_order.py` only for ordering checks.
+   - If running in an older setup without packaged scripts, fall back to the repository-level `scripts/` copies.
 2. **Do not hardcode private paths.**
    - Ledger paths must come from `BUB_LEDGER_ROOT`, `LEDGER_ROOT`, or explicit user-provided configuration.
    - If no ledger path is configured, report a configuration error instead of guessing.
@@ -56,49 +58,49 @@ Handle requests such as:
 
 ## Read-Only Command Recipes
 
-Run commands from the app repository root when possible.
+Run commands from the app repository root when possible. Prefer the packaged skill scripts under `.agents/skills/beancount-insights/scripts/`. If those are unavailable in an older deployment, use the repository-level `scripts/` copies as a fallback.
 
 ### Monthly Summary
 
 ```bash
-python3 scripts/bub_query.py summary YYYY-MM
+python3 .agents/skills/beancount-insights/scripts/bub_query.py summary YYYY-MM
 ```
 
 ### Budget Report
 
 ```bash
-python3 scripts/bub_query.py budget YYYY-MM
+python3 .agents/skills/beancount-insights/scripts/bub_query.py budget YYYY-MM
 ```
 
 For a more detailed report if the script is available and compatible:
 
 ```bash
-python3 scripts/budget_report.py YYYY-MM --ledger "$LEDGER_ROOT/main.bean"
+python3 .agents/skills/beancount-insights/scripts/budget_report.py YYYY-MM --ledger "$LEDGER_ROOT/main.bean"
 ```
 
 ### Recent Transactions
 
 ```bash
-python3 scripts/bub_query.py recent 10
-python3 scripts/bub_query.py recent 20 Expenses:Food
+python3 .agents/skills/beancount-insights/scripts/bub_query.py recent 10
+python3 .agents/skills/beancount-insights/scripts/bub_query.py recent 20 Expenses:Food
 ```
 
 ### Search Transactions
 
 ```bash
-python3 scripts/bub_query.py search "keyword" 20
+python3 .agents/skills/beancount-insights/scripts/bub_query.py search "keyword" 20
 ```
 
 ### Accounts
 
 ```bash
-python3 scripts/bub_query.py accounts
+python3 .agents/skills/beancount-insights/scripts/bub_query.py accounts
 ```
 
 ### Ledger Check
 
 ```bash
-python3 scripts/bub_query.py check
+python3 .agents/skills/beancount-insights/scripts/bub_query.py check
 ```
 
 ## Environment Guard
