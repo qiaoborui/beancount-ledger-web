@@ -113,13 +113,24 @@ The generated `.bean` file is a temporary artifact. Do not commit generated Alip
 python3 scripts/dedup_import.py imports/alipay-output.bean --dry-run
 ```
 
+For confirmed fixed 9.99 -> 10.00 fund purchases, generate the deduped output with:
+
+```bash
+python3 scripts/dedup_import.py \
+  imports/alipay-output.bean \
+  --alipay-fund-rounding \
+  -o imports/alipay-deduped.bean
+```
+
+Use `--alipay-fund-rounding` only after confirming the user's app fund balance and the fact that the 9.99 payment is a fixed 10.00 investment with a 0.01 subsidy/discount/income component.
+
 The helper should match duplicates by:
 
 - funding account, such as `Assets:CN:Alipay:Balance`, `Liabilities:CN:CMB:CreditCard`, `Assets:CN:CMB:Checking`, or `Assets:CN:MYBank:Wealth`,
 - amount,
 - date, with optional tolerance when supported.
 
-If the helper has incomplete Alipay mappings, supplement with an explicit diagnostic script rather than blindly importing everything. Pay special attention to `网商银行储蓄卡`, `余额宝`, `招商银行信用卡`, and `招商银行储蓄卡` method strings.
+The helper should understand `网商银行储蓄卡`, `余额宝`, `招商银行信用卡`, and `招商银行储蓄卡` method strings. If a new method string appears, supplement with an explicit diagnostic script rather than blindly importing everything.
 
 ### 4. Reconcile before writing
 
@@ -152,6 +163,8 @@ Assets:CN:MYBank:Wealth    -amount
 ```
 
 However, do **not** import fund purchases merely because they appear in the CSV. First compare to the user's app fund balance and to existing manual fund entries. Pending-confirmation purchases may not yet be reflected in app fund total.
+
+When the user confirms that a 9.99 Alipay fund purchase is a fixed 10.00 investment, preserve the 0.01 difference as income/discount via `scripts/dedup_import.py --alipay-fund-rounding` rather than importing only 9.99 into the fund asset.
 
 #### Huabei
 
@@ -237,7 +250,7 @@ The private `imports/alipay-config.yaml` should map payment methods to funding a
 - `网商银行储蓄卡` → the relevant MYBank asset account, e.g. `Assets:CN:MYBank:Wealth`
 - fund purchases → `Assets:CN:Alipay:Fund` only after app-balance confirmation
 
-Rules should put specific merchant/item matches before broad category fallbacks so merchant-specific classifications win.
+Rules should put broad category fallbacks before specific merchant/item matches, because double-entry-generator allows multiple matching rules and later matching rules override earlier account assignments.
 
 ## Safety Rules
 

@@ -111,6 +111,26 @@ For uncertain entries:
 第 2 条需要确认：付款账户不确定，是支付宝还是招行信用卡？
 ```
 
+## Batch Import / Statement Reconciliation Workflow
+
+When reconciling exported statements, use this source priority:
+
+```text
+manual real-time entries
+> WeChat / Alipay payment-platform statements
+> credit-card statements as supplement and balance check
+```
+
+Operational rules:
+
+1. Import and reconcile WeChat/Alipay first because they contain richer merchant details.
+2. Run the private ledger helper, e.g. `scripts/dedup_import.py <platform-output.bean> --dry-run`, before folding transactions into monthly ledgers.
+3. Ask before replacing manual lump-sum entries with detailed imported rows.
+4. For Alipay fund purchases, preserve confirmed 9.99 -> 10.00 fixed investment differences with an explicit income/discount posting; do not silently lose the 0.01.
+5. Import credit-card statements after payment platforms. Use `scripts/dedup_import.py <card-output.bean> --credit-card --dry-run` so platform transactions are excluded and date tolerance handles settlement-date drift.
+6. Credit-card imports should primarily add direct card transactions and verify statement/app balances, not duplicate WeChat/Alipay details.
+7. Never add arbitrary balance adjustments merely to make statement balances fit; trace missing or duplicate real transactions.
+
 ## Safety Rules
 
 - Never invent accounts outside the ledger account whitelist or known open accounts.

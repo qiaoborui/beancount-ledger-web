@@ -41,6 +41,14 @@ cd "$LEDGER_ROOT"
 
 **Manual records are primary. Imports are for reconciliation and detail completion.**
 
+Recommended source priority:
+
+```text
+manual real-time entries
+> WeChat / Alipay payment-platform statements
+> credit-card statements as supplement and balance check
+```
+
 - Keep manually entered transactions when they express the correct intent, category, or user-confirmed interpretation.
 - Use the WeChat bill to find missing transactions, verify balances, and provide better detail.
 - Replace a manual lump-sum entry with imported detailed entries only when the user explicitly agrees.
