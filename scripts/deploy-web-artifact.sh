@@ -72,6 +72,13 @@ if [[ -d "$ARTIFACT_DIR/public" ]]; then
   cp -a "$ARTIFACT_DIR/public" "$RELEASE_DIR/public"
 fi
 
+# Agent skills live at the repository root, outside the Next.js standalone bundle.
+# Copy them into the release so agent runtimes using this release as their
+# workspace can discover project-local skills.
+if [[ -d "$ARTIFACT_DIR/.agents" ]]; then
+  cp -a "$ARTIFACT_DIR/.agents" "$RELEASE_DIR/.agents"
+fi
+
 if [[ -n "${APP_ENV_FILE:-}" ]]; then
   install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
 fi

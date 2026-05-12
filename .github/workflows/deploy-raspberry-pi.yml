@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
+      - ".agents/**"
       - "scripts/deploy-web-artifact.sh"
+      - "scripts/install-agent-skills.sh"
       - "web/**"
       - "examples/**"
       - "package*.json"
@@ -13,7 +15,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
+      - ".agents/**"
       - "scripts/deploy-web-artifact.sh"
+      - "scripts/install-agent-skills.sh"
       - "web/**"
       - "examples/**"
       - "package*.json"
@@ -98,6 +102,7 @@ jobs:
           cp -a .next/standalone ../artifact/standalone
           cp -a .next/static ../artifact/static
           if [[ -d public ]]; then cp -a public ../artifact/public; fi
+          if [[ -d ../.agents ]]; then cp -a ../.agents ../artifact/.agents; fi
           cat > ../artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
           sha=${{ github.sha }}
