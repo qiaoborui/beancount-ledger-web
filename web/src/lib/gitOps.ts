@@ -3,6 +3,14 @@ import { ledgerRoot } from "./ledgerPaths";
 
 const TRACKED_PATHS = ["transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"];
 
+function isTrackedPath(filePath: string) {
+  return TRACKED_PATHS.some((trackedPath) => filePath === trackedPath || filePath.startsWith(`${trackedPath}/`));
+}
+
+function isTrackedChange(change: GitChange) {
+  return isTrackedPath(change.path) || Boolean(change.originalPath && isTrackedPath(change.originalPath));
+}
+
 export type GitChange = {
   path: string;
   originalPath?: string;
@@ -57,9 +65,9 @@ export function parseGitStatus(status: string): GitChange[] {
 
 export function gitStatus() {
   const cwd = ledgerRoot();
-  const status = git(["status", "--short"], { cwd });
+  const status = git(["status", "--short", "--", ...TRACKED_PATHS], { cwd });
   const branch = git(["status", "--short", "--branch"], { cwd });
-  const changes = parseGitStatus(status);
+  const changes = parseGitStatus(status).filter(isTrackedChange);
   return { status, branch, dirty: changes.length > 0, changedFileCount: changes.length, changes };
 }
 
@@ -69,11 +77,11 @@ export function gitPullRebase() {
 
 export function gitCommitPullPush(message = "chore: update ledger") {
   const cwd = ledgerRoot();
-  git(["add", ...TRACKED_PATHS], { cwd });
-  const before = git(["status", "--short"], { cwd });
-  const changedFileCount = parseGitStatus(before).length;
+  git(["add", "--", ...TRACKED_PATHS], { cwd });
+  const before = git(["status", "--short", "--", ...TRACKED_PATHS], { cwd });
+  const changedFileCount = parseGitStatus(before).filter(isTrackedChange).length;
   let commit = "No changes to commit\n";
-  if (before.trim()) commit = git(["commit", "-m", message], { cwd });
+  if (before.trim()) commit = git(["commit", "-m", message, "--", ...TRACKED_PATHS], { cwd });
   const pull = git(["pull", "--rebase", "--autostash"], { cwd });
   const push = git(["push"], { cwd });
   return { output: `${commit}\n${pull}\n${push}`, changedFileCount };
