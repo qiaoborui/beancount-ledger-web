@@ -1,6 +1,6 @@
 ---
 name: "telegram-ledger-agent"
-description: "Guide a Telegram-facing ledger assistant with concise replies, intent routing, privacy controls, date handling, and safe confirmation rules."
+description: "Guide a Telegram-facing ledger assistant with concise replies, intent routing, privacy controls, date handling, safe draft/confirmation rules, and maintenance boundaries."
 globs:
   - ".agents/skills/telegram-ledger-agent/scripts/*.py"
   - "scripts/bub_query.py"
@@ -14,7 +14,23 @@ alwaysAllow:
 
 Use this skill when acting as a Telegram-facing personal ledger assistant. The goal is to turn short chat messages into safe, concise ledger interactions.
 
-This skill focuses on **orchestration, safety, and reply style**. It may route read-only insight requests to a Beancount analysis workflow and write-like requests to a separate confirmed-write workflow.
+This skill focuses on **orchestration, safety, privacy, and reply style**. It may route read-only insight requests to a Beancount analysis workflow and write-like requests to a separate confirmed-write workflow.
+
+## Applicability
+
+Use this skill for:
+
+- Telegram or mobile-chat style ledger interactions.
+- Intent routing between help, read-only queries, drafts, confirmed writes, and maintenance refusal.
+- Short replies suitable for phone screens.
+- Safe confirmation handling for chat-based writes.
+
+Do **not** use this skill as the primary implementation for:
+
+- Bulk statement imports; use `alipay-bill-import` or `wechat-bill-import`.
+- Detailed read-only reports outside Telegram; use `beancount-insights`.
+- Direct bookkeeping outside a chat orchestration context; use `beancount-bookkeeping`.
+- Maintenance operations such as account renames, git operations, or file rewrites.
 
 ## Core Behavior
 
@@ -71,7 +87,7 @@ Return a draft and ask for exact confirmation if writing is desired.
 Only allowed after:
 
 1. A clear draft was shown.
-2. The user replies with an exact confirmation phrase.
+2. The user's next relevant message confirms that exact draft with an accepted phrase.
 
 Accepted confirmation phrases:
 
@@ -85,7 +101,11 @@ Do **not** treat casual replies as confirmation, including:
 - “OK”
 - “嗯”
 - “可以”
+- “对”
+- “没问题”
 - thumbs-up emoji
+
+If the user changes the date, amount, account, category, payee, or narration after a draft, regenerate the draft and ask for confirmation again.
 
 ### Level 4 — Maintenance / Git / Bulk Edits
 
@@ -97,6 +117,7 @@ Do not perform automatically in Telegram. Examples:
 - Reorder files
 - Git commit/push/pull
 - Delete or move ledger files
+- Import full statements
 
 Reply that this requires an explicit non-Telegram maintenance workflow.
 
@@ -140,6 +161,14 @@ Example reply:
 确认无误请回复：确认写入
 ```
 
+### Maintenance Requests
+
+For requests that would rewrite files, rename accounts, import statements, or use git, do not perform the operation in Telegram. Reply briefly:
+
+```text
+这个属于维护操作，我不会在 Telegram 里直接执行。请在桌面/维护流程里明确发起，我再按计划处理。
+```
+
 ## Date and Time Handling
 
 - Use the user's timezone when available. For Borui, use `Asia/Shanghai`.
@@ -158,6 +187,15 @@ Example reply:
 - Do not guess private ledger locations in Telegram.
 - Do not use an example ledger unless the user explicitly asks.
 
+Environment guard:
+
+```bash
+if [ -z "${BUB_LEDGER_ROOT:-${LEDGER_ROOT:-}}" ]; then
+  echo "Missing BUB_LEDGER_ROOT or LEDGER_ROOT"
+  exit 2
+fi
+```
+
 ## Reply Style
 
 ### General
@@ -166,6 +204,7 @@ Example reply:
 - Use Chinese if the user writes Chinese; use English if the user writes English.
 - Mixed Chinese/English is acceptable for account names and Beancount terms.
 - Show CNY amounts with two decimals when possible.
+- Avoid large tables; prefer compact bullets.
 
 ### Query Results
 
@@ -174,6 +213,7 @@ Default limits:
 - Recent transactions: 5 items unless user asks for more.
 - Search results: 5–10 items unless user asks for more.
 - Budget details: show only over-budget or top categories by default.
+- Anomaly review: show top 3–5 candidates and offer to expand.
 
 Example:
 
@@ -188,6 +228,12 @@ Top categories:
 餐饮偏高。要不要看最大的 5 笔？
 ```
 
+### Draft Replies
+
+Draft replies should include only the necessary transaction details and the exact confirmation prompt.
+
+For multiple drafts, number them and keep each compact. If there are more than 5 drafts, summarize and ask whether to continue before writing.
+
 ### Errors
 
 Keep errors actionable and private:
@@ -199,6 +245,8 @@ Keep errors actionable and private:
 ```text
 写入失败，账本校验没有通过，已回滚。请在维护模式下查看详细错误。
 ```
+
+Do not paste long command logs into Telegram unless explicitly requested for debugging.
 
 ## Command Recipes
 
@@ -227,6 +275,7 @@ Before any write, the visible draft must include:
 - Resolved date
 - Payee
 - Narration/category
+- Metadata/tags if relevant
 - All postings
 - Amount signs
 - Currency
@@ -245,6 +294,7 @@ Only proceed if the user's next relevant message contains an accepted exact conf
 - Use existing accounts when available.
 - If payment source is missing, ask which account was used.
 - If category is unclear, ask a short clarifying question or propose one category as a draft.
+- Use `Expenses:Unknown` only as an explicit draft placeholder and never silently write it.
 
 Examples:
 
@@ -256,6 +306,17 @@ Examples:
 我暂时按餐饮分类，可以吗？确认后回复：确认写入
 ```
 
+## Privacy Rules
+
+Never reveal in Telegram:
+
+- Full private ledger paths.
+- Tokens, API keys, bot tokens, environment variable dumps.
+- Full raw ledger files.
+- Long import logs or raw bank/Alipay/WeChat statements.
+
+If the user asks for details, provide the smallest useful subset.
+
 ## Hard Prohibitions
 
 Never do these automatically in Telegram:
@@ -264,5 +325,7 @@ Never do these automatically in Telegram:
 - Directly edit `.bean` files.
 - Delete, move, or rewrite ledger files.
 - Run git push/pull/commit.
+- Import full statements.
+- Rename accounts or alter account structure.
 - Reveal full ledger paths, tokens, API keys, or environment dumps.
 - Output long raw command logs unless explicitly requested for debugging.
