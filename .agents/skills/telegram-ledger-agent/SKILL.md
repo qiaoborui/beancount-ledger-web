@@ -1,5 +1,5 @@
 ---
-name: "Telegram Ledger Agent"
+name: "telegram-ledger-agent"
 description: "Guide a Telegram-facing ledger assistant with concise replies, intent routing, privacy controls, date handling, and safe confirmation rules."
 globs:
   - ".agents/skills/telegram-ledger-agent/scripts/*.py"

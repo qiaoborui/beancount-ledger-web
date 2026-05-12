@@ -1,5 +1,5 @@
 ---
-name: "Beancount Insights"
+name: "beancount-insights"
 description: "Analyze Beancount ledger data for monthly summaries, budget explanations, spending trends, and anomaly review using safe read-only workflows."
 globs:
   - "**/*.bean"

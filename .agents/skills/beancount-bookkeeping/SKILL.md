@@ -1,5 +1,5 @@
 ---
-name: "Beancount Bookkeeping"
+name: "beancount-bookkeeping"
 description: "Parse Chinese natural-language or multi-line expense, income, transfer, repayment, and reimbursement records into Beancount transactions, preview them, and append confirmed entries safely."
 globs:
   - "**/*.bean"
