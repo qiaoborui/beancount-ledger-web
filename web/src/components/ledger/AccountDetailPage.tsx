@@ -175,7 +175,7 @@ export function AccountDetailPage({ account }: { account: string }) {
                 data={chartData}
                 margin={{ left: 8, right: 16, top: 8, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e3d8" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                 <XAxis dataKey="date" minTickGap={24} fontSize={11} />
                 <YAxis
                   width={56}
@@ -189,8 +189,8 @@ export function AccountDetailPage({ account }: { account: string }) {
                   type="monotone"
                   dataKey="balance"
                   name="余额"
-                  stroke="#1B365D"
-                  fill="#d8d1c1"
+                  stroke="var(--chart-primary)"
+                  fill="var(--chart-fill)"
                   strokeWidth={2}
                 />
               </AreaChart>

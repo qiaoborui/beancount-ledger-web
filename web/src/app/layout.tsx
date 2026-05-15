@@ -19,13 +19,28 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1B365D",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#1B365D" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
 };
 
+const themeScript = `
+(function() {
+  try {
+    var stored = localStorage.getItem("ledger_theme_mode");
+    var mode = stored === "light" || stored === "dark" ? stored : "system";
+    var theme = mode === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } catch (_) {}
+})();
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="zh-CN"><body><PwaRegister />{children}</body></html>;
+  return <html lang="zh-CN" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head><body><PwaRegister />{children}</body></html>;
 }

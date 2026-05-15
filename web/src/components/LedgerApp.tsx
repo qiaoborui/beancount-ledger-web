@@ -16,6 +16,7 @@ import { useLedgerLock } from "./ledger/hooks/useLedgerLock";
 import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
 import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
+import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, UnlockScreen } from "./ledger/AuthScreens";
 import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
@@ -72,6 +73,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [customStart, setCustomStart] = useState(timeRange.start);
   const [customEnd, setCustomEnd] = useState(timeRange.end);
   const { toast, setToast, showToast } = useToast();
+  const { themeMode, resolvedTheme, setThemeMode } = useThemeMode();
   const { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, gitCommit } = useGitStatus(showToast);
   const {
     privacySettings,
@@ -251,7 +253,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "net-worth" && <NetWorthPage rows={netWorthChart} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} />}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onSelectCategory={(account) => { setTxnCategoryQuery(account); window.history.pushState(null, "", "/transactions"); }} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return <AccountDetailPage account={detailAccount} />; return <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></>; })()}
-      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} />}
+      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
       {page === "reconcile" && <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} />}
       {(page === "home" || page === "transactions") && (

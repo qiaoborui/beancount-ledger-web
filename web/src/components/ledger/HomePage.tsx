@@ -29,7 +29,7 @@ export function HomePage({ summary, chart, privacySettings, onPrivacyChange }: {
       <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div><h2 className="font-serif text-2xl font-medium">每日收支节奏</h2><p className="mt-1 text-sm text-olive">用低饱和颜色看波动，不让图表抢过结论。</p></div>
       </div>
-      {privacySettings.showHomeCashflowChart ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart}><CartesianGrid strokeDasharray="3 3" stroke="#e5e3d8" /><XAxis dataKey="day" /><YAxis /><Tooltip /><Legend /><Bar dataKey="收入" fill="#1B365D" /><Bar dataKey="支出" fill="#6b6a64" /></BarChart></ResponsiveContainer></div> : <HiddenPanel text="每日收支图包含具体金额，默认隐藏。可到设置页改为默认显示。" />}
+      {privacySettings.showHomeCashflowChart ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="day" /><YAxis /><Tooltip /><Legend /><Bar dataKey="收入" fill="var(--chart-primary)" /><Bar dataKey="支出" fill="var(--chart-secondary)" /></BarChart></ResponsiveContainer></div> : <HiddenPanel text="每日收支图包含具体金额，默认隐藏。可到设置页改为默认显示。" />}
     </section>
   </>;
 }
