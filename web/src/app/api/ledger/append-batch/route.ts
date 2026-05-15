@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
+import { appendLedgerEntries } from "@/lib/ledgerWriter";
 import { LedgerEntrySchema } from "@/lib/schemas";
 
 export async function POST(request: Request) {
@@ -13,13 +13,7 @@ export async function POST(request: Request) {
 
   try {
     const entries = rawEntries.map((entry: unknown) => LedgerEntrySchema.parse(entry));
-    const beanTexts: string[] = [];
-    for (const entry of entries) {
-      const year = Number(entry.date.slice(0, 4));
-      const beanText = entry.kind === "transaction" ? transactionToBean(entry) : balanceToBean(entry);
-      await appendBeanText(year, beanText);
-      beanTexts.push(beanText);
-    }
+    const beanTexts = await appendLedgerEntries(entries);
     return NextResponse.json({ ok: true, count: entries.length, beanTexts });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

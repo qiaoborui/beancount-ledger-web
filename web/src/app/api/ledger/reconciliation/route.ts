@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   const beanText = `${adjustment ? `${transactionToBean(adjustment)}\n` : ""}${balanceToBean(balance)}`;
 
   try {
-    await appendBeanText(Number(input.balanceDate.slice(0, 4)), beanText);
+    await appendBeanText(input.balanceDate, beanText);
     return NextResponse.json({ ok: true, ledgerBalance, actual, diff, adjustment, balance, beanText });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
