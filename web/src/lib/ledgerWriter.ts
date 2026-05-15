@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { accountsBeanPath, mainBeanPath, transactionFileForYear, transactionsDir } from "./ledgerPaths";
-import type { BalanceAssertion, MetadataValue, ParsedTransaction } from "./schemas";
+import { accountsBeanPath, mainBeanPath, transactionFileForDate } from "./ledgerPaths";
+import type { BalanceAssertion, LedgerEntry, MetadataValue, ParsedTransaction } from "./schemas";
 
 let writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -79,21 +79,99 @@ function runBeanCheck() {
   }
 }
 
-export async function appendBeanText(year: number, beanText: string): Promise<void> {
-  await withWriteLock(async () => {
-    fs.mkdirSync(transactionsDir(), { recursive: true });
-    const file = transactionFileForYear(year);
-    const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-    const separator = before.endsWith("\n") ? "\n" : "\n\n";
-    const next = `${before}${separator}${beanText.trimEnd()}\n`;
-    fs.writeFileSync(file, next, "utf8");
-    try {
-      runBeanCheck();
-    } catch (error) {
-      fs.writeFileSync(file, before, "utf8");
-      throw error;
+type FileSnapshot = { existed: boolean; content: string };
+
+type AppendItem = { date: string; beanText: string };
+
+function includeLineForTransactionFile(file: string) {
+  const relative = path.relative(path.dirname(mainBeanPath()), file).split(path.sep).join("/");
+  return `include "${relative}"`;
+}
+
+function monthHeaderForDate(date: string) {
+  return `; ${date.slice(0, 7)} 交易记录\n`;
+}
+
+function snapshotFile(file: string): FileSnapshot {
+  return { existed: fs.existsSync(file), content: fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "" };
+}
+
+function restoreSnapshots(snapshots: Map<string, FileSnapshot>) {
+  for (const [file, snapshot] of snapshots) {
+    if (snapshot.existed) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, snapshot.content, "utf8");
+    } else if (fs.existsSync(file)) {
+      fs.rmSync(file);
     }
-  });
+  }
+}
+
+function ensureSnapshot(snapshots: Map<string, FileSnapshot>, file: string) {
+  if (!snapshots.has(file)) snapshots.set(file, snapshotFile(file));
+}
+
+function appendText(before: string, beanText: string) {
+  const trimmed = beanText.trimEnd();
+  if (!trimmed) return before;
+  const separator = before.length === 0 ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  return `${before}${separator}${trimmed}\n`;
+}
+
+function ensureMonthlyFileAndInclude(file: string, date: string, snapshots: Map<string, FileSnapshot>) {
+  const main = mainBeanPath();
+  ensureSnapshot(snapshots, main);
+  ensureSnapshot(snapshots, file);
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, monthHeaderForDate(date), "utf8");
+
+  const includeLine = includeLineForTransactionFile(file);
+  const mainBefore = fs.readFileSync(main, "utf8");
+  const hasInclude = mainBefore.split(/\r?\n/).some((line) => line.trim() === includeLine);
+  if (!hasInclude) {
+    const separator = mainBefore.endsWith("\n") ? "" : "\n";
+    fs.writeFileSync(main, `${mainBefore}${separator}${includeLine}\n`, "utf8");
+  }
+}
+
+function appendItemsChecked(items: AppendItem[]) {
+  const snapshots = new Map<string, FileSnapshot>();
+  try {
+    const byFile = new Map<string, AppendItem[]>();
+    for (const item of items) {
+      const file = transactionFileForDate(item.date);
+      const existing = byFile.get(file) ?? [];
+      existing.push(item);
+      byFile.set(file, existing);
+    }
+
+    for (const [file, fileItems] of byFile) {
+      ensureMonthlyFileAndInclude(file, fileItems[0].date, snapshots);
+      const before = fs.readFileSync(file, "utf8");
+      const next = fileItems.reduce((content, item) => appendText(content, item.beanText), before);
+      fs.writeFileSync(file, next, "utf8");
+    }
+
+    runBeanCheck();
+  } catch (error) {
+    restoreSnapshots(snapshots);
+    throw error;
+  }
+}
+
+export async function appendBeanText(dateOrYear: string | number, beanText: string): Promise<void> {
+  const date = typeof dateOrYear === "number" ? `${dateOrYear}-01-01` : dateOrYear;
+  await withWriteLock(async () => appendItemsChecked([{ date, beanText }]));
+}
+
+export async function appendLedgerEntries(entries: LedgerEntry[]): Promise<string[]> {
+  const items = entries.map((entry) => ({
+    date: entry.date,
+    beanText: entry.kind === "transaction" ? transactionToBean(entry) : balanceToBean(entry),
+  }));
+  await withWriteLock(async () => appendItemsChecked(items));
+  return items.map((item) => item.beanText);
 }
 
 export async function appendAccount(entry: { date: string; account: string; alias?: string; currency?: "CNY" }): Promise<void> {

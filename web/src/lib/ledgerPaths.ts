@@ -27,8 +27,10 @@ export function transactionsDir(): string {
   return path.join(ledgerRoot(), "transactions");
 }
 
-export function transactionFileForYear(year: number): string {
-  return path.join(transactionsDir(), `${year}.bean`);
+export function transactionFileForDate(date: string): string {
+  const match = date.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) throw new Error(`Invalid ledger date: ${date}`);
+  return path.join(transactionsDir(), match[1], `${match[2]}.bean`);
 }
 
 export function budgetsBeanPath(): string {

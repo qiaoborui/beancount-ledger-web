@@ -73,7 +73,7 @@ export async function POST(request: Request) {
         currency: posting.currency,
       })),
     };
-    await appendBeanText(Number(reverseDate.slice(0, 4)), transactionToBean(entry));
+    await appendBeanText(reverseDate, transactionToBean(entry));
     return NextResponse.json({ ok: true, entry });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
