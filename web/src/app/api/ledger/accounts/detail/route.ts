@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireSensitiveUnlock } from "@/lib/auth";
 import { accountDetail, parseAccounts, currentBalances, parseTransactions } from "@/lib/beancountParser";
 
 export async function GET(request: Request) {
-  await requireAuth();
+  await requireSensitiveUnlock();
 
   const { searchParams } = new URL(request.url);
   const account = searchParams.get("account");
