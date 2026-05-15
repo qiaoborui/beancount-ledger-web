@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 
 const COOKIE_NAME = "ledger_session";
+const SENSITIVE_COOKIE_NAME = "ledger_sensitive_until";
+const SENSITIVE_UNLOCK_MAX_AGE_SECONDS = 15 * 60;
 
 function secret(): Uint8Array {
   const raw = process.env.AUTH_SECRET || process.env.APP_PASSWORD;
@@ -45,6 +47,36 @@ export async function requireAuth(): Promise<void> {
   }
 }
 
+export async function isSensitiveUnlocked(): Promise<boolean> {
+  const jar = await cookies();
+  const raw = jar.get(SENSITIVE_COOKIE_NAME)?.value;
+  const until = raw ? Number(raw) : 0;
+  return Number.isFinite(until) && until > Date.now();
+}
+
+export async function requireSensitiveUnlock(): Promise<void> {
+  await requireAuth();
+  if (!(await isSensitiveUnlocked())) {
+    throw new Response("Sensitive data is locked", { status: 423 });
+  }
+}
+
+export async function setSensitiveUnlockCookie() {
+  const jar = await cookies();
+  jar.set(SENSITIVE_COOKIE_NAME, String(Date.now() + SENSITIVE_UNLOCK_MAX_AGE_SECONDS * 1000), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: SENSITIVE_UNLOCK_MAX_AGE_SECONDS,
+  });
+}
+
+export async function clearSensitiveUnlockCookie() {
+  const jar = await cookies();
+  jar.delete(SENSITIVE_COOKIE_NAME);
+}
+
 export async function setSessionCookie(token: string) {
   const jar = await cookies();
   jar.set(COOKIE_NAME, token, {
@@ -59,4 +91,5 @@ export async function setSessionCookie(token: string) {
 export async function clearSessionCookie() {
   const jar = await cookies();
   jar.delete(COOKIE_NAME);
+  jar.delete(SENSITIVE_COOKIE_NAME);
 }

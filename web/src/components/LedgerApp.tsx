@@ -18,7 +18,7 @@ import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
-import { AppSkeleton, LoginScreen, PasskeyBanner, UnlockScreen } from "./ledger/AuthScreens";
+import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
 import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
@@ -154,8 +154,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
 
-  if (hasPasskey && !unlocked) return <><Toast toast={toast} /><UnlockScreen message={toast?.kind === "error" ? toast.text : ""} onUnlock={loginWithPasskey} /></>;
-
+  const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
+  const requireSensitiveUnlock = (title?: string, description?: string) => (
+    <SensitiveUnlockPanel title={title} description={description} message={sensitiveMessage} onUnlock={loginWithPasskey} />
+  );
   const header = pageHeader(page, timeRange);
   const canNavigate = timeRange.preset !== "all" && timeRange.preset !== "custom";
 
@@ -248,14 +250,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>
       </div>
 
-      {page === "home" && <HomePage summary={summary} chart={chart} privacySettings={privacySettings} onPrivacyChange={updatePrivacySetting} />}
+      {page === "home" && <HomePage summary={summary} chart={chart} privacySettings={privacySettings} sensitiveUnlocked={unlocked} onPrivacyChange={updatePrivacySetting} />}
 
-      {page === "net-worth" && <NetWorthPage rows={netWorthChart} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} />}
-      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onSelectCategory={(account) => { setTxnCategoryQuery(account); window.history.pushState(null, "", "/transactions"); }} />}
-      {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return <AccountDetailPage account={detailAccount} />; return <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></>; })()}
+      {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={(account) => { setTxnCategoryQuery(account); window.history.pushState(null, "", "/transactions"); }} />}
+      {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额、余额断言和对账数据需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
-      {page === "reconcile" && <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} />}
+      {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {(page === "home" || page === "transactions") && (
         <TransactionList
           txns={txns}

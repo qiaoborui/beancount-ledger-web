@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSessionToken, setSessionCookie, verifyPassword } from "@/lib/auth";
+import { createSessionToken, setSensitiveUnlockCookie, setSessionCookie, verifyPassword } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const { password } = await request.json();
@@ -7,5 +7,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
   await setSessionCookie(await createSessionToken());
+  await setSensitiveUnlockCookie();
   return NextResponse.json({ ok: true });
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireSensitiveUnlock } from "@/lib/auth";
 import { currentBalances, parseBalances, parseTransactions } from "@/lib/beancountParser";
 
 export async function GET() {
-  await requireAuth();
+  await requireSensitiveUnlock();
   return NextResponse.json({ balances: currentBalances(parseTransactions()), assertions: parseBalances() });
 }

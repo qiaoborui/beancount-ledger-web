@@ -36,35 +36,38 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     setLoadingFresh(true);
     const params = timeRangeToParams(range);
     try {
-      const [s, t, b, r, a, inc, st] = await Promise.all([
+      const requests = [
         fetch(`/api/ledger/summary?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/transactions?${params}`).then((r) => r.json()),
         fetch(`/api/ledger/budget?${params}`).then((r) => r.json()),
-        fetch(`/api/ledger/reconciliation?${params}`).then((r) => r.json()),
+        unlocked ? fetch(`/api/ledger/reconciliation?${params}`).then((r) => r.json()) : Promise.resolve({ rows: [] }),
         fetch("/api/ledger/accounts").then((r) => r.json()),
         fetch(`/api/ledger/income-statement?${params}`).then((r) => r.json()),
-        fetch("/api/ledger/account-status").then((r) => r.json()),
-      ]);
+        unlocked ? fetch("/api/ledger/account-status").then((r) => r.json()) : Promise.resolve({ statuses: [] }),
+      ] as const;
+      const [s, t, b, r, a, inc, st] = await Promise.all(requests);
       const fresh: LedgerCache = {
         summary: s.summary,
-        balances: s.balances,
-        netWorthRows: s.netWorthHistory ?? [],
+        balances: unlocked ? (s.balances ?? {}) : {},
+        netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
         txns: t.transactions,
         budgetRows: b.rows,
-        reconciliationRows: r.rows ?? [],
+        reconciliationRows: unlocked ? (r.rows ?? []) : [],
         accounts: a.accounts ?? [],
-        accountStatuses: st.statuses ?? [],
-        incomeStatement: { income: inc.income ?? [], expense: inc.expense ?? [], totalIncome: inc.totalIncome ?? 0, totalExpense: inc.totalExpense ?? 0, netIncome: inc.netIncome ?? 0 },
+        accountStatuses: unlocked ? (st.statuses ?? []) : [],
+        incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0 },
         savedAt: Date.now(),
       };
       applyCache(fresh);
-      writeLedgerCache(range, fresh);
-      freshLedgerCacheKeys.add(timeRangeToParams(range));
+      if (unlocked) {
+        writeLedgerCache(range, fresh);
+        freshLedgerCacheKeys.add(timeRangeToParams(range));
+      }
       onGitStatusRefresh();
     } finally {
       setLoadingFresh(false);
     }
-  }, [applyCache, onGitStatusRefresh]);
+  }, [applyCache, onGitStatusRefresh, unlocked]);
 
   const load = useCallback(async (forceFresh = false) => {
     const [me, passkey] = await Promise.all([
@@ -77,9 +80,8 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     if (me.authenticated) sessionStorage.setItem("ledger_authed", "1");
     else sessionStorage.removeItem("ledger_authed");
     if (!me.authenticated) return;
-    if (hasPasskey && !unlocked) return;
 
-    if (!forceFresh) {
+    if (!forceFresh && unlocked) {
       const cached = readLedgerCache(timeRange);
       if (cached) {
         applyCache(cached);
@@ -95,7 +97,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     setRefreshing(true);
     try {
       await load(true);
-      showToast("success", "已刷新到最新账本");
+      showToast("success", unlocked ? "已刷新到最新账本" : "已刷新普通账本数据；余额和净资产仍保持隐藏");
     } catch (error) {
       showToast("error", error instanceof Error ? error.message : "刷新失败");
     } finally {

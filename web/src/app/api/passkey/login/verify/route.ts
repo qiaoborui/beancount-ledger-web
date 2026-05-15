@@ -1,6 +1,6 @@
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import { NextResponse } from "next/server";
-import { createSessionToken, setSessionCookie } from "@/lib/auth";
+import { createSessionToken, setSensitiveUnlockCookie, setSessionCookie } from "@/lib/auth";
 import { consumeCurrentChallenge, listPasskeys, originFromRequest, rpIDFromRequest, updatePasskeyCounter } from "@/lib/passkeys";
 
 function base64urlToBuffer(value: string) {
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     if (!verification.verified) return NextResponse.json({ error: "Passkey login failed" }, { status: 401 });
     updatePasskeyCounter(stored.id, verification.authenticationInfo.newCounter);
     await setSessionCookie(await createSessionToken());
+    await setSensitiveUnlockCookie();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

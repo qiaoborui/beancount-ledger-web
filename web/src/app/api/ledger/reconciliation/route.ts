@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireSensitiveUnlock } from "@/lib/auth";
 import { accountGroup, currentBalances, parseAccounts, parseBalances, parseTransactions } from "@/lib/beancountParser";
 import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
 import { cents, fromCents } from "@/lib/money";
@@ -85,7 +85,7 @@ function adjustmentEntry(account: string, label: string, diff: number, date: str
 }
 
 export async function GET(request: Request) {
-  await requireAuth();
+  await requireSensitiveUnlock();
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const monthPrefix = start.slice(0, 7);
   const balances = balancesBefore(todayStr());
@@ -105,7 +105,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await requireAuth();
+  await requireSensitiveUnlock();
   const input = ReconcileSchema.parse(await request.json());
   const accounts = parseAccounts();
   const accountInfo = accounts.find((a) => a.active && (a.account.startsWith("Assets:") || a.account.startsWith("Liabilities:")) && a.account === input.account);
