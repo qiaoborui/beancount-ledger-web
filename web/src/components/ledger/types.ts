@@ -22,4 +22,6 @@ export type ManualKind = "expense" | "income" | "transfer";
 export type ManualForm = { kind: ManualKind; date: string; payee: string; narration: string; amount: string; fromAccount: string; toAccount: string; category: string };
 export type LedgerPage = "home" | "net-worth" | "transactions" | "accounts" | "budgets" | "reconcile" | "settings" | "income-statement";
 export type PrivacySettings = { showHomeSummaryAmounts: boolean; showHomeCashflowChart: boolean; showAccountBalancesByDefault: boolean; showNetWorthByDefault: boolean; showIncomeStatementByDefault: boolean };
+export type ThemeMode = "system" | "light" | "dark";
+export type ResolvedTheme = "light" | "dark";
 export type IncomeStatementNode = { account: string; label: string; amount: number; children: IncomeStatementNode[]; depth: number; txCount: number };

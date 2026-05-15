@@ -1,7 +1,51 @@
-import type { PrivacySettings } from "./types";
+import type { PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
-export function SettingsPage({ settings, onChange }: { settings: PrivacySettings; onChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void }) {
+const themeOptions: { value: ThemeMode; label: string; description: string }[] = [
+  { value: "system", label: "跟随系统", description: "系统切换时自动同步" },
+  { value: "light", label: "浅色", description: "固定使用纸张浅色" },
+  { value: "dark", label: "深色", description: "固定使用夜间深色" },
+];
+
+export function SettingsPage({
+  settings,
+  onChange,
+  themeMode,
+  resolvedTheme,
+  onThemeModeChange,
+}: {
+  settings: PrivacySettings;
+  onChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void;
+  themeMode: ThemeMode;
+  resolvedTheme: ResolvedTheme;
+  onThemeModeChange: (mode: ThemeMode) => void;
+}) {
   return <div className="space-y-6">
+    <section className="card p-5 md:p-6">
+      <div className="border-l-4 border-brand pl-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">appearance</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">外观设置</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">默认跟随系统深浅色，也可以在这里手动固定。设置只保存在当前浏览器。</p>
+      </div>
+      <div className="mt-6 rounded-2xl border border-line bg-panel p-2">
+        <div className="grid gap-2 md:grid-cols-3">
+          {themeOptions.map((option) => {
+            const active = themeMode === option.value;
+            return <button
+              key={option.value}
+              type="button"
+              className={`rounded-xl border px-4 py-3 text-left ${active ? "border-brand bg-[var(--selected-bg)] text-ink ring-1 ring-brand/30" : "border-line bg-paper text-ink hover:bg-tag"}`}
+              onClick={() => onThemeModeChange(option.value)}
+              aria-pressed={active}
+            >
+              <span className="block font-medium">{option.label}</span>
+              <span className={`mt-1 block text-xs leading-5 ${active ? "text-olive" : "text-stone"}`}>{option.description}</span>
+            </button>;
+          })}
+        </div>
+        <p className="mt-3 px-2 text-xs text-stone">当前实际主题：{resolvedTheme === "dark" ? "深色" : "浅色"}</p>
+      </div>
+    </section>
+
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">privacy defaults</div>

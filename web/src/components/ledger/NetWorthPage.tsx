@@ -4,7 +4,14 @@ import { formatCny, formatCompactCny } from "@/lib/money";
 import { Metric } from "./shared";
 import type { AccountView, IncomeStatementCache } from "./types";
 
-const COLORS = ["#1B365D", "#8a7a45", "#504e49", "#7d8b6f", "#b58b6b", "#6b6a64"];
+const COLORS = [
+  "var(--chart-palette-1)",
+  "var(--chart-palette-2)",
+  "var(--chart-palette-3)",
+  "var(--chart-palette-4)",
+  "var(--chart-palette-5)",
+  "var(--chart-palette-6)",
+];
 
 export function NetWorthPage({ rows, balances, accounts, incomeStatement, visible, onToggleVisible }: { rows: { date: string; 资产: number; 负债: number; 净资产: number }[]; balances: Record<string, number>; accounts: AccountView[]; incomeStatement: IncomeStatementCache; visible: boolean; onToggleVisible: () => void }) {
   const assets = Object.entries(balances).filter(([a]) => a.startsWith("Assets:")).reduce((s, [, v]) => s + v, 0);
@@ -66,7 +73,7 @@ function AssetComposition({ accounts, balances, visible }: { accounts: AccountVi
 }
 
 function LiabilitiesTrend({ rows, visible }: { rows: { date: string; 负债: number }[]; visible: boolean }) {
-  return <section className="card p-4"><h2 className="font-serif text-2xl">负债趋势</h2>{visible ? <div className="mt-4 h-72"><ResponsiveContainer width="100%" height="100%"><AreaChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="#e5e3d8" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} tickFormatter={(value) => chartMoney(Number(value))} /><Tooltip formatter={(value) => formatCny(Number(value))} /><Area type="monotone" dataKey="负债" stroke="#6b6a64" fill="#d8d1c1" /></AreaChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+  return <section className="card p-4"><h2 className="font-serif text-2xl">负债趋势</h2>{visible ? <div className="mt-4 h-72"><ResponsiveContainer width="100%" height="100%"><AreaChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} tickFormatter={(value) => chartMoney(Number(value))} /><Tooltip formatter={(value) => formatCny(Number(value))} /><Area type="monotone" dataKey="负债" stroke="var(--chart-secondary)" fill="var(--chart-fill)" /></AreaChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
 }
 
 function chartMoney(value: number) {
@@ -74,7 +81,7 @@ function chartMoney(value: number) {
 }
 
 function NetWorthChart({ rows, visible }: { rows: { date: string; 资产: number; 负债: number; 净资产: number }[]; visible: boolean }) {
-  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">净资产变化</h2>{visible ? <div className="mt-4 h-72 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="#e5e3d8" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} domain={["dataMin", "dataMax"]} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip formatter={(value, name) => [formatCny(Number(value)), name]} /><Legend /><Line type="monotone" dataKey="净资产" stroke="#1B365D" strokeWidth={3} dot /><Line type="monotone" dataKey="资产" stroke="#504e49" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="负债" stroke="#6b6a64" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">净资产变化</h2>{visible ? <div className="mt-4 h-72 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} domain={["dataMin", "dataMax"]} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip formatter={(value, name) => [formatCny(Number(value)), name]} /><Legend /><Line type="monotone" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={3} dot /><Line type="monotone" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
 }
 
 function HiddenMoney() {
