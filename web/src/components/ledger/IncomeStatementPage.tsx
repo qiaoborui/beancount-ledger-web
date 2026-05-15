@@ -6,7 +6,7 @@ import { formatCny } from "@/lib/money";
 import { HiddenPanel, Metric } from "./shared";
 import type { IncomeStatementNode } from "./types";
 
-export function IncomeStatementPage({ income, expense, totalIncome, totalExpense, netIncome, visible, onToggleVisible, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; onToggleVisible: () => void; onSelectCategory?: (account: string) => void }) {
+export function IncomeStatementPage({ income, expense, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string) => void }) {
   return <>
     <section className="card overflow-hidden p-0">
       <div className="border-l-4 border-brand p-5 md:p-6">
@@ -14,7 +14,7 @@ export function IncomeStatementPage({ income, expense, totalIncome, totalExpense
           <div>
             <div className="text-xs uppercase tracking-[0.24em] text-stone">income statement</div>
             <h1 className="mt-2 font-serif text-3xl font-medium leading-tight md:text-4xl">花在哪里，赚在哪里。</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-olive">按树形层级展开收入和支出，点击叶子节点可跳到对应流水。</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-olive">支出分析可直接查看；收入和净利需要确认本人后显示。</p>
           </div>
           <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={onToggleVisible} title={visible ? "隐藏金额" : "显示金额"} aria-label={visible ? "隐藏金额" : "显示金额"}>
             {visible ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
@@ -22,9 +22,9 @@ export function IncomeStatementPage({ income, expense, totalIncome, totalExpense
         </div>
       </div>
       <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-5 text-center">
-        <Metric label="收入" value={visible ? formatCny(totalIncome / 100) : "••••••"} cls="amount-income text-lg sm:text-2xl" />
+        <Metric label="收入" value={visible && sensitiveUnlocked ? formatCny(totalIncome / 100) : "••••••"} cls="amount-income text-lg sm:text-2xl" />
         <Metric label="支出" value={visible ? formatCny(totalExpense / 100) : "••••••"} cls="amount-expense text-lg sm:text-2xl" />
-        <Metric label="净利" value={visible ? formatCny(netIncome / 100) : "••••••"} cls="amount-gold text-lg sm:text-2xl" />
+        <Metric label="净利" value={visible && sensitiveUnlocked ? formatCny(netIncome / 100) : "••••••"} cls="amount-gold text-lg sm:text-2xl" />
       </div>
     </section>
 
@@ -32,7 +32,7 @@ export function IncomeStatementPage({ income, expense, totalIncome, totalExpense
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-4">
           <h2 className="mb-4 border-l-2 border-brand pl-3 font-serif text-2xl text-warm">收入</h2>
-          {income.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无收入记录</div> : income.map((node) => <TreeNode key={node.account} node={node} visible={visible} onSelectCategory={onSelectCategory} />)}
+          {sensitiveUnlocked ? (income.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无收入记录</div> : income.map((node) => <TreeNode key={node.account} node={node} visible={visible} onSelectCategory={onSelectCategory} />)) : <IncomeLockedPanel onUnlock={onUnlockSensitive} />}
         </div>
         <div className="card p-4">
           <h2 className="mb-4 border-l-2 border-brand pl-3 font-serif text-2xl text-warm">支出</h2>
@@ -40,11 +40,15 @@ export function IncomeStatementPage({ income, expense, totalIncome, totalExpense
         </div>
       </div>
     ) : (
-      <HiddenPanel text="损益表包含具体分类金额，默认隐藏。点击上方「显示金额」查看。" />
+      <HiddenPanel text="损益表金额默认隐藏。支出可直接显示；收入和净利需要使用 Face ID / Passkey 解锁。" />
     )}
 
 
   </>;
+}
+
+function IncomeLockedPanel({ onUnlock }: { onUnlock: () => void }) {
+  return <div className="rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone"><p>收入分类和收入金额已隐藏。</p><button className="mt-4 rounded-xl bg-brand px-4 py-2 text-paper" onClick={onUnlock}>使用 Face ID / Passkey 查看收入</button></div>;
 }
 
 function TreeNode({ node, visible, onSelectCategory }: { node: IncomeStatementNode; visible: boolean; onSelectCategory?: (account: string) => void }) {

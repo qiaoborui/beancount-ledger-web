@@ -55,7 +55,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
         reconciliationRows: unlocked ? (r.rows ?? []) : [],
         accounts: a.accounts ?? [],
         accountStatuses: unlocked ? (st.statuses ?? []) : [],
-        incomeStatement: { income: inc.income ?? [], expense: inc.expense ?? [], totalIncome: inc.totalIncome ?? 0, totalExpense: inc.totalExpense ?? 0, netIncome: inc.netIncome ?? 0 },
+        incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0 },
         savedAt: Date.now(),
       };
       applyCache(fresh);

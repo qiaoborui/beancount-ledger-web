@@ -8,10 +8,14 @@ export async function GET(request: Request) {
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const txns = parseTransactions();
   const sensitiveUnlocked = await isSensitiveUnlocked();
+  const summary = monthSummary(start, end, txns);
+  const publicDays = Object.fromEntries(
+    Object.entries(summary.days).map(([day, value]) => [day, { income: sensitiveUnlocked ? value.income : 0, expense: value.expense }]),
+  );
   return NextResponse.json({
     start,
     end,
-    summary: monthSummary(start, end, txns),
+    summary: sensitiveUnlocked ? summary : { ...summary, income: 0, net: 0, days: publicDays },
     balances: sensitiveUnlocked ? currentBalances(txns) : {},
     netWorthHistory: sensitiveUnlocked ? netWorthHistory(txns) : [],
     sensitiveUnlocked,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { isSensitiveUnlocked, requireAuth } from "@/lib/auth";
 import { parseTransactions } from "@/lib/beancountParser";
 import { parseApiTimeParams } from "@/lib/timeRange";
 import { appendBeanText, commentTransactionBlock, replaceTransactionBlock, transactionToBean } from "@/lib/ledgerWriter";
@@ -20,9 +20,13 @@ function findBySource(source: z.infer<typeof SourceSchema>) {
 export async function GET(request: Request) {
   await requireAuth();
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
+  const sensitiveUnlocked = await isSensitiveUnlocked();
   let transactions = parseTransactions().sort((a, b) => b.date.localeCompare(a.date));
   transactions = transactions.filter((txn) => txn.date >= start && txn.date < end);
-  return NextResponse.json({ start, end, transactions });
+  if (!sensitiveUnlocked) {
+    transactions = transactions.filter((txn) => !txn.postings.some((posting) => posting.account.startsWith("Income:")));
+  }
+  return NextResponse.json({ start, end, transactions, sensitiveUnlocked });
 }
 
 export async function PUT(request: Request) {
