@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { isSensitiveUnlocked } from "@/lib/auth";
+import { creditCardAnalytics, monthEndNetWorth, netWorthChangeWindows } from "@/lib/assetAnalytics";
 import { monthSummary, netWorthHistory } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
@@ -12,6 +13,8 @@ export async function GET(request: Request) {
   const snapshot = getLedgerSnapshot();
   const sensitiveUnlocked = await isSensitiveUnlocked();
   const summary = monthSummary(start, end, snapshot.transactions);
+  const netWorthRows = sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [];
+  const monthEndRows = sensitiveUnlocked ? monthEndNetWorth(netWorthRows) : [];
   const publicDays = Object.fromEntries(
     Object.entries(summary.days).map(([day, value]) => [day, { income: sensitiveUnlocked ? value.income : 0, expense: value.expense }]),
   );
@@ -20,7 +23,10 @@ export async function GET(request: Request) {
     end,
     summary: sensitiveUnlocked ? summary : { ...summary, income: 0, net: 0, days: publicDays },
     balances: sensitiveUnlocked ? snapshot.balances : {},
-    netWorthHistory: sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [],
+    netWorthHistory: netWorthRows,
+    monthEndNetWorth: monthEndRows,
+    netWorthWindows: sensitiveUnlocked ? netWorthChangeWindows(netWorthRows) : null,
+    creditCards: sensitiveUnlocked ? creditCardAnalytics(snapshot.transactions, snapshot.balances, snapshot.accounts, start, end) : [],
     sensitiveUnlocked,
   });
 }
