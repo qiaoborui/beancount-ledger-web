@@ -2,11 +2,11 @@ import { Eye, EyeOff } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { HiddenPanel, Metric } from "./shared";
-import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, NetWorthWindows, PrivacySettings, Summary } from "./types";
+import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
-export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, netWorthWindows, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; chart: { day: string; 收入: number; 支出: number }[]; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; netWorthWindows: NetWorthWindows | null; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; chart: { day: string; 收入: number; 支出: number }[]; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
-  const canShowSensitive = showAmounts && sensitiveUnlocked;
+  const canShowSensitive = sensitiveUnlocked && showAmounts;
   const mask = (value: string, sensitive = true) => sensitive ? canShowSensitive ? value : "••••••" : showAmounts ? value : "••••••";
   const cardOutstanding = creditCards.reduce((sum, card) => sum + card.outstanding, 0);
   const cardSpend = creditCards.reduce((sum, card) => sum + card.periodSpend, 0);
@@ -21,8 +21,8 @@ export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, n
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xs uppercase tracking-[0.24em] text-stone">financial dashboard</div>
-            <h1 className="mt-2 font-serif text-3xl font-medium leading-tight md:text-4xl">现金流、净资产、信用卡一起看。</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-olive">首页聚合本期收支、净资产趋势、信用卡压力、预算风险和待整理项；敏感金额仍按隐私开关隐藏。</p>
+            <h1 className="mt-2 font-serif text-3xl font-medium leading-tight md:text-4xl">现金流、信用卡和待整理项先看。</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-olive">首页聚合本期收支、信用卡压力、预算风险和待整理项；净资产保留在独立页面。解锁后金额默认可见，可用右侧眼睛临时隐藏。</p>
           </div>
           <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
             {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
@@ -37,8 +37,8 @@ export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, n
     </section>
 
     <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <DashboardCard label="净资产" value={mask(formatCompactCny((netWorthWindows?.latest?.netWorth ?? 0) / 100))} tone="amount-gold" detail={`6月 ${mask(formatDelta(netWorthWindows?.sixMonth.change))} · 12月 ${mask(formatDelta(netWorthWindows?.twelveMonth.change))}`} />
       <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`本期刷卡 ${mask(formatCny(cardSpend / 100))}`} />
+      <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0]?.account.replace(/^Expenses:/, "") ?? "暂无预算数据"} />
       <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
       <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
     </section>
@@ -71,7 +71,3 @@ function ListCard({ title, items, empty }: { title: string; items: { key: string
   }) : <div className="rounded-xl border border-line bg-panel p-4 text-center text-sm text-stone">{empty}</div>}</div></section>;
 }
 
-function formatDelta(value: number | null | undefined) {
-  if (value == null) return "暂无";
-  return `${value >= 0 ? "+" : ""}${formatCompactCny(value / 100)}`;
-}
