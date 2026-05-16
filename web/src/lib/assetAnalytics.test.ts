@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creditCardAnalytics, monthEndNetWorth, netWorthChangeWindows } from "./assetAnalytics";
+import { creditCardAnalytics, creditCardBillingCycle, monthEndNetWorth, netWorthChangeWindows } from "./assetAnalytics";
 import type { AccountView, TransactionView } from "./beancountParser";
 
 function txn(date: string, line: number, postings: TransactionView["postings"]): TransactionView {
@@ -42,7 +42,7 @@ describe("asset analytics", () => {
     });
   });
 
-  it("summarizes credit card outstanding, spending, repayments and activity", () => {
+  it("summarizes credit card outstanding, spending, repayments and billing cycle", () => {
     const rows = creditCardAnalytics([
       txn("2026-05-01", 1, [
         { account: "Expenses:Food", amount: 5000, currency: "CNY" },
@@ -56,8 +56,13 @@ describe("asset analytics", () => {
         { account: "Expenses:Travel", amount: 8000, currency: "CNY" },
         { account: "Liabilities:CreditCard:Visa", amount: -8000, currency: "CNY" },
       ]),
-    ], { "Liabilities:CreditCard:Visa": -10000 }, [cardAccount], "2026-05-01", "2026-06-01");
+    ], { "Liabilities:CreditCard:Visa": -10000 }, [cardAccount], "2026-05-01", "2026-06-01", "2026-05-16");
 
-    expect(rows).toEqual([{ account: "Liabilities:CreditCard:Visa", label: "Visa", balance: -10000, outstanding: 10000, periodSpend: 5000, periodRepayments: 3000, txCount: 1, repaymentCount: 1, lastActivityDate: "2026-05-03" }]);
+    expect(rows).toEqual([{ account: "Liabilities:CreditCard:Visa", label: "Visa", balance: -10000, outstanding: 10000, periodSpend: 5000, periodRepayments: 3000, billCycleSpend: 13000, billCycleStart: "2026-04-17", billCycleEnd: "2026-05-17", statementDate: "2026-05-18", dueDate: "2026-06-05", txCount: 1, repaymentCount: 1, lastActivityDate: "2026-05-03" }]);
+  });
+
+  it("computes 17-to-17 billing cycle with statement on the 18th and due on the 5th", () => {
+    expect(creditCardBillingCycle("2026-05-16")).toEqual({ billCycleStart: "2026-04-17", billCycleEnd: "2026-05-17", statementDate: "2026-05-18", dueDate: "2026-06-05" });
+    expect(creditCardBillingCycle("2026-05-17")).toEqual({ billCycleStart: "2026-05-17", billCycleEnd: "2026-06-17", statementDate: "2026-06-18", dueDate: "2026-07-05" });
   });
 });
