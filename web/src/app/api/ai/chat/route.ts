@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { chatBookkeeping } from "@/lib/deepseek";
 import { ParsedTransactionSchema } from "@/lib/schemas";
 
@@ -17,7 +17,8 @@ const ChatRequestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const json = await request.json();
   const parsed = ChatRequestSchema.safeParse(json);
   if (!parsed.success) {

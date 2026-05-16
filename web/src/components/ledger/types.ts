@@ -16,8 +16,12 @@ export type AccountStatus = {
 };
 export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean };
 export type LedgerNotification = { id: string; insightId: string; month: string; severity: "info" | "warning" | "critical"; title: string; detail: string; amount?: number; account?: string; date?: string; status: "unread" | "read" | "dismissed" | "resolved"; createdAt: string; readAt: string | null; dismissedAt: string | null; resolvedAt: string | null; updatedAt: string };
-export type IncomeStatementCache = { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; totalIncome: number; totalExpense: number; netIncome: number } | null;
-export type LedgerCache = { summary: Summary | null; balances: Record<string, number>; txns: Txn[]; budgetRows: BudgetRow[]; netWorthRows: { date: string; assets: number; liabilities: number; netWorth: number }[]; reconciliationRows: ReconcileRow[]; accounts: AccountView[]; notifications?: LedgerNotification[]; incomeStatement: IncomeStatementCache; accountStatuses: AccountStatus[]; savedAt: number };
+export type PayeeAnalytics = { payee: string; amount: number; txCount: number };
+export type AccountAnalytics = { account: string; amount: number; txCount: number };
+export type ExpenseCategoryAnalytics = { account: string; label: string; amount: number; txCount: number; share: number | null; previousAmount: number; changeRatio: number | null; topPayees: PayeeAnalytics[] };
+export type IncomeStatementCache = { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; totalIncome: number; totalExpense: number; netIncome: number; expenseAnalytics?: ExpenseCategoryAnalytics[]; topPayees?: PayeeAnalytics[]; topPaymentAccounts?: AccountAnalytics[] } | null;
+export type LedgerVersion = { signature: string; fileCount: number; latestMtimeMs: number; totalSize: number };
+export type LedgerCache = { summary: Summary | null; balances: Record<string, number>; txns: Txn[]; budgetRows: BudgetRow[]; netWorthRows: { date: string; assets: number; liabilities: number; netWorth: number }[]; reconciliationRows: ReconcileRow[]; accounts: AccountView[]; notifications?: LedgerNotification[]; incomeStatement: IncomeStatementCache; accountStatuses: AccountStatus[]; ledgerVersion?: LedgerVersion; savedAt: number };
 export type ManualKind = "expense" | "income" | "transfer";
 export type ManualForm = { kind: ManualKind; date: string; payee: string; narration: string; amount: string; fromAccount: string; toAccount: string; category: string };
 export type LedgerPage = "home" | "net-worth" | "transactions" | "accounts" | "budgets" | "reconcile" | "settings" | "income-statement";

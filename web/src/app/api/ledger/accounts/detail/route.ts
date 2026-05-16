@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireSensitiveUnlock } from "@/lib/auth";
+import { requireSensitiveUnlockJson } from "@/lib/apiAuth";
 import { accountDetail } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 
 export async function GET(request: Request) {
-  await requireSensitiveUnlock();
+  const authError = await requireSensitiveUnlockJson();
+  if (authError) return authError;
 
   const { searchParams } = new URL(request.url);
   const account = searchParams.get("account");

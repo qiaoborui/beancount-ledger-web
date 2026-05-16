@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isSensitiveUnlocked, requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
+import { isSensitiveUnlocked } from "@/lib/auth";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 import { appendBeanText, commentTransactionBlock, replaceTransactionBlock, transactionToBean } from "@/lib/ledgerWriter";
@@ -18,7 +19,8 @@ function findBySource(source: z.infer<typeof SourceSchema>) {
 }
 
 export async function GET(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const sensitiveUnlocked = await isSensitiveUnlocked();
   let transactions = [...getLedgerSnapshot().transactions].sort((a, b) => b.date.localeCompare(a.date));
@@ -30,7 +32,8 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { source, entry } = UpdateSchema.parse(await request.json());
   try {
     await replaceTransactionBlock(source, entry);
@@ -41,7 +44,8 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { source, reason } = DeleteSchema.parse(await request.json());
   try {
     await commentTransactionBlock(source, reason);
@@ -52,7 +56,8 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { source, date } = ReverseSchema.parse(await request.json());
   try {
     const original = findBySource(source);

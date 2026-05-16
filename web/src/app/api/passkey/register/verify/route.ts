@@ -1,6 +1,6 @@
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { consumeCurrentChallenge, originFromRequest, rpIDFromRequest, savePasskey } from "@/lib/passkeys";
 
 function bufferToBase64url(buffer: Uint8Array) {
@@ -8,7 +8,8 @@ function bufferToBase64url(buffer: Uint8Array) {
 }
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const body = await request.json();
   try {
     const verification = await verifyRegistrationResponse({

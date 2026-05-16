@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireSensitiveUnlock } from "@/lib/auth";
+import { requireSensitiveUnlockJson } from "@/lib/apiAuth";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 
 export async function GET() {
-  await requireSensitiveUnlock();
+  const authError = await requireSensitiveUnlockJson();
+  if (authError) return authError;
   const snapshot = getLedgerSnapshot();
   return NextResponse.json({ balances: snapshot.balances, assertions: snapshot.balanceAssertions });
 }

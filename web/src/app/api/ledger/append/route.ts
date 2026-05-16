@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
 import { LedgerEntrySchema } from "@/lib/schemas";
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const entry = LedgerEntrySchema.parse(await request.json());
   const beanText = entry.kind === "transaction" ? transactionToBean(entry) : balanceToBean(entry);
   try {

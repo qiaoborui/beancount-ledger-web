@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { gitCommitPullPush } from "@/lib/gitOps";
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { message } = await request.json().catch(() => ({ message: "chore: update ledger" }));
   try {
     const result = gitCommitPullPush(String(message || "chore: update ledger"));

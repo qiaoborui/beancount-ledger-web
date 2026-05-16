@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { mergeInsightsIntoNotifications, updateNotificationStatus } from "@/lib/notifications";
 import { detectInsights } from "@/lib/insights";
 import { getMonthsInRange, parseApiTimeParams } from "@/lib/timeRange";
@@ -11,7 +11,8 @@ const PatchSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const months = getMonthsInRange(start, end);
   let allNotifications: Awaited<ReturnType<typeof mergeInsightsIntoNotifications>> = [];
@@ -24,7 +25,8 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const input = PatchSchema.parse(await request.json());
   const notifications = await updateNotificationStatus(input.ids, input.status);
   return NextResponse.json({ ok: true, notifications });

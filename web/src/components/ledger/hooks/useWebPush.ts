@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { readJson } from "@/lib/clientFetch";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - base64String.length % 4) % 4);
@@ -31,7 +32,7 @@ export function useWebPush(showToast: (kind: "info" | "success" | "error", text:
         fetch("/api/push/subscription"),
         navigator.serviceWorker.ready,
       ]);
-      const config = await configRes.json();
+      const config = await readJson<{ error?: string; configured?: boolean; publicKey?: string }>(configRes);
       const subscription = await registration.pushManager.getSubscription();
       setState({ supported: true, permission: Notification.permission, subscribed: Boolean(subscription), configured: Boolean(config.configured && config.publicKey), loading: false, error: config.configured ? "" : "Web Push 尚未配置 VAPID keys" });
     } catch (error) {
@@ -48,7 +49,7 @@ export function useWebPush(showToast: (kind: "info" | "success" | "error", text:
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const configRes = await fetch("/api/push/subscription");
-      const config = await configRes.json();
+      const config = await readJson<{ error?: string; configured?: boolean; publicKey?: string }>(configRes);
       if (!configRes.ok) throw new Error(config.error || "读取 Web Push 配置失败");
       if (!config.publicKey || !config.configured) throw new Error("Web Push 尚未配置 VAPID keys");
 
@@ -63,7 +64,7 @@ export function useWebPush(showToast: (kind: "info" | "success" | "error", text:
       });
 
       const res = await fetch("/api/push/subscription", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscription: subscription.toJSON() }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error || "保存订阅失败");
       showToast("success", "Web Push 已开启");
       await refresh();
@@ -96,7 +97,7 @@ export function useWebPush(showToast: (kind: "info" | "success" | "error", text:
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const res = await fetch("/api/push/subscription", { method: "PUT" });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; sent?: number; attempted?: number }>(res);
       if (!res.ok) throw new Error(data.error || "测试通知发送失败");
       showToast("success", `测试通知已发送：${data.sent}/${data.attempted}`);
       await refresh();

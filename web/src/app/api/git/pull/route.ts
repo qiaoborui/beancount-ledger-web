@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { gitPullRebase } from "@/lib/gitOps";
 
 export async function POST() {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   try {
     const output = gitPullRebase();
     return NextResponse.json({ ok: true, output });

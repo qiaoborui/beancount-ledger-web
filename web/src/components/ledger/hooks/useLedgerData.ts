@@ -1,9 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { readLedgerCache, writeLedgerCache } from "../storage";
+import { fetchJson, readJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, LedgerVersion, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
+const LEDGER_VERSION_POLL_MS = 45_000;
+
+async function fetchSensitiveJson<T>(input: RequestInfo | URL, fallback: T): Promise<T> {
+  const response = await fetch(input);
+  if (response.status === 401 || response.status === 423) return fallback;
+  return readJson<T>(response, fallback);
+}
+
+async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
+  try {
+    const data = await fetchJson<{ version?: LedgerVersion }>("/api/ledger/version", undefined, {});
+    return data.version ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -18,6 +35,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
   const [loadingFresh, setLoadingFresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(null);
 
   const applyCache = useCallback((cache: LedgerCache) => {
     setSummary(cache.summary);
@@ -29,6 +47,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     setAccounts(cache.accounts ?? []);
     setIncomeStatement(cache.incomeStatement ?? null);
     setAccountStatuses(cache.accountStatuses ?? []);
+    setLedgerVersion(cache.ledgerVersion ?? null);
     setLastSyncedAt(cache.savedAt);
   }, []);
 
@@ -37,25 +56,26 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     const params = timeRangeToParams(range);
     try {
       const requests = [
-        fetch(`/api/ledger/summary?${params}`).then((r) => r.json()),
-        fetch(`/api/ledger/transactions?${params}`).then((r) => r.json()),
-        fetch(`/api/ledger/budget?${params}`).then((r) => r.json()),
-        unlocked ? fetch(`/api/ledger/reconciliation?${params}`).then((r) => r.json()) : Promise.resolve({ rows: [] }),
-        fetch("/api/ledger/accounts").then((r) => r.json()),
-        fetch(`/api/ledger/income-statement?${params}`).then((r) => r.json()),
-        unlocked ? fetch("/api/ledger/account-status").then((r) => r.json()) : Promise.resolve({ statuses: [] }),
+        fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: { date: string; assets: number; liabilities: number; netWorth: number }[] }>(`/api/ledger/summary?${params}`),
+        fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
+        fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
+        unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }) : Promise.resolve({ rows: [] }),
+        fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
+        fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
+        unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }) : Promise.resolve({ statuses: [] }),
       ] as const;
-      const [s, t, b, r, a, inc, st] = await Promise.all(requests);
+      const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
       const fresh: LedgerCache = {
-        summary: s.summary,
+        summary: s.summary ?? null,
         balances: unlocked ? (s.balances ?? {}) : {},
         netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
-        txns: t.transactions,
-        budgetRows: b.rows,
+        txns: t.transactions ?? [],
+        budgetRows: b.rows ?? [],
         reconciliationRows: unlocked ? (r.rows ?? []) : [],
         accounts: a.accounts ?? [],
         accountStatuses: unlocked ? (st.statuses ?? []) : [],
-        incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0 },
+        incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
+        ledgerVersion: version ?? undefined,
         savedAt: Date.now(),
       };
       applyCache(fresh);
@@ -71,15 +91,16 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
 
   const load = useCallback(async (forceFresh = false) => {
     const [me, passkey] = await Promise.all([
-      fetch("/api/auth/me").then((r) => r.json()),
-      fetch("/api/passkey/status").then((r) => r.json()).catch(() => ({ registered: false })),
+      fetchJson<{ authenticated?: boolean }>("/api/auth/me"),
+      fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
     ]);
     const hasPasskey = Boolean(passkey.registered);
     onPasskeyRegistered(hasPasskey);
-    onAuthChange(me.authenticated);
-    if (me.authenticated) sessionStorage.setItem("ledger_authed", "1");
+    const authenticated = Boolean(me.authenticated);
+    onAuthChange(authenticated);
+    if (authenticated) sessionStorage.setItem("ledger_authed", "1");
     else sessionStorage.removeItem("ledger_authed");
-    if (!me.authenticated) return;
+    if (!authenticated) return;
 
     if (!forceFresh && unlocked) {
       const cached = readLedgerCache(timeRange);
@@ -91,6 +112,42 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
 
     await fetchFreshLedger(timeRange);
   }, [applyCache, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+
+  useEffect(() => {
+    if (authedPollDisabled()) return;
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function checkVersion() {
+      if (cancelled || refreshing || loadingFresh) return;
+      try {
+        const latest = await fetchLedgerVersion();
+        if (cancelled || !latest) return;
+        if (!ledgerVersion) {
+          setLedgerVersion(latest);
+          return;
+        }
+        if (latest.signature !== ledgerVersion.signature) {
+          showToast("info", "账本已更新，正在刷新数据");
+          await load(true);
+        }
+      } catch {
+        // Version polling is best-effort; keep the current data if the lightweight check fails.
+      }
+    }
+
+    timer = window.setInterval(checkVersion, LEDGER_VERSION_POLL_MS);
+    document.addEventListener("visibilitychange", checkVersion);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", checkVersion);
+    };
+  }, [ledgerVersion, load, loadingFresh, refreshing, showToast]);
+
+  function authedPollDisabled() {
+    return typeof window === "undefined" || !summary;
+  }
 
   async function refreshLedger() {
     if (refreshing || loadingFresh) return;

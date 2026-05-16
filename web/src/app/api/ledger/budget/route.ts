@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { monthSummary } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 
 export async function GET(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const snapshot = getLedgerSnapshot();
   const budgets = snapshot.budgets.filter((b) => b.date <= end);

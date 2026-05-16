@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { parseNaturalLanguage } from "@/lib/deepseek";
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { input } = await request.json();
   if (typeof input !== "string" || !input.trim()) {
     return NextResponse.json({ error: "input is required" }, { status: 400 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -87,10 +87,13 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     visibleAccountMap,
     setVisibleAccountMap,
   } = usePrivacySettings();
-  const [txnCategoryQuery, setTxnCategoryQuery] = useState("");
-  const [txnMetadataQuery, setTxnMetadataQuery] = useState("");
-  const [txnSearchQuery, setTxnSearchQuery] = useState("");
-  const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">("prefix");
+  const [txnCategoryQuery, setTxnCategoryQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("category") ?? "") : "");
+  const [txnMetadataQuery, setTxnMetadataQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("metadata") ?? "") : "");
+  const [txnSearchQuery, setTxnSearchQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("q") ?? "") : "");
+  const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(() => {
+    if (typeof window === "undefined") return "prefix";
+    return new URLSearchParams(window.location.search).get("mode") === "exact" ? "exact" : "prefix";
+  });
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
   const [gitSaveOpen, setGitSaveOpen] = useState(false);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
@@ -149,6 +152,38 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   function applyCustomRange() {
     const range: TimeRange = { start: customStart, end: customEnd, preset: "custom" };
     setTimeRange(range);
+  }
+
+  useEffect(() => {
+    if (page !== "transactions" || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setTxnCategoryQuery(params.get("category") ?? "");
+    setTxnMetadataQuery(params.get("metadata") ?? "");
+    setTxnSearchQuery(params.get("q") ?? "");
+    setCategoryMatchMode(params.get("mode") === "exact" ? "exact" : "prefix");
+  }, [page, pathname]);
+
+  useEffect(() => {
+    if (page !== "transactions" || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const setOrDelete = (key: string, value: string) => {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    };
+    setOrDelete("category", txnCategoryQuery.trim());
+    setOrDelete("metadata", txnMetadataQuery.trim());
+    setOrDelete("q", txnSearchQuery.trim());
+    if (categoryMatchMode === "exact") params.set("mode", "exact");
+    else params.delete("mode");
+    const query = params.toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl) window.history.replaceState(null, "", nextUrl);
+  }, [page, txnCategoryQuery, txnMetadataQuery, txnSearchQuery, categoryMatchMode]);
+
+  function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {
+    setTxnCategoryQuery(account);
+    setCategoryMatchMode(mode);
+    window.history.pushState(null, "", `/transactions?category=${encodeURIComponent(account)}${mode === "exact" ? "&mode=exact" : ""}`);
   }
 
   if (authed === null) return <AppSkeleton />;
@@ -253,7 +288,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "home" && <HomePage summary={summary} chart={chart} privacySettings={privacySettings} sensitiveUnlocked={unlocked} onPrivacyChange={updatePrivacySetting} />}
 
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
-      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={(account) => { setTxnCategoryQuery(account); window.history.pushState(null, "", "/transactions"); }} />}
+      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额、余额断言和对账数据需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
