@@ -40,6 +40,23 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(null);
 
+  const clearLedgerData = useCallback(() => {
+    setSummary(null);
+    setBalances({});
+    setNetWorthRows([]);
+    setMonthEndNetWorthRows([]);
+    setNetWorthWindows(null);
+    setCreditCards([]);
+    setTxns([]);
+    setBudgetRows([]);
+    setReconciliationRows([]);
+    setAccounts([]);
+    setIncomeStatement(null);
+    setAccountStatuses([]);
+    setLedgerVersion(null);
+    setLastSyncedAt(null);
+  }, []);
+
   const applyCache = useCallback((cache: LedgerCache) => {
     setSummary(cache.summary);
     setBalances(cache.balances);
@@ -108,7 +125,11 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
     if (authenticated) sessionStorage.setItem("ledger_authed", "1");
-    else sessionStorage.removeItem("ledger_authed");
+    else {
+      sessionStorage.removeItem("ledger_authed");
+      sessionStorage.removeItem("ledger_unlocked");
+      clearLedgerData();
+    }
     if (!authenticated) return;
 
     if (!forceFresh && unlocked) {
@@ -120,7 +141,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;

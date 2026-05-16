@@ -67,7 +67,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const initialPathname = usePathname();
   const pathname = useClientPathname(initialPathname);
   const page = pageProp ?? pageFromPathname(pathname);
-  const [authed, setAuthed] = useState<boolean | null>(() => typeof window !== "undefined" && sessionStorage.getItem("ledger_authed") === "1" ? true : null);
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
   const [customStart, setCustomStart] = useState(timeRange.start);
