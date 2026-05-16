@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSensitiveUnlock } from "@/lib/auth";
-import { accountDetail, parseAccounts, currentBalances, parseTransactions } from "@/lib/beancountParser";
+import { accountDetail } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 
 export async function GET(request: Request) {
   await requireSensitiveUnlock();
@@ -11,16 +12,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "缺少 account 参数" }, { status: 400 });
   }
 
-  const accounts = parseAccounts();
-  const acct = accounts.find((a) => a.account === account);
+  const snapshot = getLedgerSnapshot();
+  const acct = snapshot.accounts.find((a) => a.account === account);
   if (!acct) {
     return NextResponse.json({ error: `账户不存在: ${account}` }, { status: 404 });
   }
 
-  const txns = parseTransactions();
-  const rows = accountDetail(account, txns);
-  const balances = currentBalances(txns);
-  const currentBalance = balances[account] ?? 0;
+  const rows = accountDetail(account, snapshot.transactions);
+  const currentBalance = snapshot.balances[account] ?? 0;
 
   return NextResponse.json({
     account: acct.account,

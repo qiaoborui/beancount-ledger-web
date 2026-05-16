@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireSensitiveUnlock } from "@/lib/auth";
-import { accountGroup, currentBalances, parseAccounts, parseBalances, parseTransactions } from "@/lib/beancountParser";
+import { accountGroup, currentBalances, type AccountView, type TransactionView } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
 import { cents, fromCents } from "@/lib/money";
 import { parseApiTimeParams } from "@/lib/timeRange";
 import type { ParsedTransaction } from "@/lib/schemas";
 
-function reconciliableAccounts() {
-  return parseAccounts().filter(
+function reconciliableAccounts(accounts: AccountView[]) {
+  return accounts.filter(
     (a) => a.active && (a.account.startsWith("Assets:") || a.account.startsWith("Liabilities:"))
   );
 }
@@ -39,8 +40,8 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function balancesBefore(date: string): Record<string, number> {
-  return currentBalances(parseTransactions().filter((txn) => txn.date < date));
+function balancesBefore(date: string, txns: TransactionView[]): Record<string, number> {
+  return currentBalances(txns.filter((txn) => txn.date < date));
 }
 
 function adjustmentEntry(account: string, label: string, diff: number, date: string, openAccounts: string[]): ParsedTransaction | null {
@@ -88,9 +89,10 @@ export async function GET(request: Request) {
   await requireSensitiveUnlock();
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const monthPrefix = start.slice(0, 7);
-  const balances = balancesBefore(todayStr());
-  const assertions = parseBalances();
-  const rows = reconciliableAccounts().map((a) => {
+  const snapshot = getLedgerSnapshot();
+  const balances = balancesBefore(todayStr(), snapshot.transactions);
+  const assertions = snapshot.balanceAssertions;
+  const rows = reconciliableAccounts(snapshot.accounts).map((a) => {
     const accountAssertions = assertions.filter((assertion) => assertion.account === a.account).sort((a, b) => b.date.localeCompare(a.date));
     const monthAssertions = accountAssertions.filter((assertion) => assertion.date >= start && assertion.date < end);
     return {
@@ -107,11 +109,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   await requireSensitiveUnlock();
   const input = ReconcileSchema.parse(await request.json());
-  const accounts = parseAccounts();
+  const snapshot = getLedgerSnapshot();
+  const accounts = snapshot.accounts;
   const accountInfo = accounts.find((a) => a.active && (a.account.startsWith("Assets:") || a.account.startsWith("Liabilities:")) && a.account === input.account);
   if (!accountInfo) return NextResponse.json({ error: "不支持的对账账户" }, { status: 400 });
 
-  const balances = balancesBefore(input.balanceDate);
+  const balances = balancesBefore(input.balanceDate, snapshot.transactions);
   const ledgerBalance = balances[input.account] ?? 0;
   const actual = cents(input.actualAmount);
   const diff = actual - ledgerBalance;

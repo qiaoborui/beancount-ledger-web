@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { isSensitiveUnlocked, requireAuth } from "@/lib/auth";
-import { currentBalances, monthSummary, netWorthHistory, parseTransactions } from "@/lib/beancountParser";
+import { monthSummary, netWorthHistory } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 
 export async function GET(request: Request) {
   await requireAuth();
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
-  const txns = parseTransactions();
+  const snapshot = getLedgerSnapshot();
   const sensitiveUnlocked = await isSensitiveUnlocked();
-  const summary = monthSummary(start, end, txns);
+  const summary = monthSummary(start, end, snapshot.transactions);
   const publicDays = Object.fromEntries(
     Object.entries(summary.days).map(([day, value]) => [day, { income: sensitiveUnlocked ? value.income : 0, expense: value.expense }]),
   );
@@ -16,8 +17,8 @@ export async function GET(request: Request) {
     start,
     end,
     summary: sensitiveUnlocked ? summary : { ...summary, income: 0, net: 0, days: publicDays },
-    balances: sensitiveUnlocked ? currentBalances(txns) : {},
-    netWorthHistory: sensitiveUnlocked ? netWorthHistory(txns) : [],
+    balances: sensitiveUnlocked ? snapshot.balances : {},
+    netWorthHistory: sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [],
     sensitiveUnlocked,
   });
 }
