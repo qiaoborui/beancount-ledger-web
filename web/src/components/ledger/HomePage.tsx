@@ -1,6 +1,6 @@
 import { Eye, EyeOff } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatCny, formatCompactCny } from "@/lib/money";
+import { formatCny } from "@/lib/money";
 import { HiddenPanel, Metric } from "./shared";
 import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
@@ -43,10 +43,9 @@ export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, c
       <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
     </section>
 
-    <section className="mt-6 grid gap-4 xl:grid-cols-3">
+    <section className="mt-6 grid gap-4 xl:grid-cols-2">
       <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
       <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
-      <ListCard title="信用卡 Top" items={creditCards.slice(0, 3).map((card) => ({ key: card.account, title: card.label, value: mask(formatCompactCny(card.outstanding / 100)), detail: `账单周期 ${mask(formatCompactCny(card.billCycleSpend / 100))} · 最晚 ${card.dueDate.slice(5)}` }))} empty={sensitiveUnlocked ? "暂无信用卡数据" : "解锁后查看信用卡"} />
     </section>
 
     <section className="card mt-6 p-5">
