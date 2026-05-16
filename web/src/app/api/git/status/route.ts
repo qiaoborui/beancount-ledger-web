@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { gitStatus } from "@/lib/gitOps";
 
 export async function GET() {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   return NextResponse.json(gitStatus());
 }

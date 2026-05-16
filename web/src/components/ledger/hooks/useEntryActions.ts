@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import type { ManualForm } from "../types";
 
@@ -24,7 +25,7 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
 
   async function appendEntry(entry: ParsedTransaction | BalanceAssertion) {
     const res = await fetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) {
       showToast("error", data.error || "写入失败");
       return { ok: false };
@@ -42,7 +43,7 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
     setParseMessage("正在解析，请保持弹窗打开…");
     try {
       const res = await fetch("/api/ai/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: nl }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; entry?: ParsedTransaction }>(res);
       if (!res.ok) throw new Error(data.error || "解析失败");
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : data.entry ? [data.entry as ParsedTransaction] : [];
       if (!entries.length) throw new Error("AI 没有返回可写入的记录");
@@ -109,7 +110,7 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
     setParseMessage(`正在写入 ${previews.length} 条…`);
     try {
       const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: previews }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || "写入失败");
       const count = typeof data.count === "number" ? data.count : previews.length;
       setPreviews([]);

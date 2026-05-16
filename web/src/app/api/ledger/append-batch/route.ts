@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { appendLedgerEntries } from "@/lib/ledgerWriter";
 import { LedgerEntrySchema } from "@/lib/schemas";
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const body = await request.json();
   const rawEntries = Array.isArray(body?.entries) ? body.entries : null;
   if (!rawEntries?.length) {

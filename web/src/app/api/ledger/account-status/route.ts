@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { accountStatusIndicators } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 
 export async function GET() {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const snapshot = getLedgerSnapshot();
   const statuses = accountStatusIndicators(snapshot.transactions, snapshot.balanceAssertions, snapshot.accounts);
   return NextResponse.json({ statuses });

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { readJson } from "@/lib/clientFetch";
 import type { LedgerNotification } from "./types";
 
 export function NotificationCenter({ notifications, open, onClose, onChange }: { notifications: LedgerNotification[]; open: boolean; onClose: () => void; onChange: (updated: LedgerNotification[]) => void }) {
@@ -12,7 +13,7 @@ export function NotificationCenter({ notifications, open, onClose, onChange }: {
 
   async function updateStatus(ids: string[], status: LedgerNotification["status"]) {
     const res = await fetch("/api/ledger/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, status }) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string; notifications?: LedgerNotification[] }>(res);
     if (res.ok) onChange(data.notifications ?? []);
   }
 

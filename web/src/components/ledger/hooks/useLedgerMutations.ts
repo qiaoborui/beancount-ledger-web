@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import type { Txn } from "../types";
 
@@ -21,7 +22,7 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
 
   async function updateTransaction(source: Txn["source"], entry: ParsedTransaction) {
     const res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry }) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) return showToast("error", data.error || "修改失败");
     showToast("success", "交易已修改");
     load(true);
@@ -30,7 +31,7 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
 
   async function deleteTransaction(source: Txn["source"], reason: string) {
     const res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, reason }) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) return showToast("error", data.error || "删除失败");
     showToast("success", "交易已注释删除");
     load(true);
@@ -39,7 +40,7 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
 
   async function reverseTransaction(source: Txn["source"], date: string) {
     const res = await fetch("/api/ledger/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, date }) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) return showToast("error", data.error || "冲销失败");
     showToast("success", "冲销交易已写入");
     load(true);
@@ -48,7 +49,7 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
 
   async function reconcileAccount(input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) {
     const res = await fetch("/api/ledger/reconciliation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string; diff?: number }>(res);
     if (!res.ok) return showToast("error", data.error || "对账写入失败");
     showToast("success", data.diff === 0 ? "余额断言已写入" : "调整分录和余额断言已写入");
     load(true);

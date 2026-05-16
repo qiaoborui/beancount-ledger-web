@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
+import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 import type { BalanceAssertion } from "@/lib/schemas";
 import type { AccountGroup, AccountStatus, AccountView, BudgetRow } from "./types";
@@ -22,7 +23,7 @@ export function AccountManager({ accounts, onAdded }: { accounts: AccountView[];
   async function submit() {
     setMessage("写入中...");
     const res = await fetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: "CNY" }) });
-    const data = await res.json();
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) { setMessage(data.error || "新增失败"); return; }
     setMessage("账户已新增");
     setAccount("");

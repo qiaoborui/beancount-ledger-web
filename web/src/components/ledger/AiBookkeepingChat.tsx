@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import { Bot, MessageCircle, Send, Trash2, X } from "lucide-react";
+import { readJson } from "@/lib/clientFetch";
 import type { ParsedTransaction } from "@/lib/schemas";
 
 type ChatMessage = {
@@ -96,7 +97,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
     setStatus("thinking");
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; message?: string }>(res);
       if (!res.ok) throw new Error(data.error || "解析失败");
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : [];
       const hadPreviews = previews.length > 0;
@@ -131,7 +132,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
     try {
       const entriesToWrite = previews;
       const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: entriesToWrite }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || "写入失败");
       const count = typeof data.count === "number" ? data.count : entriesToWrite.length;
       setPreviews([]);

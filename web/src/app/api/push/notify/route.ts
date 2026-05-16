@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { sendWebPushToAll } from "@/lib/webPush";
 
 const NotifySchema = z.object({
@@ -11,7 +11,8 @@ const NotifySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const parsed = NotifySchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid push notification request" }, { status: 400 });

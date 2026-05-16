@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
+import { readJson } from "@/lib/clientFetch";
 import {
   Area,
   AreaChart,
@@ -80,10 +81,7 @@ export function AccountDetailPage({ account }: { account: string }) {
   useEffect(() => {
     const encoded = encodeURIComponent(account);
     fetch(`/api/ledger/accounts/detail?account=${encoded}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+      .then((res) => readJson<AccountDetail & { error?: string }>(res))
       .then((json) => {
         if (json.error) throw new Error(json.error);
         setData(json);

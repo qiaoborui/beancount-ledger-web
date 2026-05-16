@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { isSensitiveUnlocked, requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
+import { isSensitiveUnlocked } from "@/lib/auth";
 import { incomeStatementTree } from "@/lib/beancountParser";
 import { expenseAnalyticsSummary } from "@/lib/categoryAnalytics";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 
 export async function GET(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const snapshot = getLedgerSnapshot();
   const { income, expense, totalIncome, totalExpense, netIncome } = incomeStatementTree(start, end, snapshot.transactions);

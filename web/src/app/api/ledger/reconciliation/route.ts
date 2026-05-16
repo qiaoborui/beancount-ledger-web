@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSensitiveUnlock } from "@/lib/auth";
+import { requireSensitiveUnlockJson } from "@/lib/apiAuth";
 import { accountGroup, currentBalances, type AccountView, type TransactionView } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
@@ -86,7 +86,8 @@ function adjustmentEntry(account: string, label: string, diff: number, date: str
 }
 
 export async function GET(request: Request) {
-  await requireSensitiveUnlock();
+  const authError = await requireSensitiveUnlockJson();
+  if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const monthPrefix = start.slice(0, 7);
   const snapshot = getLedgerSnapshot();
@@ -107,7 +108,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await requireSensitiveUnlock();
+  const authError = await requireSensitiveUnlockJson();
+  if (authError) return authError;
   const input = ReconcileSchema.parse(await request.json());
   const snapshot = getLedgerSnapshot();
   const accounts = snapshot.accounts;

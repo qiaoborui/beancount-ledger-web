@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthJson } from "@/lib/apiAuth";
 import { listPushSubscriptions, publicVapidKey, removePushSubscription, savePushSubscription, sendWebPushToAll } from "@/lib/webPush";
 
 const PushKeysSchema = z.object({
@@ -23,7 +23,8 @@ const DeleteSchema = z.object({
 });
 
 export async function GET() {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const subscriptions = await listPushSubscriptions();
   return NextResponse.json({
     publicKey: publicVapidKey(),
@@ -33,21 +34,24 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const input = PostSchema.parse(await request.json());
   const result = await savePushSubscription(input.subscription, request.headers.get("user-agent") ?? undefined);
   return NextResponse.json({ ok: true, ...result });
 }
 
 export async function DELETE(request: Request) {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   const input = DeleteSchema.parse(await request.json());
   const result = await removePushSubscription(input.endpoint);
   return NextResponse.json({ ok: true, ...result });
 }
 
 export async function PUT() {
-  await requireAuth();
+  const authError = await requireAuthJson();
+  if (authError) return authError;
   try {
     const result = await sendWebPushToAll({
       title: "我的账本",

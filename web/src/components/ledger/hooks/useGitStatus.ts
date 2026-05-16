@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { fetchJson, readJson } from "@/lib/clientFetch";
 import type { GitChange } from "../GitSaveModal";
 
 export function useGitStatus(showToast: (kind: "info" | "success" | "error", text: string) => void) {
@@ -11,7 +12,7 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
   const refreshGitStatus = useCallback(async () => {
     setGitStatusLoading(true);
     try {
-      const data = await fetch("/api/git/status").then((r) => r.json());
+      const data = await fetchJson<{ changes?: GitChange[]; changedFileCount?: number; dirty?: boolean; status?: string }>("/api/git/status", undefined, { changes: [], changedFileCount: 0, dirty: false });
       const changes = Array.isArray(data.changes) ? data.changes as GitChange[] : [];
       const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changes.length;
       setGitChanges(changes);
@@ -34,7 +35,7 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
     setGitCommitting(true);
     try {
       const res = await fetch("/api/git/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
-      const data = await res.json();
+      const data = await readJson<{ error?: string; changedFileCount?: number; output?: string }>(res);
       if (!res.ok) throw new Error(data.error || "Git 提交失败");
       const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changedFileCount;
       showToast("success", count > 0 ? `已提交并推送 ${count} 个文件` : data.output || "已提交并推送");
