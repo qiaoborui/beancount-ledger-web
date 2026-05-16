@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { readLedgerCache, writeLedgerCache } from "../storage";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountStatus, AccountView, BudgetRow, IncomeStatementCache, LedgerCache, LedgerVersion, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 const LEDGER_VERSION_POLL_MS = 45_000;
@@ -27,7 +27,10 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [txns, setTxns] = useState<Txn[]>([]);
   const [budgetRows, setBudgetRows] = useState<BudgetRow[]>([]);
-  const [netWorthRows, setNetWorthRows] = useState<{ date: string; assets: number; liabilities: number; netWorth: number }[]>([]);
+  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>([]);
+  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>([]);
+  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(null);
+  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>([]);
   const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>([]);
   const [accounts, setAccounts] = useState<AccountView[]>([]);
   const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(null);
@@ -37,10 +40,30 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(null);
 
+  const clearLedgerData = useCallback(() => {
+    setSummary(null);
+    setBalances({});
+    setNetWorthRows([]);
+    setMonthEndNetWorthRows([]);
+    setNetWorthWindows(null);
+    setCreditCards([]);
+    setTxns([]);
+    setBudgetRows([]);
+    setReconciliationRows([]);
+    setAccounts([]);
+    setIncomeStatement(null);
+    setAccountStatuses([]);
+    setLedgerVersion(null);
+    setLastSyncedAt(null);
+  }, []);
+
   const applyCache = useCallback((cache: LedgerCache) => {
     setSummary(cache.summary);
     setBalances(cache.balances);
     setNetWorthRows(cache.netWorthRows);
+    setMonthEndNetWorthRows(cache.monthEndNetWorthRows ?? []);
+    setNetWorthWindows(cache.netWorthWindows ?? null);
+    setCreditCards(cache.creditCards ?? []);
     setTxns(cache.txns);
     setBudgetRows(cache.budgetRows);
     setReconciliationRows(cache.reconciliationRows ?? []);
@@ -56,7 +79,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     const params = timeRangeToParams(range);
     try {
       const requests = [
-        fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: { date: string; assets: number; liabilities: number; netWorth: number }[] }>(`/api/ledger/summary?${params}`),
+        fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: NetWorthPoint[]; monthEndNetWorth?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[] }>(`/api/ledger/summary?${params}`),
         fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
         fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
         unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }) : Promise.resolve({ rows: [] }),
@@ -69,6 +92,9 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
         summary: s.summary ?? null,
         balances: unlocked ? (s.balances ?? {}) : {},
         netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
+        monthEndNetWorthRows: unlocked ? (s.monthEndNetWorth ?? []) : [],
+        netWorthWindows: unlocked ? (s.netWorthWindows ?? null) : null,
+        creditCards: unlocked ? (s.creditCards ?? []) : [],
         txns: t.transactions ?? [],
         budgetRows: b.rows ?? [],
         reconciliationRows: unlocked ? (r.rows ?? []) : [],
@@ -99,7 +125,11 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
     if (authenticated) sessionStorage.setItem("ledger_authed", "1");
-    else sessionStorage.removeItem("ledger_authed");
+    else {
+      sessionStorage.removeItem("ledger_authed");
+      sessionStorage.removeItem("ledger_unlocked");
+      clearLedgerData();
+    }
     if (!authenticated) return;
 
     if (!forceFresh && unlocked) {
@@ -111,7 +141,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;
@@ -127,7 +157,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
           setLedgerVersion(latest);
           return;
         }
-        if (latest.signature !== ledgerVersion.signature) {
+        if ((latest.version ?? latest.signature) !== (ledgerVersion.version ?? ledgerVersion.signature)) {
           showToast("info", "账本已更新，正在刷新数据");
           await load(true);
         }
@@ -170,6 +200,9 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     txns,
     budgetRows,
     netWorthRows,
+    monthEndNetWorthRows,
+    netWorthWindows,
+    creditCards,
     reconciliationRows,
     accounts,
     incomeStatement,
