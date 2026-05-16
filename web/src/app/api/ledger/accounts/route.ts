@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
-import { parseAccounts } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { appendAccount } from "@/lib/ledgerWriter";
 
 const AccountSchema = z.object({
@@ -13,13 +13,13 @@ const AccountSchema = z.object({
 
 export async function GET() {
   await requireAuth();
-  return NextResponse.json({ accounts: parseAccounts() });
+  return NextResponse.json({ accounts: getLedgerSnapshot().accounts });
 }
 
 export async function POST(request: Request) {
   await requireAuth();
   const input = AccountSchema.parse(await request.json());
-  const exists = parseAccounts().some((account) => account.account === input.account);
+  const exists = getLedgerSnapshot().accounts.some((account) => account.account === input.account);
   if (exists) return NextResponse.json({ error: "账户已存在" }, { status: 400 });
 
   try {

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireSensitiveUnlock } from "@/lib/auth";
-import { currentBalances, parseBalances, parseTransactions } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 
 export async function GET() {
   await requireSensitiveUnlock();
-  return NextResponse.json({ balances: currentBalances(parseTransactions()), assertions: parseBalances() });
+  const snapshot = getLedgerSnapshot();
+  return NextResponse.json({ balances: snapshot.balances, assertions: snapshot.balanceAssertions });
 }

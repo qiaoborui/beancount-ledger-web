@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isSensitiveUnlocked, requireAuth } from "@/lib/auth";
-import { parseTransactions } from "@/lib/beancountParser";
+import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 import { appendBeanText, commentTransactionBlock, replaceTransactionBlock, transactionToBean } from "@/lib/ledgerWriter";
 import { ParsedTransactionSchema } from "@/lib/schemas";
@@ -12,7 +12,7 @@ const DeleteSchema = z.object({ source: SourceSchema, reason: z.string().optiona
 const ReverseSchema = z.object({ source: SourceSchema, date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 function findBySource(source: z.infer<typeof SourceSchema>) {
-  const txn = parseTransactions().find((item) => item.source.file === source.file && item.source.line === source.line);
+  const txn = getLedgerSnapshot().transactions.find((item) => item.source.file === source.file && item.source.line === source.line);
   if (!txn) throw new Error("找不到原交易，账本可能已被修改，请刷新后重试");
   return txn;
 }
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   await requireAuth();
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const sensitiveUnlocked = await isSensitiveUnlocked();
-  let transactions = parseTransactions().sort((a, b) => b.date.localeCompare(a.date));
+  let transactions = [...getLedgerSnapshot().transactions].sort((a, b) => b.date.localeCompare(a.date));
   transactions = transactions.filter((txn) => txn.date >= start && txn.date < end);
   if (!sensitiveUnlocked) {
     transactions = transactions.filter((txn) => !txn.postings.some((posting) => posting.account.startsWith("Income:")));
