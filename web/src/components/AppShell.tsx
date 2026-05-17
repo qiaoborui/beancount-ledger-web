@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, BookOpen, GitBranch, Home, Landmark, List, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, X } from "lucide-react";
+import { BarChart3, BookOpen, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 
@@ -17,7 +17,7 @@ const nav = [
 
 const mobilePrimaryNav = nav.filter((item) => item.mobilePrimary);
 
-export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0 }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number }) {
+export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   return (
     <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink">
@@ -37,6 +37,19 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           </div>
           <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs tracking-wide text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
           <div className="flex items-center gap-2">
+            {passkeyEnabled && (
+              <button
+                type="button"
+                onClick={sensitiveUnlocked ? undefined : onUnlockSensitive}
+                disabled={sensitiveUnlocked || !onUnlockSensitive}
+                className={`rounded-xl border border-line bg-paper px-3 py-2 text-sm ${sensitiveUnlocked ? "cursor-default text-olive" : "text-warm hover:bg-tag"}`}
+                aria-label={sensitiveUnlocked ? "敏感数据已解锁" : "解锁敏感数据"}
+                aria-pressed={sensitiveUnlocked}
+                title={sensitiveUnlocked ? "敏感数据已解锁" : "使用 Face ID / Passkey 解锁敏感数据"}
+              >
+                {sensitiveUnlocked ? <UnlockKeyhole className="inline h-4 w-4 text-brand" /> : <LockKeyhole className="inline h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "已解锁" : "解锁"}</span>
+              </button>
+            )}
             <button onClick={onGit} className="relative rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag">
               {gitDirty && changedFileCount > 0 && <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-xs text-paper ring-2 ring-panel">{changedFileCount}</span>}
               <GitBranch className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">保存到 Git</span>
