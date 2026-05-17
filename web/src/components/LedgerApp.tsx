@@ -211,7 +211,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   return (
-    <AppShell pathname={pathname} onGit={openGitSave} onAdd={() => setEntryOpen(true)} gitDirty={gitDirty} changedFileCount={changedFileCount}>
+    <AppShell
+      pathname={pathname}
+      onGit={openGitSave}
+      onAdd={() => setEntryOpen(true)}
+      gitDirty={gitDirty}
+      changedFileCount={changedFileCount}
+      sensitiveUnlocked={unlocked}
+      passkeyEnabled={hasPasskey}
+      onUnlockSensitive={loginWithPasskey}
+    >
       <Toast toast={toast} />
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
