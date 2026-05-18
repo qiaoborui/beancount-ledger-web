@@ -22,7 +22,6 @@ type CashFlowCardProps = {
 
 export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, totalExpense, netIncome, sensitiveUnlocked, title = "Cash Flow", description = "收入流入本期现金流，再分配到支出和储蓄/缺口。", className = "mt-4" }: CashFlowCardProps) {
   const data = buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, totalExpense, netIncome, sensitiveUnlocked });
-  const mobileRows = buildMobileRows({ expenseAnalytics, expense, totalExpense, netIncome });
 
   if (data.links.length === 0) return <section className={`card p-4 ${className}`}><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前周期暂无可视化现金流。</div></section>;
 
@@ -35,48 +34,28 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
       {!sensitiveUnlocked && <span className="text-xs text-stone">收入来源需解锁后显示明细</span>}
     </div>
 
-    <div className="md:hidden">
-      <div className="grid grid-cols-3 divide-x divide-line rounded-2xl border border-line bg-panel p-3 text-center">
-        <MobileStat label="收入" value={sensitiveUnlocked ? formatCny(totalIncome / 100) : "••••••"} tone="amount-income" />
-        <MobileStat label="支出" value={formatCny(totalExpense / 100)} tone="amount-expense" />
-        <MobileStat label={netIncome >= 0 ? "储蓄" : "缺口"} value={sensitiveUnlocked ? formatCny(Math.abs(netIncome) / 100) : "••••••"} tone={netIncome >= 0 ? "amount-gold" : "amount-expense"} />
-      </div>
-      <div className="mt-3 space-y-2">
-        {mobileRows.map((row) => <div key={row.label} className="rounded-xl border border-line bg-panel p-3">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate text-warm">{row.label}</span>
-            <strong className={`shrink-0 tabular-nums ${row.tone}`}>{formatCny(row.amount / 100)}</strong>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
-            <div className={row.barClass} style={{ width: `${row.percent}%` }} />
-          </div>
-        </div>)}
+    <div className="-mx-2 overflow-x-auto px-2 pb-1 [scrollbar-width:thin]">
+      <div className="h-[520px] min-w-[720px] md:h-[380px] md:min-w-0 xl:h-[420px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <Sankey
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            node={<CashFlowNodeShape />}
+            link={<CashFlowLinkShape />}
+            nodePadding={18}
+            nodeWidth={18}
+            linkCurvature={0.55}
+            margin={{ top: 16, right: 132, bottom: 16, left: 86 }}
+            sort={false}
+          >
+            <Tooltip formatter={(value) => formatCny(Number(value) / 100)} />
+          </Sankey>
+        </ResponsiveContainer>
       </div>
     </div>
-
-    <div className="hidden h-[380px] min-w-0 md:block xl:h-[420px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <Sankey
-          data={data}
-          dataKey="value"
-          nameKey="name"
-          node={<CashFlowNodeShape />}
-          link={<CashFlowLinkShape />}
-          nodePadding={18}
-          nodeWidth={18}
-          linkCurvature={0.55}
-          margin={{ top: 16, right: 132, bottom: 16, left: 86 }}
-          sort={false}
-        >
-          <Tooltip formatter={(value) => formatCny(Number(value) / 100)} />
-        </Sankey>
-      </ResponsiveContainer>
-    </div>
+    <p className="mt-2 text-[11px] text-stone md:hidden">图表可横向滑动查看完整分类。</p>
   </section>;
-}
-
-function MobileStat({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="min-w-0 px-1"><div className="text-[11px] text-stone">{label}</div><div className={`mt-1 truncate text-sm font-semibold ${tone}`}>{value}</div></div>;
 }
 
 function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
@@ -126,18 +105,6 @@ function buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, tot
   if (netIncome < 0) links.push({ source: addNode({ name: "Deficit", color: "var(--danger)", value: Math.abs(netIncome) }), target: cashFlowIndex, value: Math.abs(netIncome) });
 
   return { nodes, links };
-}
-
-function buildMobileRows({ expenseAnalytics, expense, totalExpense, netIncome }: { expenseAnalytics: ExpenseCategoryAnalytics[]; expense: IncomeStatementNode[]; totalExpense: number; netIncome: number }) {
-  const expenseRows = expenseAnalytics.length ? expenseAnalytics.map((row) => ({ label: row.label || row.account.replace(/^Expenses:/, ""), amount: row.amount })) : topNodes(expense, 4);
-  const topExpenseRows = expenseRows.filter((row) => row.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 4);
-  const maxValue = Math.max(...topExpenseRows.map((row) => row.amount), Math.abs(netIncome), 1);
-  const rows = topExpenseRows.map((row) => ({ ...row, tone: "amount-expense", barClass: "h-full rounded-full bg-[var(--danger)]", percent: Math.max(3, Math.round(row.amount / maxValue * 100)) }));
-  const otherExpense = Math.max(0, totalExpense - topExpenseRows.reduce((sum, row) => sum + row.amount, 0));
-  if (otherExpense > 0) rows.push({ label: "其他支出", amount: otherExpense, tone: "amount-expense", barClass: "h-full rounded-full bg-[var(--danger)]/70", percent: Math.max(3, Math.round(otherExpense / maxValue * 100)) });
-  if (netIncome > 0) rows.push({ label: "储蓄", amount: netIncome, tone: "amount-gold", barClass: "h-full rounded-full bg-brand", percent: Math.max(3, Math.round(netIncome / maxValue * 100)) });
-  if (netIncome < 0) rows.push({ label: "缺口", amount: Math.abs(netIncome), tone: "amount-expense", barClass: "h-full rounded-full bg-[var(--danger)]", percent: Math.max(3, Math.round(Math.abs(netIncome) / maxValue * 100)) });
-  return rows;
 }
 
 function topNodes(nodes: IncomeStatementNode[], limit: number) {
