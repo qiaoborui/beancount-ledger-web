@@ -1,15 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny } from "@/lib/money";
 import { HiddenPanel, Metric } from "./shared";
 import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
-type CashflowChartRow = { day: string; 收入: number; 支出: number };
-
-export function IncomeStatementPage({ income, expense, cashflowChart, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; cashflowChart: CashflowChartRow[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   return <>
     <section className="card overflow-hidden p-0">
       <div className="border-l-4 border-brand p-5 md:p-6">
@@ -33,7 +30,6 @@ export function IncomeStatementPage({ income, expense, cashflowChart, expenseAna
 
     {visible ? (
       <>
-      <CashflowChart rows={cashflowChart} showIncome={sensitiveUnlocked} />
       <CategoryAnalyticsPanel rows={expenseAnalytics} topPayees={topPayees} topPaymentAccounts={topPaymentAccounts} onSelectCategory={onSelectCategory} />
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-4">
@@ -68,71 +64,6 @@ function formatChange(value: number | null): string {
   if (value === 0) return "持平";
   const sign = value > 0 ? "+" : "";
   return `${sign}${Math.round(value * 100)}%`;
-}
-
-function formatChartMoney(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 10000) return `¥${(value / 10000).toFixed(1)}万`;
-  return `¥${Math.round(value)}`;
-}
-
-function tooltipIndex(state: unknown): number | null {
-  if (typeof state !== "object" || state === null || !("activeTooltipIndex" in state)) return null;
-  const index = Number((state as { activeTooltipIndex?: unknown }).activeTooltipIndex);
-  return Number.isInteger(index) && index >= 0 ? index : null;
-}
-
-function CashflowChart({ rows, showIncome }: { rows: CashflowChartRow[]; showIncome: boolean }) {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const chartAreaRef = useRef<HTMLDivElement>(null);
-  const selected = activeIndex == null ? null : rows[activeIndex] ?? null;
-  const hasData = rows.some((row) => row.收入 > 0 || row.支出 > 0);
-
-  function handleChartMove(state: unknown) {
-    const index = tooltipIndex(state);
-    if (index != null && rows[index]) setActiveIndex(index);
-  }
-
-  function handleTouch(event: React.TouchEvent<HTMLDivElement>) {
-    const rect = chartAreaRef.current?.getBoundingClientRect();
-    const touch = event.touches[0];
-    if (!rect || !touch || rows.length === 0) return;
-    const plotLeft = 56;
-    const plotRight = 16;
-    const plotWidth = Math.max(1, rect.width - plotLeft - plotRight);
-    const ratio = Math.max(0, Math.min(1, (touch.clientX - rect.left - plotLeft) / plotWidth));
-    setActiveIndex(Math.min(rows.length - 1, Math.floor(ratio * rows.length)));
-  }
-
-  return <section className="card mt-6 p-4">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h2 className="border-l-2 border-brand pl-3 font-serif text-2xl text-warm">每日收支节奏</h2>
-        <p className="mt-1 pl-3 text-sm text-olive">收入解锁后显示，支出保持可见。</p>
-      </div>
-      {selected && <div className="rounded-xl border border-line bg-panel px-3 py-2 text-right text-xs text-stone">
-        <div>{selected.day}</div>
-        <div className="mt-1 flex gap-3 tabular-nums">
-          {showIncome && <span className="amount-income">收入 {formatCny(selected.收入)}</span>}
-          <span className="amount-expense">支出 {formatCny(selected.支出)}</span>
-        </div>
-      </div>}
-    </div>
-    {hasData ? <div ref={chartAreaRef} className="mt-4 h-72 min-w-0 touch-pan-y" onTouchStart={handleTouch} onTouchMove={handleTouch}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }} onMouseMove={handleChartMove} onClick={handleChartMove} onMouseLeave={() => setActiveIndex(null)}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-          <XAxis dataKey="day" minTickGap={12} />
-          <YAxis width={56} tickFormatter={(value) => formatChartMoney(Number(value))} />
-          <Tooltip formatter={(value, name) => [formatCny(Number(value)), name]} cursor={{ fill: "var(--selected-bg)" }} />
-          <Legend />
-          {selected && <ReferenceLine x={selected.day} stroke="var(--brand)" strokeDasharray="4 3" />}
-          {showIncome && <Bar dataKey="收入" fill="var(--chart-primary)" radius={[4, 4, 0, 0]} activeBar={{ fillOpacity: 0.82 }} />}
-          <Bar dataKey="支出" fill="var(--chart-secondary)" radius={[4, 4, 0, 0]} activeBar={{ fillOpacity: 0.82 }} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div> : <div className="mt-4 rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone">当前周期暂无收支记录</div>}
-  </section>;
 }
 
 function CollapsibleCard({ title, subtitle, defaultOpen = false, children }: { title: string; subtitle?: string; defaultOpen?: boolean; children: React.ReactNode }) {

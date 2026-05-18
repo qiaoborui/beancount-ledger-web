@@ -4,6 +4,7 @@ import { timeRangeCacheKey } from "@/lib/timeRange";
 
 export const defaultPrivacySettings: PrivacySettings = {
   showHomeSummaryAmounts: true,
+  showHomeCashflowChart: false,
   showAccountBalancesByDefault: false,
   showNetWorthByDefault: false,
   showIncomeStatementByDefault: false,
