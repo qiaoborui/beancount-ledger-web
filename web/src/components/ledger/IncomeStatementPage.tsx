@@ -3,41 +3,43 @@
 import { useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { formatCny } from "@/lib/money";
+import { CashFlowCard } from "./CashFlowCard";
 import { HiddenPanel, Metric } from "./shared";
 import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
 export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   return <>
     <section className="card overflow-hidden p-0">
-      <div className="border-l-4 border-brand p-5 md:p-6">
+      <div className="border-l-4 border-brand p-4 md:p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-[0.24em] text-stone">income statement</div>
-            <h1 className="mt-2 font-serif text-3xl font-medium leading-tight md:text-4xl">花在哪里，赚在哪里。</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-olive">支出分析可直接查看；收入和净利需要确认本人后显示。</p>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-stone">income statement</div>
+            <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">花在哪里，赚在哪里。</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">支出分析可直接查看；收入和净利需要确认本人后显示。</p>
           </div>
           <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={onToggleVisible} title={visible ? "隐藏金额" : "显示金额"} aria-label={visible ? "隐藏金额" : "显示金额"}>
             {visible ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-5 text-center">
-        <Metric label="收入" value={visible && sensitiveUnlocked ? formatCny(totalIncome / 100) : "••••••"} cls="amount-income text-lg sm:text-2xl" />
-        <Metric label="支出" value={visible ? formatCny(totalExpense / 100) : "••••••"} cls="amount-expense text-lg sm:text-2xl" />
-        <Metric label="净利" value={visible && sensitiveUnlocked ? formatCny(netIncome / 100) : "••••••"} cls="amount-gold text-lg sm:text-2xl" />
+      <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
+        <Metric label="收入" value={visible && sensitiveUnlocked ? formatCny(totalIncome / 100) : "••••••"} cls="amount-income text-base sm:text-xl" />
+        <Metric label="支出" value={visible ? formatCny(totalExpense / 100) : "••••••"} cls="amount-expense text-base sm:text-xl" />
+        <Metric label="净利" value={visible && sensitiveUnlocked ? formatCny(netIncome / 100) : "••••••"} cls="amount-gold text-base sm:text-xl" />
       </div>
     </section>
 
     {visible ? (
       <>
+      <CashFlowCard income={income} expense={expense} expenseAnalytics={expenseAnalytics} totalIncome={totalIncome} totalExpense={totalExpense} netIncome={netIncome} sensitiveUnlocked={sensitiveUnlocked} />
       <CategoryAnalyticsPanel rows={expenseAnalytics} topPayees={topPayees} topPaymentAccounts={topPaymentAccounts} onSelectCategory={onSelectCategory} />
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className="card p-4">
-          <h2 className="mb-4 border-l-2 border-brand pl-3 font-serif text-2xl text-warm">收入</h2>
+          <h2 className="mb-3 border-l-2 border-brand pl-3 font-serif text-xl text-warm">收入</h2>
           {sensitiveUnlocked ? (income.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无收入记录</div> : income.map((node) => <TreeNode key={node.account} node={node} visible={visible} onSelectCategory={onSelectCategory} />)) : <IncomeLockedPanel onUnlock={onUnlockSensitive} />}
         </div>
         <div className="card p-4">
-          <h2 className="mb-4 border-l-2 border-brand pl-3 font-serif text-2xl text-warm">支出</h2>
+          <h2 className="mb-3 border-l-2 border-brand pl-3 font-serif text-xl text-warm">支出</h2>
           {expense.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无支出记录</div> : expense.map((node) => <TreeNode key={node.account} node={node} visible={visible} onSelectCategory={onSelectCategory} />)}
         </div>
       </div>
@@ -71,7 +73,7 @@ function CollapsibleCard({ title, subtitle, defaultOpen = false, children }: { t
   return <section className="card self-start overflow-hidden p-0">
     <button className="flex w-full items-center justify-between gap-3 p-4 text-left" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
       <div className="min-w-0">
-        <h2 className="border-l-2 border-brand pl-3 font-serif text-2xl text-warm">{title}</h2>
+        <h2 className="border-l-2 border-brand pl-3 font-serif text-xl text-warm">{title}</h2>
         {subtitle && <div className="mt-1 pl-3 text-xs text-stone">{subtitle}</div>}
       </div>
       <ChevronDown className={`h-4 w-4 shrink-0 text-brand transition-transform ${open ? "rotate-180" : ""}`} />
@@ -99,7 +101,7 @@ function CategoryAnalyticsPanel({ rows, topPayees, topPaymentAccounts, onSelectC
   const unknown = rows.find((row) => row.account === "Expenses:Unknown");
   if (!rows.length) return null;
 
-  return <section className="mt-6 grid items-start gap-4 xl:grid-cols-[1.25fr_0.9fr]">
+  return <section className="mt-4 grid items-start gap-4 xl:grid-cols-[1.25fr_0.9fr]">
     <CollapsibleCard title="支出 Top 分类" subtitle="点击分类查看流水" defaultOpen>
       <div className="grid gap-2">
         {topRows.map((row) => <button key={row.account} className="rounded-xl border border-line bg-panel p-3 text-left transition-colors hover:bg-tag" onClick={() => onSelectCategory?.(row.account, "prefix")}>
