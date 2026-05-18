@@ -48,6 +48,7 @@ The app never needs your ledger data to be committed to this repository.
 - Safe writes with `bean-check` validation and rollback
 - Optional ledger Git status, pull, commit, and push
 - Password login plus optional passkey / Face ID / Touch ID unlock
+- Optional authenticated Fava embed for professional Beancount dashboards
 - Optional Web Push notifications
 
 ## Quick start
@@ -106,6 +107,7 @@ npm run dev
 
 - [Self-hosting](docs/self-hosting.md)
 - [Raspberry Pi GitHub Actions deployment](docs/raspberry-pi.md)
+- [Secure Fava systemd integration on Raspberry Pi](docs/raspberry-pi.md#optional-secure-fava-professional-dashboard)
 - [Docker Compose example](docker/docker-compose.example.yml)
 
 ## Environment variables
@@ -119,6 +121,7 @@ Important variables:
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if it is not on `PATH`.
+- `FAVA_ENABLED` / `FAVA_INTERNAL_URL` — optional authenticated proxy to a localhost/private Fava service. Do not expose Fava directly to the public internet.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
 
 ## Ledger layout
