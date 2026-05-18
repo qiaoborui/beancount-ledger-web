@@ -1,10 +1,11 @@
 import { Eye, EyeOff } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny } from "@/lib/money";
+import { CashFlowCard } from "./CashFlowCard";
 import { HiddenPanel, Metric } from "./shared";
-import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
+import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementCache, PrivacySettings, Summary } from "./types";
 
-export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; chart: { day: string; 收入: number; 支出: number }[]; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, incomeStatement, onPrivacyChange, onSelectCategory }: { summary: Summary | null; chart: { day: string; 收入: number; 支出: number }[]; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; incomeStatement: IncomeStatementCache; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
   const mask = (value: string, sensitive = true) => sensitive ? canShowSensitive ? value : "••••••" : showAmounts ? value : "••••••";
@@ -42,6 +43,8 @@ export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, c
       <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
       <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
     </section>
+
+    <CashFlowCard income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={expenseAnalytics} totalIncome={summary?.income ?? 0} totalExpense={summary?.expense ?? 0} netIncome={summary?.net ?? 0} sensitiveUnlocked={sensitiveUnlocked} description="本期收入、支出和结余的快速流向，移动端自动切换为摘要列表。" />
 
     <section className="mt-4 grid gap-4 xl:grid-cols-2">
       <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
