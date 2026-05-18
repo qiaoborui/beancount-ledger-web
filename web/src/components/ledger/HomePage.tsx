@@ -1,11 +1,9 @@
 import { Eye, EyeOff } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny } from "@/lib/money";
-import { CashFlowCard } from "./CashFlowCard";
-import { HiddenPanel, Metric } from "./shared";
-import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementCache, PrivacySettings, Summary } from "./types";
+import { Metric } from "./shared";
+import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
-export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, incomeStatement, onPrivacyChange, onSelectCategory }: { summary: Summary | null; chart: { day: string; 收入: number; 支出: number }[]; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; incomeStatement: IncomeStatementCache; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
   const mask = (value: string, sensitive = true) => sensitive ? canShowSensitive ? value : "••••••" : showAmounts ? value : "••••••";
@@ -44,19 +42,11 @@ export function HomePage({ summary, chart, privacySettings, sensitiveUnlocked, c
       <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
     </section>
 
-    <CashFlowCard income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={expenseAnalytics} totalIncome={summary?.income ?? 0} totalExpense={summary?.expense ?? 0} netIncome={summary?.net ?? 0} sensitiveUnlocked={sensitiveUnlocked} description="本期收入、支出和结余的快速流向，移动端自动切换为摘要列表。" />
-
     <section className="mt-4 grid gap-4 xl:grid-cols-2">
       <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
       <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
     </section>
 
-    <section className="card mt-4 p-4">
-      <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div><h2 className="font-serif text-2xl font-medium">每日收支节奏</h2><p className="mt-1 text-sm text-olive">保留日节奏图，但首页结论由上方卡片承担。</p></div>
-      </div>
-      {privacySettings.showHomeCashflowChart ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="day" /><YAxis /><Tooltip /><Legend />{sensitiveUnlocked && <Bar dataKey="收入" fill="var(--chart-primary)" />}<Bar dataKey="支出" fill="var(--chart-secondary)" /></BarChart></ResponsiveContainer></div> : <HiddenPanel text="每日支出图包含具体金额，默认隐藏。收入曲线需解锁后才会显示。" />}
-    </section>
   </>;
 }
 
@@ -72,4 +62,3 @@ function ListCard({ title, items, empty }: { title: string; items: { key: string
     return item.onClick ? <button key={item.key} className="flex w-full items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={item.onClick}>{content}</button> : <div key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3">{content}</div>;
   }) : <div className="rounded-xl border border-line bg-panel p-4 text-center text-sm text-stone">{empty}</div>}</div></section>;
 }
-
