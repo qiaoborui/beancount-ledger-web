@@ -67,18 +67,17 @@ function responseHeaders(upstreamHeaders: Headers): Headers {
   return headers;
 }
 
-function rewriteLocation(location: string, request: NextRequest): string {
+function rewriteLocation(location: string): string {
   const base = favaBaseUrl();
-  const origin = request.nextUrl.origin;
   try {
     const parsed = new URL(location, base);
     if (parsed.origin === base.origin) {
-      return `${origin}/api/fava${parsed.pathname}${parsed.search}${parsed.hash}`;
+      return `/api/fava${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
   } catch {
     // Fall back to relative handling below.
   }
-  if (location.startsWith("/")) return `${origin}/api/fava${location}`;
+  if (location.startsWith("/")) return `/api/fava${location}`;
   return location;
 }
 
@@ -132,7 +131,7 @@ async function handler(request: NextRequest, context: { params: Promise<{ path?:
 
   const headers = responseHeaders(upstreamResponse.headers);
   const location = upstreamResponse.headers.get("location");
-  if (location) headers.set("location", rewriteLocation(location, request));
+  if (location) headers.set("location", rewriteLocation(location));
 
   const contentType = upstreamResponse.headers.get("content-type") ?? "";
   const shouldRewriteBody = contentType.includes("text/html") || contentType.includes("text/css") || contentType.includes("javascript");
