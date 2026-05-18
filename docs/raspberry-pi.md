@@ -153,6 +153,76 @@ sudo systemctl enable beancount-web-preview
 
 The deployment script restarts these services after each artifact deploy.
 
+## Optional secure Fava professional dashboard
+
+Fava can provide a more complete Beancount dashboard, but it does not use this app's password/passkey auth by default. Run it as a localhost-only systemd service and let the web app proxy it through authenticated `/api/fava/*` routes.
+
+### Install Fava on the Pi
+
+```bash
+ssh pi
+python3 -m venv ~/.local/share/fava-venv
+~/.local/share/fava-venv/bin/pip install --upgrade pip
+~/.local/share/fava-venv/bin/pip install fava
+```
+
+This assumes your production ledger is at:
+
+```text
+/home/pi/beancount-ledger
+```
+
+### Create the Fava systemd service
+
+```ini
+# /etc/systemd/system/beancount-fava.service
+[Unit]
+Description=Fava for Beancount Ledger
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/beancount-ledger
+ExecStart=/home/pi/.local/share/fava-venv/bin/fava /home/pi/beancount-ledger/main.bean --host 127.0.0.1 --port 5000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and test it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now beancount-fava
+systemctl status beancount-fava --no-pager
+curl -I http://127.0.0.1:5000
+```
+
+Important: keep `--host 127.0.0.1`. Do not bind Fava to `0.0.0.0` unless it is protected by a separate reverse-proxy authentication layer.
+
+### Enable the web app proxy
+
+Add these values to your Pi production env file, for example `~/beancount-ledger-web-deploy/env/prod.env`:
+
+```bash
+LEDGER_ROOT=/home/pi/beancount-ledger
+FAVA_ENABLED=true
+FAVA_INTERNAL_URL=http://127.0.0.1:5000
+```
+
+Redeploy or restart the web service so `~/beancount-ledger-web-deploy/prod/systemd.env` includes the Fava variables.
+
+After logging in to the web app, open:
+
+```text
+/fava
+```
+
+The Fava iframe uses the authenticated Next.js proxy at `/api/fava/`, so direct public access to port 5000 is not required and should not be exposed.
+
 ## Workflow behavior
 
 - Push to `main` deploys production.

@@ -22,6 +22,7 @@ import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from ".
 import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
+import { FavaPage } from "./ledger/FavaPage";
 import { HomePage } from "./ledger/HomePage";
 import { IncomeStatementPage } from "./ledger/IncomeStatementPage";
 import { Toast } from "./ledger/shared";
@@ -39,6 +40,7 @@ function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/reconcile")) return "reconcile";
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/fava")) return "fava";
   if (pathname.startsWith("/income-statement")) return "income-statement";
   if (pathname.startsWith("/accounts")) return "accounts";
   return "home";
@@ -226,7 +228,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
       {/* ── 时间范围选择器 ── */}
-      <div className="mb-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      {page !== "fava" && <div className="mb-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {/* 第一行：标题 + 翻页按钮 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {canNavigate && (
@@ -296,8 +298,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
+      {page === "fava" && <FavaPage />}
       {page === "home" && <HomePage summary={summary} chart={chart} privacySettings={privacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} creditCards={creditCards} accountStatuses={accountStatuses} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
@@ -336,7 +339,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "net-worth" && page !== "settings";
+  const isMonthScoped = page !== "accounts" && page !== "net-worth" && page !== "settings" && page !== "fava";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
@@ -346,6 +349,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     "net-worth": { eyebrow: "net worth", title: "净资产" },
     "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
     settings: { eyebrow: "preferences", title: "设置" },
+    fava: { eyebrow: "professional dashboard", title: "Fava 专业面板" },
   };
   return { ...headers[page], monthScoped: isMonthScoped };
 }
