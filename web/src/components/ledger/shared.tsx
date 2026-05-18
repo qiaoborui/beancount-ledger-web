@@ -9,5 +9,5 @@ export function HiddenPanel({ text }: { text: string }) {
 }
 
 export function Metric({ label, value, cls }: { label: string; value: string; cls: string }) {
-  return <div className="min-w-0"><div className="text-xs uppercase tracking-[0.18em] text-stone">{label}</div><div className={`mt-2 truncate font-serif font-medium ${cls}`}>{value}</div></div>;
+  return <div className="min-w-0"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate font-serif font-medium ${cls}`}>{value}</div></div>;
 }

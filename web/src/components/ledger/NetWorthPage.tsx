@@ -32,25 +32,25 @@ export function NetWorthPage({ rows, monthEndRows, windows, creditCards, account
   const chartRows = viewMode === "month-end" ? monthEndChart : rows;
 
   return <>
-    <section className="card p-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <section className="card p-3 md:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid flex-1 grid-cols-3 divide-x divide-line text-center">
-          <Metric label="资产" value={mask(formatCompactCny(assets / 100))} cls="amount-income text-lg sm:text-xl" />
-          <Metric label="负债" value={mask(formatCompactCny(liabilities / 100))} cls="amount-expense text-lg sm:text-xl" />
-          <Metric label="净资产" value={mask(formatCompactCny(currentNetWorth / 100))} cls="amount-gold text-lg sm:text-xl" />
+          <Metric label="资产" value={mask(formatCompactCny(assets / 100))} cls="amount-income text-base sm:text-lg" />
+          <Metric label="负债" value={mask(formatCompactCny(liabilities / 100))} cls="amount-expense text-base sm:text-lg" />
+          <Metric label="净资产" value={mask(formatCompactCny(currentNetWorth / 100))} cls="amount-gold text-base sm:text-lg" />
         </div>
         <button className="shrink-0 self-end rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-panel sm:self-auto" onClick={onToggleVisible}>{visible ? <EyeOff className="inline h-4 w-4" /> : <Eye className="inline h-4 w-4" />} <span className="ml-1">{visible ? "隐藏金额" : "显示金额"}</span></button>
       </div>
     </section>
 
-    <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <InsightCard label="月末/本期变化" value={mask(formatDelta(windows?.monthChange))} tone={tone(windows?.monthChange)} detail={windows?.previousMonthEnd ? `对比 ${windows.previousMonthEnd.date}` : "暂无基准"} />
       <InsightCard label="近 6 月变化" value={mask(formatDelta(windows?.sixMonth.change))} tone={tone(windows?.sixMonth.change)} detail={formatRatio(windows?.sixMonth.changeRatio)} />
       <InsightCard label="近 12 月变化" value={mask(formatDelta(windows?.twelveMonth.change))} tone={tone(windows?.twelveMonth.change)} detail={formatRatio(windows?.twelveMonth.changeRatio)} />
       <InsightCard label="储蓄率" value={visible ? savingsRate === null ? "收入为 0" : `${(savingsRate * 100).toFixed(1)}%` : "••••••"} tone="amount-gold" detail={mask(`期间净收入 ${formatCny(netIncome / 100)}`)} />
     </section>
 
-    <section className="mt-4 grid gap-4 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatCny(investmentIncome / 100))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
+    <section className="mt-3 grid gap-3 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatCny(investmentIncome / 100))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
     <CreditCardSection cards={creditCards} statuses={accountStatuses} visible={visible} />
     <AssetAllocation accounts={accounts} balances={balances} visible={visible} />
     <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={balances} visible={visible} /><LiabilitiesTrend rows={rows} visible={visible} /></section>
@@ -59,7 +59,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, creditCards, account
 }
 
 function InsightCard({ label, value, tone, detail }: { label: string; value: string; tone: string; detail?: string }) {
-  return <div className="rounded-2xl border border-line bg-panel p-4"><div className="text-xs uppercase tracking-[0.18em] text-stone">{label}</div><div className={`mt-2 text-xl font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-1 text-xs text-stone">{detail}</div>}</div>;
+  return <div className="rounded-2xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</div>;
 }
 
 function CreditCardSection({ cards, statuses, visible }: { cards: CreditCardAnalytics[]; statuses: AccountStatus[]; visible: boolean }) {

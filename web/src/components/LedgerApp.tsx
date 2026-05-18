@@ -198,7 +198,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     <SensitiveUnlockPanel title={title} description={description} message={sensitiveMessage} onUnlock={loginWithPasskey} />
   );
   const header = pageHeader(page, timeRange);
-  const canNavigate = timeRange.preset !== "all" && timeRange.preset !== "custom";
+  const canShowTimeControls = header.monthScoped;
+  const canNavigate = canShowTimeControls && timeRange.preset !== "all" && timeRange.preset !== "custom";
 
   async function openGitSave() {
     setGitSaveOpen(true);
@@ -258,44 +259,46 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>
 
         {/* 第二行：快捷按钮组 */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="flex rounded-xl border border-line overflow-hidden">
-            {TIME_PRESETS.map((p) => (
-              <button
-                key={p.key}
-                className={`px-3 py-1.5 text-sm transition-colors ${timeRange.preset === p.key ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-                onClick={() => setPreset(p.key)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {/* 自定义范围：date input */}
-          {timeRange.preset === "custom" && (
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
-                value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
-              />
-              <span className="text-stone text-sm">~</span>
-              <input
-                type="date"
-                className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
-                value={customEnd}
-                onChange={(e) => setCustomEnd(e.target.value)}
-              />
-              <button
-                className="rounded-xl border border-line bg-panel px-3 py-1.5 text-sm text-brand hover:bg-tag"
-                onClick={applyCustomRange}
-              >
-                确定
-              </button>
+        {canShowTimeControls && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="flex overflow-hidden rounded-xl border border-line">
+              {TIME_PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  className={`px-3 py-1.5 text-sm transition-colors ${timeRange.preset === p.key ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
+                  onClick={() => setPreset(p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
+
+            {/* 自定义范围：date input */}
+            {timeRange.preset === "custom" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                />
+                <span className="text-sm text-stone">~</span>
+                <input
+                  type="date"
+                  className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                />
+                <button
+                  className="rounded-xl border border-line bg-panel px-3 py-1.5 text-sm text-brand hover:bg-tag"
+                  onClick={applyCustomRange}
+                >
+                  确定
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {page === "home" && <HomePage summary={summary} chart={chart} privacySettings={privacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
