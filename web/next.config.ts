@@ -8,10 +8,6 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
   outputFileTracingRoot: __dirname,
-  // Fava uses trailing-slash routes. If Next.js strips those slashes on
-  // /api/fava/*, the proxy can loop between Next's slash removal and Fava's
-  // slash restoration redirects.
-  skipTrailingSlashRedirect: true,
 };
 
 export default nextConfig;
