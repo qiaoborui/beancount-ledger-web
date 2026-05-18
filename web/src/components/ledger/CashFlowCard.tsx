@@ -25,17 +25,17 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
 
   if (data.links.length === 0) return <section className={`card p-4 ${className}`}><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前周期暂无可视化现金流。</div></section>;
 
-  return <section className={`card p-4 ${className}`}>
-    <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+  return <section className={`card p-3 md:p-4 ${className}`}>
+    <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between md:mb-3">
       <div>
-        <h2 className="font-serif text-xl md:text-2xl">{title}</h2>
-        <p className="mt-1 text-sm leading-6 text-olive">{description}</p>
+        <h2 className="font-serif text-lg md:text-2xl">{title}</h2>
+        <p className="mt-0.5 text-xs leading-5 text-olive md:mt-1 md:text-sm md:leading-6">{description}</p>
       </div>
       {!sensitiveUnlocked && <span className="text-xs text-stone">收入来源需解锁后显示明细</span>}
     </div>
 
-    <div className="-mx-2 overflow-x-auto px-2 pb-1 [scrollbar-width:thin]">
-      <div className="h-[520px] min-w-[720px] md:h-[380px] md:min-w-0 xl:h-[420px]">
+    <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin] md:-mx-2 md:px-2">
+      <div className="h-[390px] min-w-[560px] md:h-[380px] md:min-w-0 xl:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
           <Sankey
             data={data}
@@ -43,10 +43,10 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
             nameKey="name"
             node={<CashFlowNodeShape />}
             link={<CashFlowLinkShape />}
-            nodePadding={18}
-            nodeWidth={18}
+            nodePadding={10}
+            nodeWidth={14}
             linkCurvature={0.55}
-            margin={{ top: 16, right: 132, bottom: 16, left: 86 }}
+            margin={{ top: 8, right: 92, bottom: 8, left: 58 }}
             sort={false}
           >
             <Tooltip formatter={(value) => formatCny(Number(value) / 100)} />
@@ -54,18 +54,18 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
         </ResponsiveContainer>
       </div>
     </div>
-    <p className="mt-2 text-[11px] text-stone md:hidden">图表可横向滑动查看完整分类。</p>
+    <p className="mt-1 text-[10px] text-stone md:hidden">可横向滑动查看完整分类。</p>
   </section>;
 }
 
 function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
   const { x = 0, y = 0, width = 0, height = 0, payload } = props;
   const name = payload?.name ?? "";
-  const isRightSide = x > 450;
-  const labelX = isRightSide ? x + width + 8 : x - 8;
+  const isRightSide = x > 320;
+  const labelX = isRightSide ? x + width + 6 : x - 6;
   return <g>
     <rect x={x} y={y} width={Math.max(width, 8)} height={Math.max(height, 6)} rx={2} fill={payload?.color ?? "var(--chart-primary)"} />
-    <text x={labelX} y={y + height / 2} textAnchor={isRightSide ? "start" : "end"} dominantBaseline="middle" fill="var(--ink)" fontSize={12}>{name}</text>
+    <text x={labelX} y={y + height / 2} textAnchor={isRightSide ? "start" : "end"} dominantBaseline="middle" fill="var(--ink)" fontSize={11}>{name}</text>
   </g>;
 }
 
