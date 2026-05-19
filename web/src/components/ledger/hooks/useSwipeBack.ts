@@ -3,11 +3,12 @@ import { useEffect } from "react";
 type SwipeBackOptions = {
   enabled: boolean;
   onBack: () => void;
+  edgeStart?: number;
   edgeWidth?: number;
   threshold?: number;
 };
 
-export function useSwipeBack({ enabled, onBack, edgeWidth = 28, threshold = 82 }: SwipeBackOptions) {
+export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, threshold = 82 }: SwipeBackOptions) {
   useEffect(() => {
     if (!enabled) return;
     let startX = 0;
@@ -17,7 +18,7 @@ export function useSwipeBack({ enabled, onBack, edgeWidth = 28, threshold = 82 }
 
     const onTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
-      if (!touch || touch.clientX > edgeWidth) return;
+      if (!touch || touch.clientX < edgeStart || touch.clientX > edgeStart + edgeWidth) return;
       startX = touch.clientX;
       startY = touch.clientY;
       tracking = true;
@@ -56,5 +57,5 @@ export function useSwipeBack({ enabled, onBack, edgeWidth = 28, threshold = 82 }
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [edgeWidth, enabled, onBack, threshold]);
+  }, [edgeStart, edgeWidth, enabled, onBack, threshold]);
 }
