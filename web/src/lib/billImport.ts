@@ -236,6 +236,13 @@ function parseBeanSummary(beanText: string) {
   };
 }
 
+function providerDocumentAccount(provider: BillProvider, accounts: Set<string>, fallback?: string) {
+  const preferred = provider === "alipay" ? "Assets:CN:Alipay:Balance" : "Assets:CN:Wechat:Balance";
+  if (accounts.has(preferred)) return preferred;
+  if (fallback && accounts.has(fallback)) return fallback;
+  return preferred;
+}
+
 function previewPath(importId: string, name: string) {
   return path.join(importRuntimeDir(importId), name);
 }
@@ -326,6 +333,8 @@ export async function commitBillImportAsync(input: { importId: string; provider:
   const beanText = validateAndRenderEntries(input.entries);
   const summary = parseBeanSummary(beanText);
   if (!summary.candidateCount || !summary.dateStart || !summary.dateEnd) throw new Error("去重后没有可写入的交易");
+  const accounts = new Set(parseAccounts().map((account) => account.account));
+  const fallbackDocumentAccount = input.entries[0].fundingAccount || input.entries[0].postings.at(-1)?.account;
 
   const written = await writeImportedBeanFile({
     dateStart: summary.dateStart,
@@ -333,7 +342,7 @@ export async function commitBillImportAsync(input: { importId: string; provider:
     provider: input.provider,
     beanText,
     suffix: input.importId.slice(0, 6),
-    documentSource: { file: meta.inputFile, originalFilename: meta.originalFilename, account: input.entries[0].fundingAccount || input.entries[0].postings.at(-1)?.account || "Assets:CN:Wechat:Balance" },
+    documentSource: { file: meta.inputFile, originalFilename: meta.originalFilename, account: providerDocumentAccount(input.provider, accounts, fallbackDocumentAccount) },
   });
 
   return { ok: true, ...written, count: summary.candidateCount, beanText };
