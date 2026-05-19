@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthJson } from "@/lib/apiAuth";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
 import { isSensitiveUnlocked } from "@/lib/auth";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
-import { appendBeanText, commentTransactionBlock, replaceTransactionBlock, transactionToBean } from "@/lib/ledgerWriter";
+import { appendBeanTextForUser, commentTransactionBlockForUser, replaceTransactionBlockForUser, transactionToBean } from "@/lib/ledgerWriter";
 import { ParsedTransactionSchema } from "@/lib/schemas";
 
 const SourceSchema = z.object({ file: z.string().min(1), line: z.number().int().positive() });
@@ -12,18 +12,18 @@ const UpdateSchema = z.object({ source: SourceSchema, entry: ParsedTransactionSc
 const DeleteSchema = z.object({ source: SourceSchema, reason: z.string().optional() });
 const ReverseSchema = z.object({ source: SourceSchema, date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
-function findBySource(source: z.infer<typeof SourceSchema>) {
-  const txn = getLedgerSnapshot().transactions.find((item) => item.source.file === source.file && item.source.line === source.line);
+function findBySource(userId: string, source: z.infer<typeof SourceSchema>) {
+  const txn = getLedgerSnapshotForUser(userId).transactions.find((item) => item.source.file === source.file && item.source.line === source.line);
   if (!txn) throw new Error("找不到原交易，账本可能已被修改，请刷新后重试");
   return txn;
 }
 
 export async function GET(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const sensitiveUnlocked = await isSensitiveUnlocked();
-  let transactions = [...getLedgerSnapshot().transactions].sort((a, b) => b.date.localeCompare(a.date));
+  let transactions = [...getLedgerSnapshotForUser(userId).transactions].sort((a, b) => b.date.localeCompare(a.date));
   transactions = transactions.filter((txn) => txn.date >= start && txn.date < end);
   if (!sensitiveUnlocked) {
     transactions = transactions.filter((txn) => !txn.postings.some((posting) => posting.account.startsWith("Income:")));
@@ -32,11 +32,11 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { source, entry } = UpdateSchema.parse(await request.json());
   try {
-    await replaceTransactionBlock(source, entry);
+    await replaceTransactionBlockForUser(userId, source, entry);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
@@ -44,11 +44,11 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { source, reason } = DeleteSchema.parse(await request.json());
   try {
-    await commentTransactionBlock(source, reason);
+    await commentTransactionBlockForUser(userId, source, reason);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
@@ -56,11 +56,11 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { source, date } = ReverseSchema.parse(await request.json());
   try {
-    const original = findBySource(source);
+    const original = findBySource(userId, source);
     const reverseDate = date ?? new Date().toISOString().slice(0, 10);
     const entry = {
       kind: "transaction" as const,
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         currency: posting.currency,
       })),
     };
-    await appendBeanText(reverseDate, transactionToBean(entry));
+    await appendBeanTextForUser(userId, reverseDate, transactionToBean(entry));
     return NextResponse.json({ ok: true, entry });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

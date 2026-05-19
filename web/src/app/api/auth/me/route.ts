@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentUserId } from "@/lib/auth";
 
 export async function GET() {
-  return NextResponse.json({ authenticated: await isAuthenticated() });
+  const userId = await getCurrentUserId();
+  return NextResponse.json({ authenticated: Boolean(userId), userId });
 }

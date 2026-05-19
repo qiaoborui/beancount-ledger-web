@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireAuthJson } from "@/lib/apiAuth";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
 import { monthSummary } from "@/lib/beancountParser";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 
 export async function GET(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
-  const snapshot = getLedgerSnapshot();
+  const snapshot = getLedgerSnapshotForUser(userId);
   const budgets = snapshot.budgets.filter((b) => b.date <= end);
   const latest = new Map<string, { amount: number; date: string }>();
   for (const b of budgets) {

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAuthJson } from "@/lib/apiAuth";
-import { getLedgerVersion } from "@/lib/ledgerCache";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
+import { getLedgerVersionForUser } from "@/lib/ledgerCache";
 
 export async function GET() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  return NextResponse.json(getLedgerVersion());
+  return NextResponse.json(getLedgerVersionForUser(userId));
 }

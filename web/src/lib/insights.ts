@@ -1,6 +1,7 @@
 import path from "node:path";
-import { ledgerRoot } from "./ledgerPaths";
+import { ledgerRootForUser } from "./ledgerPaths";
 import { monthSummary, parseBudgets, parseTransactions } from "./beancountParser";
+import { getLedgerSnapshotForUser } from "./ledgerCache";
 import { formatCny } from "./money";
 import type { Insight } from "./notifications";
 
@@ -16,12 +17,13 @@ function monthEnd(month: string) {
   return prevMonth(month, 1) + "-01";
 }
 
-function sourceId(source: { file: string; line: number }) {
-  return `${path.relative(ledgerRoot(), source.file)}:${source.line}`;
+function sourceId(userId: string, source: { file: string; line: number }) {
+  return `${path.relative(ledgerRootForUser(userId), source.file)}:${source.line}`;
 }
 
-export function detectInsights(month: string): Insight[] {
-  const txns = parseTransactions();
+export function detectInsightsForUser(userId: string, month: string): Insight[] {
+  const snapshot = getLedgerSnapshotForUser(userId);
+  const txns = parseTransactions(snapshot.lines);
   const start = `${month}-01`;
   const end = monthEnd(month);
   const currentTxns = txns.filter((txn) => txn.date >= start && txn.date < end);
@@ -30,11 +32,11 @@ export function detectInsights(month: string): Insight[] {
   for (const txn of currentTxns) {
     const expense = txn.postings.filter((posting) => posting.account.startsWith("Expenses:")).reduce((sum, posting) => sum + posting.amount, 0);
     if (expense >= LARGE_EXPENSE_CENTS) {
-      insights.push({ id: `large-${sourceId(txn.source)}`, severity: expense >= 100000 ? "critical" : "warning", title: "大额支出", detail: `${txn.date} ${txn.payee} ${txn.narration}：${formatCny(expense / 100)}，超过 300 元阈值。`, amount: expense, date: txn.date });
+      insights.push({ id: `large-${sourceId(userId, txn.source)}`, severity: expense >= 100000 ? "critical" : "warning", title: "大额支出", detail: `${txn.date} ${txn.payee} ${txn.narration}：${formatCny(expense / 100)}，超过 300 元阈值。`, amount: expense, date: txn.date });
     }
   }
 
-  const budgets = parseBudgets().filter((b) => b.date <= `${month}-01`);
+  const budgets = parseBudgets(snapshot.lines).filter((b) => b.date <= `${month}-01`);
   const latest = new Map<string, { amount: number; date: string }>();
   for (const b of budgets) {
     const cur = latest.get(b.account);
@@ -63,7 +65,7 @@ export function detectInsights(month: string): Insight[] {
   for (const txn of currentTxns) {
     const expense = txn.postings.filter((posting) => posting.account.startsWith("Expenses:")).reduce((sum, posting) => sum + posting.amount, 0);
     if (expense >= 10000 && (pastPayeeCounts.get(txn.payee) ?? 0) <= 1) {
-      insights.push({ id: `rare-${sourceId(txn.source)}`, severity: "info", title: "不常见商户", detail: `${txn.payee} 过去很少出现，本次支出 ${formatCny(expense / 100)}。`, amount: expense, date: txn.date });
+      insights.push({ id: `rare-${sourceId(userId, txn.source)}`, severity: "info", title: "不常见商户", detail: `${txn.payee} 过去很少出现，本次支出 ${formatCny(expense / 100)}。`, amount: expense, date: txn.date });
     }
   }
 
@@ -75,4 +77,8 @@ export function detectInsights(month: string): Insight[] {
 
   const severityRank = { critical: 0, warning: 1, info: 2 } as const;
   return insights.sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || (b.amount ?? 0) - (a.amount ?? 0));
+}
+
+export function detectInsights(month: string): Insight[] {
+  return detectInsightsForUser("owner", month);
 }

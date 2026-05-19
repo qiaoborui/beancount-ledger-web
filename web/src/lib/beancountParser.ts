@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { accountsBeanPath, mainBeanPath } from "./ledgerPaths";
+import { accountsBeanPath, accountsBeanPathForUser, mainBeanPath, mainBeanPathForUser } from "./ledgerPaths";
 import { cents, monthRange } from "./money";
 
 export type BeanLine = { file: string; line: number; text: string };
@@ -48,7 +48,7 @@ const openRe = /^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+(CNY)\b/;
 const closeRe = /^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b/;
 const aliasRe = /^\s+alias:\s+"([^"]+)"\s*$/;
 
-export function readLedgerLines(entry = mainBeanPath(), seen = new Set<string>()): BeanLine[] {
+export function readLedgerLinesForUser(userId: string, entry = mainBeanPathForUser(userId), seen = new Set<string>()): BeanLine[] {
   const full = path.resolve(entry);
   if (seen.has(full)) return [];
   seen.add(full);
@@ -59,12 +59,16 @@ export function readLedgerLines(entry = mainBeanPath(), seen = new Set<string>()
     const trimmed = line.trim();
     const include = trimmed.match(includeRe);
     if (include) {
-      out.push(...readLedgerLines(path.join(dir, include[1]), seen));
+      out.push(...readLedgerLinesForUser(userId, path.join(dir, include[1]), seen));
       return;
     }
     out.push({ file: full, line: index + 1, text: line });
   });
   return out;
+}
+
+export function parseTransactionsForUser(userId: string): TransactionView[] {
+  return parseTransactions(readLedgerLinesForUser(userId));
 }
 
 export function parseTransactions(lines = readLedgerLines()): TransactionView[] {
@@ -120,12 +124,20 @@ function parseMetadataValue(raw: string): MetadataValue {
   return value;
 }
 
+export function parseBalancesForUser(userId: string): BalanceAssertionView[] {
+  return parseBalances(readLedgerLinesForUser(userId));
+}
+
 export function parseBalances(lines = readLedgerLines()): BalanceAssertionView[] {
   return lines.flatMap((line) => {
     const match = line.text.trim().match(balanceRe);
     if (!match) return [];
     return [{ date: match[1], account: match[2], amount: cents(match[3]), currency: "CNY" as const }];
   });
+}
+
+export function parseBudgetsForUser(userId: string): BudgetView[] {
+  return parseBudgets(readLedgerLinesForUser(userId));
 }
 
 export function parseBudgets(lines = readLedgerLines()): BudgetView[] {
@@ -147,8 +159,8 @@ export function accountGroup(account: string): AccountGroup {
   return "other";
 }
 
-export function parseAccounts(): AccountView[] {
-  const text = fs.readFileSync(accountsBeanPath(), "utf8");
+export function parseAccountsForUser(userId: string): AccountView[] {
+  const text = fs.readFileSync(accountsBeanPathForUser(userId), "utf8");
   const accounts = new Map<string, AccountView>();
   let current: string | null = null;
 
@@ -186,6 +198,14 @@ export function parseAccounts(): AccountView[] {
   }
 
   return Array.from(accounts.values()).sort((a, b) => a.account.localeCompare(b.account));
+}
+
+export function readLedgerLines(entry = mainBeanPath(), seen = new Set<string>()): BeanLine[] {
+  return readLedgerLinesForUser("owner", entry, seen);
+}
+
+export function parseAccounts(): AccountView[] {
+  return parseAccountsForUser("owner");
 }
 
 export function currentBalances(txns = parseTransactions()): Record<string, number> {

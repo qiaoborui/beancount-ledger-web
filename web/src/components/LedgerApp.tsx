@@ -69,7 +69,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const pathname = useClientPathname(initialPathname);
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [username, setUsername] = useState("owner");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
   const [customStart, setCustomStart] = useState(timeRange.start);
   const [customEnd, setCustomEnd] = useState(timeRange.end);
@@ -124,14 +127,23 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   } = useLedgerData({
     timeRange,
     unlocked,
-    onAuthChange: setAuthed,
+    onAuthChange: (authenticated) => {
+      setAuthed(authenticated);
+      if (!authenticated) setCurrentUserId(null);
+    },
     onPasskeyRegistered: setPasskeyRegistered,
     onGitStatusRefresh: refreshGitStatus,
     showToast,
+    onUserChange: (userId) => {
+      setCurrentUserId(userId);
+      if (userId) setUsername(userId);
+    },
   });
 
-  const { login, loginWithPasskey, registerPasskey } = useLedgerAuth({
+  const { login, register, loginWithPasskey, registerPasskey } = useLedgerAuth({
+    username,
     password,
+    inviteCode,
     setPassword,
     setAuthed,
     setUnlocked,
@@ -163,6 +175,18 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   useEffect(() => {
     setMobileTabHrefs(readMobileTabHrefs());
   }, []);
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    sessionStorage.removeItem("ledger_authed");
+    sessionStorage.removeItem("ledger_unlocked");
+    sessionStorage.removeItem("ledger_locked_at");
+    sessionStorage.removeItem("ledger_hidden_at");
+    setAuthed(false);
+    setUnlocked(false);
+    setCurrentUserId(null);
+    showToast("success", "已退出登录");
+  }
 
   function updateMobileTabHrefs(hrefs: LedgerNavHref[]) {
     const next = Array.from(new Set(hrefs)).slice(0, 5);
@@ -204,7 +228,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   if (authed === null) return <AppSkeleton />;
-  if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
+  if (!authed) return <LoginScreen username={username} setUsername={setUsername} password={password} setPassword={setPassword} inviteCode={inviteCode} setInviteCode={setInviteCode} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onRegister={register} onPasskeyLogin={loginWithPasskey} />;
 
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const requireSensitiveUnlock = (title?: string, description?: string) => (
@@ -319,7 +343,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} creditCards={creditCards} accountStatuses={accountStatuses} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额、余额断言和对账数据需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
-      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
+      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} onGitStatusRefresh={refreshGitStatus} showToast={showToast} currentUserId={currentUserId ?? username} onLogout={logout} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
       {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {(page === "home" || page === "transactions") && (

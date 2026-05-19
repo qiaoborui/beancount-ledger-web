@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSensitiveUnlockJson } from "@/lib/apiAuth";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
 import { accountGroup, currentBalances, type AccountView, type TransactionView } from "@/lib/beancountParser";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
-import { appendBeanText, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
+import { appendBeanTextForUser, balanceToBean, transactionToBean } from "@/lib/ledgerWriter";
 import { cents, fromCents } from "@/lib/money";
 import { parseApiTimeParams } from "@/lib/timeRange";
 import type { ParsedTransaction } from "@/lib/schemas";
@@ -86,11 +86,11 @@ function adjustmentEntry(account: string, label: string, diff: number, date: str
 }
 
 export async function GET(request: Request) {
-  const authError = await requireSensitiveUnlockJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
   const monthPrefix = start.slice(0, 7);
-  const snapshot = getLedgerSnapshot();
+  const snapshot = getLedgerSnapshotForUser(userId);
   const balances = balancesBefore(todayStr(), snapshot.transactions);
   const assertions = snapshot.balanceAssertions;
   const rows = reconciliableAccounts(snapshot.accounts).map((a) => {
@@ -108,10 +108,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const authError = await requireSensitiveUnlockJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const input = ReconcileSchema.parse(await request.json());
-  const snapshot = getLedgerSnapshot();
+  const snapshot = getLedgerSnapshotForUser(userId);
   const accounts = snapshot.accounts;
   const accountInfo = accounts.find((a) => a.active && (a.account.startsWith("Assets:") || a.account.startsWith("Liabilities:")) && a.account === input.account);
   if (!accountInfo) return NextResponse.json({ error: "不支持的对账账户" }, { status: 400 });
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
   const beanText = `${adjustment ? `${transactionToBean(adjustment)}\n` : ""}${balanceToBean(balance)}`;
 
   try {
-    await appendBeanText(input.balanceDate, beanText);
+    await appendBeanTextForUser(userId, input.balanceDate, beanText);
     return NextResponse.json({ ok: true, ledgerBalance, actual, diff, adjustment, balance, beanText });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
