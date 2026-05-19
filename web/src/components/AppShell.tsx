@@ -87,9 +87,10 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   useSwipeBack({
     enabled: mobileViewport && isMobileTabRoot && !mobileMenuOpen && !mobileMenuClosing,
     onBack: openMobileMenu,
-    edgeStart: 32,
-    edgeWidth: 88,
-    threshold: 72,
+    edgeStart: 0,
+    edgeWidth: 144,
+    threshold: 48,
+    intentThreshold: 10,
   });
 
   return (

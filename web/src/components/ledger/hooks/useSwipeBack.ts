@@ -6,9 +6,10 @@ type SwipeBackOptions = {
   edgeStart?: number;
   edgeWidth?: number;
   threshold?: number;
+  intentThreshold?: number;
 };
 
-export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, threshold = 82 }: SwipeBackOptions) {
+export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, threshold = 82, intentThreshold = 14 }: SwipeBackOptions) {
   useEffect(() => {
     if (!enabled) return;
     let startX = 0;
@@ -31,13 +32,21 @@ export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, 
       if (!touch) return;
       const dx = touch.clientX - startX;
       const dy = Math.abs(touch.clientY - startY);
+      if (dx < -8) {
+        tracking = false;
+        return;
+      }
       if (dy > 42 && dy > dx) {
         tracking = false;
         return;
       }
+      if (dx > intentThreshold && dx > dy * 1.15 && event.cancelable) {
+        event.preventDefault();
+      }
       if (dx > threshold && dy < 56) {
         triggered = true;
         tracking = false;
+        if (event.cancelable) event.preventDefault();
         onBack();
       }
     };
@@ -48,7 +57,7 @@ export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, 
     };
 
     window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
     window.addEventListener("touchend", onTouchEnd, { passive: true });
     window.addEventListener("touchcancel", onTouchEnd, { passive: true });
     return () => {
@@ -57,5 +66,5 @@ export function useSwipeBack({ enabled, onBack, edgeStart = 32, edgeWidth = 72, 
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [edgeStart, edgeWidth, enabled, onBack, threshold]);
+  }, [edgeStart, edgeWidth, enabled, intentThreshold, onBack, threshold]);
 }
