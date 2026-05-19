@@ -1,3 +1,4 @@
+import { readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
 import type { LedgerCache, LedgerNavHref, PrivacySettings, ThemeMode } from "./types";
 import type { TimeRange } from "@/lib/timeRange";
 import { timeRangeCacheKey } from "@/lib/timeRange";
@@ -16,14 +17,23 @@ const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
 const mobileTabsKey = "ledger_mobile_tabs";
 
-export function readLedgerCache(timeRange: TimeRange): LedgerCache | null {
+function readLocalLedgerCache(key: string): LedgerCache | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(timeRangeCacheKey(timeRange));
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) as LedgerCache : null;
   } catch {
     return null;
   }
+}
+
+export function readLedgerCache(timeRange: TimeRange): LedgerCache | null {
+  return readLocalLedgerCache(timeRangeCacheKey(timeRange));
+}
+
+export async function readLedgerCacheAsync(timeRange: TimeRange): Promise<LedgerCache | null> {
+  const key = timeRangeCacheKey(timeRange);
+  return await readIndexedCache<LedgerCache>(key) ?? readLocalLedgerCache(key);
 }
 
 function runWhenIdle(task: () => void) {
@@ -39,6 +49,7 @@ function runWhenIdle(task: () => void) {
 export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache) {
   if (typeof window === "undefined") return;
   const key = timeRangeCacheKey(timeRange);
+  void writeIndexedCache(key, cache);
   runWhenIdle(() => {
     try {
       localStorage.setItem(key, JSON.stringify(cache));

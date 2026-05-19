@@ -1,13 +1,23 @@
-const CACHE_NAME = "beancount-ledger-shell-v4";
+const CACHE_NAME = "beancount-ledger-shell-v5";
+const API_CACHE_NAME = "beancount-ledger-api-v1";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const STALE_WHILE_REVALIDATE_API_PATHS = new Set([
+  "/api/ledger/summary",
+  "/api/ledger/transactions",
+  "/api/ledger/budget",
+  "/api/ledger/accounts",
+  "/api/ledger/income-statement",
+  "/api/ledger/version",
+]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
+  const keep = new Set([CACHE_NAME, API_CACHE_NAME]);
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))).then(() => self.clients.claim()),
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key)))).then(() => self.clients.claim()),
   );
 });
 
@@ -41,13 +51,42 @@ self.addEventListener("notificationclick", (event) => {
   }));
 });
 
+function cacheableApiRequest(request, url) {
+  if (request.method !== "GET") return false;
+  if (request.credentials === "omit") return false;
+  return STALE_WHILE_REVALIDATE_API_PATHS.has(url.pathname);
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(API_CACHE_NAME);
+  const cached = await cache.match(request);
+  const network = fetch(request).then((response) => {
+    if (response && response.ok && response.type === "basic") cache.put(request, response.clone());
+    return response;
+  });
+
+  if (cached) {
+    network.catch(() => undefined);
+    return cached;
+  }
+
+  return network.catch(() => new Response(JSON.stringify({ error: "离线且暂无缓存" }), {
+    status: 503,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  }));
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) return;
   if (request.method !== "GET") return;
+
+  if (url.pathname.startsWith("/api/")) {
+    if (cacheableApiRequest(request, url)) event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(

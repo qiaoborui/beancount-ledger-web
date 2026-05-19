@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { readLedgerCache, writeLedgerCache } from "../storage";
+import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
 import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
@@ -136,15 +136,20 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
     if (!authenticated) return;
 
     if (!forceFresh && unlocked) {
-      const cached = readLedgerCache(timeRange);
+      const cacheKey = timeRangeToParams(timeRange);
+      const cached = await readLedgerCacheAsync(timeRange);
       if (cached) {
         applyCache(cached);
-        if (freshLedgerCacheKeys.has(timeRangeToParams(timeRange))) return;
+        if (freshLedgerCacheKeys.has(cacheKey)) return;
+        fetchFreshLedger(timeRange).catch((error) => {
+          showToast("error", error instanceof Error ? error.message : "刷新失败");
+        });
+        return;
       }
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, showToast, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;
