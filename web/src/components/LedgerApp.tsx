@@ -298,10 +298,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       <Toast toast={toast} />
       {isRoutePending && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
-      <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing || loadingFresh} />
+      <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
-      <div key={`${page}:${pathname}`} className="app-page-transition">
+      <div className="app-page-transition">
       {/* ── 时间范围选择器 ── */}
       <div className="mb-6" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
         {/* 第一行：标题 + 翻页按钮 */}
