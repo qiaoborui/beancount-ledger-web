@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
+import { haptic } from "../haptics";
 import type { ManualForm } from "../types";
 
 const emptyManual = (): ManualForm => ({
@@ -14,7 +15,11 @@ const emptyManual = (): ManualForm => ({
   category: "Expenses:Unknown",
 });
 
-export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+function offlineOrNetworkError(error?: unknown) {
+  return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
+}
+
+export function useEntryActions({ load, refreshGitStatus, showToast, enqueuePendingWrites }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void }) {
   const [nl, setNl] = useState("");
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsing" | "success" | "error">("idle");
@@ -50,6 +55,7 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
       setPreviews(entries);
       setParseStatus("success");
       setParseMessage(`已解析 ${entries.length} 条，请确认后写入`);
+      haptic(8);
       showToast("success", `解析成功：${entries.length} 条`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -92,6 +98,7 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
     setPreviews([entry]);
     setParseStatus("success");
     setParseMessage("已生成 1 条预览，请确认写入");
+    haptic(6);
     showToast("success", "已生成预览，请确认写入");
   }
 
@@ -106,24 +113,45 @@ export function useEntryActions({ load, refreshGitStatus, showToast }: { load: (
 
   async function appendPreviews() {
     if (!previews.length) return;
-    setAppendStatus("writing");
-    setParseMessage(`正在写入 ${previews.length} 条…`);
-    try {
-      const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: previews }) });
-      const data = await readJson<{ error?: string; count?: number }>(res);
-      if (!res.ok) throw new Error(data.error || "写入失败");
-      const count = typeof data.count === "number" ? data.count : previews.length;
+    const entries = previews;
+    const resetDraft = () => {
       setPreviews([]);
       setNl("");
       setEntryOpen(false);
       setManual((current) => ({ ...current, payee: "", narration: "", amount: "" }));
       setParseStatus("idle");
       setParseMessage("");
+    };
+
+    if (offlineOrNetworkError()) {
+      enqueuePendingWrites(entries);
+      resetDraft();
+      showToast("info", `已保存 ${entries.length} 条待同步记录`);
+      return;
+    }
+
+    setAppendStatus("writing");
+    setParseMessage(`正在写入 ${entries.length} 条…`);
+    resetDraft();
+    showToast("info", `正在写入 ${entries.length} 条记录`);
+    try {
+      const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries }) });
+      const data = await readJson<{ error?: string; count?: number }>(res);
+      if (!res.ok) throw new Error(data.error || "写入失败");
+      const count = typeof data.count === "number" ? data.count : entries.length;
+      haptic([6, 24, 10]);
       showToast("success", `已写入 ${count} 条账本记录`);
       load(true);
       refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (offlineOrNetworkError(error)) {
+        enqueuePendingWrites(entries);
+        showToast("info", `网络不稳定，已保存 ${entries.length} 条待同步记录`);
+        return;
+      }
+      setPreviews(entries);
+      setEntryOpen(true);
       setParseStatus("error");
       setParseMessage(message);
       showToast("error", message || "写入失败");

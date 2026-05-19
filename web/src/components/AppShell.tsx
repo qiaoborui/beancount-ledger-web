@@ -1,8 +1,9 @@
 "use client";
 
 import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
+import { haptic } from "./ledger/haptics";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref } from "./ledger/types";
 
@@ -30,12 +31,14 @@ function writeSidebarCollapsed(collapsed: boolean) {
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
 }
 
-export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onActiveRouteTap?: () => void }) {
+export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onActiveRouteTap?: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
+  const [navPendingHref, setNavPendingHref] = useState<string | null>(null);
+  const navPendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setSidebarCollapsed(readSidebarCollapsed());
@@ -47,10 +50,37 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
       window.removeEventListener("storage", handleMobileTabsChange);
       window.removeEventListener("ledger-mobile-tabs-change", handleMobileTabsChange);
       if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
+      if (navPendingTimer.current) clearTimeout(navPendingTimer.current);
     };
   }, []);
 
+  useEffect(() => {
+    setNavPendingHref(null);
+    if (navPendingTimer.current) {
+      clearTimeout(navPendingTimer.current);
+      navPendingTimer.current = null;
+    }
+  }, [pathname]);
+
+  function markNavigationPending(href: string) {
+    if (href === pathname) return;
+    haptic(5);
+    setNavPendingHref(href);
+    if (navPendingTimer.current) clearTimeout(navPendingTimer.current);
+    navPendingTimer.current = setTimeout(() => {
+      setNavPendingHref(null);
+      navPendingTimer.current = null;
+    }, 2800);
+  }
+
+  function handleNavClick(event: MouseEvent<HTMLAnchorElement>, href: string, onClick?: (event: MouseEvent<HTMLAnchorElement>) => void) {
+    onClick?.(event);
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    markNavigationPending(href);
+  }
+
   function openMobileMenu() {
+    haptic(6);
     if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
     setMobileMenuClosing(false);
     setMobileMenuOpen(true);
@@ -68,6 +98,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   }
 
   function toggleSidebarCollapsed() {
+    haptic(5);
     setSidebarCollapsed((current) => {
       const next = !current;
       writeSidebarCollapsed(next);
@@ -76,16 +107,18 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   }
 
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
+  const showingRouteProgress = routePending || Boolean(navPendingHref);
 
   return (
     <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
+      {showingRouteProgress && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
         <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
           <div className="flex min-w-0 items-center gap-3 md:w-64">
             <button className="rounded-xl border border-line bg-paper p-2 text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label="打开侧边栏">
               <Menu className="h-5 w-5" />
             </button>
-            <ClientNavLink href="/" className="flex min-w-0 items-center gap-3 font-serif text-xl font-medium">
+            <ClientNavLink href="/" onClick={(event) => handleNavClick(event, "/")} className="flex min-w-0 items-center gap-3 font-serif text-xl font-medium">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand text-paper"><PiggyBank className="h-5 w-5" /></span>
               <span className="min-w-0">
                 <span className="block truncate leading-tight">我的账本</span>
@@ -128,7 +161,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} onClick={closeMobileMenu} className={`flex items-center justify-between rounded-2xl px-3 py-3 text-sm ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                <ClientNavLink key={item.href} href={item.href} onClick={(event) => handleNavClick(event, item.href, closeMobileMenu)} className={`flex items-center justify-between rounded-2xl px-3 py-3 text-sm ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}>
                   <span className="flex items-center gap-3"><Icon className="h-4 w-4" /> {item.label}</span>
                   {!mobileTabHrefs.includes(item.href) && <span className={`rounded-full px-2 py-0.5 text-xs ${active ? "bg-paper/10 text-paper/70" : "bg-tag text-stone"}`}>更多</span>}
                 </ClientNavLink>
@@ -154,7 +187,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} className={`flex items-center rounded-2xl px-3 py-3 text-sm ${sidebarCollapsed ? "justify-center" : "gap-3"} ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`flex items-center rounded-2xl px-3 py-3 text-sm ${sidebarCollapsed ? "justify-center" : "gap-3"} ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
                   <Icon className="h-4 w-4 shrink-0" /> {!sidebarCollapsed && item.label}
                 </ClientNavLink>
               );
@@ -167,7 +200,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
         </main>
       </div>
 
-      <button onClick={onAdd} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
+      <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
         <Plus />
       </button>
       <nav className={`mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel/95 px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 backdrop-blur md:hidden`} style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
@@ -175,7 +208,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
-            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); } }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
+            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); return; } handleNavClick(event, item.href); }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
               <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
             </ClientNavLink>
           );

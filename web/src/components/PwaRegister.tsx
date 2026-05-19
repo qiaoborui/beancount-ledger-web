@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { haptic } from "./ledger/haptics";
 
 export function PwaRegister() {
   const [updateReady, setUpdateReady] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(display-mode: standalone)");
+    const updateDisplayMode = () => {
+      const standalone = media.matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+      document.documentElement.dataset.displayMode = standalone ? "standalone" : "browser";
+    };
+    updateDisplayMode();
+    media.addEventListener("change", updateDisplayMode);
+    return () => media.removeEventListener("change", updateDisplayMode);
+  }, []);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -63,6 +75,7 @@ export function PwaRegister() {
   }, []);
 
   const activateUpdate = async () => {
+    haptic(8);
     const registration = await navigator.serviceWorker.getRegistration();
     const waiting = registration?.waiting;
     if (!waiting) {
