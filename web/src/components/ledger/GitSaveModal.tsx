@@ -1,7 +1,8 @@
 "use client";
 
-import { GitBranch, X } from "lucide-react";
+import { GitBranch } from "lucide-react";
 import { useState } from "react";
+import { MobileSheet } from "./MobileSheet";
 
 export type GitChange = {
   path: string;
@@ -37,20 +38,20 @@ export function GitSaveModal({
 
   const hasChanges = changedFileCount > 0;
 
+  const footer = <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+    <button className="rounded-xl border border-line bg-paper px-4 py-2 text-warm disabled:opacity-60" onClick={onClose} disabled={committing}>取消</button>
+    <button className="rounded-xl bg-brand px-4 py-2 text-paper disabled:opacity-60" onClick={() => onCommit(message)} disabled={!hasChanges || loading || committing || !message.trim()}>
+      <GitBranch className="mr-1 inline h-4 w-4" /> {committing ? "提交中…" : `提交并推送 ${changedFileCount} 个文件`}
+    </button>
+  </div>;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="kami-float max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-paper p-5 shadow-xl sm:rounded-3xl sm:p-6" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.24em] text-stone">git save preview</div>
-            <h2 className="mt-2 font-serif text-3xl font-medium">保存到 Git</h2>
-            <p className="mt-2 text-sm leading-6 text-olive">
-              {loading ? "正在读取账本仓库变更…" : hasChanges ? `本次将提交 ${changedFileCount} 个变动文件。` : "当前没有需要提交的账本变更。"}
-            </p>
-          </div>
-          <button className="rounded-xl border border-line bg-panel p-2 text-stone hover:text-ink" onClick={onClose} aria-label="关闭 Git 保存预览" disabled={committing}>
-            <X className="h-4 w-4" />
-          </button>
+    <MobileSheet open title="保存到 Git" onClose={onClose} shouldClose={() => !committing} size="md" align="center" footer={footer} zIndexClassName="z-[110]">
+        <div>
+          <div className="text-xs uppercase tracking-[0.24em] text-stone">git save preview</div>
+          <p className="mt-2 text-sm leading-6 text-olive">
+            {loading ? "正在读取账本仓库变更…" : hasChanges ? `本次将提交 ${changedFileCount} 个变动文件。` : "当前没有需要提交的账本变更。"}
+          </p>
         </div>
 
         <div className="mt-5 rounded-2xl border border-line bg-panel">
@@ -89,14 +90,6 @@ export function GitSaveModal({
             placeholder="chore: update ledger"
           />
         </label>
-
-        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="rounded-xl border border-line bg-paper px-4 py-2 text-warm disabled:opacity-60" onClick={onClose} disabled={committing}>取消</button>
-          <button className="rounded-xl bg-brand px-4 py-2 text-paper disabled:opacity-60" onClick={() => onCommit(message)} disabled={!hasChanges || loading || committing || !message.trim()}>
-            <GitBranch className="mr-1 inline h-4 w-4" /> {committing ? "提交中…" : `提交并推送 ${changedFileCount} 个文件`}
-          </button>
-        </div>
-      </div>
-    </div>
+    </MobileSheet>
   );
 }

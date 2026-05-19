@@ -1,7 +1,7 @@
 "use client";
 
 import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref } from "./ledger/types";
@@ -32,6 +32,8 @@ function writeSidebarCollapsed(collapsed: boolean) {
 
 export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onActiveRouteTap?: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
+  const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
 
@@ -44,8 +46,26 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
     return () => {
       window.removeEventListener("storage", handleMobileTabsChange);
       window.removeEventListener("ledger-mobile-tabs-change", handleMobileTabsChange);
+      if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
     };
   }, []);
+
+  function openMobileMenu() {
+    if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
+    setMobileMenuClosing(false);
+    setMobileMenuOpen(true);
+  }
+
+  function closeMobileMenu() {
+    if (!mobileMenuOpen || mobileMenuClosing) return;
+    setMobileMenuClosing(true);
+    if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
+    mobileMenuCloseTimer.current = setTimeout(() => {
+      setMobileMenuOpen(false);
+      setMobileMenuClosing(false);
+      mobileMenuCloseTimer.current = null;
+    }, 190);
+  }
 
   function toggleSidebarCollapsed() {
     setSidebarCollapsed((current) => {
@@ -62,7 +82,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
       <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
         <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
           <div className="flex min-w-0 items-center gap-3 md:w-64">
-            <button className="rounded-xl border border-line bg-paper p-2 text-brand hover:bg-tag md:hidden" onClick={() => setMobileMenuOpen(true)} aria-label="打开侧边栏">
+            <button className="rounded-xl border border-line bg-paper p-2 text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label="打开侧边栏">
               <Menu className="h-5 w-5" />
             </button>
             <ClientNavLink href="/" className="flex min-w-0 items-center gap-3 font-serif text-xl font-medium">
@@ -96,11 +116,11 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
         </div>
       </header>
 
-      {mobileMenuOpen && <div className="fixed inset-0 z-40 bg-ink/35 md:hidden" onClick={() => setMobileMenuOpen(false)}>
-        <aside className="kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel px-[max(1rem,env(safe-area-inset-left))] pb-4 pr-4 pt-[calc(env(safe-area-inset-top)+1rem)]" onClick={(event) => event.stopPropagation()}>
+      {(mobileMenuOpen || mobileMenuClosing) && <div className={`mobile-sidebar-backdrop fixed inset-0 z-40 bg-ink/35 md:hidden ${mobileMenuClosing ? "mobile-sidebar-backdrop-close" : ""}`} onClick={closeMobileMenu}>
+        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel px-[max(1rem,env(safe-area-inset-left))] pb-4 pr-4 pt-[calc(env(safe-area-inset-top)+1rem)] ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-2 font-serif text-xl font-medium"><span className="grid h-8 w-8 place-items-center rounded-xl bg-brand text-paper"><PiggyBank className="h-4 w-4" /></span> 我的账本</div>
-            <button className="rounded-xl border border-line bg-paper p-2 text-stone" onClick={() => setMobileMenuOpen(false)} aria-label="关闭侧边栏"><X className="h-4 w-4" /></button>
+            <button className="rounded-xl border border-line bg-paper p-2 text-stone" onClick={closeMobileMenu} aria-label="关闭侧边栏"><X className="h-4 w-4" /></button>
           </div>
           <div className="mb-3 text-xs font-medium uppercase tracking-[0.22em] text-stone">全部功能</div>
           <nav className="space-y-2">
@@ -108,7 +128,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)} className={`flex items-center justify-between rounded-2xl px-3 py-3 text-sm ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                <ClientNavLink key={item.href} href={item.href} onClick={closeMobileMenu} className={`flex items-center justify-between rounded-2xl px-3 py-3 text-sm ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}>
                   <span className="flex items-center gap-3"><Icon className="h-4 w-4" /> {item.label}</span>
                   {!mobileTabHrefs.includes(item.href) && <span className={`rounded-full px-2 py-0.5 text-xs ${active ? "bg-paper/10 text-paper/70" : "bg-tag text-stone"}`}>更多</span>}
                 </ClientNavLink>

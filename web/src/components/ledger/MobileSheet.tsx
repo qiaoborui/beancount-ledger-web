@@ -9,14 +9,20 @@ type MobileSheetProps = {
   children: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
+  shouldClose?: () => boolean;
   size?: "md" | "lg";
   align?: "right" | "center";
   closeLabel?: string;
   zIndexClassName?: string;
 };
 
-export function MobileSheet({ open, title, children, footer, onClose, size = "lg", align = "right", closeLabel = "关闭", zIndexClassName = "z-[100]" }: MobileSheetProps) {
+export function MobileSheet({ open, title, children, footer, onClose, shouldClose, size = "lg", align = "right", closeLabel = "关闭", zIndexClassName = "z-[100]" }: MobileSheetProps) {
   const [mounted, setMounted] = useState(false);
+
+  const requestClose = () => {
+    if (shouldClose && !shouldClose()) return;
+    onClose();
+  };
 
   useEffect(() => setMounted(true), []);
 
@@ -25,14 +31,14 @@ export function MobileSheet({ open, title, children, footer, onClose, size = "lg
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = originalOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose, open]);
+  }, [open, requestClose]);
 
   if (!mounted || !open) return null;
 
@@ -41,12 +47,12 @@ export function MobileSheet({ open, title, children, footer, onClose, size = "lg
   const desktopRadius = align === "center" ? "sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl" : "sm:h-full sm:rounded-none";
 
   return createPortal(
-    <div className={`sheet-backdrop fixed inset-0 ${zIndexClassName} flex items-end bg-ink/35 p-0 ${desktopAlign}`} onClick={onClose}>
+    <div className={`sheet-backdrop fixed inset-0 ${zIndexClassName} flex items-end bg-ink/35 p-0 ${desktopAlign}`} onClick={requestClose}>
       <div className={`mobile-sheet kami-float flex h-[92dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-paper ${maxWidth} ${desktopRadius}`} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <div className="shrink-0 border-b border-line bg-paper/95 px-5 pb-3 pt-5 backdrop-blur sm:pt-[calc(env(safe-area-inset-top)+1.25rem)]">
           <div className="flex items-center justify-between gap-4">
             <h2 className="min-w-0 font-serif text-2xl">{title}</h2>
-            <button className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>{closeLabel}</button>
+            <button className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm" onClick={requestClose}>{closeLabel}</button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
