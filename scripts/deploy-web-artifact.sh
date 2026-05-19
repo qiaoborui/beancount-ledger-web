@@ -80,7 +80,12 @@ if [[ -d "$ARTIFACT_DIR/.agents" ]]; then
 fi
 
 if [[ -n "${APP_ENV_FILE:-}" ]]; then
-  install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
+  if [[ -f "$APP_ENV_FILE" ]]; then
+    install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
+  else
+    umask 077
+    printf '%s\n' "$APP_ENV_FILE" > "$RELEASE_DIR/.env.local"
+  fi
 fi
 
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
