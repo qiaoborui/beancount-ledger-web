@@ -358,9 +358,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="rounded-xl border border-line bg-panel px-3 py-2 text-warm" onClick={refreshLedger} disabled={refreshing || loadingFresh}>
-              <RefreshCw className={`inline h-4 w-4 text-brand ${refreshing || loadingFresh ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">刷新</span>
-            </button>
             {canNavigate && (
               <button
                 className="rounded-xl border border-line bg-panel px-3 py-2 text-brand"

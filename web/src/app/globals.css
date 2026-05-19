@@ -267,18 +267,6 @@ button.card:active, a.card:active { transform: scale(0.992); }
   to { transform: translate3d(0, 0, 0); opacity: 1; }
 }
 
-.transaction-swipe-card {
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.transaction-swipe-actions {
-  display: flex;
-}
-
-.transaction-swipe-open {
-  transform: translateX(-168px);
-}
-
 .sheet-backdrop {
   animation: app-fade-in 160ms ease-out;
 }
@@ -336,7 +324,6 @@ button.card:active, a.card:active { transform: scale(0.992); }
 }
 
 @media (min-width: 768px) {
-  .transaction-swipe-open { transform: none; }
   .account-detail-stack { animation: none; }
 }
 
