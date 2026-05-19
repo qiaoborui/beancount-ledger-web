@@ -78,16 +78,18 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 }
 
 function AssetAllocation({ accounts, balances, visible }: { accounts: AccountView[]; balances: Record<string, number>; visible: boolean }) {
-  const bucket = (match: (account: AccountView) => boolean) => accounts.filter(match).reduce((sum, account) => sum + (balances[account.account] ?? 0), 0);
-  const cash = bucket((a) => a.account.startsWith("Assets:") && a.group === "cash");
-  const wealth = bucket((a) => a.account.includes(":Wealth"));
-  const fund = bucket((a) => a.account.includes(":Fund"));
-  const housing = bucket((a) => a.account.includes(":HousingFund"));
-  const otherAssets = Object.entries(balances).filter(([account]) => account.startsWith("Assets:") && !accounts.some((a) => a.account === account && (a.group === "cash" || a.account.includes(":Wealth") || a.account.includes(":Fund") || a.account.includes(":HousingFund")))).reduce((sum, [, value]) => sum + value, 0);
+  const knownAccounts = new Set(accounts.map((account) => account.account));
+  const bucket = (match: (account: AccountView) => boolean) => accounts.filter((account) => account.account.startsWith("Assets:") && match(account)).reduce((sum, account) => sum + (balances[account.account] ?? 0), 0);
+  const cash = bucket((account) => account.group === "cash");
+  const wealth = bucket((account) => account.group === "wealth");
+  const receivable = bucket((account) => account.group === "receivable");
+  const otherAssets = Object.entries(balances).filter(([account]) => account.startsWith("Assets:") && !knownAccounts.has(account)).reduce((sum, [, value]) => sum + value, 0) + bucket((account) => !["cash", "wealth", "receivable"].includes(account.group));
   const liabilities = Object.entries(balances).filter(([a]) => a.startsWith("Liabilities:")).reduce((s, [, v]) => s + Math.abs(v), 0);
-  const totalAssets = Math.max(1, cash + wealth + fund + housing + otherAssets);
-  const rows = [{ label: "现金", value: cash }, { label: "理财", value: wealth }, { label: "基金", value: fund }, { label: "公积金", value: housing }, { label: "其他资产", value: otherAssets }, { label: "负债", value: -liabilities }];
-  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">资产配置</h2><div className="mt-4 space-y-3">{rows.map((row) => { const pct = row.value / totalAssets * 100; return <div key={row.label}><div className="flex justify-between text-sm"><span>{row.label}</span><strong>{Math.round(pct)}%{visible ? ` · ${formatCompactCny(row.value / 100)}` : ""}</strong></div><div className="mt-1 h-2 overflow-hidden rounded-xl bg-line"><div className={row.value < 0 ? "h-full bg-[var(--danger)]" : "h-full bg-brand"} style={{ width: `${Math.min(Math.abs(pct), 100)}%` }} /></div></div>; })}</div><p className="mt-3 text-xs text-stone">隐私模式下只显示配置百分比，不显示具体金额。</p></section>;
+  const totalAssetsRaw = cash + wealth + receivable + otherAssets;
+  const totalAssets = Math.max(1, totalAssetsRaw);
+  const assetRows = [{ label: "现金", value: cash }, { label: "理财 / 投资", value: wealth }, { label: "应收", value: receivable }, { label: "其他资产", value: otherAssets }].filter((row) => row.value !== 0);
+  const liabilityPct = liabilities / totalAssets * 100;
+  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">资产配置</h2><div className="mt-4 space-y-3">{assetRows.map((row) => { const pct = row.value / totalAssets * 100; return <div key={row.label}><div className="flex justify-between text-sm"><span>{row.label}</span><strong>{Math.round(pct)}%{visible ? ` · ${formatCompactCny(row.value / 100)}` : ""}</strong></div><div className="mt-1 h-2 overflow-hidden rounded-xl bg-line"><div className="h-full bg-brand" style={{ width: `${Math.min(Math.abs(pct), 100)}%` }} /></div></div>; })}<div><div className="flex justify-between text-sm"><span>负债 / 总资产</span><strong>{Math.round(liabilityPct)}%{visible ? ` · ${formatCompactCny(liabilities / 100)}` : ""}</strong></div><div className="mt-1 h-2 overflow-hidden rounded-xl bg-line"><div className="h-full bg-[var(--danger)]" style={{ width: `${Math.min(Math.abs(liabilityPct), 100)}%` }} /></div></div></div><p className="mt-3 text-xs text-stone">资产分类优先读取账户 metadata（如 group: \"wealth\"）；百分比为占总资产比例，负债单独按负债 / 总资产展示。隐私模式下只显示百分比。</p></section>;
 }
 
 function AssetComposition({ accounts, balances, visible }: { accounts: AccountView[]; balances: Record<string, number>; visible: boolean }) {

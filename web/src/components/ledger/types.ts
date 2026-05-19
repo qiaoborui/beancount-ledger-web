@@ -14,7 +14,7 @@ export type AccountStatus = {
   assertionAmount: number | null;
   computedBalance: number | null;
 };
-export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean };
+export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean; metadata?: Record<string, MetadataValue> };
 export type LedgerNotification = { id: string; insightId: string; month: string; severity: "info" | "warning" | "critical"; title: string; detail: string; amount?: number; account?: string; date?: string; status: "unread" | "read" | "dismissed" | "resolved"; createdAt: string; readAt: string | null; dismissedAt: string | null; resolvedAt: string | null; updatedAt: string };
 export type PayeeAnalytics = { payee: string; amount: number; txCount: number };
 export type AccountAnalytics = { account: string; amount: number; txCount: number };

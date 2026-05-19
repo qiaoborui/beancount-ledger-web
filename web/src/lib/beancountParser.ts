@@ -19,7 +19,7 @@ export type BalanceAssertionView = { date: string; account: string; amount: numb
 export type BudgetView = { date: string; account: string; amount: number; currency: "CNY" };
 export type IncomeStatementNode = { account: string; label: string; amount: number; children: IncomeStatementNode[]; depth: number; txCount: number };
 export type AccountGroup = "cash" | "credit" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";
-export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean };
+export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean; metadata?: Record<string, MetadataValue> };
 export type AccountStatus = {
   account: string;
   status: "green" | "red" | "yellow" | "grey";
@@ -46,7 +46,6 @@ const balanceRe = /^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\
 const budgetRe = /^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b/;
 const openRe = /^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+(CNY)\b/;
 const closeRe = /^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b/;
-const aliasRe = /^\s+alias:\s+"([^"]+)"\s*$/;
 
 export function readLedgerLines(entry = mainBeanPath(), seen = new Set<string>()): BeanLine[] {
   const full = path.resolve(entry);
@@ -136,13 +135,65 @@ export function parseBudgets(lines = readLedgerLines()): BudgetView[] {
   });
 }
 
-export function accountGroup(account: string): AccountGroup {
+const groupMetadataKeys = ["group", "account-group", "asset-class", "type"];
+const groupAliases: Record<string, AccountGroup> = {
+  cash: "cash",
+  checking: "cash",
+  bank: "cash",
+  现金: "cash",
+  活期: "cash",
+  wealth: "wealth",
+  investment: "wealth",
+  invest: "wealth",
+  asset: "wealth",
+  理财: "wealth",
+  投资: "wealth",
+  基金: "wealth",
+  credit: "credit",
+  liability: "credit",
+  liabilities: "credit",
+  debt: "credit",
+  负债: "credit",
+  信用卡: "credit",
+  receivable: "receivable",
+  payable: "receivable",
+  应收: "receivable",
+  应付: "receivable",
+  expense: "expense",
+  expenses: "expense",
+  支出: "expense",
+  income: "income",
+  收入: "income",
+  equity: "equity",
+  权益: "equity",
+  other: "other",
+  其他: "other",
+};
+
+export function normalizeAccountGroup(value: MetadataValue | undefined): AccountGroup | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/[ _]/g, "-");
+  return groupAliases[normalized] ?? groupAliases[value.trim()] ?? null;
+}
+
+function accountGroupFromMetadata(metadata: Record<string, MetadataValue>): AccountGroup | null {
+  for (const key of groupMetadataKeys) {
+    const group = normalizeAccountGroup(metadata[key]);
+    if (group) return group;
+  }
+  return null;
+}
+
+export function accountGroup(account: string, metadata: Record<string, MetadataValue> = {}, alias?: string | null): AccountGroup {
+  const metadataGroup = accountGroupFromMetadata(metadata);
+  if (metadataGroup) return metadataGroup;
+  const haystack = `${account} ${alias ?? ""}`;
   if (account.startsWith("Expenses:")) return "expense";
   if (account.startsWith("Income:")) return "income";
   if (account.startsWith("Equity:")) return "equity";
   if (account.startsWith("Assets:Receivable") || account.startsWith("Liabilities:Payable")) return "receivable";
   if (account.startsWith("Liabilities:")) return "credit";
-  if (account.includes(":Wealth") || account.includes(":Fund") || account.includes(":Stock") || account.includes(":Bond") || account.includes(":HousingFund") || account.includes(":Insurance")) return "wealth";
+  if (/(^|:)(Wealth|Fund|Stock|Bond|HousingFund|Insurance)(:|$)|理财|稳利宝|增利宝|余利宝|余额宝|零钱通|基金|债券|股票|保险|黄金|存单|定期/i.test(haystack)) return "wealth";
   if (account.startsWith("Assets:")) return "cash";
   return "other";
 }
@@ -156,7 +207,7 @@ export function parseAccounts(): AccountView[] {
     const open = line.match(openRe);
     if (open) {
       const account = open[2];
-      accounts.set(account, { account, openDate: open[1], closeDate: null, currency: "CNY", alias: null, label: account, group: accountGroup(account), active: true });
+      accounts.set(account, { account, openDate: open[1], closeDate: null, currency: "CNY", alias: null, label: account, group: accountGroup(account), active: true, metadata: {} });
       current = account;
       continue;
     }
@@ -172,12 +223,17 @@ export function parseAccounts(): AccountView[] {
       continue;
     }
 
-    const alias = line.match(aliasRe);
-    if (alias && current) {
+    const metadata = line.match(metadataRe);
+    if (metadata && current) {
       const account = accounts.get(current);
       if (account) {
-        account.alias = alias[1];
-        account.label = alias[1].split("/")[0].trim() || current;
+        const value = parseMetadataValue(metadata[2]);
+        account.metadata = { ...(account.metadata ?? {}), [metadata[1]]: value };
+        if (metadata[1] === "alias" && typeof value === "string") {
+          account.alias = value;
+          account.label = value.split("/")[0].trim() || current;
+        }
+        account.group = accountGroup(account.account, account.metadata, account.alias);
       }
       continue;
     }
