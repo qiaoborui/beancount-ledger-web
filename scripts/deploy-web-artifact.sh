@@ -109,6 +109,7 @@ cat > "$ENV_DIR/systemd.env" << SYSEOF
 PORT=$PORT
 NODE_ENV=production
 HOSTNAME=${APP_HOSTNAME:-0.0.0.0}
+PATH=${PATH:-/home/pi/.local/share/uv/tools/beancount/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin:/home/pi/go/bin:/home/pi/.local/bin}
 LEDGER_ROOT=$LEDGER_ROOT_EFFECTIVE
 RUNTIME_DIR=$RUNTIME_DIR_EFFECTIVE
 AUTH_SECRET=${AUTH_SECRET:-}
