@@ -2,6 +2,15 @@ import { useMemo, useState } from "react";
 
 const PULL_THRESHOLD = 92;
 const MAX_PULL = 128;
+const INTERACTIVE_SELECTOR = "button,a,input,textarea,select,[role='button'],[contenteditable='true']";
+
+function isAtPageTop() {
+  return (document.scrollingElement?.scrollTop ?? window.scrollY) <= 0;
+}
+
+function startedFromInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(INTERACTIVE_SELECTOR));
+}
 
 export function usePullToRefresh(refresh: () => void | Promise<void>, disabled = false) {
   const [pullStartY, setPullStartY] = useState<number | null>(null);
@@ -10,13 +19,14 @@ export function usePullToRefresh(refresh: () => void | Promise<void>, disabled =
 
   function handleTouchStart(event: React.TouchEvent) {
     if (disabled || refreshingByGesture) return;
-    if (window.scrollY <= 0) setPullStartY(event.touches[0].clientY);
+    if (startedFromInteractiveTarget(event.target)) return;
+    if (isAtPageTop()) setPullStartY(event.touches[0].clientY);
   }
 
   function handleTouchMove(event: React.TouchEvent) {
     if (pullStartY == null || disabled) return;
     const rawDistance = event.touches[0].clientY - pullStartY;
-    if (rawDistance <= 0 || window.scrollY > 0) {
+    if (rawDistance <= 0 || !isAtPageTop()) {
       setPullDistance(0);
       return;
     }
@@ -25,10 +35,11 @@ export function usePullToRefresh(refresh: () => void | Promise<void>, disabled =
 
   async function handleTouchEnd() {
     if (pullStartY == null) return;
-    const shouldRefresh = !disabled && window.scrollY <= 0 && pullDistance >= PULL_THRESHOLD;
+    const shouldRefresh = !disabled && isAtPageTop() && pullDistance >= PULL_THRESHOLD;
     setPullStartY(null);
     setPullDistance(0);
     if (!shouldRefresh) return;
+    navigator.vibrate?.(8);
     setRefreshingByGesture(true);
     try {
       await refresh();

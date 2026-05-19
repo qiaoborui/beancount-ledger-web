@@ -138,7 +138,9 @@ html {
   min-height: 100%;
   background: var(--brand);
   -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
 }
 body {
   min-height: 100vh;
@@ -147,7 +149,10 @@ body {
   background: var(--body-gradient);
   color: var(--ink);
   font-family: var(--font-sans);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  overscroll-behavior-y: none;
 }
 body::before {
   content: "";
@@ -157,7 +162,11 @@ body::before {
   background: var(--body-gradient);
 }
 button, input, textarea, select { font: inherit; }
-button, a { touch-action: manipulation; }
+button, a {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
 button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease; }
 button:active, a:active { transform: scale(0.985); }
 button:disabled { transform: none; }
@@ -229,6 +238,14 @@ button.card:active, a.card:active { transform: scale(0.992); }
 .app-page-transition {
   animation: app-page-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: opacity, transform;
+}
+
+.app-pull-surface {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-pull-surface-active {
+  transition-duration: 0ms;
 }
 
 @keyframes app-page-enter {

@@ -322,21 +322,29 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onAdd={() => setQuickActionsOpen(true)}
       gitDirty={gitDirty}
       changedFileCount={changedFileCount}
+      routePending={isRoutePending}
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       onUnlockSensitive={loginWithPasskey}
       onActiveRouteTap={handleActiveRouteTap}
     >
       <Toast toast={toast} />
-      {isRoutePending && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
       <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onBalanceAssertion={openBalanceAssertion} onGitSave={openGitSave} onRefresh={refreshLedger} />
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
-      <div className="app-page-transition">
+      <div
+        key={pathname}
+        className={`app-page-transition app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+        style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+      >
       {/* ── 时间范围选择器 ── */}
-      <div className="mb-6" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+      <div className="mb-6">
         {/* 第一行：标题 + 翻页按钮 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {canNavigate && (
