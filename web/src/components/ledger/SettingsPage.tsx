@@ -1,4 +1,5 @@
-import type { PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
+import { ledgerNavItems } from "../AppShell";
+import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
 const themeOptions: { value: ThemeMode; label: string; description: string }[] = [
   { value: "system", label: "跟随系统", description: "系统切换时自动同步" },
@@ -12,13 +13,22 @@ export function SettingsPage({
   themeMode,
   resolvedTheme,
   onThemeModeChange,
+  mobileTabHrefs,
+  onMobileTabHrefsChange,
 }: {
   settings: PrivacySettings;
   onChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void;
   themeMode: ThemeMode;
   resolvedTheme: ResolvedTheme;
   onThemeModeChange: (mode: ThemeMode) => void;
+  mobileTabHrefs: LedgerNavHref[];
+  onMobileTabHrefsChange: (hrefs: LedgerNavHref[]) => void;
 }) {
+  function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
+    if (checked) onMobileTabHrefsChange(Array.from(new Set([...mobileTabHrefs, href])).slice(0, 5));
+    else onMobileTabHrefsChange(mobileTabHrefs.filter((item) => item !== href));
+  }
+
   return <div className="space-y-6">
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
@@ -44,6 +54,29 @@ export function SettingsPage({
         </div>
         <p className="mt-3 px-2 text-xs text-stone">当前实际主题：{resolvedTheme === "dark" ? "深色" : "浅色"}</p>
       </div>
+    </section>
+
+    <section className="card p-5 md:p-6">
+      <div className="border-l-4 border-brand pl-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">mobile navigation</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">底部 Tab</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">选择移动端底部栏展示哪些页面，最多 5 个。未展示的页面仍可从左上角菜单进入。</p>
+      </div>
+      <div className="mt-6 grid gap-2 rounded-2xl border border-line bg-panel p-2 md:grid-cols-2">
+        {ledgerNavItems.map((item) => {
+          const Icon = item.icon;
+          const checked = mobileTabHrefs.includes(item.href);
+          const disabled = !checked && mobileTabHrefs.length >= 5;
+          return <label key={item.href} className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-4 py-3 ${checked ? "border-brand bg-[var(--selected-bg)]" : "border-line bg-paper"} ${disabled ? "cursor-not-allowed opacity-50" : "hover:bg-tag"}`}>
+            <span className="flex min-w-0 items-center gap-3">
+              <Icon className="h-4 w-4 shrink-0 text-brand" />
+              <span className="font-medium text-ink">{item.label}</span>
+            </span>
+            <input className="h-5 w-5 shrink-0 accent-brand" type="checkbox" checked={checked} disabled={disabled} onChange={(event) => toggleMobileTab(item.href, event.target.checked)} />
+          </label>;
+        })}
+      </div>
+      <p className="mt-3 text-xs text-stone">当前展示：{mobileTabHrefs.length ? ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href)).map((item) => item.label).join("、") : "无"}</p>
     </section>
 
     <section className="card p-5 md:p-6">
