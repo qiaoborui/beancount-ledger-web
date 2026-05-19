@@ -20,8 +20,8 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
-            <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">现金流、信用卡和待整理项先看。</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">首页聚合本期收支、信用卡压力、预算风险和待整理项；净资产保留在独立页面。解锁后金额默认可见，可用右侧眼睛临时隐藏。</p>
+            <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
           </div>
           <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
             {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
