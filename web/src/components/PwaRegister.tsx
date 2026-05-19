@@ -9,14 +9,28 @@ export function PwaRegister() {
     if (!("serviceWorker" in navigator)) return;
 
     let registrationRef: ServiceWorkerRegistration | null = null;
-    const onControllerChange = () => window.location.reload();
+    let reloaded = false;
+    let checkInterval: number | undefined;
+
+    const onControllerChange = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
 
     const markUpdateReady = (registration: ServiceWorkerRegistration) => {
       if (registration.waiting && navigator.serviceWorker.controller) setUpdateReady(true);
     };
 
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").then((registration) => {
+    const checkForUpdate = () => {
+      if (document.visibilityState !== "visible") return;
+      registrationRef?.update().catch((error) => {
+        console.warn("Service worker update check failed", error);
+      });
+    };
+
+    const registerServiceWorker = () => {
+      navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => {
         registrationRef = registration;
         markUpdateReady(registration);
         registration.addEventListener("updatefound", () => {
@@ -29,10 +43,23 @@ export function PwaRegister() {
       }).catch((error) => {
         console.warn("Service worker registration failed", error);
       });
-    });
+    };
 
+    if (document.readyState === "complete") {
+      registerServiceWorker();
+    } else {
+      window.addEventListener("load", registerServiceWorker);
+    }
+    document.addEventListener("visibilitychange", checkForUpdate);
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
-    return () => navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+    checkInterval = window.setInterval(checkForUpdate, 60 * 60 * 1000);
+
+    return () => {
+      window.removeEventListener("load", registerServiceWorker);
+      document.removeEventListener("visibilitychange", checkForUpdate);
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      if (checkInterval) window.clearInterval(checkInterval);
+    };
   }, []);
 
   const activateUpdate = async () => {

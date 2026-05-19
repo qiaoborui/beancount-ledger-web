@@ -1,6 +1,6 @@
-const CACHE_NAME = "beancount-ledger-shell-v5";
+const CACHE_NAME = "beancount-ledger-shell-v6";
 const API_CACHE_NAME = "beancount-ledger-api-v2";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const APP_STATIC_ASSETS = ["/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
 // Only cache read-only API responses that do not vary by sensitive unlock state.
 // Summary, transactions, and income-statement intentionally stay network-only here because
 // the server returns different payloads before/after Face ID / Passkey unlock. Caching them
@@ -12,7 +12,7 @@ const STALE_WHILE_REVALIDATE_API_PATHS = new Set([
 ]);
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_STATIC_ASSETS)));
 });
 
 self.addEventListener("message", (event) => {
@@ -81,6 +81,31 @@ async function staleWhileRevalidate(request) {
   }));
 }
 
+function isRscRequest(request, url) {
+  return url.searchParams.has("_rsc")
+    || request.headers.get("RSC") === "1"
+    || request.headers.get("Accept")?.includes("text/x-component");
+}
+
+function cacheableStaticRequest(request, url) {
+  if (isRscRequest(request, url)) return false;
+  if (url.pathname.startsWith("/_next/static/")) return true;
+  if (url.pathname.startsWith("/icons/")) return true;
+  return APP_STATIC_ASSETS.includes(url.pathname);
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response && response.status === 200 && response.type === "basic") {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -96,29 +121,12 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          if (response && response.ok && response.type === "basic") {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-
-          if ([500, 502, 503, 504].includes(response.status)) {
-            return caches.match(request).then((cached) => cached || caches.match("/"));
-          }
-
-          return response;
-        })
-        .catch(() => caches.match(request).then((cached) => cached || caches.match("/"))),
+        .catch(() => new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } })),
     );
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (!response || response.status !== 200 || response.type !== "basic") return response;
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-      return response;
-    })),
-  );
+  if (cacheableStaticRequest(request, url)) {
+    event.respondWith(cacheFirst(request));
+  }
 });
