@@ -137,6 +137,8 @@ html[data-theme="dark"] {
 html {
   min-height: 100%;
   background: var(--brand);
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
 }
 body {
   min-height: 100vh;
@@ -155,8 +157,10 @@ body::before {
   background: var(--body-gradient);
 }
 button, input, textarea, select { font: inherit; }
-button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease; }
-button:active { transform: translateY(1px); }
+button, a { touch-action: manipulation; }
+button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease; }
+button:active, a:active { transform: scale(0.985); }
+button:disabled { transform: none; }
 input, textarea, select {
   border-radius: 10px;
   color: var(--ink);
@@ -173,7 +177,9 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--line);
   border-radius: 18px;
   box-shadow: var(--paper-shadow);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
+button.card:active, a.card:active { transform: scale(0.992); }
 
 .kami-float { box-shadow: var(--float-shadow); }
 .kami-overlay { background: var(--overlay); }
@@ -190,6 +196,55 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.app-page-transition {
+  animation: app-page-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+@keyframes app-page-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.997); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.app-route-progress {
+  animation: app-route-progress 900ms ease-in-out infinite;
+  transform-origin: left;
+}
+
+@keyframes app-route-progress {
+  0% { transform: translateX(-120%) scaleX(0.8); }
+  55% { transform: translateX(160%) scaleX(1.4); }
+  100% { transform: translateX(320%) scaleX(0.8); }
+}
+
+.sheet-backdrop {
+  animation: app-fade-in 160ms ease-out;
+}
+
+.mobile-sheet {
+  animation: app-sheet-up 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  overscroll-behavior: contain;
+}
+
+@keyframes app-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes app-sheet-up {
+  from { transform: translateY(18px); opacity: 0.86; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 @media (max-width: 720px) {
   body { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }

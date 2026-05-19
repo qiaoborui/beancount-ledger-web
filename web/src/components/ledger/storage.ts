@@ -26,13 +26,26 @@ export function readLedgerCache(timeRange: TimeRange): LedgerCache | null {
   }
 }
 
+function runWhenIdle(task: () => void) {
+  if (typeof window === "undefined") return;
+  const idle = window.requestIdleCallback;
+  if (idle) {
+    idle(task, { timeout: 1500 });
+    return;
+  }
+  window.setTimeout(task, 0);
+}
+
 export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache) {
   if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(timeRangeCacheKey(timeRange), JSON.stringify(cache));
-  } catch {
-    // Ignore storage quota/private mode failures. Fresh in-memory data is still shown.
-  }
+  const key = timeRangeCacheKey(timeRange);
+  runWhenIdle(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(cache));
+    } catch {
+      // Ignore storage quota/private mode failures. Fresh in-memory data is still shown.
+    }
+  });
 }
 
 export function readPrivacySettings(): PrivacySettings {

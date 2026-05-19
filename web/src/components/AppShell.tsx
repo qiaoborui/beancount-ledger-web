@@ -58,7 +58,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
 
   return (
-    <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink">
+    <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
       <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
         <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
           <div className="flex min-w-0 items-center gap-3 md:w-64">
@@ -142,12 +142,12 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           </nav>
         </aside>
 
-        <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-10">
+        <main className="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-10">
           <div className="mx-auto max-w-5xl">{children}</div>
         </main>
       </div>
 
-      <button onClick={onAdd} className="kami-float fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper md:bottom-8" aria-label="记一笔">
+      <button onClick={onAdd} className="kami-float fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="记一笔">
         <Plus />
       </button>
       <nav className={`mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel/95 px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 backdrop-blur md:hidden`} style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
@@ -155,8 +155,8 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
-            <ClientNavLink key={item.href} href={item.href} className={`flex flex-col items-center gap-1 py-2 text-xs ${active ? "text-brand" : "text-stone"}`}>
-              <Icon className="h-5 w-5" /> {item.label}
+            <ClientNavLink key={item.href} href={item.href} className={`mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "bg-brand/10 text-brand" : "text-stone"}`}>
+              <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
             </ClientNavLink>
           );
         })}

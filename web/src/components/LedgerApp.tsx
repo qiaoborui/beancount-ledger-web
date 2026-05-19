@@ -1,13 +1,12 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
-import { useClientPathname } from "./ledger/hooks/useClientPathname";
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useGitStatus } from "./ledger/hooks/useGitStatus";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
@@ -67,8 +66,10 @@ const TIME_PRESETS: { key: TimePreset; label: string }[] = [
 ];
 
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
-  const initialPathname = usePathname();
-  const pathname = useClientPathname(initialPathname);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
@@ -90,13 +91,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     visibleAccountMap,
     setVisibleAccountMap,
   } = usePrivacySettings();
-  const [txnCategoryQuery, setTxnCategoryQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("category") ?? "") : "");
-  const [txnMetadataQuery, setTxnMetadataQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("metadata") ?? "") : "");
-  const [txnSearchQuery, setTxnSearchQuery] = useState(() => typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("q") ?? "") : "");
-  const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(() => {
-    if (typeof window === "undefined") return "prefix";
-    return new URLSearchParams(window.location.search).get("mode") === "exact" ? "exact" : "prefix";
-  });
+  const initialCategoryQuery = searchParams.get("category") ?? "";
+  const initialMetadataQuery = searchParams.get("metadata") ?? "";
+  const initialSearchQuery = searchParams.get("q") ?? "";
+  const initialMatchMode = searchParams.get("mode") === "exact" ? "exact" : "prefix";
+  const [txnCategoryQuery, setTxnCategoryQuery] = useState(initialCategoryQuery);
+  const [txnMetadataQuery, setTxnMetadataQuery] = useState(initialMetadataQuery);
+  const [txnSearchQuery, setTxnSearchQuery] = useState(initialSearchQuery);
+  const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(initialMatchMode);
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
   const [gitSaveOpen, setGitSaveOpen] = useState(false);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
@@ -151,7 +153,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast });
   const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast });
-  const { chart, accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
+  const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
   const { handleTouchStart, handleTouchEnd } = usePullToRefresh(refreshLedger);
 
   function setPreset(preset: TimePreset) {
@@ -179,18 +181,19 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     window.dispatchEvent(new Event("ledger-mobile-tabs-change"));
   }
 
-  useEffect(() => {
-    if (page !== "transactions" || typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    setTxnCategoryQuery(params.get("category") ?? "");
-    setTxnMetadataQuery(params.get("metadata") ?? "");
-    setTxnSearchQuery(params.get("q") ?? "");
-    setCategoryMatchMode(params.get("mode") === "exact" ? "exact" : "prefix");
-  }, [page, pathname]);
+  const searchKey = searchParams.toString();
 
   useEffect(() => {
-    if (page !== "transactions" || typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
+    if (page !== "transactions") return;
+    setTxnCategoryQuery(searchParams.get("category") ?? "");
+    setTxnMetadataQuery(searchParams.get("metadata") ?? "");
+    setTxnSearchQuery(searchParams.get("q") ?? "");
+    setCategoryMatchMode(searchParams.get("mode") === "exact" ? "exact" : "prefix");
+  }, [page, searchKey, searchParams]);
+
+  useEffect(() => {
+    if (page !== "transactions") return;
+    const params = new URLSearchParams(searchParams.toString());
     const setOrDelete = (key: string, value: string) => {
       if (value) params.set(key, value);
       else params.delete(key);
@@ -201,14 +204,21 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (categoryMatchMode === "exact") params.set("mode", "exact");
     else params.delete("mode");
     const query = params.toString();
-    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
-    if (`${window.location.pathname}${window.location.search}` !== nextUrl) window.history.replaceState(null, "", nextUrl);
-  }, [page, txnCategoryQuery, txnMetadataQuery, txnSearchQuery, categoryMatchMode]);
+    if (query === searchKey) return;
+    startRouteTransition(() => {
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    });
+  }, [categoryMatchMode, page, pathname, router, searchKey, searchParams, txnCategoryQuery, txnMetadataQuery, txnSearchQuery]);
 
   function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {
     setTxnCategoryQuery(account);
     setCategoryMatchMode(mode);
-    window.history.pushState(null, "", `/transactions?category=${encodeURIComponent(account)}${mode === "exact" ? "&mode=exact" : ""}`);
+    const params = new URLSearchParams();
+    params.set("category", account);
+    if (mode === "exact") params.set("mode", "exact");
+    startRouteTransition(() => {
+      router.push(`/transactions?${params.toString()}`);
+    });
   }
 
   if (authed === null) return <AppSkeleton />;
@@ -244,9 +254,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onUnlockSensitive={loginWithPasskey}
     >
       <Toast toast={toast} />
+      {isRoutePending && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
+      <div key={`${page}:${pathname}`} className="app-page-transition">
       {/* ── 时间范围选择器 ── */}
       <div className="mb-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {/* 第一行：标题 + 翻页按钮 */}
@@ -351,6 +363,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           onReverse={reverseTransaction}
         />
       )}
+      </div>
 
       <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} />
 

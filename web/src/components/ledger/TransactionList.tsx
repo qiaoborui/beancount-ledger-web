@@ -15,6 +15,15 @@ function metadataText(t: Txn): string {
   ].join(" ");
 }
 
+function useDebouncedValue<T>(value: T, delay = 160) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(id);
+  }, [delay, value]);
+  return debounced;
+}
+
 function matchesMetadataQuery(t: Txn, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -119,13 +128,16 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
-  const query = (categoryQuery ?? "").trim().toLowerCase();
-  const searchWords = (searchQuery ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
+  const debouncedMetadataQuery = useDebouncedValue(metadataQuery ?? "");
+  const query = debouncedCategoryQuery.trim().toLowerCase();
+  const searchWords = debouncedSearchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const metadataOptions = useMemo(() => Array.from(new Set(txns.flatMap((t) => [
     ...metadataPairs(t).map(([key, value]) => `${key}:${String(value)}`),
     ...(t.tags ?? []).map((tag) => `#${tag}`),
   ]))).sort(), [txns]);
-  const metadataQ = (metadataQuery ?? "").trim();
+  const metadataQ = debouncedMetadataQuery.trim();
 
   // 组合过滤：分类 AND 关键词搜索
   const rows = useMemo(() => {
@@ -162,13 +174,13 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     }
 
     return filtered;
-  }, [txns, query, searchWords, metadataQ, matchMode]);
+  }, [txns, query, debouncedSearchQuery, metadataQ, matchMode]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  useEffect(() => { setPage(1); }, [categoryQuery, searchQuery, metadataQuery, pageSize, txns.length, matchMode]);
+  useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
 
   return <section className="mt-6"><div className="mb-3 flex flex-col gap-3">
     {/* 搜索框 */}
@@ -288,5 +300,5 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       return;
     }
     onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: "CNY" })) }); setEditing(false); onClose(); }
-  return <div className="fixed inset-0 z-40 flex justify-end bg-ink/35"><div className="kami-float h-full w-full max-w-xl overflow-y-auto bg-paper px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1.25rem)]"><div className="flex items-center justify-between"><h2 className="font-serif text-2xl">流水详情</h2><button className="rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>关闭</button></div><div className="mt-4 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>{editing ? <div className="mt-4 grid gap-3"><input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><input className="border border-line bg-panel p-3" value={payee} onChange={(e) => setPayee(e.target.value)} /><input className="border border-line bg-panel p-3" value={narration} onChange={(e) => setNarration(e.target.value)} /><textarea className="min-h-28 border border-line bg-panel p-3 font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} /><input className="border border-line bg-panel p-3" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />{postings.map((p, i) => <div key={i} className="grid gap-2 sm:grid-cols-[1fr_140px]"><div><select className="w-full border border-line bg-panel p-3" value={accountOptions.some((account) => account.account === p.account) ? p.account : ""} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))}><option value="">选择账户 / 分类</option>{accountOptions.map((account) => <option key={account.account} value={account.account}>{optionLabel(account)}</option>)}</select><input list={`txn-account-options-${i}`} className="mt-2 w-full border border-line bg-panel p-3 text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} /><datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{optionLabel(account)}</option>)}</datalist></div><input className="border border-line bg-panel p-3" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} /></div>)}<button className="bg-brand px-4 py-3 text-paper" onClick={save}>保存修改</button></div> : <div className="mt-4"><div className="text-lg font-medium">{txn.date} {txn.payee}</div><div className="text-olive">{txn.narration}</div><MetadataBadges txn={txn} /><div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div><div className="mt-5 grid gap-2 sm:grid-cols-3"><button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(true)}>编辑</button><button className="border border-line px-4 py-3 text-[var(--danger)]" onClick={() => { const reason = prompt("删除原因（会注释原交易，不会物理删除）", "记错/重复记账") ?? ""; if (confirm("确认注释删除这笔交易？")) onDelete?.(txn.source, reason); }}>注释删除</button><button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button></div></div>}</div></div>;
+  return <div className="sheet-backdrop fixed inset-0 z-40 flex items-end justify-end bg-ink/35 sm:items-stretch"><div className="mobile-sheet kami-float h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-paper px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-5 sm:h-full sm:max-w-xl sm:rounded-none sm:pb-5 sm:pt-[calc(env(safe-area-inset-top)+1.25rem)]"><div className="flex items-center justify-between"><h2 className="font-serif text-2xl">流水详情</h2><button className="rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>关闭</button></div><div className="mt-4 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>{editing ? <div className="mt-4 grid gap-3"><input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><input className="border border-line bg-panel p-3" value={payee} onChange={(e) => setPayee(e.target.value)} /><input className="border border-line bg-panel p-3" value={narration} onChange={(e) => setNarration(e.target.value)} /><textarea className="min-h-28 border border-line bg-panel p-3 font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} /><input className="border border-line bg-panel p-3" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />{postings.map((p, i) => <div key={i} className="grid gap-2 sm:grid-cols-[1fr_140px]"><div><select className="w-full border border-line bg-panel p-3" value={accountOptions.some((account) => account.account === p.account) ? p.account : ""} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))}><option value="">选择账户 / 分类</option>{accountOptions.map((account) => <option key={account.account} value={account.account}>{optionLabel(account)}</option>)}</select><input list={`txn-account-options-${i}`} className="mt-2 w-full border border-line bg-panel p-3 text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} /><datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{optionLabel(account)}</option>)}</datalist></div><input className="border border-line bg-panel p-3" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} /></div>)}<button className="bg-brand px-4 py-3 text-paper" onClick={save}>保存修改</button></div> : <div className="mt-4"><div className="text-lg font-medium">{txn.date} {txn.payee}</div><div className="text-olive">{txn.narration}</div><MetadataBadges txn={txn} /><div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div><div className="mt-5 grid gap-2 sm:grid-cols-3"><button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(true)}>编辑</button><button className="border border-line px-4 py-3 text-[var(--danger)]" onClick={() => { const reason = prompt("删除原因（会注释原交易，不会物理删除）", "记错/重复记账") ?? ""; if (confirm("确认注释删除这笔交易？")) onDelete?.(txn.source, reason); }}>注释删除</button><button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button></div></div>}</div></div>;
 }
