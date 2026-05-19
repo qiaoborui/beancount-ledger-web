@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuthJson } from "@/lib/apiAuth";
-import { assertProvider, createBillImportPreview } from "@/lib/billImport";
+import { createBillImportPreview, optionalProvider } from "@/lib/billImport";
 
 export async function POST(request: Request) {
   const authError = await requireAuthJson();
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
 
   try {
     const form = await request.formData();
-    const provider = assertProvider(form.get("provider"));
+    const provider = optionalProvider(form.get("provider"));
     const file = form.get("file");
     if (!(file instanceof File)) return NextResponse.json({ error: "file is required" }, { status: 400 });
     const alipayFundRounding = form.get("alipayFundRounding") === "true";

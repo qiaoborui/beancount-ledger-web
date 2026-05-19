@@ -1,17 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, CheckCircle, FileUp, Loader2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
+import { formatCny } from "@/lib/money";
 
 type Provider = "alipay" | "wechat";
+type ProviderOverride = "auto" | Provider;
+
+type AccountOption = { account: string; label: string; group: string; active: boolean };
+type ImportPosting = { account: string; amount: string; currency: string };
+type ImportEntry = {
+  id: string;
+  date: string;
+  flag: "*" | "!";
+  payee: string;
+  narration: string;
+  source?: string;
+  orderId?: string;
+  merchantId?: string;
+  payTime?: string;
+  method?: string;
+  txType?: string;
+  status?: string;
+  type?: string;
+  categoryAccount: string;
+  fundingAccount: string;
+  amount: number;
+  currency: string;
+  metadata: Record<string, string>;
+  postings: ImportPosting[];
+};
 
 type ImportPreview = {
   importId: string;
   provider: Provider;
+  providerDetection: { provider: Provider; reason: string; confidence: "high" | "medium" | "low" };
   originalFilename: string;
   generatedBean: string;
   dedupReport: string;
+  entries: ImportEntry[];
+  accountOptions: AccountOption[];
   candidateCount: number;
   dateStart: string | null;
   dateEnd: string | null;
@@ -19,24 +48,44 @@ type ImportPreview = {
   error?: string;
 };
 
-type CommitResult = {
-  ok?: boolean;
-  outputFile?: string;
-  includeFile?: string;
-  count?: number;
-  beanText?: string;
-  error?: string;
-};
+type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
+
+function providerLabel(provider: Provider) {
+  return provider === "alipay" ? "支付宝" : "微信支付";
+}
+
+function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export function ImportPage({ onImported }: { onImported?: () => void }) {
-  const [provider, setProvider] = useState<Provider>("alipay");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
   const [alipayFundRounding, setAlipayFundRounding] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [entries, setEntries] = useState<ImportEntry[]>([]);
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
+
+  const categoryOptions = useMemo(() => {
+    const accounts = preview?.accountOptions ?? [];
+    return accounts.filter((account) => account.active && (account.account.startsWith("Expenses:") || account.account.startsWith("Income:")));
+  }, [preview]);
+
+  function resetForFile(next: File | null) {
+    setFile(next);
+    setPreview(null);
+    setEntries([]);
+    setCommitResult(null);
+    setError("");
+  }
 
   async function generatePreview() {
     if (!file) {
@@ -46,16 +95,18 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setLoading(true);
     setError("");
     setPreview(null);
+    setEntries([]);
     setCommitResult(null);
     try {
       const form = new FormData();
-      form.set("provider", provider);
+      if (providerOverride !== "auto") form.set("provider", providerOverride);
       form.set("file", file);
       form.set("alipayFundRounding", String(alipayFundRounding));
       const res = await fetch("/api/ledger/imports/preview", { method: "POST", body: form });
       const data = await readJson<ImportPreview>(res);
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
       setPreview(data);
+      setEntries(data.entries);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -72,7 +123,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       const res = await fetch("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, alipayFundRounding }),
+        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
       });
       const data = await readJson<CommitResult>(res);
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
@@ -85,7 +136,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     }
   }
 
-  const providerLabel = provider === "alipay" ? "支付宝" : "微信支付";
+  function updateEntry(id: string, patch: Partial<ImportEntry>) {
+    setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  }
+
+  function updateMetadata(id: string, key: string, value: string) {
+    setEntries((current) => current.map((entry) => entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry));
+  }
 
   return (
     <div className="space-y-6">
@@ -93,88 +150,60 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="font-serif text-2xl">账单导入</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">
-              上传支付宝 CSV 或微信支付 XLSX，后端会使用 double-entry-generator 生成 Beancount 分录，并优先按 <strong>source + orderId</strong> 去重。
-            </p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">上传支付宝 CSV 或微信支付 XLSX，系统会自动识别来源、生成分录、按订单 ID 去重，并在确认后把原始账单作为 Beancount document 保存到账本仓库。</p>
           </div>
-          <div className="rounded-2xl border border-line bg-paper px-4 py-3 text-xs leading-5 text-stone">
-            当前策略：订单 ID 优先；无订单 ID 时回退到日期 + 金额 + 资金账户。
-          </div>
+          {preview && <div className="rounded-2xl border border-line bg-paper px-4 py-3 text-xs leading-5 text-stone">识别为：<span className="font-medium text-warm">{providerLabel(preview.provider)}</span><br />{preview.providerDetection.reason}</div>}
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-[220px_1fr]">
-          <label className="block">
-            <span className="mb-1 block text-xs text-stone">账单来源</span>
-            <select className="w-full rounded-xl border border-line bg-paper px-3 py-2" value={provider} onChange={(event) => { setProvider(event.target.value as Provider); setPreview(null); setCommitResult(null); }}>
-              <option value="alipay">支付宝 CSV</option>
-              <option value="wechat">微信支付 XLSX</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs text-stone">账单文件</span>
-            <input className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" type="file" accept={provider === "alipay" ? ".csv" : ".xlsx,.xls"} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setPreview(null); setCommitResult(null); }} />
-          </label>
+        <div
+          className="mt-5 cursor-pointer rounded-3xl border-2 border-dashed border-line bg-paper p-8 text-center transition hover:border-brand/60 hover:bg-panel"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); resetForFile(event.dataTransfer.files?.[0] ?? null); }}
+        >
+          <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
+          <UploadCloud className="mx-auto h-10 w-10 text-brand" />
+          <div className="mt-3 font-medium">拖拽账单到这里，或点击选择文件</div>
+          <div className="mt-1 text-sm text-stone">支持支付宝 CSV、微信支付 XLSX/XLS</div>
+          {file && <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-sm"><FileSpreadsheet className="h-4 w-4" />{file.name}<span className="text-stone">{fileSize(file.size)}</span></div>}
         </div>
 
-        {provider === "alipay" && (
-          <label className="mt-4 flex items-start gap-3 rounded-2xl border border-line bg-paper p-4 text-sm">
-            <input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} />
-            <span>
-              <span className="font-medium">启用支付宝基金 9.99 → 10.00 补差规则</span>
-              <span className="mt-1 block text-xs leading-5 text-stone">仅当你确认该基金定投是支付 9.99、基金入账 10.00，且 0.01 记为收益/优惠时开启。</span>
-            </span>
-          </label>
-        )}
+        <button className="mt-4 flex items-center gap-2 text-sm text-stone underline" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</button>
+        {advancedOpen && <div className="mt-3 grid gap-4 rounded-2xl border border-line bg-paper p-4 md:grid-cols-2">
+          <label className="block text-sm"><span className="mb-1 block text-xs text-stone">账单来源覆盖</span><select className="w-full rounded-xl border border-line bg-panel px-3 py-2" value={providerOverride} onChange={(e) => setProviderOverride(e.target.value as ProviderOverride)}><option value="auto">自动识别</option><option value="alipay">支付宝 CSV</option><option value="wechat">微信支付 XLSX</option></select></label>
+          <label className="flex items-start gap-3 text-sm"><input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} /><span><span className="font-medium">支付宝基金 9.99 → 10.00 补差</span><span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span></span></label>
+        </div>}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={generatePreview} disabled={loading || !file}>
-            {loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <FileUp className="mr-2 inline h-4 w-4" />}生成预览
-          </button>
-          {file && <span className="text-sm text-stone">已选择：{file.name}</span>}
+          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={generatePreview} disabled={loading || !file}>{loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <FileUp className="mr-2 inline h-4 w-4" />}生成预览</button>
         </div>
       </section>
 
       {error && <div className="rounded-2xl border border-line bg-panel p-4 text-sm text-[var(--danger)]"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
 
-      {preview && (
-        <section className="card p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="font-serif text-xl">{providerLabel}导入预览</h3>
-              <p className="mt-1 text-sm text-stone">{preview.originalFilename} · {preview.candidateCount} 条生成交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p>
-            </div>
-            <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true}>
-              {committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本
-            </button>
-          </div>
+      {preview && <section className="card p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
+          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
+        </div>
+        {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
 
-          {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div>
-              <div className="mb-2 text-xs uppercase tracking-[0.22em] text-stone">dedup report</div>
-              <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre>
+        <div className="mt-5 space-y-3">
+          {entries.map((entry) => <article key={entry.id} className="rounded-2xl border border-line bg-paper p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-panel px-2 py-1 text-xs text-stone">{entry.date}</span><span className="font-medium">{entry.payee || "未命名商户"}</span><span className="text-sm text-warm">{formatCny(entry.amount * 100)}</span></div><input className="mt-2 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></div>
+              <label className="block min-w-[280px] text-xs text-stone">分类账户<select className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.categoryAccount} onChange={(e) => updateEntry(entry.id, { categoryAccount: e.target.value })}>{categoryOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}</select></label>
             </div>
-            <div>
-              <div className="mb-2 text-xs uppercase tracking-[0.22em] text-stone">generated bean</div>
-              <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre>
-            </div>
-          </div>
-        </section>
-      )}
+            <div className="mt-3 grid gap-3 text-xs text-stone md:grid-cols-3"><div>支付方式：{entry.method || "-"}</div><div>资金账户：{entry.fundingAccount || "-"}</div><div>订单号：{entry.orderId || "-"}</div></div>
+            <details className="mt-3"><summary className="cursor-pointer text-xs text-stone"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary><div className="mt-3 grid gap-2 md:grid-cols-2"><label className="text-xs text-stone">note<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.note ?? ""} onChange={(e) => updateMetadata(entry.id, "note", e.target.value)} placeholder="添加备注" /></label><label className="text-xs text-stone">purpose<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.purpose ?? ""} onChange={(e) => updateMetadata(entry.id, "purpose", e.target.value)} placeholder="例如: travel / work" /></label></div></details>
+          </article>)}
+        </div>
 
-      {commitResult?.ok && (
-        <section className="card p-5">
-          <h3 className="font-serif text-xl text-brand"><CheckCircle className="mr-2 inline h-5 w-5" />导入完成</h3>
-          <div className="mt-3 space-y-1 text-sm text-olive">
-            <div>写入交易：{commitResult.count} 条</div>
-            <div>导入文件：{commitResult.outputFile}</div>
-            <div>月份 include：{commitResult.includeFile}</div>
-            <div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div>
-          </div>
-        </section>
-      )}
+        <button className="mt-5 flex items-center gap-2 text-sm text-stone underline" onClick={() => setRawOpen((value) => !value)}>{rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}查看原始输出 / dedup 报告</button>
+        {rawOpen && <div className="mt-4 grid gap-4 lg:grid-cols-2"><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre></div>}
+      </section>}
+
+      {commitResult?.ok && <section className="card p-5"><h3 className="font-serif text-xl text-brand"><CheckCircle className="mr-2 inline h-5 w-5" />导入完成</h3><div className="mt-3 space-y-1 text-sm text-olive"><div>写入交易：{commitResult.count} 条</div><div>导入文件：{commitResult.outputFile}</div><div>月份 include：{commitResult.includeFile}</div>{commitResult.documentFile && <div>原始账单 document：{commitResult.documentFile}</div>}<div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div></div></section>}
     </div>
   );
 }

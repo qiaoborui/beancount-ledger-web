@@ -84,6 +84,7 @@ type FileSnapshot = { existed: boolean; content: string };
 type AppendItem = { date: string; beanText: string };
 
 type ImportProvider = "alipay" | "wechat";
+type ImportDocumentSource = { file: string; originalFilename: string; account: string };
 
 function includeLineForTransactionFile(file: string) {
   const relative = path.relative(path.dirname(mainBeanPath()), file).split(path.sep).join("/");
@@ -189,6 +190,20 @@ function importOutputPath(dateStart: string, dateEnd: string, provider: ImportPr
   return path.join(transactionsDir(), match[1], "imports", basename);
 }
 
+function importDocumentPath(dateStart: string, dateEnd: string, provider: ImportProvider, originalFilename: string, suffix?: string) {
+  const match = dateStart.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) throw new Error("导入文档缺少有效日期范围");
+  const safeSuffix = suffix?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12);
+  const ext = path.extname(originalFilename).toLowerCase() || (provider === "wechat" ? ".xlsx" : ".csv");
+  const basename = `${dateStart}_${dateEnd}-${provider}${safeSuffix ? `-${safeSuffix}` : ""}${ext}`;
+  return path.join(transactionsDir(), match[1], "documents", "imports", basename);
+}
+
+function documentDirective(date: string, account: string, outputFile: string, documentFile: string) {
+  const relative = path.relative(path.dirname(outputFile), documentFile).split(path.sep).join("/");
+  return `${date} document ${account} "${relative}"`;
+}
+
 function uniquePath(file: string) {
   if (!fs.existsSync(file)) return file;
   const ext = path.extname(file);
@@ -200,8 +215,9 @@ function uniquePath(file: string) {
   throw new Error("无法生成不冲突的导入文件名");
 }
 
-export async function writeImportedBeanFile(input: { dateStart: string; dateEnd: string; provider: ImportProvider; beanText: string; suffix?: string }): Promise<{ outputFile: string; includeFile: string }> {
+export async function writeImportedBeanFile(input: { dateStart: string; dateEnd: string; provider: ImportProvider; beanText: string; suffix?: string; documentSource?: ImportDocumentSource }): Promise<{ outputFile: string; includeFile: string; documentFile?: string }> {
   const outputFile = uniquePath(importOutputPath(input.dateStart, input.dateEnd, input.provider, input.suffix));
+  const documentFile = input.documentSource ? uniquePath(importDocumentPath(input.dateStart, input.dateEnd, input.provider, input.documentSource.originalFilename, input.suffix)) : undefined;
   const monthFile = transactionFileForDate(input.dateStart);
   const snapshots = new Map<string, FileSnapshot>();
 
@@ -212,8 +228,15 @@ export async function writeImportedBeanFile(input: { dateStart: string; dateEnd:
       ensureSnapshot(snapshots, outputFile);
 
       fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+      let documentLine = "";
+      if (input.documentSource && documentFile) {
+        ensureSnapshot(snapshots, documentFile);
+        fs.mkdirSync(path.dirname(documentFile), { recursive: true });
+        fs.copyFileSync(input.documentSource.file, documentFile);
+        documentLine = `${documentDirective(input.dateEnd, input.documentSource.account, outputFile, documentFile)}\n\n`;
+      }
       const header = `; ${input.provider === "alipay" ? "Alipay" : "WeChat Pay"} import: ${input.dateStart} .. ${input.dateEnd}\n`;
-      fs.writeFileSync(outputFile, `${header}${input.beanText.trimEnd()}\n`, "utf8");
+      fs.writeFileSync(outputFile, `${header}${documentLine}${input.beanText.trimEnd()}\n`, "utf8");
 
       const includeLine = includeLineRelativeTo(monthFile, outputFile);
       const monthBefore = fs.readFileSync(monthFile, "utf8");
@@ -230,7 +253,7 @@ export async function writeImportedBeanFile(input: { dateStart: string; dateEnd:
     }
   });
 
-  return { outputFile, includeFile: monthFile };
+  return { outputFile, includeFile: monthFile, documentFile };
 }
 
 export async function appendAccount(entry: { date: string; account: string; alias?: string; currency?: "CNY" }): Promise<void> {
