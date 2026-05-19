@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatCny } from "@/lib/money";
 import type { ParsedTransaction } from "@/lib/schemas";
 import type { AccountView, MetadataValue, Txn } from "./types";
@@ -272,11 +273,35 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     );
   })}
   {rows.length > 0 && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between"><div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} 条</div><div className="flex items-center gap-2"><select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>}
-  {selected && <TransactionDrawer txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+  {selected && <TransactionDrawerPortal txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
 
-function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: { txn: Txn; accounts: AccountView[]; onClose: () => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void }) {
+type TransactionDrawerProps = {
+  txn: Txn;
+  accounts: AccountView[];
+  onClose: () => void;
+  onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
+  onDelete?: (source: Txn["source"], reason: string) => void;
+  onReverse?: (source: Txn["source"], date: string) => void;
+};
+
+function TransactionDrawerPortal(props: TransactionDrawerProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  if (!mounted) return null;
+  return createPortal(<TransactionDrawer {...props} />, document.body);
+}
+
+function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
