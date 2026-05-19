@@ -91,6 +91,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
     edgeWidth: 144,
     threshold: 48,
     intentThreshold: 10,
+    guardBrowserBack: true,
   });
 
   return (

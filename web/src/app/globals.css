@@ -137,6 +137,7 @@ html[data-theme="dark"] {
 html {
   min-height: 100%;
   background: var(--brand);
+  overscroll-behavior-x: none;
   -webkit-tap-highlight-color: transparent;
   text-rendering: optimizeLegibility;
 }
@@ -148,6 +149,7 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   letter-spacing: 0.02em;
+  overscroll-behavior-x: none;
 }
 body::before {
   content: "";
