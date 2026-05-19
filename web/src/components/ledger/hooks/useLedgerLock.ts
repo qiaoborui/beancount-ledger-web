@@ -28,10 +28,12 @@ export function useLedgerLock({ passkeyRegistered, authed }: { passkeyRegistered
       if (hiddenAt && Date.now() - hiddenAt > lockAfterMs) lock();
     }
 
-    function handlePageHide(event: PageTransitionEvent) {
+    function handlePageHide() {
       if (!shouldUseLock()) return;
+      // Mobile browser/PWA edge gestures and bfcache transitions can emit pagehide
+      // during ordinary in-app navigation. Record hidden time, but let pageshow
+      // apply the same 5-minute timeout policy instead of immediately relocking.
       sessionStorage.setItem(hiddenAtKey, String(Date.now()));
-      if (!event.persisted) sessionStorage.setItem(lockedAtKey, String(Date.now()));
     }
 
     function handlePageShow() {

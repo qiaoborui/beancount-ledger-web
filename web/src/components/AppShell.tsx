@@ -167,7 +167,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
         </main>
       </div>
 
-      <button onClick={onAdd} className="kami-float fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="记一笔">
+      <button onClick={onAdd} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
         <Plus />
       </button>
       <nav className={`mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel/95 px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 backdrop-blur md:hidden`} style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
@@ -175,7 +175,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
-            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); } }} className={`mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "bg-brand/10 text-brand" : "text-stone"}`}>
+            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); } }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
               <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
             </ClientNavLink>
           );

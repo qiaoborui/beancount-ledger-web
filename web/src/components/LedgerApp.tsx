@@ -19,6 +19,7 @@ import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
+import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
@@ -26,6 +27,7 @@ import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
 import { HomePage } from "./ledger/HomePage";
+import { QuickActionsSheet } from "./ledger/QuickActionsSheet";
 import { ImportPage } from "./ledger/ImportPage";
 import { Toast } from "./ledger/shared";
 import { AccountManager, BalanceAssertionForm, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
@@ -119,6 +121,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(initialMatchMode);
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
   const [gitSaveOpen, setGitSaveOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [aiOpenSignal, setAiOpenSignal] = useState(0);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
@@ -177,6 +181,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast });
   const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
+  const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
+  useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => router.push("/accounts") });
 
   function setPreset(preset: TimePreset) {
     if (preset === "custom") {
@@ -258,6 +264,32 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     await refreshGitStatus();
   }
 
+  function handleActiveRouteTap() {
+    if (window.scrollY > 8) {
+      scrollToTop(pathname);
+      return;
+    }
+    void refreshLedger();
+  }
+
+  function openManualEntry() {
+    setEntryOpen(true);
+  }
+
+  function openAiEntry() {
+    setAiOpenSignal((value) => value + 1);
+  }
+
+  function openImportPage() {
+    router.push("/imports");
+  }
+
+  function openBalanceAssertion() {
+    router.push("/accounts");
+    if (!unlocked) void loginWithPasskey();
+    window.setTimeout(() => document.getElementById("balance-assertion-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 180);
+  }
+
   const offlineWriteMessage = "当前离线，写入操作会失败，请联网后再试。";
   const guardOnline = () => {
     if (online) return true;
@@ -287,17 +319,18 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     <AppShell
       pathname={pathname}
       onGit={openGitSave}
-      onAdd={() => setEntryOpen(true)}
+      onAdd={() => setQuickActionsOpen(true)}
       gitDirty={gitDirty}
       changedFileCount={changedFileCount}
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       onUnlockSensitive={loginWithPasskey}
-      onActiveRouteTap={() => scrollToTop(pathname)}
+      onActiveRouteTap={handleActiveRouteTap}
     >
       <Toast toast={toast} />
       {isRoutePending && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
+      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onBalanceAssertion={openBalanceAssertion} onGitSave={openGitSave} onRefresh={refreshLedger} />
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
@@ -325,9 +358,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="rounded-xl border border-line bg-panel px-3 py-2 text-warm" onClick={refreshLedger} disabled={refreshing || loadingFresh}>
-              <RefreshCw className={`inline h-4 w-4 text-brand ${refreshing || loadingFresh ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">刷新</span>
-            </button>
             {canNavigate && (
               <button
                 className="rounded-xl border border-line bg-panel px-3 py-2 text-brand"
@@ -413,7 +443,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       )}
       </div>
 
-      <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} />
+      <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} openSignal={aiOpenSignal} />
 
       {entryOpen && <EntryModal onClose={() => setEntryOpen(false)}><EntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></EntryModal>}
     </AppShell>

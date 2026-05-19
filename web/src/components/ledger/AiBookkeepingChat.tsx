@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
-import { Bot, MessageCircle, Send, Trash2, X } from "lucide-react";
+import { Bot, Send, Trash2, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import type { ParsedTransaction } from "@/lib/schemas";
 
@@ -43,7 +43,7 @@ function PreviewCard({ entry, index, busy, onRemove }: { entry: ParsedTransactio
   );
 }
 
-export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSignal = 0 }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; openSignal?: number }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ChatStatus>("idle");
@@ -53,6 +53,10 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
 
   useEffect(() => {
     if (!open) { setKeyboardHeight(0); return; }
@@ -210,13 +214,6 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
         </div>
       )}
 
-      <div className="fixed bottom-[calc(10.75rem+env(safe-area-inset-bottom))] right-4 z-30 sm:right-6 md:bottom-[calc(7rem+env(safe-area-inset-bottom))]">
-        <button type="button" className={`kami-float flex items-center gap-2 rounded-full bg-brand px-5 py-3 text-paper transition hover:-translate-y-0.5 ${open ? "invisible" : ""}`} onClick={() => setOpen((value) => !value)} aria-label="打开 AI 记账">
-          <MessageCircle className="h-5 w-5" />
-          <span className="font-medium">AI 记账</span>
-          {previews.length > 0 && <span className="rounded-full bg-paper px-2 py-0.5 text-xs text-brand">{previews.length}</span>}
-        </button>
-      </div>
     </>
   );
 }
