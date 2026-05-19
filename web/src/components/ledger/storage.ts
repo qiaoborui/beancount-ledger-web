@@ -1,4 +1,4 @@
-import type { LedgerCache, PrivacySettings, ThemeMode } from "./types";
+import type { LedgerCache, LedgerNavHref, PrivacySettings, ThemeMode } from "./types";
 import type { TimeRange } from "@/lib/timeRange";
 import { timeRangeCacheKey } from "@/lib/timeRange";
 
@@ -9,8 +9,12 @@ export const defaultPrivacySettings: PrivacySettings = {
   showIncomeStatementByDefault: false,
 };
 
+export const defaultMobileTabHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts"];
+
+const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts", "/budgets", "/net-worth", "/income-statement", "/reconcile", "/settings"];
 const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
+const mobileTabsKey = "ledger_mobile_tabs";
 
 export function readLedgerCache(timeRange: TimeRange): LedgerCache | null {
   if (typeof window === "undefined") return null;
@@ -65,6 +69,29 @@ export function writeThemeMode(mode: ThemeMode) {
   try {
     if (mode === "system") localStorage.removeItem(themeModeKey);
     else localStorage.setItem(themeModeKey, mode);
+  } catch {
+    // Ignore private mode / storage quota errors. The in-memory setting still works.
+  }
+}
+
+export function readMobileTabHrefs(): LedgerNavHref[] {
+  if (typeof window === "undefined") return defaultMobileTabHrefs;
+  try {
+    const raw = localStorage.getItem(mobileTabsKey);
+    if (!raw) return defaultMobileTabHrefs;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return defaultMobileTabHrefs;
+    const valid = parsed.filter((href): href is LedgerNavHref => allLedgerNavHrefs.includes(href));
+    return valid.length ? Array.from(new Set(valid)).slice(0, 5) : defaultMobileTabHrefs;
+  } catch {
+    return defaultMobileTabHrefs;
+  }
+}
+
+export function writeMobileTabHrefs(hrefs: LedgerNavHref[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(mobileTabsKey, JSON.stringify(Array.from(new Set(hrefs)).slice(0, 5)));
   } catch {
     // Ignore private mode / storage quota errors. The in-memory setting still works.
   }
