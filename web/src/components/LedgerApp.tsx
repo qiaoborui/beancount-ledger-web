@@ -75,13 +75,18 @@ const TIME_PRESETS: { key: TimePreset; label: string }[] = [
   { key: "all", label: "全部" },
 ];
 
+function readSessionAuthed(): boolean | null {
+  if (typeof window === "undefined") return null;
+  return sessionStorage.getItem("ledger_authed") === "1" ? true : null;
+}
+
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
   const [customStart, setCustomStart] = useState(timeRange.start);
