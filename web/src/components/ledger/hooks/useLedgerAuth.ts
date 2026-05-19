@@ -1,7 +1,7 @@
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 
-export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: { password: string; setPassword: (value: string) => void; setAuthed: (authenticated: boolean) => void; setUnlocked: (unlocked: boolean) => void; setPasskeyRegistered: (registered: boolean) => void; load: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; clearToast: () => void }) {
+export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, showToast, clearToast }: { password: string; setPassword: (value: string) => void; setAuthed: (authenticated: boolean) => void; setUnlocked: (unlocked: boolean) => void; setPasskeyRegistered: (registered: boolean) => void; load: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; clearToast: () => void }) {
   async function login() {
     const res = await fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
     if (res.ok) {
@@ -11,7 +11,6 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
       sessionStorage.setItem("ledger_authed", "1");
       setUnlocked(true);
       setAuthed(true);
-      load();
     } else {
       showToast("error", "密码不对");
     }
@@ -33,7 +32,6 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
       setUnlocked(true);
       setAuthed(true);
       clearToast();
-      load();
     } catch (error) {
       showToast("error", error instanceof Error ? error.message : String(error));
     }

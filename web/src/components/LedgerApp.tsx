@@ -205,9 +205,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     else params.delete("mode");
     const query = params.toString();
     if (query === searchKey) return;
-    startRouteTransition(() => {
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-    });
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }, [categoryMatchMode, page, pathname, router, searchKey, searchParams, txnCategoryQuery, txnMetadataQuery, txnSearchQuery]);
 
   function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {

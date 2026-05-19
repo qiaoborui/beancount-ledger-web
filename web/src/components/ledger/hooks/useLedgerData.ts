@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
@@ -42,6 +42,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(null);
+  const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const clearLedgerData = useCallback(() => {
     setSummary(null);
@@ -77,45 +78,73 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
     setLastSyncedAt(cache.savedAt);
   }, []);
 
-  const fetchFreshLedger = useCallback(async (range: TimeRange) => {
-    setLoadingFresh(true);
+  const clearSensitiveData = useCallback(() => {
+    setBalances({});
+    setNetWorthRows([]);
+    setMonthEndNetWorthRows([]);
+    setNetWorthWindows(null);
+    setCreditCards([]);
+    setTxns([]);
+    setReconciliationRows([]);
+    setAccountStatuses([]);
+    setIncomeStatement((current) => current ? {
+      ...current,
+      income: [],
+      totalIncome: 0,
+      netIncome: 0,
+    } : null);
+  }, []);
+
+  const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean } = {}) => {
     const params = timeRangeToParams(range);
-    try {
-      const requests = [
-        fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: NetWorthPoint[]; monthEndNetWorth?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[] }>(`/api/ledger/summary?${params}`),
-        fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
-        fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
-        unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }, onSensitiveLocked) : Promise.resolve({ rows: [] }),
-        fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
-        fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
-        unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }, onSensitiveLocked) : Promise.resolve({ statuses: [] }),
-      ] as const;
-      const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
-      const fresh: LedgerCache = {
-        summary: s.summary ?? null,
-        balances: unlocked ? (s.balances ?? {}) : {},
-        netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
-        monthEndNetWorthRows: unlocked ? (s.monthEndNetWorth ?? []) : [],
-        netWorthWindows: unlocked ? (s.netWorthWindows ?? null) : null,
-        creditCards: unlocked ? (s.creditCards ?? []) : [],
-        txns: t.transactions ?? [],
-        budgetRows: b.rows ?? [],
-        reconciliationRows: unlocked ? (r.rows ?? []) : [],
-        accounts: a.accounts ?? [],
-        accountStatuses: unlocked ? (st.statuses ?? []) : [],
-        incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
-        ledgerVersion: version ?? undefined,
-        savedAt: Date.now(),
-      };
-      applyCache(fresh);
-      if (unlocked) {
-        writeLedgerCache(range, fresh);
-        freshLedgerCacheKeys.add(timeRangeToParams(range));
+    const inFlightKey = `${params}:${unlocked ? "unlocked" : "locked"}`;
+    const existing = freshInFlightRef.current.get(inFlightKey);
+    if (existing) return existing;
+
+    const run = async () => {
+      if (!options.background) setLoadingFresh(true);
+      try {
+        const requests = [
+          fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: NetWorthPoint[]; monthEndNetWorth?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[] }>(`/api/ledger/summary?${params}`),
+          fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
+          fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
+          unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }, onSensitiveLocked) : Promise.resolve({ rows: [] }),
+          fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
+          fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
+          unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }, onSensitiveLocked) : Promise.resolve({ statuses: [] }),
+        ] as const;
+        const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
+        const fresh: LedgerCache = {
+          summary: s.summary ?? null,
+          balances: unlocked ? (s.balances ?? {}) : {},
+          netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
+          monthEndNetWorthRows: unlocked ? (s.monthEndNetWorth ?? []) : [],
+          netWorthWindows: unlocked ? (s.netWorthWindows ?? null) : null,
+          creditCards: unlocked ? (s.creditCards ?? []) : [],
+          txns: t.transactions ?? [],
+          budgetRows: b.rows ?? [],
+          reconciliationRows: unlocked ? (r.rows ?? []) : [],
+          accounts: a.accounts ?? [],
+          accountStatuses: unlocked ? (st.statuses ?? []) : [],
+          incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
+          ledgerVersion: version ?? undefined,
+          savedAt: Date.now(),
+        };
+        applyCache(fresh);
+        if (unlocked) {
+          writeLedgerCache(range, fresh);
+          freshLedgerCacheKeys.add(timeRangeToParams(range));
+        }
+        onGitStatusRefresh();
+      } finally {
+        if (!options.background) setLoadingFresh(false);
+        freshInFlightRef.current.delete(inFlightKey);
       }
-      onGitStatusRefresh();
-    } finally {
-      setLoadingFresh(false);
-    }
+    };
+
+    const promise = run();
+    freshInFlightRef.current.set(inFlightKey, promise);
+    return promise;
   }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked]);
 
   const load = useCallback(async (forceFresh = false) => {
@@ -141,15 +170,15 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
       if (cached) {
         applyCache(cached);
         if (freshLedgerCacheKeys.has(cacheKey)) return;
-        fetchFreshLedger(timeRange).catch((error) => {
-          showToast("error", error instanceof Error ? error.message : "刷新失败");
+        fetchFreshLedger(timeRange, { background: true }).catch(() => {
+          // Keep showing cached data if background refresh fails.
         });
         return;
       }
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, showToast, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;
@@ -199,6 +228,10 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
       setRefreshing(false);
     }
   }
+
+  useEffect(() => {
+    if (!unlocked) clearSensitiveData();
+  }, [clearSensitiveData, unlocked]);
 
   useEffect(() => { load(); }, [load]);
 

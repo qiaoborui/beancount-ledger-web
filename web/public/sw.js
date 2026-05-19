@@ -1,12 +1,13 @@
 const CACHE_NAME = "beancount-ledger-shell-v5";
-const API_CACHE_NAME = "beancount-ledger-api-v1";
+const API_CACHE_NAME = "beancount-ledger-api-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+// Only cache read-only API responses that do not vary by sensitive unlock state.
+// Summary, transactions, and income-statement intentionally stay network-only here because
+// the server returns different payloads before/after Face ID / Passkey unlock. Caching them
+// in the service worker can leak unlocked data after the app locks again.
 const STALE_WHILE_REVALIDATE_API_PATHS = new Set([
-  "/api/ledger/summary",
-  "/api/ledger/transactions",
   "/api/ledger/budget",
   "/api/ledger/accounts",
-  "/api/ledger/income-statement",
   "/api/ledger/version",
 ]);
 

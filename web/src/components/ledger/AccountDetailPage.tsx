@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { ClientNavLink } from "./ClientNavLink";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import {
@@ -96,12 +96,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
     return (
       <div className="card p-6 text-center">
         <p className="text-[var(--danger)]">加载失败: {error}</p>
-        <Link
+        <ClientNavLink
           href="/accounts"
           className="mt-4 inline-block text-sm text-brand underline"
         >
           ← 返回账户列表
-        </Link>
+        </ClientNavLink>
       </div>
     );
   }
@@ -130,12 +130,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
     <div className="space-y-6">
       {/* Header */}
       <section className="card p-4">
-        <Link
+        <ClientNavLink
           href="/accounts"
           className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-warm"
         >
           <ArrowLeft className="h-4 w-4" /> 账户列表
-        </Link>
+        </ClientNavLink>
         <h1 className="font-serif text-2xl font-medium">{data.label}</h1>
         {data.alias && data.alias !== data.label && (
           <p className="mt-1 text-sm text-olive">{data.alias}</p>
