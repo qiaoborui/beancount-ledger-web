@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, BookOpen, ChevronLeft, ChevronRight, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
@@ -11,6 +11,7 @@ export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof 
   { href: "/transactions", label: "流水", icon: List, mobilePrimary: true },
   { href: "/accounts", label: "账户", icon: BookOpen, mobilePrimary: true },
   { href: "/budgets", label: "预算", icon: BarChart3, mobilePrimary: false },
+  { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false },
   { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false },
   { href: "/reconcile", label: "对账", icon: Scale, mobilePrimary: false },

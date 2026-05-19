@@ -11,7 +11,7 @@ export const defaultPrivacySettings: PrivacySettings = {
 
 export const defaultMobileTabHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts"];
 
-const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts", "/budgets", "/net-worth", "/income-statement", "/reconcile", "/settings"];
+const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts", "/budgets", "/imports", "/net-worth", "/income-statement", "/reconcile", "/settings"];
 const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
 const mobileTabsKey = "ledger_mobile_tabs";

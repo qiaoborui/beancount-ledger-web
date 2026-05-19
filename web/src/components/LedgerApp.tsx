@@ -24,6 +24,7 @@ import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
 import { HomePage } from "./ledger/HomePage";
+import { ImportPage } from "./ledger/ImportPage";
 import { IncomeStatementPage } from "./ledger/IncomeStatementPage";
 import { Toast } from "./ledger/shared";
 import { AccountManager, BalanceAssertionForm, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
@@ -38,6 +39,7 @@ function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
+  if (pathname.startsWith("/imports")) return "imports";
   if (pathname.startsWith("/reconcile")) return "reconcile";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/income-statement")) return "income-statement";
@@ -321,6 +323,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={appendAssertion} accounts={balanceAccounts} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额、余额断言和对账数据需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
+      {page === "imports" && <ImportPage onImported={() => { load(true); refreshGitStatus(); }} />}
       {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={reconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {(page === "home" || page === "transactions") && (
         <TransactionList
@@ -352,11 +355,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "net-worth" && page !== "settings";
+  const isMonthScoped = page !== "accounts" && page !== "net-worth" && page !== "settings" && page !== "imports";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
     budgets: { eyebrow: "budget period", title: `${label} 预算` },
+    imports: { eyebrow: "statement import", title: "账单导入" },
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
     accounts: { eyebrow: "account book", title: "账户与余额" },
     "net-worth": { eyebrow: "net worth", title: "净资产" },

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { accountsBeanPath, mainBeanPath, transactionFileForDate } from "./ledgerPaths";
+import { accountsBeanPath, mainBeanPath, transactionFileForDate, transactionsDir } from "./ledgerPaths";
 import type { BalanceAssertion, LedgerEntry, MetadataValue, ParsedTransaction } from "./schemas";
 
 let writeQueue: Promise<unknown> = Promise.resolve();
@@ -83,8 +83,15 @@ type FileSnapshot = { existed: boolean; content: string };
 
 type AppendItem = { date: string; beanText: string };
 
+type ImportProvider = "alipay" | "wechat";
+
 function includeLineForTransactionFile(file: string) {
   const relative = path.relative(path.dirname(mainBeanPath()), file).split(path.sep).join("/");
+  return `include "${relative}"`;
+}
+
+function includeLineRelativeTo(baseFile: string, includedFile: string) {
+  const relative = path.relative(path.dirname(baseFile), includedFile).split(path.sep).join("/");
   return `include "${relative}"`;
 }
 
@@ -172,6 +179,58 @@ export async function appendLedgerEntries(entries: LedgerEntry[]): Promise<strin
   }));
   await withWriteLock(async () => appendItemsChecked(items));
   return items.map((item) => item.beanText);
+}
+
+function importOutputPath(dateStart: string, dateEnd: string, provider: ImportProvider, suffix?: string) {
+  const match = dateStart.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) throw new Error("导入交易缺少有效日期范围");
+  const safeSuffix = suffix?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12);
+  const basename = `${dateStart}_${dateEnd}-${provider}${safeSuffix ? `-${safeSuffix}` : ""}.bean`;
+  return path.join(transactionsDir(), match[1], "imports", basename);
+}
+
+function uniquePath(file: string) {
+  if (!fs.existsSync(file)) return file;
+  const ext = path.extname(file);
+  const base = file.slice(0, -ext.length);
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${base}-${i}${ext}`;
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error("无法生成不冲突的导入文件名");
+}
+
+export async function writeImportedBeanFile(input: { dateStart: string; dateEnd: string; provider: ImportProvider; beanText: string; suffix?: string }): Promise<{ outputFile: string; includeFile: string }> {
+  const outputFile = uniquePath(importOutputPath(input.dateStart, input.dateEnd, input.provider, input.suffix));
+  const monthFile = transactionFileForDate(input.dateStart);
+  const snapshots = new Map<string, FileSnapshot>();
+
+  await withWriteLock(async () => {
+    try {
+      ensureMonthlyFileAndInclude(monthFile, input.dateStart, snapshots);
+      ensureSnapshot(snapshots, monthFile);
+      ensureSnapshot(snapshots, outputFile);
+
+      fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+      const header = `; ${input.provider === "alipay" ? "Alipay" : "WeChat Pay"} import: ${input.dateStart} .. ${input.dateEnd}\n`;
+      fs.writeFileSync(outputFile, `${header}${input.beanText.trimEnd()}\n`, "utf8");
+
+      const includeLine = includeLineRelativeTo(monthFile, outputFile);
+      const monthBefore = fs.readFileSync(monthFile, "utf8");
+      const hasInclude = monthBefore.split(/\r?\n/).some((line) => line.trim() === includeLine);
+      if (!hasInclude) {
+        const separator = monthBefore.endsWith("\n") ? "" : "\n";
+        fs.writeFileSync(monthFile, `${monthBefore}${separator}${includeLine}\n`, "utf8");
+      }
+
+      runBeanCheck();
+    } catch (error) {
+      restoreSnapshots(snapshots);
+      throw error;
+    }
+  });
+
+  return { outputFile, includeFile: monthFile };
 }
 
 export async function appendAccount(entry: { date: string; account: string; alias?: string; currency?: "CNY" }): Promise<void> {
