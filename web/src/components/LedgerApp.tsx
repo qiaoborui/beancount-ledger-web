@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -71,21 +71,6 @@ function accountFromPathname(pathname: string): string | null {
   }
 }
 
-const routeOrder: LedgerPage[] = ["home", "transactions", "accounts", "budgets", "imports", "net-worth", "income-statement", "reconcile", "settings"];
-
-function routeTransitionClass(previousPathname: string, nextPathname: string) {
-  if (previousPathname === nextPathname) return "app-page-transition-neutral";
-  const previousAccount = accountFromPathname(previousPathname);
-  const nextAccount = accountFromPathname(nextPathname);
-  if (!previousAccount && nextAccount) return "app-page-transition-push";
-  if (previousAccount && !nextAccount && nextPathname === "/accounts") return "app-page-transition-pop";
-
-  const previousIndex = routeOrder.indexOf(pageFromPathname(previousPathname));
-  const nextIndex = routeOrder.indexOf(pageFromPathname(nextPathname));
-  if (previousIndex < 0 || nextIndex < 0 || previousIndex === nextIndex) return "app-page-transition-neutral";
-  return nextIndex > previousIndex ? "app-page-transition-forward" : "app-page-transition-back";
-}
-
 const TIME_PRESETS: { key: TimePreset; label: string }[] = [
   { key: "week", label: "本周" },
   { key: "month", label: "本月" },
@@ -103,7 +88,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const previousPathnameRef = useRef(pathname);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());
@@ -230,11 +214,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const searchKey = searchParams.toString();
   const shortcutAction = searchParams.get("action");
-  const transitionClassName = routeTransitionClass(previousPathnameRef.current, pathname);
-
-  useEffect(() => {
-    previousPathnameRef.current = pathname;
-  }, [pathname]);
 
   useEffect(() => {
     if (page !== "transactions") return;
@@ -375,7 +354,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       <div
         key={pathname}
-        className={`app-page-transition ${transitionClassName} app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+        className={`app-page-transition app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
         style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
