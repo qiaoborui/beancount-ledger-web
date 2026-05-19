@@ -3,6 +3,7 @@
 import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
+import { haptic } from "./ledger/haptics";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref } from "./ledger/types";
 
@@ -63,6 +64,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
 
   function markNavigationPending(href: string) {
     if (href === pathname) return;
+    haptic(5);
     setNavPendingHref(href);
     if (navPendingTimer.current) clearTimeout(navPendingTimer.current);
     navPendingTimer.current = setTimeout(() => {
@@ -78,6 +80,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
   }
 
   function openMobileMenu() {
+    haptic(6);
     if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
     setMobileMenuClosing(false);
     setMobileMenuOpen(true);
@@ -95,6 +98,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
   }
 
   function toggleSidebarCollapsed() {
+    haptic(5);
     setSidebarCollapsed((current) => {
       const next = !current;
       writeSidebarCollapsed(next);
@@ -196,7 +200,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
         </main>
       </div>
 
-      <button onClick={onAdd} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
+      <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
         <Plus />
       </button>
       <nav className={`mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel/95 px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 backdrop-blur md:hidden`} style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>

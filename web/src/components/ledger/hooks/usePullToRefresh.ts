@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { haptic } from "../haptics";
 
 const PULL_THRESHOLD = 92;
 const MAX_PULL = 128;
@@ -39,7 +40,7 @@ export function usePullToRefresh(refresh: () => void | Promise<void>, disabled =
     setPullStartY(null);
     setPullDistance(0);
     if (!shouldRefresh) return;
-    navigator.vibrate?.(8);
+    haptic(8);
     setRefreshingByGesture(true);
     try {
       await refresh();

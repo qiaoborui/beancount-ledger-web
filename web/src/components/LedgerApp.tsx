@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -18,6 +18,7 @@ import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
 import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
+import { usePendingLedgerWrites } from "./ledger/hooks/usePendingLedgerWrites";
 import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
@@ -36,6 +37,7 @@ import { AccountDetailPage } from "./ledger/AccountDetailPage";
 import { ReconcilePage } from "./ledger/ReconcilePage";
 import { SettingsPage } from "./ledger/SettingsPage";
 import { TransactionList } from "./ledger/TransactionList";
+import { haptic } from "./ledger/haptics";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 
 const NetWorthPage = dynamic(() => import("./ledger/NetWorthPage").then((mod) => mod.NetWorthPage), {
@@ -69,6 +71,21 @@ function accountFromPathname(pathname: string): string | null {
   }
 }
 
+const routeOrder: LedgerPage[] = ["home", "transactions", "accounts", "budgets", "imports", "net-worth", "income-statement", "reconcile", "settings"];
+
+function routeTransitionClass(previousPathname: string, nextPathname: string) {
+  if (previousPathname === nextPathname) return "app-page-transition-neutral";
+  const previousAccount = accountFromPathname(previousPathname);
+  const nextAccount = accountFromPathname(nextPathname);
+  if (!previousAccount && nextAccount) return "app-page-transition-push";
+  if (previousAccount && !nextAccount && nextPathname === "/accounts") return "app-page-transition-pop";
+
+  const previousIndex = routeOrder.indexOf(pageFromPathname(previousPathname));
+  const nextIndex = routeOrder.indexOf(pageFromPathname(nextPathname));
+  if (previousIndex < 0 || nextIndex < 0 || previousIndex === nextIndex) return "app-page-transition-neutral";
+  return nextIndex > previousIndex ? "app-page-transition-forward" : "app-page-transition-back";
+}
+
 const TIME_PRESETS: { key: TimePreset; label: string }[] = [
   { key: "week", label: "本周" },
   { key: "month", label: "本月" },
@@ -86,6 +103,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const previousPathnameRef = useRef(pathname);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());
@@ -177,8 +195,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     clearToast: () => setToast(null),
   });
 
-  const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast });
-  const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast });
+  const { pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, syncPendingWrites, syncingPendingWrites } = usePendingLedgerWrites({ load, refreshGitStatus, showToast });
+  const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast, enqueuePendingWrites });
+  const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites });
   const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
@@ -210,6 +229,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   const searchKey = searchParams.toString();
+  const shortcutAction = searchParams.get("action");
+  const transitionClassName = routeTransitionClass(previousPathnameRef.current, pathname);
+
+  useEffect(() => {
+    previousPathnameRef.current = pathname;
+  }, [pathname]);
 
   useEffect(() => {
     if (page !== "transactions") return;
@@ -235,6 +260,20 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (query === searchKey) return;
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }, [categoryMatchMode, page, pathname, router, searchKey, searchParams, txnCategoryQuery, txnMetadataQuery, txnSearchQuery]);
+
+  useEffect(() => {
+    if (!authed || !shortcutAction) return;
+    haptic(8);
+    if (shortcutAction === "quick-entry" || shortcutAction === "new-entry") setEntryOpen(true);
+    if (shortcutAction === "ai-entry") setAiOpenSignal((value) => value + 1);
+    if (shortcutAction === "quick-actions") setQuickActionsOpen(true);
+    if (shortcutAction === "sync-pending") void syncPendingWrites();
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("action");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [authed, pathname, router, searchParams, shortcutAction, syncPendingWrites]);
 
   function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {
     setTxnCategoryQuery(account);
@@ -303,8 +342,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     setGitSaveOpen(false);
   }
 
-  const guardedAppendPreviews = () => { if (guardOnline()) appendPreviews(); };
-  const guardedAppendAssertion = () => { if (guardOnline()) appendAssertion(); };
+  const guardedAppendPreviews = () => { appendPreviews(); };
+  const guardedAppendAssertion = () => { appendAssertion(); };
   const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { if (guardOnline()) updateTransaction(...args); };
   const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { if (guardOnline()) deleteTransaction(...args); };
   const guardedReverseTransaction = (...args: Parameters<typeof reverseTransaction>) => { if (guardOnline()) reverseTransaction(...args); };
@@ -330,13 +369,13 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     >
       <Toast toast={toast} />
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
-      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onBalanceAssertion={openBalanceAssertion} onGitSave={openGitSave} onRefresh={refreshLedger} />
+      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onBalanceAssertion={openBalanceAssertion} onGitSave={openGitSave} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} />
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
       <div
         key={pathname}
-        className={`app-page-transition app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+        className={`app-page-transition ${transitionClassName} app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
         style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -360,6 +399,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             <strong className="font-serif text-2xl font-medium">{header.title}</strong>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
               {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
+              {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={syncPendingWrites} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
               <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={handleSensitiveLocked}>敏感数据已解锁 · 重新隐藏</button>}

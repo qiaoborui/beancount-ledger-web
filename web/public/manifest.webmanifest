@@ -15,8 +15,22 @@
     {
       "name": "记一笔",
       "short_name": "记账",
-      "description": "快速打开账本总览并新增交易",
-      "url": "/",
+      "description": "直接打开记账面板",
+      "url": "/?action=quick-entry",
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "AI 记账",
+      "short_name": "AI",
+      "description": "打开 AI 记账面板",
+      "url": "/?action=ai-entry",
+      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "同步待写入",
+      "short_name": "同步",
+      "description": "打开账本并同步离线记录",
+      "url": "/?action=sync-pending",
       "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
     },
     {
