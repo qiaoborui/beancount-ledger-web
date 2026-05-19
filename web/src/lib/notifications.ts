@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
-import { notificationsPath } from "./ledgerPaths";
-import { sendWebPushToAll } from "./webPush";
+import { notificationsPathForUser } from "./ledgerPaths";
+import { sendWebPushToAllForUser } from "./webPush";
 
 export type Insight = {
   id: string;
@@ -36,10 +36,11 @@ export type StoredNotification = {
 
 type NotificationStore = { version: 1; notifications: StoredNotification[] };
 
-let writeQueue: Promise<unknown> = Promise.resolve();
-function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn);
-  writeQueue = next.catch(() => undefined);
+const writeQueues = new Map<string, Promise<unknown>>();
+function withWriteLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  const queue = writeQueues.get(userId) ?? Promise.resolve();
+  const next = queue.then(fn, fn);
+  writeQueues.set(userId, next.catch(() => undefined));
   return next;
 }
 
@@ -55,8 +56,8 @@ export function notificationId(month: string, insight: Insight) {
   return `${month}:${insight.id}`;
 }
 
-export function readNotificationStore(): NotificationStore {
-  const file = notificationsPath();
+export function readNotificationStoreForUser(userId: string): NotificationStore {
+  const file = notificationsPathForUser(userId);
   if (!fs.existsSync(file)) return emptyStore();
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as NotificationStore;
@@ -66,13 +67,21 @@ export function readNotificationStore(): NotificationStore {
   }
 }
 
-function writeNotificationStore(store: NotificationStore) {
-  fs.writeFileSync(notificationsPath(), `${JSON.stringify(store, null, 2)}\n`, "utf8");
+export function readNotificationStore(): NotificationStore {
+  return readNotificationStoreForUser("owner");
 }
 
-export async function mergeInsightsIntoNotifications(month: string, insights: Insight[]) {
-  return withWriteLock(async () => {
-    const store = readNotificationStore();
+function writeNotificationStoreForUser(userId: string, store: NotificationStore) {
+  fs.writeFileSync(notificationsPathForUser(userId), `${JSON.stringify(store, null, 2)}\n`, "utf8");
+}
+
+function writeNotificationStore(store: NotificationStore) {
+  writeNotificationStoreForUser("owner", store);
+}
+
+export async function mergeInsightsIntoNotificationsForUser(userId: string, month: string, insights: Insight[]) {
+  return withWriteLock(userId, async () => {
+    const store = readNotificationStoreForUser(userId);
     const now = new Date().toISOString();
     const currentIds = new Set(insights.map((insight) => notificationId(month, insight)));
     const byId = new Map(store.notifications.map((notification) => [notification.id, notification]));
@@ -136,10 +145,10 @@ export async function mergeInsightsIntoNotifications(month: string, insights: In
       }
     }
 
-    if (changed) writeNotificationStore(store);
+    if (changed) writeNotificationStoreForUser(userId, store);
     if (createdNotifications.length) {
       const mostImportant = [...createdNotifications].sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0];
-      await sendWebPushToAll({
+      await sendWebPushToAllForUser(userId, {
         title: createdNotifications.length === 1 ? mostImportant.title : `我的账本：${createdNotifications.length} 条新提醒`,
         body: createdNotifications.length === 1 ? mostImportant.detail : mostImportant.detail,
         url: "/",
@@ -150,6 +159,10 @@ export async function mergeInsightsIntoNotifications(month: string, insights: In
   });
 }
 
+export async function mergeInsightsIntoNotifications(month: string, insights: Insight[]) {
+  return mergeInsightsIntoNotificationsForUser("owner", month, insights);
+}
+
 function severityRank(severity: Insight["severity"]) {
   return severity === "critical" ? 0 : severity === "warning" ? 1 : 2;
 }
@@ -158,9 +171,9 @@ function statusRank(status: NotificationStatus) {
   return status === "unread" ? 0 : status === "read" ? 1 : status === "dismissed" ? 2 : 3;
 }
 
-export async function updateNotificationStatus(ids: string[], status: NotificationStatus) {
-  return withWriteLock(async () => {
-    const store = readNotificationStore();
+export async function updateNotificationStatusForUser(userId: string, ids: string[], status: NotificationStatus) {
+  return withWriteLock(userId, async () => {
+    const store = readNotificationStoreForUser(userId);
     const now = new Date().toISOString();
     const idSet = new Set(ids);
     for (const notification of store.notifications) {
@@ -176,7 +189,11 @@ export async function updateNotificationStatus(ids: string[], status: Notificati
       if (status === "dismissed") notification.dismissedAt = now;
       if (status === "resolved") notification.resolvedAt = now;
     }
-    writeNotificationStore(store);
+    writeNotificationStoreForUser(userId, store);
     return store.notifications.filter((notification) => idSet.has(notification.id));
   });
+}
+
+export async function updateNotificationStatus(ids: string[], status: NotificationStatus) {
+  return updateNotificationStatusForUser("owner", ids, status);
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthJson } from "@/lib/apiAuth";
-import { sendWebPushToAll } from "@/lib/webPush";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
+import { sendWebPushToAllForUser } from "@/lib/webPush";
 
 const NotifySchema = z.object({
   title: z.string().min(1).max(80),
@@ -11,7 +11,7 @@ const NotifySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const parsed = NotifySchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await sendWebPushToAll(parsed.data);
+    const result = await sendWebPushToAllForUser(userId, parsed.data);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

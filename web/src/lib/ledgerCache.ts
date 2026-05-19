@@ -3,18 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   currentBalances,
-  parseAccounts,
+  parseAccountsForUser,
   parseBalances,
   parseBudgets,
   parseTransactions,
-  readLedgerLines,
+  readLedgerLinesForUser,
   type AccountView,
   type BalanceAssertionView,
   type BeanLine,
   type BudgetView,
   type TransactionView,
 } from "./beancountParser";
-import { ledgerRoot } from "./ledgerPaths";
+import { ledgerRoot, ledgerRootForUser } from "./ledgerPaths";
 
 export type LedgerVersion = {
   version: string;
@@ -38,7 +38,7 @@ type BeanFileStat = {
   mtimeMs: number;
 };
 
-let cachedSnapshot: LedgerSnapshot | null = null;
+const cachedSnapshots = new Map<string, LedgerSnapshot>();
 
 function collectBeanFileStats(root: string): BeanFileStat[] {
   const stats: BeanFileStat[] = [];
@@ -66,8 +66,7 @@ function collectBeanFileStats(root: string): BeanFileStat[] {
   return stats.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
-export function getLedgerVersion(): LedgerVersion {
-  const root = ledgerRoot();
+function versionForRoot(root: string): LedgerVersion {
   const files = collectBeanFileStats(root);
   const latestMtimeMs = files.reduce((max, file) => Math.max(max, file.mtimeMs), 0);
   const hash = crypto.createHash("sha256");
@@ -86,11 +85,20 @@ export function getLedgerVersion(): LedgerVersion {
   };
 }
 
-export function getLedgerSnapshot(): LedgerSnapshot {
-  const version = getLedgerVersion();
-  if (cachedSnapshot?.version === version.version) return cachedSnapshot;
+export function getLedgerVersionForUser(userId: string): LedgerVersion {
+  return versionForRoot(ledgerRootForUser(userId));
+}
 
-  const lines = readLedgerLines();
+export function getLedgerVersion(): LedgerVersion {
+  return versionForRoot(ledgerRoot());
+}
+
+export function getLedgerSnapshotForUser(userId: string): LedgerSnapshot {
+  const version = getLedgerVersionForUser(userId);
+  const cached = cachedSnapshots.get(userId);
+  if (cached?.version === version.version) return cached;
+
+  const lines = readLedgerLinesForUser(userId);
   const transactions = parseTransactions(lines);
   const snapshot: LedgerSnapshot = {
     ...version,
@@ -99,13 +107,21 @@ export function getLedgerSnapshot(): LedgerSnapshot {
     balances: currentBalances(transactions),
     balanceAssertions: parseBalances(lines),
     budgets: parseBudgets(lines),
-    accounts: parseAccounts(),
+    accounts: parseAccountsForUser(userId),
     parsedAt: Date.now(),
   };
-  cachedSnapshot = snapshot;
+  cachedSnapshots.set(userId, snapshot);
   return snapshot;
 }
 
+export function getLedgerSnapshot(): LedgerSnapshot {
+  return getLedgerSnapshotForUser("owner");
+}
+
+export function clearLedgerCacheForUser(userId: string) {
+  cachedSnapshots.delete(userId);
+}
+
 export function clearLedgerCacheForTests() {
-  cachedSnapshot = null;
+  cachedSnapshots.clear();
 }

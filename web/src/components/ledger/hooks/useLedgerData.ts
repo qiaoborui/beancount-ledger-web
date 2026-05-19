@@ -22,7 +22,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   }
 }
 
-export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast, onUserChange }: { timeRange: TimeRange; unlocked: boolean; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; onUserChange?: (userId: string | null) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [txns, setTxns] = useState<Txn[]>([]);
@@ -117,12 +117,13 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
 
   const load = useCallback(async (forceFresh = false) => {
     const [me, passkey] = await Promise.all([
-      fetchJson<{ authenticated?: boolean }>("/api/auth/me"),
+      fetchJson<{ authenticated?: boolean; userId?: string | null }>("/api/auth/me"),
       fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
     ]);
     const hasPasskey = Boolean(passkey.registered);
     onPasskeyRegistered(hasPasskey);
     const authenticated = Boolean(me.authenticated);
+    onUserChange?.(authenticated ? me.userId ?? null : null);
     onAuthChange(authenticated);
     if (authenticated) sessionStorage.setItem("ledger_authed", "1");
     else {
@@ -141,7 +142,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onUserChange, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;

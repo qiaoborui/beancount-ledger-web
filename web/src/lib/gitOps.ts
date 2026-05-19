@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { ledgerRoot } from "./ledgerPaths";
+import { ledgerRoot, ledgerRootForUser } from "./ledgerPaths";
+import { readLedgerRepoConfig } from "./ledgerRepoConfig";
+import { decryptToken } from "./tokenCrypto";
 
 const TRACKED_PATHS = ["transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"];
 
@@ -20,9 +22,31 @@ export type GitChange = {
   label: string;
 };
 
+function credentialRemoteUrl(userId: string): string | undefined {
+  const config = readLedgerRepoConfig(userId);
+  if (!config?.encryptedToken || !config.remoteUrl.startsWith("https://")) return undefined;
+  const token = decryptToken(config.encryptedToken);
+  const username = encodeURIComponent(config.tokenUsername || (config.provider === "github" ? "x-access-token" : "token"));
+  const password = encodeURIComponent(token);
+  const url = new URL(config.remoteUrl);
+  url.username = username;
+  url.password = password;
+  return url.toString();
+}
+
 function git(args: string[], options: { cwd?: string; encoding?: BufferEncoding } = {}) {
   return execFileSync("git", args, {
     cwd: options.cwd ?? ledgerRoot(),
+    encoding: options.encoding ?? "utf8",
+    stdio: "pipe",
+  }) as string;
+}
+
+function gitForUser(userId: string, args: string[], options: { cwd?: string; encoding?: BufferEncoding; injectCredentials?: boolean } = {}) {
+  const credentialUrl = options.injectCredentials ? credentialRemoteUrl(userId) : undefined;
+  const finalArgs = credentialUrl ? ["-c", `url.${credentialUrl}.insteadOf=https://`, ...args] : args;
+  return execFileSync("git", finalArgs, {
+    cwd: options.cwd ?? ledgerRootForUser(userId),
     encoding: options.encoding ?? "utf8",
     stdio: "pipe",
   }) as string;
@@ -63,6 +87,14 @@ export function parseGitStatus(status: string): GitChange[] {
     });
 }
 
+export function gitStatusForUser(userId: string) {
+  const cwd = ledgerRootForUser(userId);
+  const status = gitForUser(userId, ["status", "--short", "--", ...TRACKED_PATHS], { cwd });
+  const branch = gitForUser(userId, ["status", "--short", "--branch"], { cwd });
+  const changes = parseGitStatus(status).filter(isTrackedChange);
+  return { status, branch, dirty: changes.length > 0, changedFileCount: changes.length, changes };
+}
+
 export function gitStatus() {
   const cwd = ledgerRoot();
   const status = git(["status", "--short", "--", ...TRACKED_PATHS], { cwd });
@@ -71,8 +103,24 @@ export function gitStatus() {
   return { status, branch, dirty: changes.length > 0, changedFileCount: changes.length, changes };
 }
 
+export function gitPullRebaseForUser(userId: string) {
+  return gitForUser(userId, ["pull", "--rebase", "--autostash"], { injectCredentials: true });
+}
+
 export function gitPullRebase() {
-  return git(["pull", "--rebase", "--autostash"]);
+  return git(["pull", "--rebase", "--autostash"], { cwd: ledgerRoot() });
+}
+
+export function gitCommitPullPushForUser(userId: string, message = "chore: update ledger") {
+  const cwd = ledgerRootForUser(userId);
+  gitForUser(userId, ["add", "--", ...TRACKED_PATHS], { cwd });
+  const before = gitForUser(userId, ["status", "--short", "--", ...TRACKED_PATHS], { cwd });
+  const changedFileCount = parseGitStatus(before).filter(isTrackedChange).length;
+  let commit = "No changes to commit\n";
+  if (before.trim()) commit = gitForUser(userId, ["commit", "-m", message, "--", ...TRACKED_PATHS], { cwd });
+  const pull = gitForUser(userId, ["pull", "--rebase", "--autostash"], { cwd, injectCredentials: true });
+  const push = gitForUser(userId, ["push"], { cwd, injectCredentials: true });
+  return { output: `${commit}\n${pull}\n${push}`, changedFileCount };
 }
 
 export function gitCommitPullPush(message = "chore: update ledger") {

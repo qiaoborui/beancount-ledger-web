@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { requireAuthJson } from "@/lib/apiAuth";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
 import { isSensitiveUnlocked } from "@/lib/auth";
 import { creditCardAnalytics, monthEndNetWorth, netWorthChangeWindows } from "@/lib/assetAnalytics";
 import { monthSummary, netWorthHistory } from "@/lib/beancountParser";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
 import { parseApiTimeParams } from "@/lib/timeRange";
 
 export async function GET(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const { start, end } = parseApiTimeParams(new URL(request.url).searchParams);
-  const snapshot = getLedgerSnapshot();
+  const snapshot = getLedgerSnapshotForUser(userId);
   const sensitiveUnlocked = await isSensitiveUnlocked();
   const summary = monthSummary(start, end, snapshot.transactions);
   const netWorthRows = sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [];

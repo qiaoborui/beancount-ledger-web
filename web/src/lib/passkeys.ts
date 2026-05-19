@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { passkeysPath } from "./ledgerPaths";
+import { passkeysPathForUser } from "./ledgerPaths";
 
 export type StoredPasskey = {
   id: string;
@@ -13,46 +13,74 @@ type PasskeyStore = {
   credentials: StoredPasskey[];
 };
 
-export function readPasskeyStore(): PasskeyStore {
-  const file = passkeysPath();
+export function readPasskeyStoreForUser(userId: string): PasskeyStore {
+  const file = passkeysPathForUser(userId);
   if (!fs.existsSync(file)) return { credentials: [] };
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+export function readPasskeyStore(): PasskeyStore {
+  return readPasskeyStoreForUser("owner");
+}
+
+export function writePasskeyStoreForUser(userId: string, store: PasskeyStore) {
+  fs.writeFileSync(passkeysPathForUser(userId), JSON.stringify(store, null, 2), { mode: 0o600 });
+}
+
 export function writePasskeyStore(store: PasskeyStore) {
-  fs.writeFileSync(passkeysPath(), JSON.stringify(store, null, 2), { mode: 0o600 });
+  writePasskeyStoreForUser("owner", store);
+}
+
+export function setCurrentChallengeForUser(userId: string, challenge: string) {
+  const store = readPasskeyStoreForUser(userId);
+  store.currentChallenge = challenge;
+  writePasskeyStoreForUser(userId, store);
 }
 
 export function setCurrentChallenge(challenge: string) {
-  const store = readPasskeyStore();
-  store.currentChallenge = challenge;
-  writePasskeyStore(store);
+  setCurrentChallengeForUser("owner", challenge);
 }
 
-export function consumeCurrentChallenge(): string {
-  const store = readPasskeyStore();
+export function consumeCurrentChallengeForUser(userId: string): string {
+  const store = readPasskeyStoreForUser(userId);
   if (!store.currentChallenge) throw new Error("No active passkey challenge");
   const challenge = store.currentChallenge;
   delete store.currentChallenge;
-  writePasskeyStore(store);
+  writePasskeyStoreForUser(userId, store);
   return challenge;
 }
 
-export function savePasskey(passkey: StoredPasskey) {
-  const store = readPasskeyStore();
+export function consumeCurrentChallenge(): string {
+  return consumeCurrentChallengeForUser("owner");
+}
+
+export function savePasskeyForUser(userId: string, passkey: StoredPasskey) {
+  const store = readPasskeyStoreForUser(userId);
   store.credentials = store.credentials.filter((cred) => cred.id !== passkey.id);
   store.credentials.push(passkey);
-  writePasskeyStore(store);
+  writePasskeyStoreForUser(userId, store);
+}
+
+export function savePasskey(passkey: StoredPasskey) {
+  savePasskeyForUser("owner", passkey);
+}
+
+export function updatePasskeyCounterForUser(userId: string, id: string, counter: number) {
+  const store = readPasskeyStoreForUser(userId);
+  store.credentials = store.credentials.map((cred) => cred.id === id ? { ...cred, counter } : cred);
+  writePasskeyStoreForUser(userId, store);
 }
 
 export function updatePasskeyCounter(id: string, counter: number) {
-  const store = readPasskeyStore();
-  store.credentials = store.credentials.map((cred) => cred.id === id ? { ...cred, counter } : cred);
-  writePasskeyStore(store);
+  updatePasskeyCounterForUser("owner", id, counter);
+}
+
+export function listPasskeysForUser(userId: string) {
+  return readPasskeyStoreForUser(userId).credentials;
 }
 
 export function listPasskeys() {
-  return readPasskeyStore().credentials;
+  return listPasskeysForUser("owner");
 }
 
 export function rpIDFromRequest(request: Request) {

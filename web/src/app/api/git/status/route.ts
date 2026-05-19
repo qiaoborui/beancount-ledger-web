@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAuthJson } from "@/lib/apiAuth";
-import { gitStatus } from "@/lib/gitOps";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
+import { gitStatusForUser } from "@/lib/gitOps";
 
 export async function GET() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  return NextResponse.json(gitStatus());
+  return NextResponse.json(gitStatusForUser(userId));
 }

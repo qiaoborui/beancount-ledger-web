@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAuthJson } from "@/lib/apiAuth";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
 import { accountStatusIndicators } from "@/lib/beancountParser";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
 
 export async function GET() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  const snapshot = getLedgerSnapshot();
+  const snapshot = getLedgerSnapshotForUser(userId);
   const statuses = accountStatusIndicators(snapshot.transactions, snapshot.balanceAssertions, snapshot.accounts);
   return NextResponse.json({ statuses });
 }

@@ -21,30 +21,38 @@ export async function verifyPassword(password: string): Promise<boolean> {
   return password === configured;
 }
 
-export async function createSessionToken(): Promise<string> {
-  return new SignJWT({ sub: "owner" })
+export async function createSessionToken(userId = "owner"): Promise<string> {
+  return new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("30d")
     .sign(secret());
 }
 
-export async function isAuthenticated(): Promise<boolean> {
+export async function getCurrentUserId(): Promise<string | null> {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
-  if (!token) return false;
+  if (!token) return null;
   try {
-    await jwtVerify(token, secret());
-    return true;
+    const { payload } = await jwtVerify(token, secret());
+    return typeof payload.sub === "string" && payload.sub.trim() ? payload.sub : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+export async function requireCurrentUserId(): Promise<string> {
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Response("Unauthorized", { status: 401 });
+  return userId;
+}
+
+export async function isAuthenticated(): Promise<boolean> {
+  return Boolean(await getCurrentUserId());
+}
+
 export async function requireAuth(): Promise<void> {
-  if (!(await isAuthenticated())) {
-    throw new Response("Unauthorized", { status: 401 });
-  }
+  await requireCurrentUserId();
 }
 
 export async function isSensitiveUnlocked(): Promise<boolean> {

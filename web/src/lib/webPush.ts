@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import webpush, { type PushSubscription } from "web-push";
-import { webPushSubscriptionsPath } from "./ledgerPaths";
+import { webPushSubscriptionsPathForUser } from "./ledgerPaths";
 
 export type StoredPushSubscription = {
   id: string;
@@ -12,10 +12,11 @@ export type StoredPushSubscription = {
 
 type PushStore = { version: 1; subscriptions: StoredPushSubscription[] };
 
-let writeQueue: Promise<unknown> = Promise.resolve();
-function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn);
-  writeQueue = next.catch(() => undefined);
+const writeQueues = new Map<string, Promise<unknown>>();
+function withWriteLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  const queue = writeQueues.get(userId) ?? Promise.resolve();
+  const next = queue.then(fn, fn);
+  writeQueues.set(userId, next.catch(() => undefined));
   return next;
 }
 
@@ -27,8 +28,8 @@ function subscriptionId(subscription: PushSubscription) {
   return Buffer.from(subscription.endpoint).toString("base64url").slice(0, 48);
 }
 
-function readPushStore(): PushStore {
-  const file = webPushSubscriptionsPath();
+function readPushStoreForUser(userId: string): PushStore {
+  const file = webPushSubscriptionsPathForUser(userId);
   if (!fs.existsSync(file)) return emptyStore();
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as PushStore;
@@ -38,8 +39,8 @@ function readPushStore(): PushStore {
   }
 }
 
-function writePushStore(store: PushStore) {
-  fs.writeFileSync(webPushSubscriptionsPath(), `${JSON.stringify(store, null, 2)}\n`, "utf8");
+function writePushStoreForUser(userId: string, store: PushStore) {
+  fs.writeFileSync(webPushSubscriptionsPathForUser(userId), `${JSON.stringify(store, null, 2)}\n`, "utf8");
 }
 
 export function publicVapidKey() {
@@ -53,13 +54,17 @@ function configureWebPush() {
   webpush.setVapidDetails(process.env.WEB_PUSH_SUBJECT || "mailto:ledger@example.local", publicKey, privateKey);
 }
 
-export async function listPushSubscriptions() {
-  return readPushStore().subscriptions;
+export async function listPushSubscriptionsForUser(userId: string) {
+  return readPushStoreForUser(userId).subscriptions;
 }
 
-export async function savePushSubscription(subscription: PushSubscription, userAgent?: string) {
-  return withWriteLock(async () => {
-    const store = readPushStore();
+export async function listPushSubscriptions() {
+  return listPushSubscriptionsForUser("owner");
+}
+
+export async function savePushSubscriptionForUser(userId: string, subscription: PushSubscription, userAgent?: string) {
+  return withWriteLock(userId, async () => {
+    const store = readPushStoreForUser(userId);
     const id = subscriptionId(subscription);
     const now = new Date().toISOString();
     const existing = store.subscriptions.find((item) => item.id === id);
@@ -70,24 +75,32 @@ export async function savePushSubscription(subscription: PushSubscription, userA
     } else {
       store.subscriptions.push({ id, subscription, userAgent, createdAt: now, updatedAt: now });
     }
-    writePushStore(store);
+    writePushStoreForUser(userId, store);
     return { id, count: store.subscriptions.length };
   });
 }
 
-export async function removePushSubscription(endpoint: string) {
-  return withWriteLock(async () => {
-    const store = readPushStore();
+export async function savePushSubscription(subscription: PushSubscription, userAgent?: string) {
+  return savePushSubscriptionForUser("owner", subscription, userAgent);
+}
+
+export async function removePushSubscriptionForUser(userId: string, endpoint: string) {
+  return withWriteLock(userId, async () => {
+    const store = readPushStoreForUser(userId);
     const before = store.subscriptions.length;
     store.subscriptions = store.subscriptions.filter((item) => item.subscription.endpoint !== endpoint);
-    if (store.subscriptions.length !== before) writePushStore(store);
+    if (store.subscriptions.length !== before) writePushStoreForUser(userId, store);
     return { removed: before - store.subscriptions.length, count: store.subscriptions.length };
   });
 }
 
-export async function sendWebPushToAll(payload: { title: string; body: string; url?: string; tag?: string }) {
+export async function removePushSubscription(endpoint: string) {
+  return removePushSubscriptionForUser("owner", endpoint);
+}
+
+export async function sendWebPushToAllForUser(userId: string, payload: { title: string; body: string; url?: string; tag?: string }) {
   configureWebPush();
-  const store = readPushStore();
+  const store = readPushStoreForUser(userId);
   const deadEndpoints = new Set<string>();
   const results = await Promise.allSettled(store.subscriptions.map(async (item) => {
     try {
@@ -101,10 +114,10 @@ export async function sendWebPushToAll(payload: { title: string; body: string; u
   }));
 
   if (deadEndpoints.size) {
-    await withWriteLock(async () => {
-      const latest = readPushStore();
+    await withWriteLock(userId, async () => {
+      const latest = readPushStoreForUser(userId);
       latest.subscriptions = latest.subscriptions.filter((item) => !deadEndpoints.has(item.subscription.endpoint));
-      writePushStore(latest);
+      writePushStoreForUser(userId, latest);
     });
   }
 
@@ -114,4 +127,8 @@ export async function sendWebPushToAll(payload: { title: string; body: string; u
     failed: results.filter((result) => result.status === "rejected").length,
     removed: deadEndpoints.size,
   };
+}
+
+export async function sendWebPushToAll(payload: { title: string; body: string; url?: string; tag?: string }) {
+  return sendWebPushToAllForUser("owner", payload);
 }

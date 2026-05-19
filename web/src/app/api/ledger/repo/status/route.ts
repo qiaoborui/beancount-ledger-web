@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireCurrentUserJson } from "@/lib/apiAuth";
-import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
+import { userLedgerRepoStatus } from "@/lib/gitWorkspace";
 
 export async function GET() {
   const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  const snapshot = getLedgerSnapshotForUser(userId);
-  return NextResponse.json({ balances: snapshot.balances, assertions: snapshot.balanceAssertions });
+  return NextResponse.json(userLedgerRepoStatus(userId));
 }

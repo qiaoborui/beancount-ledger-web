@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthJson } from "@/lib/apiAuth";
-import { listPushSubscriptions, publicVapidKey, removePushSubscription, savePushSubscription, sendWebPushToAll } from "@/lib/webPush";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
+import { listPushSubscriptionsForUser, publicVapidKey, removePushSubscriptionForUser, savePushSubscriptionForUser, sendWebPushToAllForUser } from "@/lib/webPush";
 
 const PushKeysSchema = z.object({
   p256dh: z.string().min(1),
@@ -23,9 +23,9 @@ const DeleteSchema = z.object({
 });
 
 export async function GET() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  const subscriptions = await listPushSubscriptions();
+  const subscriptions = await listPushSubscriptionsForUser(userId);
   return NextResponse.json({
     publicKey: publicVapidKey(),
     configured: Boolean(publicVapidKey() && process.env.WEB_PUSH_VAPID_PRIVATE_KEY),
@@ -34,26 +34,26 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const input = PostSchema.parse(await request.json());
-  const result = await savePushSubscription(input.subscription, request.headers.get("user-agent") ?? undefined);
+  const result = await savePushSubscriptionForUser(userId, input.subscription, request.headers.get("user-agent") ?? undefined);
   return NextResponse.json({ ok: true, ...result });
 }
 
 export async function DELETE(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const input = DeleteSchema.parse(await request.json());
-  const result = await removePushSubscription(input.endpoint);
+  const result = await removePushSubscriptionForUser(userId, input.endpoint);
   return NextResponse.json({ ok: true, ...result });
 }
 
 export async function PUT() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   try {
-    const result = await sendWebPushToAll({
+    const result = await sendWebPushToAllForUser(userId, {
       title: "我的账本",
       body: "Web Push 测试通知已发送。",
       url: "/",

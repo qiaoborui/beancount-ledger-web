@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthJson } from "@/lib/apiAuth";
-import { getLedgerSnapshot } from "@/lib/ledgerCache";
-import { appendAccount } from "@/lib/ledgerWriter";
+import { requireCurrentUserJson } from "@/lib/apiAuth";
+import { getLedgerSnapshotForUser } from "@/lib/ledgerCache";
+import { appendAccountForUser } from "@/lib/ledgerWriter";
 
 const AccountSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -12,20 +12,20 @@ const AccountSchema = z.object({
 });
 
 export async function GET() {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
-  return NextResponse.json({ accounts: getLedgerSnapshot().accounts });
+  return NextResponse.json({ accounts: getLedgerSnapshotForUser(userId).accounts });
 }
 
 export async function POST(request: Request) {
-  const authError = await requireAuthJson();
+  const { userId, error: authError } = await requireCurrentUserJson();
   if (authError) return authError;
   const input = AccountSchema.parse(await request.json());
-  const exists = getLedgerSnapshot().accounts.some((account) => account.account === input.account);
+  const exists = getLedgerSnapshotForUser(userId).accounts.some((account) => account.account === input.account);
   if (exists) return NextResponse.json({ error: "账户已存在" }, { status: 400 });
 
   try {
-    await appendAccount(input);
+    await appendAccountForUser(userId, input);
     return NextResponse.json({ ok: true, account: input });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

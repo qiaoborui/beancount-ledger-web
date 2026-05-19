@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth, requireSensitiveUnlock } from "./auth";
+import { requireAuth, requireCurrentUserId, requireSensitiveUnlock } from "./auth";
 
 function authFailureResponse(error: unknown): NextResponse {
   if (error instanceof Response) {
@@ -24,5 +24,13 @@ export async function requireSensitiveUnlockJson(): Promise<NextResponse | null>
     return null;
   } catch (error) {
     return authFailureResponse(error);
+  }
+}
+
+export async function requireCurrentUserJson(): Promise<{ userId: string; error: null } | { userId: null; error: NextResponse }> {
+  try {
+    return { userId: await requireCurrentUserId(), error: null };
+  } catch (error) {
+    return { userId: null, error: authFailureResponse(error) };
   }
 }

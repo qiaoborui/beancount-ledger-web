@@ -1,9 +1,9 @@
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 
-export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: { password: string; setPassword: (value: string) => void; setAuthed: (authenticated: boolean) => void; setUnlocked: (unlocked: boolean) => void; setPasskeyRegistered: (registered: boolean) => void; load: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; clearToast: () => void }) {
+export function useLedgerAuth({ username, password, inviteCode, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: { username: string; password: string; inviteCode: string; setPassword: (value: string) => void; setAuthed: (authenticated: boolean) => void; setUnlocked: (unlocked: boolean) => void; setPasskeyRegistered: (registered: boolean) => void; load: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; clearToast: () => void }) {
   async function login() {
-    const res = await fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
+    const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
     if (res.ok) {
       sessionStorage.removeItem("ledger_locked_at");
       sessionStorage.removeItem("ledger_hidden_at");
@@ -17,13 +17,30 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
     }
   }
 
+  async function register() {
+    const res = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password, inviteCode: inviteCode.trim() || undefined }) });
+    const data = await readJson<{ error?: string }>(res);
+    if (res.ok) {
+      sessionStorage.removeItem("ledger_locked_at");
+      sessionStorage.removeItem("ledger_hidden_at");
+      sessionStorage.setItem("ledger_unlocked", "1");
+      sessionStorage.setItem("ledger_authed", "1");
+      setUnlocked(true);
+      setAuthed(true);
+      showToast("success", "用户已创建");
+      load();
+    } else {
+      showToast("error", data.error || "注册失败");
+    }
+  }
+
   async function loginWithPasskey() {
     showToast("info", "正在唤起 Face ID...");
     try {
-      const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST" });
+      const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username }) });
       if (options.error) throw new Error(options.error);
       const response = await startAuthentication({ optionsJSON: options });
-      const verify = await fetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) });
+      const verify = await fetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...response, username }) });
       const data = await readJson<{ error?: string }>(verify);
       if (!verify.ok) throw new Error(data.error || "Face ID 登录失败");
       sessionStorage.removeItem("ledger_locked_at");
@@ -55,5 +72,5 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
     }
   }
 
-  return { password, setPassword, login, loginWithPasskey, registerPasskey };
+  return { password, setPassword, login, register, loginWithPasskey, registerPasskey };
 }

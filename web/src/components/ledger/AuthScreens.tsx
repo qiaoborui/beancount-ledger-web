@@ -2,14 +2,17 @@ export function AppSkeleton() {
   return <div className="min-h-dvh bg-paper p-6"><div className="mx-auto max-w-4xl animate-pulse space-y-6"><div className="h-12 rounded-2xl bg-line" /><div className="grid grid-cols-3 gap-3"><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /></div><div className="h-72 rounded-2xl bg-line" /></div></div>;
 }
 
-export function LoginScreen({ password, setPassword, passkeyRegistered, toastText, onLogin, onPasskeyLogin }: { password: string; setPassword: (value: string) => void; passkeyRegistered: boolean; toastText?: string; onLogin: () => void; onPasskeyLogin: () => void }) {
+export function LoginScreen({ username, setUsername, password, setPassword, inviteCode, setInviteCode, passkeyRegistered, toastText, onLogin, onRegister, onPasskeyLogin }: { username: string; setUsername: (value: string) => void; password: string; setPassword: (value: string) => void; inviteCode: string; setInviteCode: (value: string) => void; passkeyRegistered: boolean; toastText?: string; onLogin: () => void; onRegister: () => void; onPasskeyLogin: () => void }) {
   return <div className="grid min-h-dvh place-items-center bg-paper px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
     <div className="card w-full max-w-sm p-7">
       <div className="mb-7 h-1 w-12 rounded-full bg-brand" />
       <h1 className="font-serif text-3xl font-medium">我的账本</h1>
-      <p className="mt-2 text-sm leading-6 text-olive">私人财务札记。输入密码后再读取本地账本数据。</p>
-      <input type="password" className="mt-6 w-full border border-line bg-panel p-3" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
+      <p className="mt-2 text-sm leading-6 text-olive">私人财务札记。输入用户名和密码后读取自己的账本数据。旧版单用户部署可继续使用 owner。</p>
+      <input className="mt-6 w-full border border-line bg-panel p-3" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" autoComplete="username" />
+      <input type="password" className="mt-3 w-full border border-line bg-panel p-3" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} placeholder="password" autoComplete="current-password" />
+      <input className="mt-3 w-full border border-line bg-panel p-3" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="invite code，可选" autoComplete="off" />
       <button className="mt-4 w-full rounded-xl bg-brand p-3 text-paper" onClick={onLogin}>密码登录</button>
+      <button className="mt-3 w-full rounded-xl border border-line bg-paper p-3 text-warm" onClick={onRegister}>创建用户并登录</button>
       {passkeyRegistered && <button className="mt-3 w-full rounded-xl border border-line bg-paper p-3 text-warm" onClick={onPasskeyLogin}>使用 Face ID / Passkey 登录</button>}
       {toastText && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{toastText}</p>}
     </div>
