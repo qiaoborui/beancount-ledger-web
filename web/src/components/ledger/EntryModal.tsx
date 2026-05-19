@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from "react";
 import type { ParsedTransaction } from "@/lib/schemas";
+import { MobileSheet } from "./MobileSheet";
 import type { ManualForm, ManualKind } from "./types";
 
 type ParseStatus = "idle" | "parsing" | "success" | "error";
 type AppendStatus = "idle" | "writing";
 
 export function EntryModal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
-  return <div className="sheet-backdrop fixed inset-0 z-40 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-4"><div className="mobile-sheet kami-float max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-paper p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:max-w-2xl sm:rounded-2xl sm:pb-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-serif text-2xl">记一笔</h2><button className="rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>关闭</button></div>{children}</div></div>;
+  return <MobileSheet open title="记一笔" onClose={onClose} size="md" align="center">{children}</MobileSheet>;
 }
 
 export function EntryPanel({ nl, setNl, onParse, manual, setManual, onPreviewManual, previews, onRemovePreview, onAppendPreviews, parseStatus, parseMessage, appendStatus, expenseAccounts, incomeAccounts, paymentAccounts, accountLabels }: { nl: string; setNl: (value: string) => void; onParse: () => void; manual: ManualForm; setManual: (value: ManualForm) => void; onPreviewManual: () => void; previews: ParsedTransaction[]; onRemovePreview: (index: number) => void; onAppendPreviews: () => void; parseStatus: ParseStatus; parseMessage: string; appendStatus: AppendStatus; expenseAccounts: string[]; incomeAccounts: string[]; paymentAccounts: string[]; accountLabels: Record<string, string> }) {

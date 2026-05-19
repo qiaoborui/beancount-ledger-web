@@ -30,7 +30,7 @@ function writeSidebarCollapsed(collapsed: boolean) {
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
 }
 
-export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void }) {
+export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onActiveRouteTap?: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
@@ -155,7 +155,7 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
-            <ClientNavLink key={item.href} href={item.href} className={`mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "bg-brand/10 text-brand" : "text-stone"}`}>
+            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); } }} className={`mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "bg-brand/10 text-brand" : "text-stone"}`}>
               <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
             </ClientNavLink>
           );

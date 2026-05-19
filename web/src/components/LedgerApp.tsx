@@ -1,8 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
@@ -15,7 +16,9 @@ import { useLedgerDerivedData } from "./ledger/hooks/useLedgerDerivedData";
 import { useLedgerLock } from "./ledger/hooks/useLedgerLock";
 import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
 import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
+import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
+import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
@@ -24,15 +27,22 @@ import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
 import { HomePage } from "./ledger/HomePage";
 import { ImportPage } from "./ledger/ImportPage";
-import { IncomeStatementPage } from "./ledger/IncomeStatementPage";
 import { Toast } from "./ledger/shared";
 import { AccountManager, BalanceAssertionForm, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
 import { AccountDetailPage } from "./ledger/AccountDetailPage";
-import { NetWorthPage } from "./ledger/NetWorthPage";
+
 import { ReconcilePage } from "./ledger/ReconcilePage";
 import { SettingsPage } from "./ledger/SettingsPage";
 import { TransactionList } from "./ledger/TransactionList";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
+
+const NetWorthPage = dynamic(() => import("./ledger/NetWorthPage").then((mod) => mod.NetWorthPage), {
+  loading: () => <section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>,
+});
+
+const IncomeStatementPage = dynamic(() => import("./ledger/IncomeStatementPage").then((mod) => mod.IncomeStatementPage), {
+  loading: () => <section className="card p-6 text-sm text-stone">正在准备损益分析…</section>,
+});
 
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
@@ -77,6 +87,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [customStart, setCustomStart] = useState(timeRange.start);
   const [customEnd, setCustomEnd] = useState(timeRange.end);
   const { toast, setToast, showToast } = useToast();
+  const online = useNetworkStatus();
+  const { scrollToTop } = useRouteScrollMemory(pathname);
   const { themeMode, resolvedTheme, setThemeMode } = useThemeMode();
   const { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, gitCommit } = useGitStatus(showToast);
   const {
@@ -159,7 +171,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast });
   const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast });
   const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
-  const { handleTouchStart, handleTouchEnd } = usePullToRefresh(refreshLedger);
+  const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
 
   function setPreset(preset: TimePreset) {
     if (preset === "custom") {
@@ -256,15 +268,17 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       onUnlockSensitive={loginWithPasskey}
+      onActiveRouteTap={() => scrollToTop(pathname)}
     >
       <Toast toast={toast} />
       {isRoutePending && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
+      <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing || loadingFresh} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
       <div key={`${page}:${pathname}`} className="app-page-transition">
       {/* ── 时间范围选择器 ── */}
-      <div className="mb-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="mb-6" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
         {/* 第一行：标题 + 翻页按钮 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {canNavigate && (
@@ -278,7 +292,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-[0.22em] text-stone">{header.eyebrow}</div>
             <strong className="font-serif text-2xl font-medium">{header.title}</strong>
-            <div className="mt-1 text-xs text-stone">{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
+              {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
+              <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
+              {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button className="rounded-xl border border-line bg-panel px-3 py-2 text-warm" onClick={refreshLedger} disabled={refreshing || loadingFresh}>
@@ -374,6 +392,13 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {entryOpen && <EntryModal onClose={() => setEntryOpen(false)}><EntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={appendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></EntryModal>}
     </AppShell>
   );
+}
+
+function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" | "pull" | "release" | "refreshing"; distance: number; refreshing: boolean }) {
+  if (state === "idle" && !refreshing) return null;
+  const label = refreshing || state === "refreshing" ? "正在刷新…" : state === "release" ? "松开刷新" : "下拉刷新";
+  const top = Math.max(12, Math.min(76, distance));
+  return <div className="pointer-events-none fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-olive shadow-sm backdrop-blur" style={{ top: `calc(${top}px + env(safe-area-inset-top))` }}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 text-brand ${refreshing || state === "refreshing" ? "animate-spin" : ""}`} />{label}</div>;
 }
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
