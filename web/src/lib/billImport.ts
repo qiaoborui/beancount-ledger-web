@@ -62,12 +62,20 @@ function commandEnv() {
   };
 }
 
+function doubleEntryGeneratorCommand() {
+  return process.env.DOUBLE_ENTRY_GENERATOR_BIN || "double-entry-generator";
+}
+
+function pythonCommand() {
+  return process.env.PYTHON_BIN || "python3";
+}
+
 function runCommand(command: string, args: string[], cwd: string) {
   try {
     return execFileSync(command, args, { cwd, env: commandEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     const err = error as Error & { stderr?: Buffer | string; stdout?: Buffer | string; code?: string };
-    if (err.code === "ENOENT") throw new Error(`找不到命令 ${command}。请确认 Web 服务 PATH 中可以访问 double-entry-generator / python3。`);
+    if (err.code === "ENOENT") throw new Error(`找不到命令 ${command}。请设置 DOUBLE_ENTRY_GENERATOR_BIN/PYTHON_BIN 为绝对路径，或确认 Web 服务 PATH 中可以访问 double-entry-generator / python3。`);
     const stderr = Buffer.isBuffer(err.stderr) ? err.stderr.toString("utf8") : err.stderr;
     const stdout = Buffer.isBuffer(err.stdout) ? err.stdout.toString("utf8") : err.stdout;
     throw new Error([stderr, stdout, err.message].filter(Boolean).join("\n").trim());
@@ -76,7 +84,7 @@ function runCommand(command: string, args: string[], cwd: string) {
 
 function runTranslate(provider: BillProvider, inputFile: string, outputFile: string) {
   const cfg = providerConfig[provider];
-  runCommand("double-entry-generator", ["translate", "--provider", provider, "--target", "beancount", "--config", cfg.config, "--output", outputFile, inputFile], ledgerRoot());
+  runCommand(doubleEntryGeneratorCommand(), ["translate", "--provider", provider, "--target", "beancount", "--config", cfg.config, "--output", outputFile, inputFile], ledgerRoot());
 }
 
 function runDedup(generatedFile: string, outputFile: string | null, alipayFundRounding: boolean, dryRun: boolean) {
@@ -84,7 +92,7 @@ function runDedup(generatedFile: string, outputFile: string | null, alipayFundRo
   if (dryRun) args.push("--dry-run");
   if (outputFile) args.push("-o", outputFile);
   if (alipayFundRounding) args.push("--alipay-fund-rounding");
-  return runCommand("python3", args, ledgerRoot());
+  return runCommand(pythonCommand(), args, ledgerRoot());
 }
 
 function parseBeanSummary(beanText: string) {
