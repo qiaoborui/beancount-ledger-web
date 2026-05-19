@@ -3,6 +3,7 @@
 import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
+import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref } from "./ledger/types";
 
@@ -36,16 +37,22 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
+  const [mobileViewport, setMobileViewport] = useState(false);
 
   useEffect(() => {
     setSidebarCollapsed(readSidebarCollapsed());
     setMobileTabHrefs(readMobileTabHrefs());
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+    const handleMobileViewportChange = () => setMobileViewport(mobileQuery.matches);
+    handleMobileViewportChange();
     const handleMobileTabsChange = () => setMobileTabHrefs(readMobileTabHrefs());
     window.addEventListener("storage", handleMobileTabsChange);
     window.addEventListener("ledger-mobile-tabs-change", handleMobileTabsChange);
+    mobileQuery.addEventListener("change", handleMobileViewportChange);
     return () => {
       window.removeEventListener("storage", handleMobileTabsChange);
       window.removeEventListener("ledger-mobile-tabs-change", handleMobileTabsChange);
+      mobileQuery.removeEventListener("change", handleMobileViewportChange);
       if (mobileMenuCloseTimer.current) clearTimeout(mobileMenuCloseTimer.current);
     };
   }, []);
@@ -76,6 +83,14 @@ export function AppShell({ children, pathname, onAdd, onGit, gitDirty, changedFi
   }
 
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
+  const isMobileTabRoot = mobileTabHrefs.some((href) => pathname === href);
+  useSwipeBack({
+    enabled: mobileViewport && isMobileTabRoot && !mobileMenuOpen && !mobileMenuClosing,
+    onBack: openMobileMenu,
+    edgeStart: 32,
+    edgeWidth: 88,
+    threshold: 72,
+  });
 
   return (
     <div className="min-h-dvh bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
