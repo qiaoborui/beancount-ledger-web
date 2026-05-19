@@ -74,10 +74,15 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
 
-  const categoryOptions = useMemo(() => {
+  const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
-    return accounts.filter((account) => account.active && (account.account.startsWith("Expenses:") || account.account.startsWith("Income:")));
+    return accounts.filter((account) => account.active);
   }, [preview]);
+
+  function editableAccountLabel(entry: ImportEntry) {
+    if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
+    return "对方账户";
+  }
 
   function resetForFile(next: File | null) {
     setFile(next);
@@ -191,8 +196,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         <div className="mt-5 space-y-3">
           {entries.map((entry) => <article key={entry.id} className="rounded-2xl border border-line bg-paper p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1"><div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span className="rounded-full bg-panel px-2 py-1 text-xs text-stone">{entry.date}</span><span className="truncate font-medium" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span><span className="whitespace-nowrap text-sm font-medium text-warm">{formatCny(entry.amount)}</span></div><input className="mt-2 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></div>
-              <label className="block min-w-[280px] max-w-full text-xs text-stone lg:w-[360px]">分类账户<select className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.categoryAccount} onChange={(e) => updateEntry(entry.id, { categoryAccount: e.target.value })}>{categoryOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}</select></label>
+              <div className="min-w-0 flex-1 space-y-3">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span className="rounded-full bg-panel px-2 py-1 text-xs text-stone">{entry.date}</span><span className="truncate font-medium" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span><span className="whitespace-nowrap text-sm font-medium text-warm">{formatCny(entry.amount)}</span></div>
+                <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+                  <label className="block text-xs text-stone">标题<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></label>
+                  <label className="block min-w-0 text-xs text-stone">{editableAccountLabel(entry)}<select className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.categoryAccount} onChange={(e) => updateEntry(entry.id, { categoryAccount: e.target.value })}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}</select></label>
+                </div>
+              </div>
             </div>
             <div className="mt-3 grid gap-3 text-xs text-stone md:grid-cols-3"><div>支付方式：{entry.method || "-"}</div><div>资金账户：{entry.fundingAccount || "-"}</div><div>订单号：{entry.orderId || "-"}</div></div>
             <details className="mt-3"><summary className="cursor-pointer text-xs text-stone"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary><div className="mt-3 grid gap-2 md:grid-cols-2"><label className="text-xs text-stone">note<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.note ?? ""} onChange={(e) => updateMetadata(entry.id, "note", e.target.value)} placeholder="添加备注" /></label><label className="text-xs text-stone">purpose<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.purpose ?? ""} onChange={(e) => updateMetadata(entry.id, "purpose", e.target.value)} placeholder="例如: travel / work" /></label></div></details>
