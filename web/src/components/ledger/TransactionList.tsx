@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { formatCny } from "@/lib/money";
+import { MobileSheet } from "./MobileSheet";
 import type { ParsedTransaction } from "@/lib/schemas";
 import type { AccountView, MetadataValue, Txn } from "./types";
 
@@ -273,7 +273,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     );
   })}
   {rows.length > 0 && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between"><div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} 条</div><div className="flex items-center gap-2"><select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>}
-  {selected && <TransactionDrawerPortal txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+  {selected && <TransactionDrawer txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
 
@@ -285,21 +285,6 @@ type TransactionDrawerProps = {
   onDelete?: (source: Txn["source"], reason: string) => void;
   onReverse?: (source: Txn["source"], date: string) => void;
 };
-
-function TransactionDrawerPortal(props: TransactionDrawerProps) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, []);
-
-  if (!mounted) return null;
-  return createPortal(<TransactionDrawer {...props} />, document.body);
-}
 
 function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
   const [editing, setEditing] = useState(false);
@@ -329,18 +314,18 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     onClose();
   }
 
-  return <div className="sheet-backdrop fixed inset-0 z-[100] flex items-end justify-end bg-ink/35 sm:items-stretch">
-    <div className="mobile-sheet kami-float flex h-[92dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-paper sm:h-full sm:max-w-xl sm:rounded-none">
-      <div className="shrink-0 border-b border-line bg-paper/95 px-5 pb-3 pt-5 backdrop-blur sm:pt-[calc(env(safe-area-inset-top)+1.25rem)]">
-        <div className="flex items-center justify-between">
-          <h2 className="font-serif text-2xl">流水详情</h2>
-          <button className="rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>关闭</button>
-        </div>
-        <div className="mt-2 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>
-      </div>
+  const footer = editing ? <div className="grid grid-cols-2 gap-2">
+    <button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(false)}>取消</button>
+    <button className="bg-brand px-4 py-3 text-paper" onClick={save}>保存修改</button>
+  </div> : <div className="grid gap-2 sm:grid-cols-3">
+    <button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(true)}>编辑</button>
+    <button className="border border-line px-4 py-3 text-[var(--danger)]" onClick={() => { const reason = prompt("删除原因（会注释原交易，不会物理删除）", "记错/重复记账") ?? ""; if (confirm("确认注释删除这笔交易？")) onDelete?.(txn.source, reason); }}>注释删除</button>
+    <button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button>
+  </div>;
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {editing ? <div className="grid gap-3">
+  return <MobileSheet open title="流水详情" onClose={onClose} footer={footer}>
+    <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>
+    {editing ? <div className="grid gap-3">
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           <input className="border border-line bg-panel p-3" value={payee} onChange={(e) => setPayee(e.target.value)} />
           <input className="border border-line bg-panel p-3" value={narration} onChange={(e) => setNarration(e.target.value)} />
@@ -357,24 +342,11 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             </div>
             <input className="border border-line bg-panel p-3" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
           </div>)}
-        </div> : <div>
-          <div className="text-lg font-medium">{txn.date} {txn.payee}</div>
-          <div className="text-olive">{txn.narration}</div>
-          <MetadataBadges txn={txn} />
-          <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
-        </div>}
-      </div>
-
-      <div className="shrink-0 border-t border-line bg-paper/95 px-5 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur">
-        {editing ? <div className="grid grid-cols-2 gap-2">
-          <button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(false)}>取消</button>
-          <button className="bg-brand px-4 py-3 text-paper" onClick={save}>保存修改</button>
-        </div> : <div className="grid gap-2 sm:grid-cols-3">
-          <button className="border border-line bg-panel px-4 py-3" onClick={() => setEditing(true)}>编辑</button>
-          <button className="border border-line px-4 py-3 text-[var(--danger)]" onClick={() => { const reason = prompt("删除原因（会注释原交易，不会物理删除）", "记错/重复记账") ?? ""; if (confirm("确认注释删除这笔交易？")) onDelete?.(txn.source, reason); }}>注释删除</button>
-          <button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button>
-        </div>}
-      </div>
-    </div>
-  </div>;
+    </div> : <div>
+      <div className="text-lg font-medium">{txn.date} {txn.payee}</div>
+      <div className="text-olive">{txn.narration}</div>
+      <MetadataBadges txn={txn} />
+      <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
+    </div>}
+  </MobileSheet>;
 }
