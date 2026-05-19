@@ -5,9 +5,9 @@ import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Eye, EyeOff } 
 import { formatCny } from "@/lib/money";
 import { CashFlowCard } from "./CashFlowCard";
 import { HiddenPanel, Metric } from "./shared";
-import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
+import type { AccountAnalytics, CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
-export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, creditCards, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; creditCards: CreditCardAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   return <>
     <section className="card overflow-hidden p-0">
       <div className="border-l-4 border-brand p-4 md:p-5">
@@ -31,7 +31,7 @@ export function IncomeStatementPage({ income, expense, expenseAnalytics, topPaye
 
     {visible ? (
       <>
-      <CashFlowCard income={income} expense={expense} expenseAnalytics={expenseAnalytics} totalIncome={totalIncome} totalExpense={totalExpense} netIncome={netIncome} sensitiveUnlocked={sensitiveUnlocked} />
+      <CashFlowCard income={income} expense={expense} expenseAnalytics={expenseAnalytics} creditCards={creditCards} totalIncome={totalIncome} totalExpense={totalExpense} netIncome={netIncome} sensitiveUnlocked={sensitiveUnlocked} />
       <CategoryAnalyticsPanel rows={expenseAnalytics} topPayees={topPayees} topPaymentAccounts={topPaymentAccounts} onSelectCategory={onSelectCategory} />
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className="card p-4">

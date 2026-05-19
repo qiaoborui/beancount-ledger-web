@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
 import { formatCny } from "@/lib/money";
-import type { ExpenseCategoryAnalytics, IncomeStatementNode } from "./types";
+import type { CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode } from "./types";
 
 type CashFlowNode = { name: string; color: string; value?: number };
 type CashFlowData = { nodes: CashFlowNode[]; links: { source: number; target: number; value: number }[] };
@@ -15,6 +15,7 @@ type CashFlowCardProps = {
   income: IncomeStatementNode[];
   expense: IncomeStatementNode[];
   expenseAnalytics: ExpenseCategoryAnalytics[];
+  creditCards?: CreditCardAnalytics[];
   totalIncome: number;
   totalExpense: number;
   netIncome: number;
@@ -24,8 +25,8 @@ type CashFlowCardProps = {
   className?: string;
 };
 
-export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, totalExpense, netIncome, sensitiveUnlocked, title = "Cash Flow", description = "收入流入本期现金流，再分配到支出和储蓄/缺口。", className = "mt-4" }: CashFlowCardProps) {
-  const data = buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, totalExpense, netIncome, sensitiveUnlocked });
+export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = [], totalIncome, totalExpense, netIncome, sensitiveUnlocked, title = "Cash Flow", description = "收入流入本期现金流，再分配到支出、信用卡还款和储蓄/缺口。", className = "mt-4" }: CashFlowCardProps) {
+  const data = buildCashFlowData({ income, expense, expenseAnalytics, creditCards, totalIncome, totalExpense, netIncome, sensitiveUnlocked });
   const [selection, setSelection] = useState<CashFlowSelection | null>(null);
 
   if (data.links.length === 0) return <section className={`card p-4 ${className}`}><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前周期暂无可视化现金流。</div></section>;
@@ -94,7 +95,7 @@ function CashFlowLinkShape(props: Partial<SankeyLinkProps>) {
   return <path className="cursor-pointer" d={`M${sourceX},${sourceY} C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`} fill="none" stroke={active ? "var(--brand)" : palette[index % palette.length]} strokeWidth={Math.max(2, active ? linkWidth + 2 : linkWidth)} strokeOpacity={active ? 0.82 : 0.95} onMouseEnter={select} onTouchStart={select} />;
 }
 
-function buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, totalExpense, netIncome, sensitiveUnlocked }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; sensitiveUnlocked: boolean }): CashFlowData {
+function buildCashFlowData({ income, expense, expenseAnalytics, creditCards, totalIncome, totalExpense, netIncome, sensitiveUnlocked }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; creditCards: CreditCardAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; sensitiveUnlocked: boolean }): CashFlowData {
   const nodes: CashFlowNode[] = [];
   const links: CashFlowData["links"] = [];
   const addNode = (node: CashFlowNode) => {
@@ -106,7 +107,9 @@ function buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, tot
   const expenseRows = expenseAnalytics.length ? expenseAnalytics.map((row) => ({ label: row.label || row.account, amount: row.amount })) : topNodes(expense, 8);
   const shownExpenses = expenseRows.filter((row) => row.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 8);
   const otherExpense = Math.max(0, totalExpense - shownExpenses.reduce((sum, row) => sum + row.amount, 0));
-  const flowValue = Math.max(positiveTotalIncome, totalExpense + Math.max(0, netIncome), 1);
+  const creditCardRepayments = sensitiveUnlocked ? creditCards.reduce((sum, card) => sum + card.periodRepayments, 0) : 0;
+  const cashSurplus = totalIncome - totalExpense - creditCardRepayments;
+  const flowValue = Math.max(positiveTotalIncome, totalExpense + creditCardRepayments + Math.max(0, cashSurplus), 1);
   const cashFlowIndex = addNode({ name: "Cash Flow", color: "var(--chart-primary)", value: flowValue });
 
   if (sensitiveUnlocked && visibleIncomeRows.length) {
@@ -120,8 +123,9 @@ function buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, tot
 
   for (const row of shownExpenses) links.push({ source: cashFlowIndex, target: addNode({ name: row.label.replace(/^Expenses:/, ""), color: "#ff7a1a", value: row.amount }), value: Math.max(1, row.amount) });
   if (otherExpense > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Other Expenses", color: "#ff9a4a", value: otherExpense }), value: otherExpense });
-  if (netIncome > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Savings", color: "#22c55e", value: netIncome }), value: netIncome });
-  if (netIncome < 0) links.push({ source: addNode({ name: "Deficit", color: "var(--danger)", value: Math.abs(netIncome) }), target: cashFlowIndex, value: Math.abs(netIncome) });
+  if (creditCardRepayments > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Credit Card Repayments", color: "#8b5cf6", value: creditCardRepayments }), value: creditCardRepayments });
+  if (cashSurplus > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Savings", color: "#22c55e", value: cashSurplus }), value: cashSurplus });
+  if (cashSurplus < 0) links.push({ source: addNode({ name: "Deficit", color: "var(--danger)", value: Math.abs(cashSurplus) }), target: cashFlowIndex, value: Math.abs(cashSurplus) });
 
   return { nodes, links };
 }
