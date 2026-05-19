@@ -82,6 +82,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const {
     privacySettings,
     updatePrivacySetting,
+    revealAllAmounts,
     allBalancesVisible,
     setAllBalancesVisible,
     netWorthVisible,
@@ -107,6 +108,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const hasPasskey = passkeyRegistered === true;
   const passkeyStatusLoaded = passkeyRegistered !== null;
   const { unlocked, setUnlocked } = useLedgerLock({ passkeyRegistered: hasPasskey, authed });
+  useEffect(() => {
+    if (unlocked) revealAllAmounts();
+  }, [revealAllAmounts, unlocked]);
+
   const handleSensitiveLocked = useCallback(() => {
     sessionStorage.removeItem("ledger_unlocked");
     sessionStorage.setItem("ledger_locked_at", String(Date.now()));
@@ -222,6 +227,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
 
+  const unlockedPrivacySettings = unlocked ? { ...privacySettings, showHomeSummaryAmounts: true } : privacySettings;
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const requireSensitiveUnlock = (title?: string, description?: string) => (
     <SensitiveUnlockPanel title={title} description={description} message={sensitiveMessage} onUnlock={loginWithPasskey} />
@@ -332,7 +338,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         )}
       </div>
 
-      {page === "home" && <HomePage summary={summary} privacySettings={privacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
+      {page === "home" && <HomePage summary={summary} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} creditCards={creditCards} accountStatuses={accountStatuses} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}

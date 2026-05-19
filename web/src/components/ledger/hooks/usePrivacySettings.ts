@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { readPrivacySettings, writePrivacySettings } from "../storage";
 import type { PrivacySettings } from "../types";
 
@@ -23,9 +23,18 @@ export function usePrivacySettings() {
     if (key === "showIncomeStatementByDefault") setIncomeStatementVisible(Boolean(value));
   }
 
+  const revealAllAmounts = useCallback(() => {
+    setPrivacySettings((current) => ({ ...current, showHomeSummaryAmounts: true }));
+    setAllBalancesVisible(true);
+    setNetWorthVisible(true);
+    setIncomeStatementVisible(true);
+    setVisibleAccountMap({});
+  }, []);
+
   return {
     privacySettings,
     updatePrivacySetting,
+    revealAllAmounts,
     allBalancesVisible,
     setAllBalancesVisible,
     netWorthVisible,
