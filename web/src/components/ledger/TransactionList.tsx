@@ -128,6 +128,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const [editingOnOpen, setEditingOnOpen] = useState(false);
+  const [openSwipeKey, setOpenSwipeKey] = useState<string | null>(null);
+  const [swipeStart, setSwipeStart] = useState<{ key: string; x: number; y: number } | null>(null);
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
@@ -182,6 +185,51 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
+  useEffect(() => { setOpenSwipeKey(null); }, [safePage, debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, txns.length]);
+
+  function openTransaction(txn: Txn, editing = false) {
+    setEditingOnOpen(editing);
+    setSelected(txn);
+    setOpenSwipeKey(null);
+  }
+
+  function txnKey(txn: Txn, index: number) {
+    return `${txn.source.file}-${txn.source.line}-${index}`;
+  }
+
+  function handleSwipeStart(key: string, x: number, y: number) {
+    setSwipeStart({ key, x, y });
+  }
+
+  function handleSwipeMove(key: string, x: number, y: number) {
+    if (!swipeStart || swipeStart.key !== key) return;
+    const dx = x - swipeStart.x;
+    const dy = Math.abs(y - swipeStart.y);
+    if (dy > 36 && dy > Math.abs(dx)) {
+      setSwipeStart(null);
+      return;
+    }
+    if (dx < -54) {
+      setOpenSwipeKey(key);
+      setSwipeStart(null);
+    } else if (dx > 42 && openSwipeKey === key) {
+      setOpenSwipeKey(null);
+      setSwipeStart(null);
+    }
+  }
+
+  function requestDelete(txn: Txn) {
+    const reason = prompt("删除原因（会注释原交易，不会物理删除）", "记错/重复记账") ?? "";
+    if (confirm("确认注释删除这笔交易？")) onDelete?.(txn.source, reason);
+    setOpenSwipeKey(null);
+  }
+
+  function requestReverse(txn: Txn) {
+    const reverseDate = new Date().toISOString().slice(0, 10);
+    const date = prompt("冲销日期", reverseDate) || reverseDate;
+    onReverse?.(txn.source, date);
+    setOpenSwipeKey(null);
+  }
 
   return <section className="mt-6"><div className="mb-3 flex flex-col gap-3">
     {/* 搜索框 */}
@@ -252,8 +300,16 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   {rows.length === 0 && <div className="card p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
   {pageRows.map((t, i) => {
     const amt = primaryAmount(t);
+    const key = txnKey(t, i);
+    const swipeOpen = openSwipeKey === key;
     return (
-      <button key={`${t.source.file}-${t.source.line}-${i}`} className="card mb-1.5 block w-full p-4 text-left" onClick={() => setSelected(t)}>
+      <div key={key} className="transaction-swipe-row relative mb-1.5 overflow-hidden rounded-[18px]">
+        <div className="transaction-swipe-actions absolute inset-y-0 right-0 hidden items-stretch overflow-hidden rounded-[18px] md:hidden">
+          <button type="button" className="bg-brand px-3 text-xs text-paper" onClick={() => openTransaction(t, true)}>编辑</button>
+          <button type="button" className="bg-[var(--danger)] px-3 text-xs text-paper" onClick={() => requestDelete(t)}>删除</button>
+          <button type="button" className="bg-warm px-3 text-xs text-paper" onClick={() => requestReverse(t)}>冲销</button>
+        </div>
+        <button className={`card transaction-swipe-card relative block w-full p-4 text-left md:translate-x-0 ${swipeOpen ? "transaction-swipe-open" : ""}`} onClick={() => swipeOpen ? setOpenSwipeKey(null) : openTransaction(t)} onTouchStart={(event) => { const touch = event.touches[0]; if (touch) handleSwipeStart(key, touch.clientX, touch.clientY); }} onTouchMove={(event) => { const touch = event.touches[0]; if (touch) handleSwipeMove(key, touch.clientX, touch.clientY); }}>
         <div className="flex items-baseline justify-between gap-3">
           <strong className="min-w-0 truncate">{t.payee}</strong>
           {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
@@ -269,25 +325,27 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         ) : (
           <><div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{t.date}{t.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j}>{p.account}</span>)}</div><MetadataBadges txn={t} limit={3} /></>
         )}
-      </button>
+        </button>
+      </div>
     );
   })}
   {rows.length > 0 && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between"><div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} 条</div><div className="flex items-center gap-2"><select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>}
-  {selected && <TransactionDrawer txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+  {selected && <TransactionDrawer txn={selected} accounts={accounts} initialEditing={editingOnOpen} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
 
 type TransactionDrawerProps = {
   txn: Txn;
   accounts: AccountView[];
+  initialEditing?: boolean;
   onClose: () => void;
   onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
   onDelete?: (source: Txn["source"], reason: string) => void;
   onReverse?: (source: Txn["source"], date: string) => void;
 };
 
-function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
-  const [editing, setEditing] = useState(false);
+function TransactionDrawer({ txn, accounts, initialEditing = false, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
+  const [editing, setEditing] = useState(initialEditing);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
   const [narration, setNarration] = useState(txn.narration);

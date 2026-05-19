@@ -43,7 +43,7 @@ function PreviewCard({ entry, index, busy, onRemove }: { entry: ParsedTransactio
   );
 }
 
-export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSignal = 0 }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; openSignal?: number }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ChatStatus>("idle");
@@ -53,6 +53,10 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast }: { load:
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
 
   useEffect(() => {
     if (!open) { setKeyboardHeight(0); return; }

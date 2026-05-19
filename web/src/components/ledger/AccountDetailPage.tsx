@@ -127,7 +127,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   }
 
   return (
-    <div className="space-y-6">
+    <div className="account-detail-stack space-y-6">
       {/* Header */}
       <section className="card p-4">
         <ClientNavLink
