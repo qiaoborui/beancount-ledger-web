@@ -85,13 +85,13 @@ function CollapsibleCard({ title, subtitle, defaultOpen = false, children }: { t
 function RankList({ rows, empty }: { rows: { key: string; label: string; amount: number; detail: string }[]; empty: string }) {
   if (!rows.length) return <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">{empty}</div>;
   return <div className="grid gap-2">
-    {rows.slice(0, 5).map((row, index) => <div key={row.key} className="flex items-center gap-3 rounded-xl border border-line bg-panel p-3">
+    {rows.slice(0, 5).map((row, index) => <div key={row.key} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-panel p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tag text-xs text-stone">{index + 1}</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-warm">{row.label}</div>
         <div className="mt-0.5 text-xs text-stone">{row.detail}</div>
       </div>
-      <strong className="shrink-0 text-sm tabular-nums amount-expense">{formatCny(row.amount / 100)}</strong>
+      <strong className="col-start-2 min-w-0 justify-self-end text-right text-sm tabular-nums amount-expense sm:col-start-auto">{formatCny(row.amount / 100)}</strong>
     </div>)}
   </div>;
 }
