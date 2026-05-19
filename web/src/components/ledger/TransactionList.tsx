@@ -297,6 +297,15 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const accountOptions = useMemo(() => accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account)), [accounts, postings]);
   const optionLabel = (account: AccountView) => `${account.label} · ${account.account}`;
   const reverseDate = new Date().toISOString().slice(0, 10);
+  const hasUnsavedChanges = editing && (
+    date !== txn.date ||
+    payee !== txn.payee ||
+    narration !== txn.narration ||
+    metadata !== JSON.stringify(txn.metadata ?? {}, null, 2) ||
+    tags !== (txn.tags ?? []).join(" ") ||
+    postings.some((posting, index) => posting.account !== txn.postings[index]?.account || posting.amount !== ((txn.postings[index]?.amount ?? 0) / 100).toFixed(2))
+  );
+  const shouldClose = () => !hasUnsavedChanges || confirm("有未保存的修改，确定关闭吗？");
   function save() {
     let parsedMetadata: Record<string, MetadataValue> = {};
     try {
@@ -323,7 +332,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     <button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button>
   </div>;
 
-  return <MobileSheet open title="流水详情" onClose={onClose} footer={footer}>
+  return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>
     <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>
     {editing ? <div className="grid gap-3">
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
