@@ -73,7 +73,7 @@ export function AccountDetailSkeleton() {
   );
 }
 
-export function AccountDetailPage({ account }: { account: string }) {
+export function AccountDetailPage({ account, onSensitiveLocked }: { account: string; onSensitiveLocked?: () => void }) {
   const [data, setData] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -81,13 +81,16 @@ export function AccountDetailPage({ account }: { account: string }) {
   useEffect(() => {
     const encoded = encodeURIComponent(account);
     fetch(`/api/ledger/accounts/detail?account=${encoded}`)
-      .then((res) => readJson<AccountDetail & { error?: string }>(res))
+      .then(async (res) => {
+        if (res.status === 423) onSensitiveLocked?.();
+        return readJson<AccountDetail & { error?: string }>(res);
+      })
       .then((json) => {
         if (json.error) throw new Error(json.error);
         setData(json);
       })
       .catch((err) => setError(err.message));
-  }, [account]);
+  }, [account, onSensitiveLocked]);
 
   if (error) {
     return (

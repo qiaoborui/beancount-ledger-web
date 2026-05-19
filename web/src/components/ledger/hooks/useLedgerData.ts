@@ -7,9 +7,12 @@ import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, Income
 const freshLedgerCacheKeys = new Set<string>();
 const LEDGER_VERSION_POLL_MS = 45_000;
 
-async function fetchSensitiveJson<T>(input: RequestInfo | URL, fallback: T): Promise<T> {
+async function fetchSensitiveJson<T>(input: RequestInfo | URL, fallback: T, onSensitiveLocked?: () => void): Promise<T> {
   const response = await fetch(input);
-  if (response.status === 401 || response.status === 423) return fallback;
+  if (response.status === 401 || response.status === 423) {
+    if (response.status === 423) onSensitiveLocked?.();
+    return fallback;
+  }
   return readJson<T>(response, fallback);
 }
 
@@ -22,7 +25,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   }
 }
 
-export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onSensitiveLocked: () => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [txns, setTxns] = useState<Txn[]>([]);
@@ -82,10 +85,10 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
         fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: NetWorthPoint[]; monthEndNetWorth?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[] }>(`/api/ledger/summary?${params}`),
         fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
         fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
-        unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }) : Promise.resolve({ rows: [] }),
+        unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }, onSensitiveLocked) : Promise.resolve({ rows: [] }),
         fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
         fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
-        unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }) : Promise.resolve({ statuses: [] }),
+        unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }, onSensitiveLocked) : Promise.resolve({ statuses: [] }),
       ] as const;
       const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
       const fresh: LedgerCache = {
@@ -113,7 +116,7 @@ export function useLedgerData({ timeRange, unlocked, onAuthChange, onPasskeyRegi
     } finally {
       setLoadingFresh(false);
     }
-  }, [applyCache, onGitStatusRefresh, unlocked]);
+  }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked]);
 
   const load = useCallback(async (forceFresh = false) => {
     const [me, passkey] = await Promise.all([

@@ -95,6 +95,24 @@ function runDedup(generatedFile: string, outputFile: string | null, alipayFundRo
   return runCommand(pythonCommand(), args, ledgerRoot());
 }
 
+function transactionOnlyBeanText(beanText: string) {
+  const lines = beanText.replace(/\r\n/g, "\n").split("\n");
+  const chunks: string[] = [];
+  let current: string[] | null = null;
+
+  for (const line of lines) {
+    if (/^\d{4}-\d{2}-\d{2}\s+[*!]\s+/.test(line)) {
+      if (current?.length) chunks.push(current.join("\n").trimEnd());
+      current = [line];
+      continue;
+    }
+    if (current && (/^[\t ]/.test(line) || line.trim() === "")) current.push(line);
+  }
+
+  if (current?.length) chunks.push(current.join("\n").trimEnd());
+  return chunks.join("\n\n").trim();
+}
+
 function parseBeanSummary(beanText: string) {
   const dates = Array.from(beanText.matchAll(/^(\d{4}-\d{2}-\d{2})\s+[*!]\s+/gm)).map((m) => m[1]);
   dates.sort();
@@ -132,7 +150,8 @@ export async function createBillImportPreview(input: { provider: BillProvider; f
   const generatedFile = previewPath(importId, providerConfig[input.provider].output);
 
   runTranslate(input.provider, upload.inputFile, generatedFile);
-  const generatedBean = fs.readFileSync(generatedFile, "utf8");
+  const rawGeneratedBean = fs.readFileSync(generatedFile, "utf8");
+  const generatedBean = transactionOnlyBeanText(rawGeneratedBean);
   const dedupReport = runDedup(generatedFile, null, Boolean(input.alipayFundRounding), true);
   const summary = parseBeanSummary(generatedBean);
   const warnings: string[] = [];
@@ -156,7 +175,7 @@ export async function commitBillImportAsync(input: { importId: string; provider:
   runDedup(generatedFile, dedupedFile, Boolean(input.alipayFundRounding), false);
   if (!fs.existsSync(dedupedFile)) throw new Error("没有新交易可写入");
 
-  const beanText = fs.readFileSync(dedupedFile, "utf8").trim();
+  const beanText = transactionOnlyBeanText(fs.readFileSync(dedupedFile, "utf8"));
   const summary = parseBeanSummary(beanText);
   if (!summary.candidateCount || !summary.dateStart || !summary.dateEnd) throw new Error("去重后没有可写入的交易");
 
