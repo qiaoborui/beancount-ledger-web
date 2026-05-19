@@ -7,6 +7,21 @@ import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, Income
 const freshLedgerCacheKeys = new Set<string>();
 const LEDGER_VERSION_POLL_MS = 45_000;
 
+let runtimeLedgerCache: { key: string; cache: LedgerCache } | null = null;
+
+function runtimeCacheKey(range: TimeRange, unlocked: boolean) {
+  return `${timeRangeToParams(range)}:${unlocked ? "unlocked" : "locked"}`;
+}
+
+function readRuntimeLedgerCache(range: TimeRange, unlocked: boolean) {
+  const key = runtimeCacheKey(range, unlocked);
+  return runtimeLedgerCache?.key === key ? runtimeLedgerCache.cache : null;
+}
+
+function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, cache: LedgerCache) {
+  runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked), cache };
+}
+
 async function fetchSensitiveJson<T>(input: RequestInfo | URL, fallback: T, onSensitiveLocked?: () => void): Promise<T> {
   const response = await fetch(input);
   if (response.status === 401 || response.status === 423) {
@@ -26,22 +41,23 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
 }
 
 export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onSensitiveLocked: () => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [balances, setBalances] = useState<Record<string, number>>({});
-  const [txns, setTxns] = useState<Txn[]>([]);
-  const [budgetRows, setBudgetRows] = useState<BudgetRow[]>([]);
-  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>([]);
-  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>([]);
-  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(null);
-  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>([]);
-  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>([]);
-  const [accounts, setAccounts] = useState<AccountView[]>([]);
-  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(null);
-  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>([]);
+  const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked);
+  const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
+  const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
+  const [txns, setTxns] = useState<Txn[]>(() => initialRuntimeCache?.txns ?? []);
+  const [budgetRows, setBudgetRows] = useState<BudgetRow[]>(() => initialRuntimeCache?.budgetRows ?? []);
+  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.netWorthRows ?? []);
+  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.monthEndNetWorthRows ?? []);
+  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialRuntimeCache?.netWorthWindows ?? null);
+  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialRuntimeCache?.creditCards ?? []);
+  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialRuntimeCache?.reconciliationRows ?? []);
+  const [accounts, setAccounts] = useState<AccountView[]>(() => initialRuntimeCache?.accounts ?? []);
+  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialRuntimeCache?.incomeStatement ?? null);
+  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialRuntimeCache?.accountStatuses ?? []);
   const [loadingFresh, setLoadingFresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
-  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialRuntimeCache?.savedAt ?? null);
+  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const clearLedgerData = useCallback(() => {
@@ -62,6 +78,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
   }, []);
 
   const applyCache = useCallback((cache: LedgerCache) => {
+    writeRuntimeLedgerCache(timeRange, unlocked, cache);
     setSummary(cache.summary);
     setBalances(cache.balances);
     setNetWorthRows(cache.netWorthRows);
@@ -76,7 +93,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
     setAccountStatuses(cache.accountStatuses ?? []);
     setLedgerVersion(cache.ledgerVersion ?? null);
     setLastSyncedAt(cache.savedAt);
-  }, []);
+  }, [timeRange, unlocked]);
 
   const clearSensitiveData = useCallback(() => {
     setBalances({});
@@ -163,6 +180,14 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
       clearLedgerData();
     }
     if (!authenticated) return;
+
+    if (!forceFresh) {
+      const runtimeCached = readRuntimeLedgerCache(timeRange, unlocked);
+      if (runtimeCached) {
+        applyCache(runtimeCached);
+        return;
+      }
+    }
 
     if (!forceFresh && unlocked) {
       const cacheKey = timeRangeToParams(timeRange);
