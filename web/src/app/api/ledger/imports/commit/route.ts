@@ -29,7 +29,7 @@ const EntrySchema = z.object({
 
 const CommitSchema = z.object({
   importId: z.string().min(1),
-  provider: z.enum(["alipay", "wechat"]),
+  provider: z.enum(["alipay", "wechat", "cmb"]),
   entries: z.array(EntrySchema).min(1),
   alipayFundRounding: z.boolean().optional(),
 });

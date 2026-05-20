@@ -83,7 +83,7 @@ type FileSnapshot = { existed: boolean; content: string };
 
 type AppendItem = { date: string; beanText: string };
 
-type ImportProvider = "alipay" | "wechat";
+type ImportProvider = "alipay" | "wechat" | "cmb";
 type ImportDocumentSource = { file: string; originalFilename: string; account: string };
 
 function includeLineForTransactionFile(file: string) {
@@ -194,7 +194,7 @@ function importDocumentPath(dateStart: string, dateEnd: string, provider: Import
   const match = dateStart.match(/^(\d{4})-(\d{2})-\d{2}$/);
   if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) throw new Error("导入文档缺少有效日期范围");
   const safeSuffix = suffix?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12);
-  const ext = path.extname(originalFilename).toLowerCase() || (provider === "wechat" ? ".xlsx" : ".csv");
+  const ext = path.extname(originalFilename).toLowerCase() || (provider === "wechat" ? ".xlsx" : provider === "cmb" ? ".pdf" : ".csv");
   const basename = `${dateStart}_${dateEnd}-${provider}${safeSuffix ? `-${safeSuffix}` : ""}${ext}`;
   return path.join(transactionsDir(), match[1], "documents", "imports", basename);
 }
@@ -235,7 +235,8 @@ export async function writeImportedBeanFile(input: { dateStart: string; dateEnd:
         fs.copyFileSync(input.documentSource.file, documentFile);
         documentLine = `${documentDirective(input.dateEnd, input.documentSource.account, outputFile, documentFile)}\n\n`;
       }
-      const header = `; ${input.provider === "alipay" ? "Alipay" : "WeChat Pay"} import: ${input.dateStart} .. ${input.dateEnd}\n`;
+      const providerTitle = input.provider === "alipay" ? "Alipay" : input.provider === "wechat" ? "WeChat Pay" : "CMB Credit Card";
+      const header = `; ${providerTitle} import: ${input.dateStart} .. ${input.dateEnd}\n`;
       fs.writeFileSync(outputFile, `${header}${documentLine}${input.beanText.trimEnd()}\n`, "utf8");
 
       const includeLine = includeLineRelativeTo(monthFile, outputFile);
