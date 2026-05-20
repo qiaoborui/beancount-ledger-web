@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { PwaRegister } from "@/components/PwaRegister";
+import "@fontsource/noto-serif-sc/chinese-simplified-400.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-500.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-600.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

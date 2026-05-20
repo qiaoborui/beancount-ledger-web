@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource/noto-serif-sc": "^5.2.9",
     "@openai/agents": "^0.11.0",
     "@openai/agents-openai": "^0.11.0",
     "@simplewebauthn/browser": "^13.3.0",
