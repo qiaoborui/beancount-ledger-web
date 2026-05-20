@@ -3,8 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --font-serif: "Noto Serif SC", "Songti SC", "STSong", Georgia, "Times New Roman", serif;
-  --font-sans: var(--font-serif);
+  --font-serif: "Noto Serif SC";
+  --font-serif-fallback: "Songti SC", "STSong", Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-serif), var(--font-serif-fallback);
 
   --color-paper: 245 244 237;
   --color-panel: 250 249 245;
