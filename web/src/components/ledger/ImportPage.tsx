@@ -177,7 +177,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           <UploadCloud className="mx-auto h-10 w-10 text-brand" />
           <div className="mt-3 font-medium">拖拽账单到这里，或点击选择文件</div>
           <div className="mt-1 text-sm text-stone">支持支付宝 CSV、微信支付 XLSX/XLS、招商银行信用卡 PDF</div>
-          {file && <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-sm"><FileSpreadsheet className="h-4 w-4" />{file.name}<span className="text-stone">{fileSize(file.size)}</span></div>}
+          {file && <div className="mx-auto mt-4 flex max-w-full items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-left text-sm sm:inline-flex"><FileSpreadsheet className="h-4 w-4 shrink-0" /><span className="min-w-0 flex-1 break-all font-medium sm:max-w-md">{file.name}</span><span className="shrink-0 text-stone">{fileSize(file.size)}</span></div>}
         </div>
 
         <button className="mt-4 flex items-center gap-2 text-sm text-stone underline" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</button>
