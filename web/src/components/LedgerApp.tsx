@@ -77,6 +77,7 @@ const TIME_PRESETS: { key: TimePreset; label: string }[] = [
   { key: "quarter", label: "本季" },
   { key: "year", label: "今年" },
   { key: "all", label: "全部" },
+  { key: "custom", label: "自定义" },
 ];
 
 function readSessionAuthed(): boolean | null {
@@ -189,7 +190,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   function setPreset(preset: TimePreset) {
     if (preset === "custom") {
-      const range: TimeRange = { start: customStart, end: customEnd, preset: "custom" };
+      const range: TimeRange = { start: timeRange.start, end: timeRange.end, preset: "custom" };
+      setCustomStart(range.start);
+      setCustomEnd(range.end);
       setTimeRange(range);
     } else {
       setTimeRange(makeTimeRange(preset));
@@ -486,7 +489,7 @@ function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" |
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "net-worth" && page !== "settings" && page !== "imports";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
@@ -494,7 +497,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     imports: { eyebrow: "statement import", title: "账单导入" },
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
     accounts: { eyebrow: "account book", title: "账户与余额" },
-    "net-worth": { eyebrow: "net worth", title: "净资产" },
+    "net-worth": { eyebrow: "net worth range", title: `${label} 净资产` },
     "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
     settings: { eyebrow: "preferences", title: "设置" },
   };

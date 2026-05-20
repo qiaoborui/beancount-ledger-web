@@ -1,0 +1,26 @@
+version: 1
+project: beancount-ledger-web
+entrypoint: ../AGENTS.md
+
+memory:
+  rules:
+    - rules/project.md
+  knowledge:
+    - knowledge/project.md
+
+skills:
+  directory: skills
+  include:
+    - alipay-bill-import
+    - beancount-bookkeeping
+    - beancount-insights
+    - telegram-ledger-agent
+    - wechat-bill-import
+
+validation:
+  default_workdir: web
+  commands:
+    typecheck: npm run typecheck
+    test: npm run test
+    build: npm run build
+
