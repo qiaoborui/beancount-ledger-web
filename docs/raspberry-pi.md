@@ -73,6 +73,10 @@ Preview uses the sanitized ledger packaged with the application artifact:
 RUNTIME_DIR=/home/pi/beancount-ledger-web-deploy/preview/runtime
 ```
 
+The deploy script forces preview to use `current/examples/preview-ledger`,
+initializes that directory as a local Git repository, disables remote Git sync,
+and writes tool paths such as `DOUBLE_ENTRY_GENERATOR_BIN` into `systemd.env`.
+
 ## GitHub Secrets
 
 In the new application repository, configure Actions secrets:
