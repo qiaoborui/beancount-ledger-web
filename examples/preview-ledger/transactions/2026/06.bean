@@ -78,6 +78,10 @@
   Assets:CN:Bank:PrimaryChecking          180.00 CNY
   Income:Reimbursement                   -180.00 CNY
 
+2026-06-18 * "支付宝" "余额充值"
+  Assets:CN:Bank:PrimaryChecking        -2000.00 CNY
+  Assets:CN:Alipay:Balance              2000.00 CNY
+
 2026-06-19 * "电商平台" "家居日用品"
   Assets:CN:Alipay:Balance               -219.90 CNY
   Expenses:Shopping:Daily                 219.90 CNY
@@ -109,6 +113,10 @@
 2026-06-26 * "月度理财" "买入"
   Assets:CN:Bank:PrimaryChecking        -4000.00 CNY
   Assets:CN:DigitalBank:Investments:Monthly 4000.00 CNY
+
+2026-06-26 * "微信支付" "零钱充值"
+  Assets:CN:Bank:PrimaryChecking         -500.00 CNY
+  Assets:CN:Wechat:Balance               500.00 CNY
 
 2026-06-27 * "朋友聚餐" "代付三人晚餐"
   Assets:CN:Wechat:Balance               -288.00 CNY
