@@ -52,6 +52,13 @@ function textY(item: TextItem) {
 }
 
 async function loadPdfjs() {
+  // In Node/Next standalone builds, pdfjs disables real workers and falls back to
+  // importing GlobalWorkerOptions.workerSrc (default: "./pdf.worker.mjs"). Next
+  // chunks that relative path to `.next/server/chunks/pdf.worker.mjs`, which is
+  // not emitted by the bundler. Import the worker module explicitly first; it
+  // registers `globalThis.pdfjsWorker`, and pdfjs then uses that in-process
+  // handler instead of resolving a deployment-relative fake-worker file.
+  await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   return pdfjs;
 }
