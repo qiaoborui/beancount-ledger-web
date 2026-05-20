@@ -255,7 +255,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     return (
       <button key={`${t.source.file}-${t.source.line}-${i}`} className="card mb-1.5 block w-full p-4 text-left" onClick={() => setSelected(t)}>
         <div className="flex items-baseline justify-between gap-3">
-          <strong className="min-w-0 truncate">{t.payee}</strong>
+          <div className="min-w-0">
+            <strong className="block truncate">{t.payee}</strong>
+            {t.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
+          </div>
           {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
         </div>
         <div className="mt-0.5 text-sm text-olive">{t.narration}</div>
@@ -333,7 +336,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   </div>;
 
   return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>
-    <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}</div>
+    <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
     {editing ? <div className="grid gap-3">
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           <input className="border border-line bg-panel p-3" value={payee} onChange={(e) => setPayee(e.target.value)} />

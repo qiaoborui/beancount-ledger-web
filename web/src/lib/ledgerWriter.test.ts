@@ -8,8 +8,9 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFileSync } from "node:child_process";
-import { appendBeanText, appendLedgerEntries } from "./ledgerWriter";
+import { appendBeanText, appendLedgerEntries, commentTransactionBlock, replaceTransactionBlock } from "./ledgerWriter";
 import { mainBeanPath, transactionFileForDate } from "./ledgerPaths";
+import { transactionSourceHash } from "./beancountParser";
 import type { LedgerEntry } from "./schemas";
 
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -130,5 +131,49 @@ describe("appendLedgerEntries", () => {
     expect(fs.readFileSync(mainBeanPath(), "utf8")).toBe(mainBefore);
     expect(fs.existsSync(path.join(tmpDir, "transactions", "2026", "05.bean"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, "transactions", "2026", "06.bean"))).toBe(false);
+  });
+});
+
+describe("transaction edits", () => {
+  it("falls back to source hash when an earlier edit shifts line numbers", async () => {
+    const file = path.join(tmpDir, "transactions", "2026", "05.bean");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const firstBlock = [
+      '2026-05-01 * "Cafe" "Coffee"',
+      "  Expenses:Food 12.00 CNY",
+      "  Assets:Cash -12.00 CNY",
+    ];
+    const secondBlock = [
+      '2026-05-02 * "Shop" "Snack"',
+      "  Expenses:Food 8.00 CNY",
+      "  Assets:Cash -8.00 CNY",
+    ];
+    fs.writeFileSync(file, [...firstBlock, "", ...secondBlock, ""].join("\n"), "utf8");
+
+    await replaceTransactionBlock(
+      { file, line: 1, hash: transactionSourceHash(firstBlock) },
+      {
+        kind: "transaction",
+        date: "2026-05-01",
+        payee: "Cafe",
+        narration: "Coffee",
+        metadata: { note: "edited" },
+        tags: [],
+        postings: [
+          { account: "Expenses:Food", amount: "12.00", currency: "CNY" },
+          { account: "Assets:Cash", amount: "-12.00", currency: "CNY" },
+        ],
+        confidence: 1,
+        needsReview: false,
+        questions: [],
+      },
+    );
+
+    await commentTransactionBlock({ file, line: 5, hash: transactionSourceHash(secondBlock) }, "duplicate");
+
+    const text = fs.readFileSync(file, "utf8");
+    expect(text).toContain('note: "edited"');
+    expect(text).toContain("; deleted");
+    expect(text).toContain('; 2026-05-02 * "Shop" "Snack"');
   });
 });

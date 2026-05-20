@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { accountsBeanPath, mainBeanPath, transactionFileForDate, transactionsDir } from "./ledgerPaths";
 import type { BalanceAssertion, LedgerEntry, MetadataValue, ParsedTransaction } from "./schemas";
+import { transactionSourceHash } from "./beancountParser";
 
 let writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -281,13 +282,41 @@ function editableLedgerFile(file: string) {
   return full;
 }
 
-function transactionBlock(text: string, line: number) {
+type TransactionSource = { file: string; line: number; hash?: string };
+
+function transactionBlockAtLine(text: string, line: number) {
   const lines = text.split(/\r?\n/);
   const start = line - 1;
   if (start < 0 || start >= lines.length || !/^\d{4}-\d{2}-\d{2}\s+[*!]\s+/.test(lines[start])) throw new Error("交易来源行无效");
   let end = start + 1;
   while (end < lines.length && !/^\d{4}-\d{2}-\d{2}\s+/.test(lines[end]) && !/^include\s+/.test(lines[end].trim())) end += 1;
   return { lines, start, end };
+}
+
+function blockHash(lines: string[], start: number, end: number) {
+  return transactionSourceHash(lines.slice(start, end));
+}
+
+function findTransactionBlockByHash(text: string, hash: string) {
+  const lines = text.split(/\r?\n/);
+  for (let start = 0; start < lines.length; start += 1) {
+    if (!/^\d{4}-\d{2}-\d{2}\s+[*!]\s+/.test(lines[start])) continue;
+    let end = start + 1;
+    while (end < lines.length && !/^\d{4}-\d{2}-\d{2}\s+/.test(lines[end]) && !/^include\s+/.test(lines[end].trim())) end += 1;
+    if (blockHash(lines, start, end) === hash) return { lines, start, end };
+  }
+  throw new Error("找不到原交易，账本可能已被修改，请刷新后重试");
+}
+
+function transactionBlock(text: string, source: TransactionSource) {
+  try {
+    const block = transactionBlockAtLine(text, source.line);
+    if (!source.hash || blockHash(block.lines, block.start, block.end) === source.hash) return block;
+  } catch (error) {
+    if (!source.hash) throw error;
+  }
+  if (!source.hash) throw new Error("交易来源行无效");
+  return findTransactionBlockByHash(text, source.hash);
 }
 
 function writeChecked(file: string, before: string, next: string) {
@@ -300,21 +329,21 @@ function writeChecked(file: string, before: string, next: string) {
   }
 }
 
-export async function replaceTransactionBlock(source: { file: string; line: number }, entry: ParsedTransaction): Promise<void> {
+export async function replaceTransactionBlock(source: TransactionSource, entry: ParsedTransaction): Promise<void> {
   await withWriteLock(async () => {
     const file = editableLedgerFile(source.file);
     const before = fs.readFileSync(file, "utf8");
-    const { lines, start, end } = transactionBlock(before, source.line);
+    const { lines, start, end } = transactionBlock(before, source);
     lines.splice(start, end - start, ...transactionToBean(entry).trimEnd().split("\n"));
     writeChecked(file, before, `${lines.join("\n").replace(/\n+$/g, "")}\n`);
   });
 }
 
-export async function commentTransactionBlock(source: { file: string; line: number }, reason = ""): Promise<void> {
+export async function commentTransactionBlock(source: TransactionSource, reason = ""): Promise<void> {
   await withWriteLock(async () => {
     const file = editableLedgerFile(source.file);
     const before = fs.readFileSync(file, "utf8");
-    const { lines, start, end } = transactionBlock(before, source.line);
+    const { lines, start, end } = transactionBlock(before, source);
     const note = reason.trim() ? `: ${escapeBean(reason.trim())}` : "";
     lines.splice(start, end - start, `; deleted ${new Date().toISOString().slice(0, 10)}${note}`, ...lines.slice(start, end).map((line) => `; ${line}`));
     writeChecked(file, before, `${lines.join("\n").replace(/\n+$/g, "")}\n`);
