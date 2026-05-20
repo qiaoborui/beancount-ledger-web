@@ -13,7 +13,8 @@ export async function GET(request: Request) {
   const snapshot = getLedgerSnapshot();
   const sensitiveUnlocked = await isSensitiveUnlocked();
   const summary = monthSummary(start, end, snapshot.transactions);
-  const netWorthRows = sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [];
+  const allNetWorthRows = sensitiveUnlocked ? netWorthHistory(snapshot.transactions) : [];
+  const netWorthRows = allNetWorthRows.filter((row) => row.date >= start && row.date < end);
   const monthEndRows = sensitiveUnlocked ? monthEndNetWorth(netWorthRows) : [];
   const publicDays = Object.fromEntries(
     Object.entries(summary.days).map(([day, value]) => [day, { income: sensitiveUnlocked ? value.income : 0, expense: value.expense }]),
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     balances: sensitiveUnlocked ? snapshot.balances : {},
     netWorthHistory: netWorthRows,
     monthEndNetWorth: monthEndRows,
-    netWorthWindows: sensitiveUnlocked ? netWorthChangeWindows(netWorthRows) : null,
+    netWorthWindows: sensitiveUnlocked ? netWorthChangeWindows(allNetWorthRows) : null,
     creditCards: sensitiveUnlocked ? creditCardAnalytics(snapshot.transactions, snapshot.balances, snapshot.accounts, start, end) : [],
     sensitiveUnlocked,
   });
