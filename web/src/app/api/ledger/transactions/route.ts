@@ -7,13 +7,13 @@ import { parseApiTimeParams } from "@/lib/timeRange";
 import { appendBeanText, commentTransactionBlock, replaceTransactionBlock, transactionToBean } from "@/lib/ledgerWriter";
 import { ParsedTransactionSchema } from "@/lib/schemas";
 
-const SourceSchema = z.object({ file: z.string().min(1), line: z.number().int().positive() });
+const SourceSchema = z.object({ file: z.string().min(1), line: z.number().int().positive(), hash: z.string().optional() });
 const UpdateSchema = z.object({ source: SourceSchema, entry: ParsedTransactionSchema });
 const DeleteSchema = z.object({ source: SourceSchema, reason: z.string().optional() });
 const ReverseSchema = z.object({ source: SourceSchema, date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 function findBySource(source: z.infer<typeof SourceSchema>) {
-  const txn = getLedgerSnapshot().transactions.find((item) => item.source.file === source.file && item.source.line === source.line);
+  const txn = getLedgerSnapshot().transactions.find((item) => item.source.file === source.file && (item.source.line === source.line || (source.hash && item.source.hash === source.hash)));
   if (!txn) throw new Error("找不到原交易，账本可能已被修改，请刷新后重试");
   return txn;
 }

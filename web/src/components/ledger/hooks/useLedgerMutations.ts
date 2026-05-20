@@ -8,7 +8,7 @@ function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void }) {
+export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
   const [assertion, setAssertion] = useState<BalanceAssertion>({
     kind: "balance",
     date: new Date().toISOString().slice(0, 10),
@@ -42,23 +42,15 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
   }
 
   async function updateTransaction(source: Txn["source"], entry: ParsedTransaction) {
-    const res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry }) });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) return showToast("error", data.error || "修改失败");
+    enqueueTransactionUpdate(source, entry);
     haptic(8);
-    showToast("success", "交易已修改");
-    load(true);
-    refreshGitStatus();
+    showToast("success", "交易已先保存到本地，稍后同步");
   }
 
   async function deleteTransaction(source: Txn["source"], reason: string) {
-    const res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, reason }) });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) return showToast("error", data.error || "删除失败");
+    enqueueTransactionDelete(source, reason);
     haptic(8);
-    showToast("success", "交易已注释删除");
-    load(true);
-    refreshGitStatus();
+    showToast("success", "交易已先在本地隐藏，稍后同步删除");
   }
 
   async function reverseTransaction(source: Txn["source"], date: string) {
