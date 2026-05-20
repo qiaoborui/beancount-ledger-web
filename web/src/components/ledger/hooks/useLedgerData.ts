@@ -40,7 +40,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   }
 }
 
-export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onSensitiveLocked: () => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked);
   const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
   const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
@@ -166,17 +166,24 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
 
   const load = useCallback(async (forceFresh = false) => {
     const [me, passkey] = await Promise.all([
-      fetchJson<{ authenticated?: boolean }>("/api/auth/me"),
+      fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
       fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
     ]);
     const hasPasskey = Boolean(passkey.registered);
     onPasskeyRegistered(hasPasskey);
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
-    if (authenticated) sessionStorage.setItem("ledger_authed", "1");
+    if (authenticated) {
+      sessionStorage.setItem("ledger_authed", "1");
+      if (me.sensitiveUnlocked) {
+        sessionStorage.setItem("ledger_unlocked", "1");
+        onSensitiveUnlockChange(true);
+      }
+    }
     else {
       sessionStorage.removeItem("ledger_authed");
       sessionStorage.removeItem("ledger_unlocked");
+      onSensitiveUnlockChange(false);
       clearLedgerData();
     }
     if (!authenticated) return;
@@ -203,7 +210,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onAuthCh
     }
 
     await fetchFreshLedger(timeRange);
-  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, unlocked]);
+  }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onSensitiveUnlockChange, unlocked]);
 
   useEffect(() => {
     if (authedPollDisabled()) return;
