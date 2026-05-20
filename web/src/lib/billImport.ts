@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ledgerRoot, runtimeRoot } from "./ledgerPaths";
 import { writeImportedBeanFile } from "./ledgerWriter";
 import { parseAccounts } from "./beancountParser";
+import { parseCmbCreditPdfToCsv } from "./cmbPdfStatement";
 
-export type BillProvider = "alipay" | "wechat";
+export type BillProvider = "alipay" | "wechat" | "cmb";
 
 export type ImportPreviewPosting = { account: string; amount: string; currency: string };
 
@@ -42,6 +43,11 @@ export type ImportPreview = {
   entries: ImportPreviewEntry[];
   accountOptions: { account: string; label: string; group: string; active: boolean }[];
   candidateCount: number;
+  rawRowCount: number;
+  filteredRowCount: number;
+  generatedCount: number;
+  excludedRowCount: number;
+  skippedDuplicateCount: number;
   dateStart: string | null;
   dateEnd: string | null;
   warnings: string[];
@@ -56,14 +62,15 @@ export type ImportCommitResult = {
   beanText: string;
 };
 
-const providerConfig: Record<BillProvider, { config: string; output: string; extensions: string[] }> = {
-  alipay: { config: "imports/alipay-config.yaml", output: "alipay-output.bean", extensions: [".csv"] },
-  wechat: { config: "imports/wechat-config.yaml", output: "wechat-output.bean", extensions: [".xlsx", ".xls"] },
+const providerConfig: Record<BillProvider, { config: string; output: string; extensions: string[]; label: string }> = {
+  alipay: { config: "imports/alipay-config.yaml", output: "alipay-output.bean", extensions: [".csv"], label: "支付宝" },
+  wechat: { config: "imports/wechat-config.yaml", output: "wechat-output.bean", extensions: [".xlsx", ".xls"], label: "微信支付" },
+  cmb: { config: "imports/cmb-credit-card-config.yaml", output: "cmb-credit-output.bean", extensions: [".pdf", ".csv"], label: "招商银行信用卡" },
 };
 
 function assertProvider(value: FormDataEntryValue | string | null): BillProvider {
-  if (value === "alipay" || value === "wechat") return value;
-  throw new Error("provider must be alipay or wechat");
+  if (value === "alipay" || value === "wechat" || value === "cmb") return value;
+  throw new Error("provider must be alipay, wechat or cmb");
 }
 
 function optionalProvider(value: FormDataEntryValue | string | null): BillProvider | undefined {
@@ -118,27 +125,130 @@ function runCommand(command: string, args: string[], cwd: string) {
 
 function runTranslate(provider: BillProvider, inputFile: string, outputFile: string) {
   const cfg = providerConfig[provider];
-  runCommand(doubleEntryGeneratorCommand(), ["translate", "--provider", provider, "--target", "beancount", "--config", cfg.config, "--output", outputFile, inputFile], ledgerRoot());
+  const args = ["translate", "-p", provider, "--target", "beancount", "--config", cfg.config, "--output", outputFile];
+  args.push(inputFile);
+  runCommand(doubleEntryGeneratorCommand(), args, ledgerRoot());
 }
 
-function runDedup(generatedFile: string, outputFile: string | null, alipayFundRounding: boolean, dryRun: boolean) {
+function runDedup(provider: BillProvider, generatedFile: string, outputFile: string | null, alipayFundRounding: boolean, dryRun: boolean) {
   const args = ["scripts/dedup_import.py", generatedFile];
+  if (provider === "cmb") args.push("--credit-card");
   if (dryRun) args.push("--dry-run");
   if (outputFile) args.push("-o", outputFile);
   if (alipayFundRounding) args.push("--alipay-fund-rounding");
   return runCommand(pythonCommand(), args, ledgerRoot());
 }
 
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (quoted) {
+      if (char === '"' && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        current += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells;
+}
+
+function csvCell(value: string) {
+  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function csvLine(cells: string[]) {
+  return cells.map(csvCell).join(",");
+}
+
+function cmbPaymentSourcePrefixes() {
+  const configFile = path.join(ledgerRoot(), providerConfig.cmb.config);
+  const config = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : "";
+  const match = config.match(/paymentSourceHandledExternally:\s*\n((?:\s+-\s+.+\n?)+)/);
+  if (!match) return ["支付宝-", "财付通-", "微信支付-"];
+  const prefixes = Array.from(match[1].matchAll(/^\s+-\s+(.+)\s*$/gm)).map((item) => item[1].trim().replace(/^['"]|['"]$/g, ""));
+  return prefixes.length ? prefixes : ["支付宝-", "财付通-", "微信支付-"];
+}
+
+function normalizeCmbCsvText(csvText: string) {
+  return csvText.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+}
+
+function statementHash(buffer: Buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+function prefilterCmbCsv(inputFile: string, outputFile: string) {
+  const text = normalizeCmbCsvText(fs.readFileSync(inputFile, "utf8"));
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
+  if (lines.length < 2) throw new Error("招商银行信用卡 CSV 缺少表头");
+  const [title, header, ...body] = lines;
+  const prefixes = cmbPaymentSourcePrefixes();
+  let skipped = 0;
+  let suspicious = 0;
+  const kept = body.filter((line) => {
+    const cells = parseCsvLine(line);
+    if (/^-?\d[\d,]*\.\d{2}\([A-Z]+\)$/.test(cells[4] ?? "") && !(cells[5] ?? "")) suspicious += 1;
+    const summary = cells[2] ?? "";
+    const handledExternally = prefixes.some((prefix) => summary.startsWith(prefix));
+    if (handledExternally) skipped += 1;
+    return !handledExternally;
+  });
+  fs.writeFileSync(outputFile, [title, header, ...kept].join("\n"), "utf8");
+  const warnings = [`招商银行信用卡账单 Web 前置过滤 ${skipped} 条严格前缀匹配的支付宝/财付通/微信支付明细，避免重复导入。`];
+  if (suspicious) warnings.push(`检测到 ${suspicious} 条 CSV 疑似卡号末四位丢失/列错位；建议上传原始 PDF 以恢复卡号列。`);
+  return { skipped, kept: kept.length, raw: body.length, warnings };
+}
+
+async function prepareProviderInput(provider: BillProvider, inputFile: string, originalFilename: string, importId: string) {
+  if (provider !== "cmb") return { inputFile, warnings: [] as string[], rawRowCount: 0, filteredRowCount: 0, prefilterSkipped: 0 };
+  const ext = path.extname(originalFilename).toLowerCase();
+  const warnings: string[] = [];
+  let normalizedFile = inputFile;
+  if (ext === ".pdf") {
+    const parsed = await parseCmbCreditPdfToCsv(inputFile);
+    normalizedFile = previewPath(importId, "cmb-normalized.csv");
+    fs.writeFileSync(normalizedFile, parsed.csv, "utf8");
+    warnings.push(`已从招商银行信用卡 PDF 解析 ${parsed.rowCount} 条账单明细。`);
+    warnings.push(...parsed.warnings);
+  } else if (ext === ".csv") {
+    warnings.push("当前上传的是招商银行信用卡 CSV；如 CSV 来自外部 PDF 转换且卡号列错位，建议改传原始 PDF。");
+  }
+  const prefilteredFile = previewPath(importId, "cmb-prefiltered.csv");
+  const prefilter = prefilterCmbCsv(normalizedFile, prefilteredFile);
+  warnings.push(...prefilter.warnings);
+  return { inputFile: prefilteredFile, warnings, rawRowCount: prefilter.raw, filteredRowCount: prefilter.kept, prefilterSkipped: prefilter.skipped };
+}
+
 function detectBillProvider(fileName: string, buffer: Buffer, override?: BillProvider) {
   if (override) return { provider: override, reason: "手动指定", confidence: "high" as const };
   const ext = path.extname(fileName).toLowerCase();
   if (ext === ".xlsx" || ext === ".xls") return { provider: "wechat" as const, reason: "Excel 文件通常为微信支付账单", confidence: "high" as const };
-  const sample = buffer.subarray(0, 8192).toString("utf8");
+  const sample = buffer.subarray(0, 32768).toString("utf8");
+  if (ext === ".pdf") {
+    if (buffer.subarray(0, 5).toString("utf8") === "%PDF-") return { provider: "cmb" as const, reason: "PDF 文件将按招商银行信用卡账单解析", confidence: "medium" as const };
+  }
   if (ext === ".csv") {
+    if (/招商银行信用卡对账单|交易日,记账日,交易摘要,人民币金额,卡号末四位,交易地金额/.test(sample)) return { provider: "cmb" as const, reason: "CSV 内容包含招商银行信用卡账单字段", confidence: "high" as const };
     if (/支付宝|交易号|商家订单号|交易创建时间|收支/.test(sample)) return { provider: "alipay" as const, reason: "CSV 内容包含支付宝账单字段", confidence: "high" as const };
     return { provider: "alipay" as const, reason: "CSV 文件默认按支付宝账单处理", confidence: "medium" as const };
   }
-  throw new Error("无法自动识别账单类型，请上传支付宝 CSV 或微信 XLSX/XLS。需要时可使用手动覆盖。");
+  throw new Error("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS 或招商银行信用卡 PDF。需要时可使用手动覆盖。");
 }
 
 function transactionBlocks(beanText: string) {
@@ -237,7 +347,7 @@ function parseBeanSummary(beanText: string) {
 }
 
 function providerDocumentAccount(provider: BillProvider, accounts: Set<string>, fallback?: string) {
-  const preferred = provider === "alipay" ? "Assets:CN:Alipay:Balance" : "Assets:CN:Wechat:Balance";
+  const preferred = provider === "alipay" ? "Assets:CN:Alipay:Balance" : provider === "wechat" ? "Assets:CN:Wechat:Balance" : "Liabilities:CN:CMB:CreditCard";
   if (accounts.has(preferred)) return preferred;
   if (fallback && accounts.has(fallback)) return fallback;
   return preferred;
@@ -254,14 +364,15 @@ async function saveUpload(file: File, providerOverride: BillProvider | undefined
   if (file.size > 10 * 1024 * 1024) throw new Error("账单文件超过 10MB");
   const detection = detectBillProvider(originalName, buffer, providerOverride);
   const cfg = providerConfig[detection.provider];
-  if (!cfg.extensions.includes(ext)) throw new Error(`${detection.provider === "alipay" ? "支付宝" : "微信"}账单文件类型不正确，应为 ${cfg.extensions.join("/")}`);
+  if (!cfg.extensions.includes(ext)) throw new Error(`${cfg.label}账单文件类型不正确，应为 ${cfg.extensions.join("/")}`);
 
   const dir = importRuntimeDir(importId);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const inputFile = path.join(dir, `original${ext}`);
   fs.writeFileSync(inputFile, buffer, { mode: 0o600 });
-  fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({ provider: detection.provider, originalFilename: originalName, inputFile, providerDetection: detection }, null, 2), "utf8");
-  return { inputFile, originalFilename: originalName, provider: detection.provider, providerDetection: detection };
+  const hash = statementHash(buffer);
+  fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({ provider: detection.provider, originalFilename: originalName, inputFile, providerDetection: detection, statementHash: hash }, null, 2), "utf8");
+  return { inputFile, originalFilename: originalName, provider: detection.provider, providerDetection: detection, statementHash: hash };
 }
 
 function accountOptions() {
@@ -305,20 +416,49 @@ export async function createBillImportPreview(input: { provider?: BillProvider; 
   ensureLedgerRequirements(upload.provider);
   const generatedFile = previewPath(importId, providerConfig[upload.provider].output);
   const dedupedFile = previewPath(importId, `${upload.provider}-preview-deduped.bean`);
+  const prepared = await prepareProviderInput(upload.provider, upload.inputFile, upload.originalFilename, importId);
 
-  runTranslate(upload.provider, upload.inputFile, generatedFile);
+  runTranslate(upload.provider, prepared.inputFile, generatedFile);
   const rawGeneratedBean = fs.readFileSync(generatedFile, "utf8");
-  const dedupReport = runDedup(generatedFile, null, Boolean(input.alipayFundRounding), true);
-  runDedup(generatedFile, dedupedFile, Boolean(input.alipayFundRounding), false);
+  const dedupReport = runDedup(upload.provider, generatedFile, null, Boolean(input.alipayFundRounding), true);
+  runDedup(upload.provider, generatedFile, dedupedFile, Boolean(input.alipayFundRounding), false);
   const dedupedBean = fs.existsSync(dedupedFile) ? transactionOnlyBeanText(fs.readFileSync(dedupedFile, "utf8")) : "";
   const generatedBean = transactionOnlyBeanText(rawGeneratedBean);
-  const entries = parsePreviewEntries(dedupedBean);
+  const entries = parsePreviewEntries(dedupedBean).map((entry) => upload.provider === "cmb" ? { ...entry, metadata: { ...entry.metadata, statementHash: upload.statementHash } } : entry);
   const summary = parseBeanSummary(dedupedBean);
-  const warnings: string[] = [];
+  const generatedSummary = parseBeanSummary(generatedBean);
+  const skippedDuplicateCount = Math.max(generatedSummary.candidateCount - summary.candidateCount, 0);
+  const excludedRowCount = upload.provider === "cmb" ? Math.max(prepared.filteredRowCount - generatedSummary.candidateCount, 0) : 0;
+  const warnings: string[] = [...prepared.warnings];
   if (!summary.candidateCount) warnings.push("去重后没有发现可写入的新交易。");
   if (!generatedBean.includes("orderId")) warnings.push("生成结果中没有发现 orderId，将只能使用 fallback 去重。");
+  if (upload.provider === "cmb" && generatedSummary.candidateCount !== prepared.filteredRowCount) {
+    throw new Error(`招商银行信用卡行数核对失败：PDF/CSV 明细 ${prepared.rawRowCount} 条，Web 前置过滤后 ${prepared.filteredRowCount} 条，但 DEG 生成 ${generatedSummary.candidateCount} 条。已停止导入，请检查 PDF 解析或 DEG 配置。`);
+  }
+  if (upload.provider === "cmb") {
+    warnings.push(`招商银行信用卡行数核对通过：PDF/CSV 明细 ${prepared.rawRowCount} 条，Web 前置过滤后 ${prepared.filteredRowCount} 条，DEG 生成 ${generatedSummary.candidateCount} 条，去重后待写入 ${summary.candidateCount} 条。`);
+  }
+  const metaPath = path.join(importRuntimeDir(importId), "meta.json");
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  fs.writeFileSync(metaPath, JSON.stringify({ ...meta, expectedEntryCount: entries.length }, null, 2), "utf8");
 
-  return { importId, provider: upload.provider, providerDetection: upload.providerDetection, originalFilename: upload.originalFilename, generatedBean, dedupReport, entries, accountOptions: accountOptions(), ...summary, warnings };
+  return {
+    importId,
+    provider: upload.provider,
+    providerDetection: upload.providerDetection,
+    originalFilename: upload.originalFilename,
+    generatedBean,
+    dedupReport,
+    entries,
+    accountOptions: accountOptions(),
+    ...summary,
+    rawRowCount: upload.provider === "cmb" ? prepared.rawRowCount : generatedSummary.candidateCount,
+    filteredRowCount: upload.provider === "cmb" ? prepared.filteredRowCount : generatedSummary.candidateCount,
+    generatedCount: generatedSummary.candidateCount,
+    excludedRowCount,
+    skippedDuplicateCount,
+    warnings,
+  };
 }
 
 export async function commitBillImportAsync(input: { importId: string; provider: BillProvider; entries: ImportPreviewEntry[]; alipayFundRounding?: boolean }): Promise<ImportCommitResult> {
@@ -326,8 +466,10 @@ export async function commitBillImportAsync(input: { importId: string; provider:
   const dir = importRuntimeDir(input.importId);
   const metaPath = path.join(dir, "meta.json");
   if (!fs.existsSync(metaPath)) throw new Error("找不到导入预览，请重新上传账单");
-  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { provider: BillProvider; originalFilename: string; inputFile: string };
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { provider: BillProvider; originalFilename: string; inputFile: string; statementHash?: string; expectedEntryCount?: number };
   if (meta.provider !== input.provider) throw new Error("导入 provider 与预览不一致");
+  if (meta.statementHash && statementHash(fs.readFileSync(meta.inputFile)) !== meta.statementHash) throw new Error("原始账单文件哈希与预览不一致，请重新上传账单");
+  if (typeof meta.expectedEntryCount === "number" && input.entries.length !== meta.expectedEntryCount) throw new Error(`待写入交易数量与预览不一致：预览 ${meta.expectedEntryCount} 条，提交 ${input.entries.length} 条，请重新生成预览`);
   if (!input.entries.length) throw new Error("没有可写入的交易");
 
   const beanText = validateAndRenderEntries(input.entries);
@@ -349,3 +491,4 @@ export async function commitBillImportAsync(input: { importId: string; provider:
 }
 
 export { assertProvider, optionalProvider };
+export const __billImportTest = { parseCsvLine, prefilterCmbCsv, providerDocumentAccount, transactionBlocks };

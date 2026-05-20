@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, Fi
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 
-type Provider = "alipay" | "wechat";
+type Provider = "alipay" | "wechat" | "cmb";
 type ProviderOverride = "auto" | Provider;
 
 type AccountOption = { account: string; label: string; group: string; active: boolean };
@@ -42,6 +42,11 @@ type ImportPreview = {
   entries: ImportEntry[];
   accountOptions: AccountOption[];
   candidateCount: number;
+  rawRowCount: number;
+  filteredRowCount: number;
+  generatedCount: number;
+  excludedRowCount: number;
+  skippedDuplicateCount: number;
   dateStart: string | null;
   dateEnd: string | null;
   warnings: string[];
@@ -51,7 +56,9 @@ type ImportPreview = {
 type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
 
 function providerLabel(provider: Provider) {
-  return provider === "alipay" ? "支付宝" : "微信支付";
+  if (provider === "alipay") return "支付宝";
+  if (provider === "wechat") return "微信支付";
+  return "招商银行信用卡";
 }
 
 function fileSize(bytes: number) {
@@ -155,7 +162,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="font-serif text-2xl">账单导入</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">上传支付宝 CSV 或微信支付 XLSX，系统会自动识别来源、生成分录、按订单 ID 去重，并在确认后把原始账单作为 Beancount document 保存到账本仓库。</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">上传支付宝 CSV、微信支付 XLSX 或招商银行信用卡 PDF，系统会自动识别来源、生成分录、去重，并在确认后把原始账单作为 Beancount document 保存到账本仓库。</p>
           </div>
           {preview && <div className="rounded-2xl border border-line bg-paper px-4 py-3 text-xs leading-5 text-stone">识别为：<span className="font-medium text-warm">{providerLabel(preview.provider)}</span><br />{preview.providerDetection.reason}</div>}
         </div>
@@ -166,16 +173,16 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => { event.preventDefault(); resetForFile(event.dataTransfer.files?.[0] ?? null); }}
         >
-          <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
+          <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
           <UploadCloud className="mx-auto h-10 w-10 text-brand" />
           <div className="mt-3 font-medium">拖拽账单到这里，或点击选择文件</div>
-          <div className="mt-1 text-sm text-stone">支持支付宝 CSV、微信支付 XLSX/XLS</div>
+          <div className="mt-1 text-sm text-stone">支持支付宝 CSV、微信支付 XLSX/XLS、招商银行信用卡 PDF</div>
           {file && <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-sm"><FileSpreadsheet className="h-4 w-4" />{file.name}<span className="text-stone">{fileSize(file.size)}</span></div>}
         </div>
 
         <button className="mt-4 flex items-center gap-2 text-sm text-stone underline" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</button>
         {advancedOpen && <div className="mt-3 grid gap-4 rounded-2xl border border-line bg-paper p-4 md:grid-cols-2">
-          <label className="block text-sm"><span className="mb-1 block text-xs text-stone">账单来源覆盖</span><select className="w-full rounded-xl border border-line bg-panel px-3 py-2" value={providerOverride} onChange={(e) => setProviderOverride(e.target.value as ProviderOverride)}><option value="auto">自动识别</option><option value="alipay">支付宝 CSV</option><option value="wechat">微信支付 XLSX</option></select></label>
+          <label className="block text-sm"><span className="mb-1 block text-xs text-stone">账单来源覆盖</span><select className="w-full rounded-xl border border-line bg-panel px-3 py-2" value={providerOverride} onChange={(e) => setProviderOverride(e.target.value as ProviderOverride)}><option value="auto">自动识别</option><option value="alipay">支付宝 CSV</option><option value="wechat">微信支付 XLSX</option><option value="cmb">招商银行信用卡 PDF</option></select></label>
           <label className="flex items-start gap-3 text-sm"><input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} /><span><span className="font-medium">支付宝基金 9.99 → 10.00 补差</span><span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span></span></label>
         </div>}
 
@@ -192,6 +199,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
         </div>
         {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
+        {preview.provider === "cmb" && <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-paper p-4 text-sm md:grid-cols-5"><div><div className="text-xs text-stone">PDF/CSV 明细</div><div className="font-medium">{preview.rawRowCount}</div></div><div><div className="text-xs text-stone">Web 前置过滤后</div><div className="font-medium">{preview.filteredRowCount}</div></div><div><div className="text-xs text-stone">DEG 生成</div><div className="font-medium">{preview.generatedCount}</div></div><div><div className="text-xs text-stone">已去重跳过</div><div className="font-medium">{preview.skippedDuplicateCount}</div></div><div><div className="text-xs text-stone">待确认写入</div><div className="font-medium">{entries.length}</div></div></div>}
 
         <div className="mt-5 space-y-3">
           {entries.map((entry) => <article key={entry.id} className="rounded-2xl border border-line bg-paper p-4">
