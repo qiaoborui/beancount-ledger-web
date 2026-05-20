@@ -1,0 +1,74 @@
+defaultMinusAccount: Income:Other
+defaultPlusAccount: Expenses:Unknown
+defaultCurrency: CNY
+title: 支付宝导入示例
+alipay:
+  rules:
+    - method: 余额
+      fullMatch: true
+      methodAccount: Assets:CN:Alipay:Balance
+    - method: 余额宝
+      fullMatch: true
+      methodAccount: Assets:CN:Alipay:Balance
+    - method: 信用卡
+      methodAccount: Liabilities:CN:CreditCard
+    - method: 储蓄卡
+      methodAccount: Assets:CN:Bank:PrimaryChecking
+    - method: 互联网银行
+      methodAccount: Assets:CN:DigitalBank:Yulibao
+
+    - category: 投资理财
+      type: 不计收支
+      item: 买入
+      methodAccount: Assets:CN:DigitalBank:Yulibao
+      targetAccount: Assets:CN:Alipay:Fund
+
+    - category: 餐饮美食
+      targetAccount: Expenses:Food:Meals
+    - category: 日用百货
+      targetAccount: Expenses:Shopping:Daily
+    - category: 数码电器
+      targetAccount: Expenses:Shopping:Electronics
+    - category: 运动健身
+      targetAccount: Expenses:Health:Fitness
+    - category: 医疗健康
+      targetAccount: Expenses:Health:Pharmacy
+    - category: 酒店旅游
+      targetAccount: Expenses:Travel
+    - category: 交通出行
+      targetAccount: Expenses:Transport:Taxi
+    - category: 爱车养车
+      targetAccount: Expenses:Transport:Parking
+    - category: 文化休闲
+      targetAccount: Expenses:Travel
+
+    - peer: 咖啡,奶茶,饮品
+      targetAccount: Expenses:Food:Drinks
+    - item: 咖啡,奶茶,果汁
+      targetAccount: Expenses:Food:Drinks
+    - peer: 外卖,餐厅,快餐,生活服务商家
+      targetAccount: Expenses:Food:Meals
+    - item: 外卖订单,点餐订单,午餐,晚餐
+      targetAccount: Expenses:Food:Meals
+    - peer: 便利店,超市,生鲜
+      targetAccount: Expenses:Food:Groceries
+    - item: 便利,超市,零食,饮料
+      targetAccount: Expenses:Food:Groceries
+    - peer: 健身,运动
+      targetAccount: Expenses:Health:Fitness
+    - peer: 打车,网约车
+      targetAccount: Expenses:Transport:Taxi
+    - peer: 停车,停车场
+      targetAccount: Expenses:Transport:Parking
+    - peer: 火车,酒店,民宿,门票
+      targetAccount: Expenses:Travel
+    - item: 火车票,酒店订单,门票
+      targetAccount: Expenses:Travel
+    - peer: 手机话费,通信运营商
+      targetAccount: Expenses:Communication:Mobile
+    - peer: AI 服务,App Store,订阅,云服务
+      targetAccount: Expenses:Digital:Subscription
+
+    - type: 收入
+      targetAccount: Income:Other
+      methodAccount: Assets:CN:Alipay:Balance

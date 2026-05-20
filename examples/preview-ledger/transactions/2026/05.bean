@@ -1,0 +1,27 @@
+2026-05-01 * "期初" "主力储蓄卡期初余额"
+  Assets:CN:Bank:PrimaryChecking        20000.00 CNY
+  Equity:Opening-Balances              -20000.00 CNY
+
+2026-05-01 * "期初" "支付宝余额期初余额"
+  Assets:CN:Alipay:Balance                800.00 CNY
+  Equity:Opening-Balances                -800.00 CNY
+
+2026-05-02 * "咖啡店" "拿铁"
+  Assets:CN:Wechat:Balance                -28.00 CNY
+  Expenses:Food:Drinks                     28.00 CNY
+
+2026-05-03 * "外卖平台" "午餐"
+  Liabilities:CN:CreditCard               -46.80 CNY
+  Expenses:Food:Meals                      46.80 CNY
+
+2026-05-05 * "示例公司" "工资"
+  Assets:CN:Bank:PrimaryChecking        15000.00 CNY
+  Income:Salary                        -15000.00 CNY
+
+2026-05-08 * "理财平台" "货币基金收益"
+  Assets:CN:DigitalBank:Yulibao            12.34 CNY
+  Income:Interest:Bank                    -12.34 CNY
+
+2026-05-10 * "超市" "日用品"
+  Assets:CN:Alipay:Balance               -128.50 CNY
+  Expenses:Shopping:Daily                 128.50 CNY

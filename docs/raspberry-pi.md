@@ -15,12 +15,11 @@ Recommended layout on the Pi:
 │   └── systemd.env
 └── preview/
     ├── releases/
-    ├── current -> releases/<sha>/
+    ├── current -> releases/<sha>/   # contains examples/preview-ledger
     ├── runtime/
     └── systemd.env
 
 /home/pi/beancount-ledger/              # private ledger repo for production
-/home/pi/beancount-ledger-preview/      # optional private/copy ledger repo for preview
 ```
 
 ## GitHub runner
@@ -68,10 +67,9 @@ LEDGER_GIT_PULL_INTERVAL_MINUTES=15
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=60
 ```
 
-Preview should use a separate ledger repo/copy to avoid writing test data into production:
+Preview uses the sanitized ledger packaged with the application artifact:
 
 ```bash
-LEDGER_ROOT=/home/pi/beancount-ledger-preview
 RUNTIME_DIR=/home/pi/beancount-ledger-web-deploy/preview/runtime
 ```
 
@@ -158,5 +156,6 @@ The deployment script restarts these services after each artifact deploy.
 - Push to `main` deploys production.
 - Manual `workflow_dispatch` can deploy production or preview.
 - The app artifact is built from this public application repo.
-- Runtime reads/writes are directed by `LEDGER_ROOT` and `RUNTIME_DIR` from the Pi-side env file.
-- Git sync APIs and scheduler operate on `LEDGER_ROOT`, not on the application repo.
+- Production runtime reads/writes are directed by `LEDGER_ROOT` and `RUNTIME_DIR` from the Pi-side env file.
+- Preview runtime uses `examples/preview-ledger` from the deployed release, so test data follows this repository's Git history and is reset on each preview deployment.
+- Git sync APIs and scheduler operate on `LEDGER_ROOT`.

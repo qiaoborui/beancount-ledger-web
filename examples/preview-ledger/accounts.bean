@@ -1,0 +1,102 @@
+; Sanitized account layout derived from a personal Chinese Beancount ledger.
+
+2026-01-01 open Assets:CN:Bank:PrimaryChecking CNY
+  alias: "主力储蓄卡 / 工资卡"
+  group: "cash"
+
+2026-01-01 open Assets:CN:Bank:SecondaryChecking CNY
+  alias: "备用储蓄卡"
+  group: "cash"
+
+2026-01-01 open Assets:CN:Bank:MoneyMarket CNY
+  alias: "银行活钱理财"
+  group: "wealth"
+
+2026-01-01 open Assets:CN:DigitalBank:Yulibao CNY
+  alias: "互联网银行活钱理财"
+  group: "wealth"
+
+2026-01-01 open Assets:CN:DigitalBank:Investments:ShortTerm CNY
+  alias: "互联网银行短期理财"
+  group: "wealth"
+
+2026-01-01 open Assets:CN:DigitalBank:Investments:Monthly CNY
+  alias: "互联网银行月度理财"
+  group: "wealth"
+
+2026-01-01 open Assets:CN:Wechat:Balance CNY
+  alias: "微信零钱"
+
+2026-01-01 open Assets:CN:Alipay:Balance CNY
+  alias: "支付宝余额 / 余额宝现金"
+
+2026-01-01 open Assets:CN:Alipay:Fund CNY
+  alias: "支付宝基金 / 理财持仓"
+  group: "wealth"
+
+2026-01-01 open Assets:CN:HousingFund CNY
+  alias: "住房公积金账户"
+  group: "wealth"
+
+2026-01-01 open Assets:Receivable:Friends CNY
+  alias: "朋友 AA / 代付待收款"
+
+2026-01-01 open Liabilities:CN:CreditCard CNY
+  alias: "信用卡"
+
+2026-01-01 open Liabilities:Payable:Friends CNY
+  alias: "欠朋友的钱"
+
+2026-01-01 open Income:Salary CNY
+2026-01-01 open Income:Bonus CNY
+2026-01-01 open Income:Benefits:HousingFund CNY
+2026-01-01 open Income:Interest:Bank CNY
+2026-01-01 open Income:Interest:AlipayFund CNY
+2026-01-01 open Income:SideProject CNY
+2026-01-01 open Income:Rental CNY
+2026-01-01 open Income:Reimbursement CNY
+2026-01-01 open Income:Social:RedPacket CNY
+2026-01-01 open Income:Social:Gift CNY
+2026-01-01 open Income:Other CNY
+
+2026-01-01 open Expenses:Food:Meals CNY
+2026-01-01 open Expenses:Food:Drinks CNY
+2026-01-01 open Expenses:Food:Groceries CNY
+
+2026-01-01 open Expenses:Transport:Public CNY
+2026-01-01 open Expenses:Transport:Taxi CNY
+2026-01-01 open Expenses:Transport:Parking CNY
+2026-01-01 open Expenses:Transport:CarRental CNY
+2026-01-01 open Expenses:Transport:Other CNY
+
+2026-01-01 open Expenses:Housing:Rent CNY
+2026-01-01 open Expenses:Housing:Utilities CNY
+2026-01-01 open Expenses:Housing:Property CNY
+2026-01-01 open Expenses:Housing:Other CNY
+
+2026-01-01 open Expenses:Communication:Mobile CNY
+2026-01-01 open Expenses:Communication:Internet CNY
+
+2026-01-01 open Expenses:Shopping:Daily CNY
+2026-01-01 open Expenses:Shopping:Clothing CNY
+2026-01-01 open Expenses:Shopping:Electronics CNY
+2026-01-01 open Expenses:Shopping:Gifts CNY
+2026-01-01 open Expenses:Shopping:Other CNY
+
+2026-01-01 open Expenses:Social:RedPacket CNY
+2026-01-01 open Expenses:Social:Gift CNY
+2026-01-01 open Expenses:Social:Treat CNY
+
+2026-01-01 open Expenses:Digital:Subscription CNY
+2026-01-01 open Expenses:Digital:Devices CNY
+2026-01-01 open Expenses:Health:Medical CNY
+2026-01-01 open Expenses:Health:Pharmacy CNY
+2026-01-01 open Expenses:Health:Fitness CNY
+2026-01-01 open Expenses:Entertainment CNY
+2026-01-01 open Expenses:Travel CNY
+2026-01-01 open Expenses:Fees CNY
+2026-01-01 open Expenses:Investment:Loss CNY
+2026-01-01 open Expenses:Unknown CNY
+
+2026-01-01 open Equity:Opening-Balances CNY
+2026-01-01 open Equity:Balance-Adjustments CNY

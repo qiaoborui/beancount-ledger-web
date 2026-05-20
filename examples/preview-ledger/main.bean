@@ -1,0 +1,9 @@
+option "title" "Preview Beancount Ledger"
+option "operating_currency" "CNY"
+option "booking_method" "FIFO"
+
+include "commodities.bean"
+include "accounts.bean"
+include "budgets.bean"
+include "prices.bean"
+include "transactions/2026/05.bean"
