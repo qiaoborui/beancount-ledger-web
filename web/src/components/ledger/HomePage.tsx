@@ -1,5 +1,5 @@
 import { Eye, EyeOff } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny } from "@/lib/money";
 import { Metric } from "./shared";
 import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
@@ -17,7 +17,7 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return <>
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+    <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(620px,1.15fr)]">
       <section className="card overflow-hidden p-0">
         <div className="border-l-4 border-brand p-4 md:p-5">
           <div className="flex items-start justify-between gap-4">
@@ -62,29 +62,34 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
     income: value.income / 100,
     expense: value.expense / 100,
   }));
-  return <section className="card flex min-h-[220px] flex-col p-4">
+  return <section className="card flex min-h-[340px] flex-col p-4">
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
         <h2 className="mt-1 font-serif text-xl">日收支趋势</h2>
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-stone">
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--color-expense))]" />支出柱</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[rgb(var(--color-income))]" />收入线</span>
+        </div>
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="mt-4 h-44 min-w-0 flex-1">
+    {rows.length ? showAmounts ? <div className="mt-4 h-72 min-w-0 flex-1">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
+        <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
-          <YAxis width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
+          <YAxis yAxisId="expense" width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
+          <YAxis yAxisId="income" orientation="right" width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
           <Tooltip
             cursor={{ fill: "var(--selected-bg)" }}
             contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
             labelFormatter={(label) => String(label)}
             formatter={(value, name) => [formatCny(Number(value)), name === "收入" ? "收入" : "支出"]}
           />
-          <Bar dataKey="income" name="收入" fill="rgb(var(--color-income))" radius={[4, 4, 0, 0]} maxBarSize={18} />
-          <Bar dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={18} />
-        </BarChart>
+          <Bar yAxisId="expense" dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
+          <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
   </section>;
