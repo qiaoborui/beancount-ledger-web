@@ -479,6 +479,32 @@ func TestCmbPDFTableHelpers(t *testing.T) {
 	}
 }
 
+func TestCmbPDFLayoutTextParser(t *testing.T) {
+	text := strings.Join([]string{
+		"招商银行信用卡对账单（个人消费卡账户 2026年05月）（补）",
+		"交易日       记账日       交易摘要                                     人民币金额             卡号末四位             交易地金额",
+		"          05/05     掌上生活还款                                     -7,662.12               9813         -7,662.12",
+		" 04/21    04/22     财付通-示例商户有限公司                            -199.00                3218      -199.00(CN)",
+		" 05/02    05/04     PP*APPLE.COM/BILL                       34.17    9813     4.99(US)",
+	}, "\n")
+	result, err := parseCmbPDFLayoutText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RowCount != 3 {
+		t.Fatalf("row count = %d", result.RowCount)
+	}
+	if !strings.Contains(result.CSV, `,05/05,掌上生活还款,"-7,662.12",9813,"-7,662.12"`) {
+		t.Fatalf("missing payment row:\n%s", result.CSV)
+	}
+	if !strings.Contains(result.CSV, "04/21,04/22,财付通-示例商户有限公司,-199.00,3218,-199.00(CN)") {
+		t.Fatalf("missing refund row:\n%s", result.CSV)
+	}
+	if !strings.Contains(result.CSV, "05/02,05/04,PP*APPLE.COM/BILL,34.17,9813,4.99(US)") {
+		t.Fatalf("missing foreign currency row:\n%s", result.CSV)
+	}
+}
+
 func TestRateLimitUsesRemoteAddrByDefault(t *testing.T) {
 	limiter := NewRateLimiter()
 	cfg := testLedger(t)

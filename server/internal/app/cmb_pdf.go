@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -46,6 +48,68 @@ type cmbPDFColumnRange struct {
 }
 
 func parseCmbCreditPDFToCSV(inputFile string) (cmbPDFParseResult, error) {
+	if result, err := parseCmbCreditPDFWithPdftotext(inputFile); err == nil && result.RowCount > 0 {
+		return result, nil
+	}
+	return parseCmbCreditPDFWithCoordinates(inputFile)
+}
+
+func parseCmbCreditPDFWithPdftotext(inputFile string) (cmbPDFParseResult, error) {
+	command := env("PDFTOTEXT_BIN", "pdftotext")
+	cmd := exec.Command(command, "-layout", inputFile, "-")
+	cmd.Env = commandEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return cmbPDFParseResult{}, fmt.Errorf("找不到命令 %s，请安装 poppler-utils 或设置 PDFTOTEXT_BIN", command)
+		}
+		detail := strings.TrimSpace(strings.Join([]string{stderr.String(), stdout.String(), err.Error()}, "\n"))
+		return cmbPDFParseResult{}, errors.New(detail)
+	}
+	return parseCmbPDFLayoutText(stdout.String())
+}
+
+func parseCmbPDFLayoutText(text string) (cmbPDFParseResult, error) {
+	title := ""
+	rows := [][]string{}
+	lineRe := regexp.MustCompile(`^\s*(?:(\d{2}/\d{2})\s+)?(\d{2}/\d{2})\s+(.+?)\s+(-?[\d,]+\.\d{2})\s+(\d{4})\s+(-?[\d,]+\.\d{2}(?:\([A-Z]+\))?)\s*$`)
+	for _, rawLine := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+		if title == "" && strings.Contains(line, "招商银行信用卡") {
+			title = strings.TrimSpace(line)
+		}
+		m := lineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		rows = append(rows, []string{m[1], m[2], strings.TrimSpace(m[3]), m[4], m[5], m[6]})
+	}
+	if title == "" {
+		return cmbPDFParseResult{}, errors.New("未识别到招商银行信用卡对账单标题")
+	}
+	if len(rows) == 0 {
+		return cmbPDFParseResult{}, errors.New("未从招商银行信用卡 PDF 中解析到交易明细")
+	}
+	missingCardLast4 := 0
+	for _, row := range rows {
+		if row[4] == "" {
+			missingCardLast4++
+		}
+	}
+	warnings := []string{}
+	if missingCardLast4 > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d 条交易缺少卡号末四位，已保留空列避免金额错位。", missingCardLast4))
+	}
+	csvRows := []string{title, csvLine(cmbPDFHeaders)}
+	for _, row := range rows {
+		csvRows = append(csvRows, csvLine(row))
+	}
+	return cmbPDFParseResult{CSV: strings.Join(csvRows, "\n"), Title: title, RowCount: len(rows), MissingCardLast4Count: missingCardLast4, Warnings: warnings}, nil
+}
+
+func parseCmbCreditPDFWithCoordinates(inputFile string) (cmbPDFParseResult, error) {
 	file, reader, err := pdf.Open(inputFile)
 	if err != nil {
 		return cmbPDFParseResult{}, err

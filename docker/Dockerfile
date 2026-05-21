@@ -21,7 +21,7 @@ FROM debian:bookworm-slim AS runner
 WORKDIR /app
 ENV GIN_MODE=release
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip git \
+  && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip git poppler-utils \
   && rm -rf /var/lib/apt/lists/* \
   && pip3 install --break-system-packages beancount
 COPY --from=go-builder /app/ledger-web ./ledger-web

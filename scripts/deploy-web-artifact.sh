@@ -122,6 +122,16 @@ PYTHON_BIN_EFFECTIVE="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN_EFFECTIVE" ]]; then
   PYTHON_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v python3 || true)"
 fi
+PDFTOTEXT_BIN_EFFECTIVE="${PDFTOTEXT_BIN:-}"
+if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]]; then
+  PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
+fi
+if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1; then
+  echo "==> Installing poppler-utils for PDF statement import"
+  sudo apt-get update
+  sudo apt-get install -y poppler-utils
+  PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
+fi
 if [[ "$ENVIRONMENT" == "preview" ]]; then
   test -f "$LEDGER_ROOT_EFFECTIVE/main.bean"
   if ! git -C "$LEDGER_ROOT_EFFECTIVE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -161,6 +171,7 @@ WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-}
 BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-}
 DOUBLE_ENTRY_GENERATOR_BIN=$DOUBLE_ENTRY_GENERATOR_BIN_EFFECTIVE
 PYTHON_BIN=$PYTHON_BIN_EFFECTIVE
+PDFTOTEXT_BIN=$PDFTOTEXT_BIN_EFFECTIVE
 LEDGER_GIT_SCHEDULER=$LEDGER_GIT_SCHEDULER_EFFECTIVE
 LEDGER_GIT_REMOTE_DISABLED=$LEDGER_GIT_REMOTE_DISABLED_EFFECTIVE
 LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
