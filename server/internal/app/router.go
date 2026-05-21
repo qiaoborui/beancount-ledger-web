@@ -685,7 +685,7 @@ func (s *Server) importsPreview(c *gin.Context) {
 		return
 	}
 	_ = file.Close()
-	result, err := s.createImportPreview(c.Request.FormValue("provider"), header)
+	result, err := s.createImportPreview(c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -752,6 +752,15 @@ func parseTimeParams(c *gin.Context) (string, string) {
 func monthEnd(month string) string {
 	t, _ := time.Parse("2006-01-02", month+"-01")
 	return t.AddDate(0, 1, 0).Format("2006-01-02")
+}
+
+func truthyFormValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func statusMap(ok bool, value map[string]int) map[string]int {

@@ -288,7 +288,51 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if err := os.Chmod(beanCheck, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	deg := filepath.Join(t.TempDir(), "double-entry-generator")
+	mustWrite(t, deg, strings.Join([]string{
+		"#!/bin/sh",
+		"out=\"\"",
+		"prev=\"\"",
+		"for arg in \"$@\"; do",
+		"  if [ \"$prev\" = \"--output\" ]; then out=\"$arg\"; fi",
+		"  prev=\"$arg\"",
+		"done",
+		"cat > \"$out\" <<'EOF'",
+		"2026-05-03 * \"便利店\" \"便利店\"",
+		"  orderId: \"alipay-1\"",
+		"  source: \"alipay\"",
+		"  Expenses:Food                         6.50 CNY",
+		"  Assets:Cash                         -6.50 CNY",
+		"EOF",
+		"",
+	}, "\n"))
+	if err := os.Chmod(deg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakePython := filepath.Join(t.TempDir(), "python3")
+	mustWrite(t, fakePython, strings.Join([]string{
+		"#!/bin/sh",
+		"generated=\"$2\"",
+		"out=\"\"",
+		"prev=\"\"",
+		"dry=\"\"",
+		"for arg in \"$@\"; do",
+		"  if [ \"$arg\" = \"--dry-run\" ]; then dry=1; fi",
+		"  if [ \"$prev\" = \"-o\" ]; then out=\"$arg\"; fi",
+		"  prev=\"$arg\"",
+		"done",
+		"if [ -n \"$dry\" ]; then echo \"dedup dry run: 1 candidate\"; exit 0; fi",
+		"cp \"$generated\" \"$out\"",
+		"",
+	}, "\n"))
+	if err := os.Chmod(fakePython, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), "alipay: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("DOUBLE_ENTRY_GENERATOR_BIN", deg)
+	t.Setenv("PYTHON_BIN", fakePython)
 	t.Setenv("APP_PASSWORD", "secret")
 	router := NewRouter(cfg)
 	cookies := loginCookies(t, router)
@@ -324,6 +368,9 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if preview.ImportID == "" || len(preview.Entries) != 1 {
 		t.Fatalf("unexpected preview: %#v", preview)
 	}
+	if preview.Entries[0].OrderID != "alipay-1" || preview.Entries[0].CategoryAccount != "Expenses:Food" {
+		t.Fatalf("preview did not parse DEG output: %#v", preview.Entries[0])
+	}
 
 	body, _ := json.Marshal(map[string]any{"importId": preview.ImportID, "provider": preview.Provider, "entries": preview.Entries})
 	recorder = requestWithCookies(router, http.MethodPost, "/api/ledger/imports/commit", string(body), cookies)
@@ -337,6 +384,64 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 	if len(files) == 0 {
 		t.Fatal("expected import output file")
+	}
+	importText := string(mustRead(t, filepath.Join(importsDir, files[0].Name())))
+	if !strings.Contains(importText, "document Assets:Cash") || !strings.Contains(importText, "orderId: \"alipay-1\"") {
+		t.Fatalf("import output missing document or transaction:\n%s", importText)
+	}
+	documentsDir := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports")
+	documents, err := os.ReadDir(documentsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(documents) == 0 {
+		t.Fatal("expected archived import document")
+	}
+}
+
+func TestCmbImportHelpers(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-credit-card-config.yaml"), strings.Join([]string{
+		"cmb:",
+		"  paymentSourceHandledExternally:",
+		"    - 支付宝-",
+		"    - 财付通-",
+		"    - 微信支付-",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "cmb.csv")
+	output := filepath.Join(t.TempDir(), "cmb-prefiltered.csv")
+	mustWrite(t, input, strings.Join([]string{
+		"招商银行信用卡对账单",
+		"交易日,记账日,交易摘要,人民币金额,卡号末四位,交易地金额",
+		"05/01,05/02,支付宝-中国铁路网络有限公司,10.00,1234,10.00(CNY)",
+		"05/02,05/03,财付通-福州超体健康科技有限公司,20.00,1234,20.00(CNY)",
+		"05/03,05/04,微信支付-某商户,30.00,1234,30.00(CNY)",
+		"05/04,05/05,云闪付扫码-财付通(银联云闪付),40.00,1234,40.00(CNY)",
+		"05/05,05/06,上海一嗨汽车租赁有限公司-Apple Pay:6131,50.00,1234,50.00(CNY)",
+	}, "\n"))
+
+	server := &Server{cfg: cfg}
+	result, err := server.prefilterCmbCSV(input, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered := string(mustRead(t, output))
+	if result.RawRowCount != 5 || result.Skipped != 3 || result.FilteredRowCount != 2 {
+		t.Fatalf("unexpected prefilter counts: %#v", result)
+	}
+	for _, skipped := range []string{"支付宝-中国铁路网络有限公司", "财付通-福州超体健康科技有限公司", "微信支付-某商户"} {
+		if strings.Contains(filtered, skipped) {
+			t.Fatalf("filtered CSV still contains skipped row %q:\n%s", skipped, filtered)
+		}
+	}
+	if !strings.Contains(filtered, "云闪付扫码-财付通(银联云闪付)") || !strings.Contains(filtered, "上海一嗨汽车租赁有限公司-Apple Pay:6131") {
+		t.Fatalf("filtered CSV dropped non-prefix rows:\n%s", filtered)
+	}
+
+	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard": true}
+	if got := providerDocumentAccount("cmb", accounts, "Assets:CN:CMB:Checking"); got != "Liabilities:CN:CMB:CreditCard" {
+		t.Fatalf("document account = %s", got)
 	}
 }
 
