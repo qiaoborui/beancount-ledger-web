@@ -30,12 +30,16 @@ type passkeyStore struct {
 }
 
 type passkeyUser struct {
+	id          []byte
 	credentials []webauthn.Credential
 }
 
 var passkeyMu sync.Mutex
 
 func (u passkeyUser) WebAuthnID() []byte {
+	if len(u.id) > 0 {
+		return u.id
+	}
 	return []byte("ledger-owner")
 }
 
@@ -129,7 +133,14 @@ func (s *Server) passkeyLoginOptions(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	assertion, session, err := wa.BeginLogin(s.passkeyUser(), webauthn.WithUserVerification(protocol.VerificationRequired))
+	descriptors := []protocol.CredentialDescriptor{}
+	for _, credential := range s.passkeyUser().credentials {
+		descriptors = append(descriptors, credential.Descriptor())
+	}
+	assertion, session, err := wa.BeginDiscoverableLogin(
+		webauthn.WithAllowedCredentials(descriptors),
+		webauthn.WithUserVerification(protocol.VerificationRequired),
+	)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -155,7 +166,7 @@ func (s *Server) passkeyLoginVerify(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	credential, err := wa.FinishLogin(s.passkeyUser(), *session, c.Request)
+	_, credential, err := wa.FinishPasskeyLogin(s.passkeyUserByCredential, *session, c.Request)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -311,6 +322,19 @@ func (s *Server) passkeyUser() passkeyUser {
 		})
 	}
 	return passkeyUser{credentials: credentials}
+}
+
+func (s *Server) passkeyUserByCredential(rawID, userHandle []byte) (webauthn.User, error) {
+	encoded := base64.RawURLEncoding.EncodeToString(rawID)
+	store := s.readPasskeyStore()
+	for _, credential := range store.Credentials {
+		if credential.ID == encoded {
+			user := s.passkeyUser()
+			user.id = userHandle
+			return user, nil
+		}
+	}
+	return nil, errors.New("Unknown passkey")
 }
 
 func decodeBase64URL(value string) ([]byte, error) {
