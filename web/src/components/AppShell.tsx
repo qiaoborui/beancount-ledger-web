@@ -175,9 +175,9 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
       </div>}
 
       <div className="md:flex">
-        <aside className={`hidden min-h-[calc(100vh-64px)] shrink-0 border-r border-line bg-panel/75 p-4 transition-[width] md:block ${sidebarCollapsed ? "w-20" : "w-64"}`}>
+        <aside className={`hidden min-h-[calc(100vh-64px)] shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 transition-[width] duration-200 ease-out md:block ${sidebarCollapsed ? "w-20" : "w-64"}`}>
           <div className={`mb-3 flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
-            {!sidebarCollapsed && <div className="text-xs font-medium uppercase tracking-[0.24em] text-stone">本月账页</div>}
+            <div className={`min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium uppercase tracking-[0.24em] text-stone transition-[max-width,opacity,transform] duration-150 ease-out ${sidebarCollapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-32 translate-x-0 opacity-100 delay-75"}`}>本月账页</div>
             <button type="button" onClick={toggleSidebarCollapsed} className="rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
@@ -187,8 +187,9 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`flex items-center rounded-2xl px-3 py-3 text-sm ${sidebarCollapsed ? "justify-center" : "gap-3"} ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
-                  <Icon className="h-4 w-4 shrink-0" /> {!sidebarCollapsed && item.label}
+                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`flex items-center rounded-2xl px-3 py-3 text-sm ${sidebarCollapsed ? "justify-center gap-0" : "gap-3"} ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className={`min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-150 ease-out ${sidebarCollapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-32 translate-x-0 opacity-100 delay-75"}`}>{item.label}</span>
                 </ClientNavLink>
               );
             })}
