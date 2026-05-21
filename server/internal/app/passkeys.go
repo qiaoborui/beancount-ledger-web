@@ -17,10 +17,12 @@ import (
 )
 
 type StoredPasskey struct {
-	ID         string   `json:"id"`
-	PublicKey  string   `json:"publicKey"`
-	Counter    uint32   `json:"counter"`
-	Transports []string `json:"transports,omitempty"`
+	ID             string   `json:"id"`
+	PublicKey      string   `json:"publicKey"`
+	Counter        uint32   `json:"counter"`
+	Transports     []string `json:"transports,omitempty"`
+	BackupEligible *bool    `json:"backupEligible,omitempty"`
+	BackupState    *bool    `json:"backupState,omitempty"`
 }
 
 type passkeyStore struct {
@@ -166,12 +168,20 @@ func (s *Server) passkeyLoginVerify(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	_, credential, err := wa.FinishPasskeyLogin(s.passkeyUserByCredential, *session, c.Request)
+	parsedResponse, err := protocol.ParseCredentialRequestResponse(c.Request)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.updatePasskeyCounter(credential.ID, credential.Authenticator.SignCount); err != nil {
+	authenticatorFlags := parsedResponse.Response.AuthenticatorData.Flags
+	_, credential, err := wa.ValidatePasskeyLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
+		return s.passkeyUserByCredential(rawID, userHandle, authenticatorFlags.HasBackupEligible(), authenticatorFlags.HasBackupState())
+	}, *session, parsedResponse)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.updatePasskeyAfterLogin(credential.ID, credential.Authenticator.SignCount, credential.Flags.BackupEligible, credential.Flags.BackupState); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -263,10 +273,12 @@ func (s *Server) savePasskey(credential *webauthn.Credential) error {
 		transports = append(transports, string(transport))
 	}
 	stored := StoredPasskey{
-		ID:         id,
-		PublicKey:  base64.RawURLEncoding.EncodeToString(credential.PublicKey),
-		Counter:    credential.Authenticator.SignCount,
-		Transports: transports,
+		ID:             id,
+		PublicKey:      base64.RawURLEncoding.EncodeToString(credential.PublicKey),
+		Counter:        credential.Authenticator.SignCount,
+		Transports:     transports,
+		BackupEligible: boolPtr(credential.Flags.BackupEligible),
+		BackupState:    boolPtr(credential.Flags.BackupState),
 	}
 	replaced := false
 	for i := range store.Credentials {
@@ -283,6 +295,10 @@ func (s *Server) savePasskey(credential *webauthn.Credential) error {
 }
 
 func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
+	return s.updatePasskeyAfterLogin(id, counter, false, false)
+}
+
+func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligible bool, backupState bool) error {
 	passkeyMu.Lock()
 	defer passkeyMu.Unlock()
 	store := s.readPasskeyStore()
@@ -290,6 +306,8 @@ func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
 	for i := range store.Credentials {
 		if store.Credentials[i].ID == encoded {
 			store.Credentials[i].Counter = counter
+			store.Credentials[i].BackupEligible = boolPtr(backupEligible)
+			store.Credentials[i].BackupState = boolPtr(backupState)
 			return s.writePasskeyStore(store)
 		}
 	}
@@ -316,6 +334,10 @@ func (s *Server) passkeyUser() passkeyUser {
 			ID:        id,
 			PublicKey: publicKey,
 			Transport: transports,
+			Flags: webauthn.CredentialFlags{
+				BackupEligible: stored.BackupEligible != nil && *stored.BackupEligible,
+				BackupState:    stored.BackupState != nil && *stored.BackupState,
+			},
 			Authenticator: webauthn.Authenticator{
 				SignCount: stored.Counter,
 			},
@@ -324,13 +346,23 @@ func (s *Server) passkeyUser() passkeyUser {
 	return passkeyUser{credentials: credentials}
 }
 
-func (s *Server) passkeyUserByCredential(rawID, userHandle []byte) (webauthn.User, error) {
+func (s *Server) passkeyUserByCredential(rawID, userHandle []byte, backupEligible bool, backupState bool) (webauthn.User, error) {
 	encoded := base64.RawURLEncoding.EncodeToString(rawID)
 	store := s.readPasskeyStore()
 	for _, credential := range store.Credentials {
 		if credential.ID == encoded {
 			user := s.passkeyUser()
 			user.id = userHandle
+			for i := range user.credentials {
+				if base64.RawURLEncoding.EncodeToString(user.credentials[i].ID) == encoded {
+					if credential.BackupEligible == nil {
+						user.credentials[i].Flags.BackupEligible = backupEligible
+					}
+					if credential.BackupState == nil {
+						user.credentials[i].Flags.BackupState = backupState
+					}
+				}
+			}
 			return user, nil
 		}
 	}
@@ -342,6 +374,10 @@ func decodeBase64URL(value string) ([]byte, error) {
 		return decoded, nil
 	}
 	return base64.URLEncoding.DecodeString(value)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func rpIDFromRequest(c *gin.Context) string {
