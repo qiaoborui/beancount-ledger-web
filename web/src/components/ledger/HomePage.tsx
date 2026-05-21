@@ -17,7 +17,7 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return <>
-    <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(620px,1.15fr)]">
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(620px,1.15fr)]">
       <section className="card overflow-hidden p-0">
         <div className="border-l-4 border-brand p-4 md:p-5">
           <div className="flex items-start justify-between gap-4">
