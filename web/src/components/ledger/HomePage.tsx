@@ -62,7 +62,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
     income: value.income / 100,
     expense: value.expense / 100,
   }));
-  return <section className="card flex min-h-[340px] flex-col p-4">
+  return <section className="card p-4">
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
@@ -74,8 +74,8 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="mt-4 h-72 min-w-0 flex-1">
-      <ResponsiveContainer width="100%" height="100%">
+    {rows.length ? showAmounts ? <div className="mt-4 min-w-0">
+      <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
@@ -91,7 +91,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
           <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
         </ComposedChart>
       </ResponsiveContainer>
-    </div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
+    </div> : <div className="mt-4 grid h-[300px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid h-[300px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
   </section>;
 }
 
