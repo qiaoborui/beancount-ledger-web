@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
-import { AppShell } from "./AppShell";
+import { AppShell, ledgerNavItems } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
@@ -26,13 +26,14 @@ import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
 import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
+import { CommandPalette, type CommandAction } from "./ledger/CommandPalette";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
 import { HomePage } from "./ledger/HomePage";
 import { QuickActionsSheet } from "./ledger/QuickActionsSheet";
 import { ImportPage } from "./ledger/ImportPage";
 import { Toast } from "./ledger/shared";
-import { AccountManager, BalanceAssertionForm, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
+import { AccountManager, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
 import { AccountDetailPage } from "./ledger/AccountDetailPage";
 
 import { ReconcilePage } from "./ledger/ReconcilePage";
@@ -81,9 +82,21 @@ const TIME_PRESETS: { key: TimePreset; label: string }[] = [
   { key: "custom", label: "自定义" },
 ];
 
+const TRANSACTION_QUICK_VIEWS = [
+  { id: "food", label: "本月餐饮", detail: "Expenses:Food 及子分类", category: "Expenses:Food", mode: "prefix" as const },
+  { id: "unknown", label: "Unknown 待整理", detail: "精确查看 Expenses:Unknown", category: "Expenses:Unknown", mode: "exact" as const },
+  { id: "reimburse", label: "报销相关", detail: "搜索报销线索", search: "报销" },
+];
+
 function readSessionAuthed(): boolean | null {
   if (typeof window === "undefined") return null;
   return sessionStorage.getItem("ledger_authed") === "1" ? true : null;
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  const element = target instanceof HTMLElement ? target : null;
+  if (!element) return false;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) || element.isContentEditable;
 }
 
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
@@ -126,6 +139,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
   const [gitSaveOpen, setGitSaveOpen] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [aiOpenSignal, setAiOpenSignal] = useState(0);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
@@ -184,8 +198,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites } = usePendingLedgerWrites({ load, refreshGitStatus, showToast });
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast, enqueuePendingWrites });
-  const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete });
-  const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
+  const { updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete });
+  const { accountLabelMap, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
   const projectedTxns = useMemo(() => applyPendingLedgerOperations(txns, pendingOperations, timeRange), [pendingOperations, timeRange, txns]);
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
@@ -271,6 +285,58 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     });
   }
 
+  function applyTransactionQuickView(view: (typeof TRANSACTION_QUICK_VIEWS)[number]) {
+    const category = ("category" in view ? view.category : "") ?? "";
+    const metadata = "";
+    const search = ("search" in view ? view.search : "") ?? "";
+    const mode = ("mode" in view ? view.mode : "prefix") ?? "prefix";
+    setTxnCategoryQuery(category);
+    setTxnMetadataQuery(metadata);
+    setTxnSearchQuery(search);
+    setCategoryMatchMode(mode);
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (metadata) params.set("metadata", metadata);
+    if (search) params.set("q", search);
+    if (mode === "exact") params.set("mode", "exact");
+    const query = params.toString();
+    startRouteTransition(() => {
+      router.push(query ? `/transactions?${query}` : "/transactions");
+    });
+  }
+
+  function focusTransactionSearch() {
+    if (page !== "transactions") {
+      startRouteTransition(() => router.push("/transactions"));
+      window.setTimeout(() => document.getElementById("transaction-search-input")?.focus(), 220);
+      return;
+    }
+    document.getElementById("transaction-search-input")?.focus();
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+      if (event.key === "/" && page === "transactions") {
+        event.preventDefault();
+        focusTransactionSearch();
+      }
+      if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        openManualEntry();
+      }
+      if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        const currentHeader = pageHeader(page, timeRange);
+        const canMove = currentHeader.monthScoped && timeRange.preset !== "all" && timeRange.preset !== "custom";
+        if (!canMove) return;
+        event.preventDefault();
+        setTimeRange(navigateTimeRange(timeRange, event.key === "ArrowLeft" ? -1 : 1));
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [page, router, timeRange]);
+
   if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
@@ -309,10 +375,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     router.push("/imports");
   }
 
-  function openBalanceAssertion() {
-    router.push("/accounts");
+  function openReconcilePage() {
+    router.push("/reconcile");
     if (!unlocked) void loginWithPasskey();
-    window.setTimeout(() => document.getElementById("balance-assertion-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 180);
   }
 
   const offlineWriteMessage = "当前离线，写入操作会失败，请联网后再试。";
@@ -329,7 +394,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   const guardedAppendPreviews = () => { appendPreviews(); };
-  const guardedAppendAssertion = () => { appendAssertion(); };
   const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { updateTransaction(...args); };
   const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { deleteTransaction(...args); };
   const guardedReverseTransaction = (...args: Parameters<typeof reverseTransaction>) => { if (guardOnline()) reverseTransaction(...args); };
@@ -339,6 +403,18 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     load(true);
     refreshGitStatus();
   };
+
+  const commandActions: CommandAction[] = [
+    { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
+    { id: "ai-entry", label: "AI 记账助理", detail: "用自然语言生成预览", keywords: ["ai", "chat"], run: openAiEntry },
+    { id: "search-transactions", label: "搜索流水", detail: "跳到流水页并聚焦搜索框", shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
+    { id: "git-save", label: "保存到 Git", detail: gitDirty ? `${changedFileCount} 个文件有改动` : "查看私有账本 Git 状态", keywords: ["commit", "save"], run: () => { void openGitSave(); } },
+    { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
+    { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, -1)) },
+    { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, 1)) },
+    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => router.push(item.href) })),
+    ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
+  ];
 
   return (
     <AppShell
@@ -354,8 +430,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onActiveRouteTap={handleActiveRouteTap}
     >
       <Toast toast={toast} />
+      <CommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} />
       <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
-      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onBalanceAssertion={openBalanceAssertion} onGitSave={openGitSave} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} />
+      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onGitSave={openGitSave} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} />
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
@@ -448,13 +525,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "home" && <HomePage summary={summary} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
-      {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} creditCards={creditCards} accountStatuses={accountStatuses} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} creditCards={creditCards} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
-      {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /><BalanceAssertionForm assertion={assertion} setAssertion={setAssertion} onSubmit={guardedAppendAssertion} accounts={balanceAccounts} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额、余额断言和对账数据需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
+      {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
       {page === "imports" && <ImportPage onImported={guardedImportRefresh} />}
       {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {(page === "home" || page === "transactions") && (
         <TransactionList
           txns={projectedTxns}
@@ -489,6 +567,24 @@ function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" |
   const label = refreshing || state === "refreshing" ? "正在刷新…" : state === "release" ? "松开刷新" : "下拉刷新";
   const top = Math.max(12, Math.min(76, distance));
   return <div className="pointer-events-none fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-olive shadow-sm backdrop-blur" style={{ top: `calc(${top}px + env(safe-area-inset-top))` }}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 text-brand ${refreshing || state === "refreshing" ? "animate-spin" : ""}`} />{label}</div>;
+}
+
+function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {
+  return (
+    <section className="mb-4 hidden items-center justify-between gap-3 rounded-2xl border border-line bg-panel p-3 lg:flex">
+      <div>
+        <div className="text-xs uppercase tracking-[0.2em] text-stone">saved views</div>
+        <div className="mt-0.5 text-sm text-olive">常用流水视图</div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        {views.map((view) => (
+          <button key={view.id} type="button" className="rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag" onClick={() => onSelect(view)} title={view.detail}>
+            {view.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function pageHeader(page: LedgerPage, range: TimeRange) {

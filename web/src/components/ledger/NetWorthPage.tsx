@@ -3,8 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { Metric } from "./shared";
-import { statusColor, statusTitle } from "./AccountPanels";
-import type { AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, NetWorthPoint, NetWorthWindows } from "./types";
+import type { AccountView, IncomeStatementCache, NetWorthPoint, NetWorthWindows } from "./types";
 
 const COLORS = [
   "var(--chart-palette-1)",
@@ -18,7 +17,7 @@ const COLORS = [
 type ChartRow = { date: string; 资产: number; 负债: number; 净资产: number };
 type ViewMode = "daily" | "month-end";
 
-export function NetWorthPage({ rows, monthEndRows, windows, creditCards, accountStatuses, balances, accounts, incomeStatement, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; creditCards: CreditCardAnalytics[]; accountStatuses: AccountStatus[]; balances: Record<string, number>; accounts: AccountView[]; incomeStatement: IncomeStatementCache; visible: boolean; onToggleVisible: () => void }) {
+export function NetWorthPage({ rows, monthEndRows, windows, balances, accounts, incomeStatement, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; balances: Record<string, number>; accounts: AccountView[]; incomeStatement: IncomeStatementCache; visible: boolean; onToggleVisible: () => void }) {
   const [viewMode, setViewMode] = useState<ViewMode>("month-end");
   const assets = Object.entries(balances).filter(([a]) => a.startsWith("Assets:")).reduce((s, [, v]) => s + v, 0);
   const liabilities = Object.entries(balances).filter(([a]) => a.startsWith("Liabilities:")).reduce((s, [, v]) => s + Math.abs(v), 0);
@@ -51,7 +50,6 @@ export function NetWorthPage({ rows, monthEndRows, windows, creditCards, account
     </section>
 
     <section className="mt-3 grid gap-3 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatCny(investmentIncome / 100))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
-    <CreditCardSection cards={creditCards} statuses={accountStatuses} visible={visible} />
     <AssetAllocation accounts={accounts} balances={balances} visible={visible} />
     <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={balances} visible={visible} /><LiabilitiesTrend rows={rows} visible={visible} /></section>
     <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} onModeChange={setViewMode} />
@@ -60,21 +58,6 @@ export function NetWorthPage({ rows, monthEndRows, windows, creditCards, account
 
 function InsightCard({ label, value, tone, detail }: { label: string; value: string; tone: string; detail?: string }) {
   return <div className="rounded-2xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</div>;
-}
-
-function CreditCardSection({ cards, statuses, visible }: { cards: CreditCardAnalytics[]; statuses: AccountStatus[]; visible: boolean }) {
-  const totalOutstanding = cards.reduce((sum, card) => sum + card.outstanding, 0);
-  const totalSpend = cards.reduce((sum, card) => sum + card.periodSpend, 0);
-  const totalBillCycleSpend = cards.reduce((sum, card) => sum + card.billCycleSpend, 0);
-  const totalRepayments = cards.reduce((sum, card) => sum + card.periodRepayments, 0);
-  const billing = cards[0];
-  const mask = (value: string) => visible ? value : "••••••";
-  if (!cards.length) return null;
-  return <section className="card mt-6 p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="font-serif text-2xl">信用卡</h2><p className="mt-1 text-sm text-olive">账单周期 {billing.billCycleStart.slice(5)} ~ {billing.billCycleEnd.slice(5)}；{billing.statementDate.slice(5)} 出账，最晚 {billing.dueDate.slice(5)} 还款。</p></div><div className="text-sm text-stone">账单周期消费 {mask(formatCny(totalBillCycleSpend / 100))} · 当前范围消费 {mask(formatCny(totalSpend / 100))} · 还款 {mask(formatCny(totalRepayments / 100))}</div></div><div className="mt-4 rounded-2xl border border-line bg-panel p-4"><div className="text-xs uppercase tracking-[0.18em] text-stone">总未还</div><div className="amount-expense mt-2 text-2xl font-semibold">{mask(formatCny(totalOutstanding / 100))}</div></div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{cards.map((card) => { const status = statuses.find((item) => item.account === card.account); return <div key={card.account} className="rounded-2xl border border-line bg-panel p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2 font-medium">{status && <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusColor(status.status)}`} title={statusTitle(status)} />}{card.label}</div><div className="mt-1 truncate text-xs text-stone">{card.account}</div></div><div className="amount-expense shrink-0 text-right font-semibold">{mask(formatCompactCny(card.outstanding / 100))}</div></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><MiniStat label="账单周期消费" value={mask(formatCny(card.billCycleSpend / 100))} /><MiniStat label="当前范围刷卡" value={mask(formatCny(card.periodSpend / 100))} /><MiniStat label="最晚还款" value={card.dueDate.slice(5)} /><MiniStat label="最近活动" value={card.lastActivityDate?.slice(5) ?? "—"} /></div></div>; })}</div></section>;
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return <div><div className="text-xs text-stone">{label}</div><div className="mt-1 font-medium text-olive">{value}</div></div>;
 }
 
 function AssetAllocation({ accounts, balances, visible }: { accounts: AccountView[]; balances: Record<string, number>; visible: boolean }) {

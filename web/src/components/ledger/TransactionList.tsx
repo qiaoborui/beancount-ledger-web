@@ -124,6 +124,75 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   );
 }
 
+function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
+  const amt = primaryAmount(txn);
+  return (
+    <button className={`card mb-1.5 block w-full p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          <strong className="block truncate">{txn.payee}</strong>
+          {txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
+        </div>
+        {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
+      </div>
+      <div className="mt-0.5 text-sm text-olive">{txn.narration}</div>
+      {viewMode === "full" ? (
+        <>
+          <PostingFlow postings={txn.postings} />
+          <MetadataBadges txn={txn} limit={6} />
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{txn.date}</div>
+        </>
+      ) : (
+        <>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{txn.date}{txn.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j}>{p.account}</span>)}</div>
+          <MetadataBadges txn={txn} limit={3} />
+        </>
+      )}
+    </button>
+  );
+}
+
+function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
+  const amt = primaryAmount(txn);
+  const categoryAccounts = txn.postings.filter((posting) => posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:"));
+  const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
+  const meta = metadataPairs(txn);
+  return (
+    <button
+      type="button"
+      className={`grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      onClick={onSelect}
+    >
+      <div className="text-xs tabular-nums text-stone">
+        <div>{txn.date.slice(5)}</div>
+        <div className="mt-1 text-[11px] text-stone/70">{txn.date.slice(0, 4)}</div>
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <strong className="truncate text-sm text-ink">{txn.payee}</strong>
+          {txn.pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步</span>}
+        </div>
+        <div className="mt-0.5 truncate text-xs text-olive">{txn.narration || "无说明"}</div>
+        {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
+      </div>
+      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
+      <div className="min-w-0">
+        <div className="truncate text-xs text-warm">{categoryAccounts.map((posting) => posting.account).join(" · ") || "未分类"}</div>
+        <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
+      </div>
+      <div className="min-w-0">
+        {meta.length || txn.tags?.length ? (
+          <div className="flex flex-wrap gap-1">
+            {meta.slice(0, 2).map(([key, value]) => <span key={`${key}:${String(value)}`} className="max-w-[120px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{key}: {String(value)}</span>)}
+            {(txn.tags ?? []).slice(0, 1).map((tag) => <span key={tag} className="max-w-[100px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">#{tag}</span>)}
+            {meta.length + (txn.tags?.length ?? 0) > 3 && <span className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">+{meta.length + (txn.tags?.length ?? 0) - 3}</span>}
+          </div>
+        ) : <span className="text-xs text-stone/60">—</span>}
+      </div>
+    </button>
+  );
+}
+
 export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -183,101 +252,81 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
 
-  return <section className="mt-6"><div className="mb-3 flex flex-col gap-3">
-    {/* 搜索框 */}
-    {searchable && setSearchQuery && (
-      <input
-        className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm"
-        placeholder="搜索商户名、说明、账户、metadata…（空格分多个关键词）"
-        value={searchQuery ?? ""}
-        onChange={(e) => setSearchQuery(e.target.value)}
-      />
-    )}
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3">
-        <h2 className="text-sm text-stone">账单明细{searchable && <span className="ml-2 text-stone">{rows.length} / {txns.length}</span>}</h2>
-        {/* 视图切换 */}
-        {searchable && setViewMode && (
-          <div className="flex rounded-lg border border-line overflow-hidden">
-            <button
-              className={`px-2 py-0.5 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-              onClick={() => setViewMode("compact")}
-            >简洁</button>
-            <button
-              className={`px-2 py-0.5 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-              onClick={() => setViewMode("full")}
-            >完整</button>
+  const hasFilters = Boolean((categoryQuery ?? "").trim() || (metadataQuery ?? "").trim() || (searchQuery ?? "").trim());
+  const selectedMatches = (txn: Txn) => selected?.source.file === txn.source.file && selected.source.line === txn.source.line && selected.source.hash === txn.source.hash;
+  const pager = rows.length > 0 && <TransactionPager safePage={safePage} totalPages={totalPages} rowsLength={rows.length} pageSize={pageSize} setPageSize={setPageSize} setPage={setPage} />;
+
+  return <section className="mt-6">
+    <div className="min-w-0">
+      {searchable && (
+        <div className="mb-4 rounded-2xl border border-line bg-panel p-3 shadow-sm">
+          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(180px,260px)_minmax(180px,260px)]">
+            {setSearchQuery && <input id="transaction-search-input" className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
+            {setCategoryQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={categories.includes(categoryQuery ?? "") ? categoryQuery : ""} onChange={(e) => setCategoryQuery(e.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select>}
+            {setMetadataQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ""} onChange={(e) => setMetadataQuery(e.target.value)}><option value="">全部 metadata</option>{metadataOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>}
           </div>
-        )}
-      </div>
-      {searchable && setCategoryQuery && (
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div>
-            <input list="txn-category-options" className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" placeholder="手动输入分类，如 Food / Expenses:Transport" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />
-            <datalist id="txn-category-options">{categories.map((category) => <option key={category} value={category} />)}</datalist>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
+              <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+              {setCategoryQuery && <input list="txn-category-options" className="w-60 rounded-xl border border-line bg-paper px-3 py-1.5 text-xs" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
+              <datalist id="txn-category-options">{categories.map((category) => <option key={category} value={category} />)}</datalist>
+              {setMetadataQuery && <input list="txn-metadata-options" className="w-64 rounded-xl border border-line bg-paper px-3 py-1.5 text-xs" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
+              <datalist id="txn-metadata-options">{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
+                <button className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
+                <button className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
+              </div>}
+              {setCategoryQuery && setMatchMode && categoryQuery && query && <div className="flex overflow-hidden rounded-lg border border-line">
+                <button className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>前缀</button>
+                <button className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>精确</button>
+              </div>}
+              {hasFilters && <button className="rounded-xl border border-line bg-paper px-3 py-1.5 text-xs text-stone hover:bg-tag" onClick={() => { setCategoryQuery?.(""); setMetadataQuery?.(""); setSearchQuery?.(""); }}>清除筛选</button>}
+            </div>
           </div>
-          <select className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={categories.includes(categoryQuery ?? "") ? categoryQuery : ""} onChange={(e) => setCategoryQuery(e.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select>
         </div>
       )}
-      {searchable && setMetadataQuery && (
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div>
-            <input list="txn-metadata-options" className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" placeholder="按 metadata/tag 筛选，如 platform:taobao person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />
-            <datalist id="txn-metadata-options">{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
+
+      {rows.length === 0 && <div className="card p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
+
+      {searchable && rows.length > 0 ? (
+        <>
+          <div className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm lg:block">
+            <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
+              <span>日期</span>
+              <span>交易</span>
+              <span className="text-right">金额</span>
+              <span>分类 / 账户</span>
+              <span>标签</span>
+            </div>
+            <div className="divide-y divide-line">
+              {pageRows.map((txn, index) => <TransactionTableRow key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+            </div>
           </div>
-          <select className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ""} onChange={(e) => setMetadataQuery(e.target.value)}><option value="">全部 metadata</option>{metadataOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-        </div>
+          <div className="lg:hidden">
+            {pageRows.map((txn, index) => <TransactionCard key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+          </div>
+        </>
+      ) : (
+        pageRows.map((txn, index) => <TransactionCard key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)
       )}
+
+      {pager}
     </div>
-    {/* 分类筛选：匹配模式切换 + 提示 */}
-    {searchable && setCategoryQuery && setMatchMode && categoryQuery && query && (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="flex rounded-lg border border-line overflow-hidden">
-          <button
-            className={`px-2 py-0.5 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-            onClick={() => setMatchMode("prefix")}
-          >前缀匹配</button>
-          <button
-            className={`px-2 py-0.5 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-            onClick={() => setMatchMode("exact")}
-          >精确匹配</button>
-        </div>
-        {matchMode === "prefix" && (
-          <span className="text-xs text-stone">{categoryQuery} 及其子分类 · {rows.length} 条</span>
-        )}
-      </div>
-    )}
-    {(searchable && categoryQuery && setCategoryQuery) || (searchable && searchQuery && setSearchQuery) || (searchable && metadataQuery && setMetadataQuery) ? <div className="flex flex-wrap gap-2">{categoryQuery && setCategoryQuery && <button className="self-start text-xs text-stone underline" onClick={() => setCategoryQuery("")}>清除分类筛选</button>}{metadataQuery && setMetadataQuery && <button className="self-start text-xs text-stone underline" onClick={() => setMetadataQuery("")}>清除 metadata 筛选</button>}{searchQuery && setSearchQuery && <button className="self-start text-xs text-stone underline" onClick={() => setSearchQuery("")}>清除搜索</button>}</div> : null}
-  </div>
-  {rows.length === 0 && <div className="card p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
-  {pageRows.map((t, i) => {
-    const amt = primaryAmount(t);
-    return (
-      <button key={`${t.source.file}-${t.source.line}-${i}`} className="card mb-1.5 block w-full p-4 text-left" onClick={() => setSelected(t)}>
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="min-w-0">
-            <strong className="block truncate">{t.payee}</strong>
-            {t.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
-          </div>
-          {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
-        </div>
-        <div className="mt-0.5 text-sm text-olive">{t.narration}</div>
-        {viewMode === "full" ? (
-          <>
-            {/* 完整视图：显示借贷方流向 */}
-            <PostingFlow postings={t.postings} />
-            <MetadataBadges txn={t} limit={6} />
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{t.date}</div>
-          </>
-        ) : (
-          <><div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{t.date}{t.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j}>{p.account}</span>)}</div><MetadataBadges txn={t} limit={3} /></>
-        )}
-      </button>
-    );
-  })}
-  {rows.length > 0 && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between"><div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} 条</div><div className="flex items-center gap-2"><select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>}
-  {selected && <TransactionDrawer txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+    {selected && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
+}
+
+function TransactionPager({ safePage, totalPages, rowsLength, pageSize, setPageSize, setPage }: { safePage: number; totalPages: number; rowsLength: number; pageSize: number; setPageSize: (value: number) => void; setPage: React.Dispatch<React.SetStateAction<number>> }) {
+  return <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rowsLength)} 条</div>
+    <div className="flex items-center gap-2">
+      <select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select>
+      <button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+      <button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button>
+    </div>
+  </div>;
 }
 
 type TransactionDrawerProps = {
@@ -335,7 +384,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     <button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button>
   </div>;
 
-  return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>
+  const body = <>
     <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
     {editing ? <div className="grid gap-3">
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -360,5 +409,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       <MetadataBadges txn={txn} />
       <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
     </div>}
-  </MobileSheet>;
+  </>;
+
+  return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>{body}</MobileSheet>;
 }

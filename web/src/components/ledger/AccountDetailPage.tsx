@@ -77,6 +77,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   const [data, setData] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const encoded = encodeURIComponent(account);
@@ -116,6 +117,20 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
 
   // 反转 rows 以便最新在前展示
   const displayRows = [...data.rows].reverse();
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRows = normalizedQuery
+    ? displayRows.filter((row) => {
+        const haystack = [
+          row.date,
+          row.payee,
+          row.narration,
+          row.txn.postings.map((posting) => posting.account).join(" "),
+          Object.entries(row.txn.metadata ?? {}).map(([key, value]) => `${key}:${String(value)}`).join(" "),
+          (row.txn.tags ?? []).map((tag) => `#${tag}`).join(" "),
+        ].join(" ").toLowerCase();
+        return normalizedQuery.split(/\s+/).every((word) => haystack.includes(word));
+      })
+    : displayRows;
 
   function toggleExpand(idx: number) {
     setExpanded((prev) => {
@@ -162,56 +177,71 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         </div>
       </section>
 
-      {/* Balance Chart */}
-      {chartData.length > 0 && (
+      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)] xl:items-start">
+        <div className="space-y-6 xl:sticky xl:top-24">
+          {/* Balance Chart */}
+          {chartData.length > 0 ? (
+            <section className="card p-4">
+              <h2 className="font-serif text-2xl">余额变化</h2>
+              <p className="mt-1 text-sm text-olive">
+                {chartData.length} 笔变动 ·{" "}
+                {chartData[0].date} ~ {chartData.at(-1)!.date}
+              </p>
+              <div className="mt-4 h-80 min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={chartData}
+                    margin={{ left: 8, right: 16, top: 8, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                    <XAxis dataKey="date" minTickGap={24} fontSize={11} />
+                    <YAxis
+                      width={56}
+                      tickFormatter={chartMoney}
+                      fontSize={11}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => [formatCny(value), "余额"]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="balance"
+                      name="余额"
+                      stroke="var(--chart-primary)"
+                      fill="var(--chart-fill)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          ) : (
+            <section className="card p-4 text-sm text-stone">暂无可绘制的余额变化。</section>
+          )}
+        </div>
+
+        {/* Transaction History */}
         <section className="card p-4">
-          <h2 className="font-serif text-2xl">余额变化</h2>
-          <p className="mt-1 text-sm text-olive">
-            {chartData.length} 笔变动 ·{" "}
-            {chartData[0].date} ~ {chartData.at(-1)!.date}
-          </p>
-          <div className="mt-4 h-72 min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={chartData}
-                margin={{ left: 8, right: 16, top: 8, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-                <XAxis dataKey="date" minTickGap={24} fontSize={11} />
-                <YAxis
-                  width={56}
-                  tickFormatter={chartMoney}
-                  fontSize={11}
-                />
-                <Tooltip
-                  formatter={(value: number) => [formatCny(value), "余额"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="balance"
-                  name="余额"
-                  stroke="var(--chart-primary)"
-                  fill="var(--chart-fill)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="font-serif text-2xl">变动明细</h2>
+              <p className="mt-1 text-sm text-olive">
+                共 {filteredRows.length} / {displayRows.length} 笔，最新在前
+              </p>
+            </div>
+            <input
+              className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm lg:w-72"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="筛选商户、说明、账户、metadata"
+            />
           </div>
-        </section>
-      )}
 
-      {/* Transaction History */}
-      <section className="card p-4">
-        <h2 className="font-serif text-2xl">变动明细</h2>
-        <p className="mt-1 text-sm text-olive">
-          共 {displayRows.length} 笔，最新在前
-        </p>
-
-        {displayRows.length === 0 ? (
-          <p className="mt-4 text-sm text-stone">该账户暂无交易记录。</p>
-        ) : (
-          <div className="mt-4 space-y-1.5">
-            {displayRows.map((row, idx) => {
+          {filteredRows.length === 0 ? (
+            <p className="mt-4 text-sm text-stone">没有匹配的交易记录。</p>
+          ) : (
+            <div className="mt-4 max-h-none space-y-1.5 xl:max-h-[calc(100dvh-13rem)] xl:overflow-y-auto xl:pr-1">
+              {filteredRows.map((row, idx) => {
               const isExpanded = expanded.has(idx);
               const counterParties = row.txn.postings
                 .filter((p) => p.account !== account)
@@ -334,10 +364,11 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                   )}
                 </div>
               );
-            })}
-          </div>
-        )}
-      </section>
+              })}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 
@@ -75,6 +75,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [entries, setEntries] = useState<ImportEntry[]>([]);
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
@@ -96,6 +97,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setPreview(null);
     setEntries([]);
     setCommitResult(null);
+    setResultOpen(false);
     setError("");
   }
 
@@ -109,6 +111,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setPreview(null);
     setEntries([]);
     setCommitResult(null);
+    setResultOpen(false);
     try {
       const form = new FormData();
       if (providerOverride !== "auto") form.set("provider", providerOverride);
@@ -131,6 +134,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitting(true);
     setError("");
     setCommitResult(null);
+    setResultOpen(false);
     try {
       const res = await fetch("/api/ledger/imports/commit", {
         method: "POST",
@@ -140,6 +144,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       const data = await readJson<CommitResult>(res);
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
       setCommitResult(data);
+      setResultOpen(true);
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -193,11 +198,30 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
       {error && <div className="rounded-2xl border border-line bg-panel p-4 text-sm text-[var(--danger)]"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
 
+      {commitResult?.ok && resultOpen && <div className="fixed inset-0 z-[120] grid place-items-center bg-ink/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="import-result-title">
+        <section className="w-full max-w-lg rounded-3xl border border-line bg-paper p-5 shadow-2xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 id="import-result-title" className="font-serif text-2xl text-brand"><CheckCircle className="mr-2 inline h-5 w-5" />导入完成</h3>
+              <p className="mt-1 text-sm text-stone">账单已经写入 ledger，可以继续保存到 Git。</p>
+            </div>
+            <button className="rounded-xl border border-line bg-panel p-2 text-olive hover:bg-tag" onClick={() => setResultOpen(false)} aria-label="关闭导入结果"><X className="h-4 w-4" /></button>
+          </div>
+          <CommitResultDetails result={commitResult} />
+          <button className="mt-5 w-full rounded-xl bg-brand px-4 py-3 text-paper" onClick={() => setResultOpen(false)}>知道了</button>
+        </section>
+      </div>}
+
       {preview && <section className="card p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
           <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
         </div>
+        {commitResult?.ok && <div className="mt-4 rounded-2xl border border-brand/30 bg-[var(--selected-bg)] p-4 text-sm text-olive">
+          <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
+          <div className="mt-1 text-stone">结果已弹出；关闭后仍可点击此处查看输出文件。</div>
+          <button className="mt-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setResultOpen(true)}>查看写入结果</button>
+        </div>}
         {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
         {preview.provider === "cmb" && <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-paper p-4 text-sm md:grid-cols-5"><div><div className="text-xs text-stone">PDF/CSV 明细</div><div className="font-medium">{preview.rawRowCount}</div></div><div><div className="text-xs text-stone">Web 前置过滤后</div><div className="font-medium">{preview.filteredRowCount}</div></div><div><div className="text-xs text-stone">DEG 生成</div><div className="font-medium">{preview.generatedCount}</div></div><div><div className="text-xs text-stone">已去重跳过</div><div className="font-medium">{preview.skippedDuplicateCount}</div></div><div><div className="text-xs text-stone">待确认写入</div><div className="font-medium">{entries.length}</div></div></div>}
 
@@ -221,7 +245,16 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         {rawOpen && <div className="mt-4 grid gap-4 lg:grid-cols-2"><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre></div>}
       </section>}
 
-      {commitResult?.ok && <section className="card p-5"><h3 className="font-serif text-xl text-brand"><CheckCircle className="mr-2 inline h-5 w-5" />导入完成</h3><div className="mt-3 space-y-1 text-sm text-olive"><div>写入交易：{commitResult.count} 条</div><div>导入文件：{commitResult.outputFile}</div><div>月份 include：{commitResult.includeFile}</div>{commitResult.documentFile && <div>原始账单 document：{commitResult.documentFile}</div>}<div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div></div></section>}
     </div>
   );
+}
+
+function CommitResultDetails({ result }: { result: CommitResult }) {
+  return <div className="mt-4 space-y-2 rounded-2xl border border-line bg-panel p-4 text-sm text-olive">
+    <div>写入交易：{result.count} 条</div>
+    {result.outputFile && <div className="break-all">导入文件：{result.outputFile}</div>}
+    {result.includeFile && <div className="break-all">月份 include：{result.includeFile}</div>}
+    {result.documentFile && <div className="break-all">原始账单 document：{result.documentFile}</div>}
+    <div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div>
+  </div>;
 }

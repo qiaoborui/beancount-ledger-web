@@ -25,7 +25,7 @@ type CashFlowCardProps = {
   className?: string;
 };
 
-export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = [], totalIncome, totalExpense, netIncome, sensitiveUnlocked, title = "Cash Flow", description = "收入流入本期现金流，再分配到支出、信用卡还款和储蓄/缺口。", className = "mt-4" }: CashFlowCardProps) {
+export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = [], totalIncome, totalExpense, netIncome, sensitiveUnlocked, title = "现金流向", description = "收入进入本期现金流，再分配到支出、信用卡还款和结余。", className = "mt-4" }: CashFlowCardProps) {
   const data = buildCashFlowData({ income, expense, expenseAnalytics, creditCards, totalIncome, totalExpense, netIncome, sensitiveUnlocked });
   const [selection, setSelection] = useState<CashFlowSelection | null>(null);
 
@@ -57,7 +57,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = 
             nodePadding={10}
             nodeWidth={14}
             linkCurvature={0.55}
-            margin={{ top: 8, right: 92, bottom: 8, left: 58 }}
+            margin={{ top: 8, right: 120, bottom: 8, left: 116 }}
             sort={false}
           >
             <Tooltip formatter={(value) => formatCny(Number(value) / 100)} />
@@ -110,22 +110,22 @@ function buildCashFlowData({ income, expense, expenseAnalytics, creditCards, tot
   const creditCardRepayments = sensitiveUnlocked ? creditCards.reduce((sum, card) => sum + card.periodRepayments, 0) : 0;
   const cashSurplus = totalIncome - totalExpense - creditCardRepayments;
   const flowValue = Math.max(positiveTotalIncome, totalExpense + creditCardRepayments + Math.max(0, cashSurplus), 1);
-  const cashFlowIndex = addNode({ name: "Cash Flow", color: "var(--chart-primary)", value: flowValue });
+  const cashFlowIndex = addNode({ name: "本期现金流", color: "var(--chart-primary)", value: flowValue });
 
   if (sensitiveUnlocked && visibleIncomeRows.length) {
     const shownIncomeTotal = visibleIncomeRows.reduce((sum, row) => sum + row.amount, 0);
     for (const row of visibleIncomeRows) links.push({ source: addNode({ name: row.label, color: "rgb(var(--color-income))", value: row.amount }), target: cashFlowIndex, value: Math.max(1, row.amount) });
     const otherIncome = Math.max(0, positiveTotalIncome - shownIncomeTotal);
-    if (otherIncome > 0) links.push({ source: addNode({ name: "Other Income", color: "rgb(var(--color-income))", value: otherIncome }), target: cashFlowIndex, value: otherIncome });
+    if (otherIncome > 0) links.push({ source: addNode({ name: "其他收入", color: "rgb(var(--color-income))", value: otherIncome }), target: cashFlowIndex, value: otherIncome });
   } else if (positiveTotalIncome > 0) {
-    links.push({ source: addNode({ name: sensitiveUnlocked ? "Income" : "Income (locked)", color: "rgb(var(--color-income))", value: positiveTotalIncome }), target: cashFlowIndex, value: positiveTotalIncome });
+    links.push({ source: addNode({ name: sensitiveUnlocked ? "收入" : "收入（已锁定）", color: "rgb(var(--color-income))", value: positiveTotalIncome }), target: cashFlowIndex, value: positiveTotalIncome });
   }
 
   for (const row of shownExpenses) links.push({ source: cashFlowIndex, target: addNode({ name: row.label.replace(/^Expenses:/, ""), color: "#ff7a1a", value: row.amount }), value: Math.max(1, row.amount) });
-  if (otherExpense > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Other Expenses", color: "#ff9a4a", value: otherExpense }), value: otherExpense });
-  if (creditCardRepayments > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Credit Card Repayments", color: "#8b5cf6", value: creditCardRepayments }), value: creditCardRepayments });
-  if (cashSurplus > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "Savings", color: "#22c55e", value: cashSurplus }), value: cashSurplus });
-  if (cashSurplus < 0) links.push({ source: addNode({ name: "Deficit", color: "var(--danger)", value: Math.abs(cashSurplus) }), target: cashFlowIndex, value: Math.abs(cashSurplus) });
+  if (otherExpense > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "其他支出", color: "#ff9a4a", value: otherExpense }), value: otherExpense });
+  if (creditCardRepayments > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "信用卡还款", color: "#8b5cf6", value: creditCardRepayments }), value: creditCardRepayments });
+  if (cashSurplus > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "结余", color: "#22c55e", value: cashSurplus }), value: cashSurplus });
+  if (cashSurplus < 0) links.push({ source: addNode({ name: "缺口", color: "var(--danger)", value: Math.abs(cashSurplus) }), target: cashFlowIndex, value: Math.abs(cashSurplus) });
 
   return { nodes, links };
 }
