@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { accountsBeanPath, mainBeanPath } from "./ledgerPaths";
 import { cents, monthRange } from "./money";
 
@@ -13,7 +14,7 @@ export type TransactionView = {
   metadata: Record<string, MetadataValue>;
   tags: string[];
   postings: PostingView[];
-  source: { file: string; line: number };
+  source: { file: string; line: number; hash?: string };
 };
 export type BalanceAssertionView = { date: string; account: string; amount: number; currency: "CNY" };
 export type BudgetView = { date: string; account: string; amount: number; currency: "CNY" };
@@ -66,16 +67,30 @@ export function readLedgerLines(entry = mainBeanPath(), seen = new Set<string>()
   return out;
 }
 
+export function transactionSourceHash(lines: string[]) {
+  return createHash("sha256").update(lines.join("\n").trimEnd()).digest("hex").slice(0, 16);
+}
+
 export function parseTransactions(lines = readLedgerLines()): TransactionView[] {
   const txns: TransactionView[] = [];
   let current: TransactionView | null = null;
+  let currentRawLines: string[] = [];
+
+  function finishCurrent() {
+    if (current) current.source.hash = transactionSourceHash(currentRawLines);
+    currentRawLines = [];
+  }
 
   for (const line of lines) {
-    const trimmed = line.text.trim();
-    if (!trimmed || trimmed.startsWith(";")) continue;
+    if (current && line.file !== current.source.file) {
+      finishCurrent();
+      current = null;
+    }
 
     const txn = line.text.match(txnRe);
     if (txn) {
+      finishCurrent();
+      currentRawLines = [line.text];
       current = {
         date: txn[1],
         payee: txn[2],
@@ -83,17 +98,22 @@ export function parseTransactions(lines = readLedgerLines()): TransactionView[] 
         metadata: {},
         tags: Array.from(txn[4].matchAll(/#([A-Za-z0-9_-]+)/g)).map((match) => match[1]),
         postings: [],
-        source: { file: line.file, line: line.line },
+        source: { file: line.file, line: line.line, hash: transactionSourceHash([line.text]) },
       };
       txns.push(current);
       continue;
     }
 
     if (/^\d{4}-\d{2}-\d{2}\s+/.test(line.text)) {
+      finishCurrent();
       current = null;
       continue;
     }
 
+    if (current) currentRawLines.push(line.text);
+
+    const trimmed = line.text.trim();
+    if (!trimmed || trimmed.startsWith(";")) continue;
     if (!current) continue;
     const metadata = line.text.match(metadataRe);
     if (metadata) {
@@ -105,6 +125,7 @@ export function parseTransactions(lines = readLedgerLines()): TransactionView[] 
     current.postings.push({ account: posting[1], amount: cents(posting[2]), currency: "CNY" });
   }
 
+  finishCurrent();
   return txns;
 }
 

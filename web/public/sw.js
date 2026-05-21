@@ -1,6 +1,7 @@
-const CACHE_NAME = "beancount-ledger-shell-v6";
+const CACHE_NAME = "beancount-ledger-shell-v7";
 const API_CACHE_NAME = "beancount-ledger-api-v2";
-const APP_STATIC_ASSETS = ["/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const APP_SHELL = "/";
+const APP_STATIC_ASSETS = [APP_SHELL, "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
 // Only cache read-only API responses that do not vary by sensitive unlock state.
 // Summary, transactions, and income-statement intentionally stay network-only here because
 // the server returns different payloads before/after Face ID / Passkey unlock. Caching them
@@ -121,7 +122,10 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
-        .catch(() => new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } })),
+        .catch(async () => {
+          const cachedShell = await caches.match(APP_SHELL);
+          return cachedShell ?? new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        }),
     );
     return;
   }

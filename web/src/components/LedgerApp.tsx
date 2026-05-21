@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -19,6 +19,7 @@ import { usePrivacySettings } from "./ledger/hooks/usePrivacySettings";
 import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { usePendingLedgerWrites } from "./ledger/hooks/usePendingLedgerWrites";
+import { applyPendingLedgerOperations } from "./ledger/pendingLedgerOperations";
 import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
@@ -181,10 +182,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     clearToast: () => setToast(null),
   });
 
-  const { pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, syncPendingWrites, syncingPendingWrites } = usePendingLedgerWrites({ load, refreshGitStatus, showToast });
+  const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites } = usePendingLedgerWrites({ load, refreshGitStatus, showToast });
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, refreshGitStatus, showToast, enqueuePendingWrites });
-  const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites });
+  const { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete });
   const { accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page });
+  const projectedTxns = useMemo(() => applyPendingLedgerOperations(txns, pendingOperations, timeRange), [pendingOperations, timeRange, txns]);
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
   useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => router.push("/accounts") });
@@ -269,6 +271,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     });
   }
 
+  if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
 
@@ -327,8 +330,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const guardedAppendPreviews = () => { appendPreviews(); };
   const guardedAppendAssertion = () => { appendAssertion(); };
-  const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { if (guardOnline()) updateTransaction(...args); };
-  const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { if (guardOnline()) deleteTransaction(...args); };
+  const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { updateTransaction(...args); };
+  const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { deleteTransaction(...args); };
   const guardedReverseTransaction = (...args: Parameters<typeof reverseTransaction>) => { if (guardOnline()) reverseTransaction(...args); };
   const guardedReconcileAccount = (...args: Parameters<typeof reconcileAccount>) => { if (guardOnline()) reconcileAccount(...args); };
   const guardedImportRefresh = () => {
@@ -454,7 +457,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {(page === "home" || page === "transactions") && (
         <TransactionList
-          txns={txns}
+          txns={projectedTxns}
           accounts={accounts}
           searchable={page === "transactions"}
           categoryQuery={txnCategoryQuery}
