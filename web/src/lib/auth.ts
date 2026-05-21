@@ -6,6 +6,11 @@ const COOKIE_NAME = "ledger_session";
 const SENSITIVE_COOKIE_NAME = "ledger_sensitive_until";
 const SENSITIVE_UNLOCK_MAX_AGE_SECONDS = 15 * 60;
 
+export function isAuthDisabled(): boolean {
+  const raw = process.env.LEDGER_AUTH_DISABLED?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 function secret(): Uint8Array {
   const raw = process.env.AUTH_SECRET || process.env.APP_PASSWORD;
   if (!raw) throw new Error("AUTH_SECRET or APP_PASSWORD is required");
@@ -30,6 +35,7 @@ export async function createSessionToken(): Promise<string> {
 }
 
 export async function isAuthenticated(): Promise<boolean> {
+  if (isAuthDisabled()) return true;
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
   if (!token) return false;
@@ -48,6 +54,7 @@ export async function requireAuth(): Promise<void> {
 }
 
 export async function isSensitiveUnlocked(): Promise<boolean> {
+  if (isAuthDisabled()) return true;
   const jar = await cookies();
   const raw = jar.get(SENSITIVE_COOKIE_NAME)?.value;
   const until = raw ? Number(raw) : 0;

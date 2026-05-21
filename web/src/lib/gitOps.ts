@@ -28,6 +28,11 @@ function git(args: string[], options: { cwd?: string; encoding?: BufferEncoding 
   }) as string;
 }
 
+function remoteDisabled() {
+  const raw = process.env.LEDGER_GIT_REMOTE_DISABLED?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 function statusLabel(indexStatus: string, workTreeStatus: string) {
   const combined = `${indexStatus}${workTreeStatus}`;
   if (combined === "??") return "未跟踪";
@@ -72,6 +77,7 @@ export function gitStatus() {
 }
 
 export function gitPullRebase() {
+  if (remoteDisabled()) return "Git remote sync disabled\n";
   return git(["pull", "--rebase", "--autostash"]);
 }
 
@@ -82,6 +88,7 @@ export function gitCommitPullPush(message = "chore: update ledger") {
   const changedFileCount = parseGitStatus(before).filter(isTrackedChange).length;
   let commit = "No changes to commit\n";
   if (before.trim()) commit = git(["commit", "-m", message, "--", ...TRACKED_PATHS], { cwd });
+  if (remoteDisabled()) return { output: `${commit}\nGit remote sync disabled\n`, changedFileCount };
   const pull = git(["pull", "--rebase", "--autostash"], { cwd });
   const push = git(["push"], { cwd });
   return { output: `${commit}\n${pull}\n${push}`, changedFileCount };

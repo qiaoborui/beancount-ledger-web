@@ -163,6 +163,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     timeRange,
     unlocked,
     onSensitiveLocked: handleSensitiveLocked,
+    onSensitiveUnlockChange: setUnlocked,
     onAuthChange: setAuthed,
     onPasskeyRegistered: setPasskeyRegistered,
     onGitStatusRefresh: refreshGitStatus,

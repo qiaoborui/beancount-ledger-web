@@ -1,0 +1,180 @@
+2026-05-01 * "期初" "主力储蓄卡期初余额"
+  Assets:CN:Bank:PrimaryChecking        30000.00 CNY
+  Equity:Opening-Balances              -30000.00 CNY
+
+2026-05-01 * "期初" "备用储蓄卡期初余额"
+  Assets:CN:Bank:SecondaryChecking       5000.00 CNY
+  Equity:Opening-Balances               -5000.00 CNY
+
+2026-05-01 * "期初" "银行活钱理财期初余额"
+  Assets:CN:Bank:MoneyMarket            20000.00 CNY
+  Equity:Opening-Balances              -20000.00 CNY
+
+2026-05-01 * "期初" "互联网银行活钱理财期初余额"
+  Assets:CN:DigitalBank:Yulibao          6000.00 CNY
+  Equity:Opening-Balances               -6000.00 CNY
+
+2026-05-01 * "期初" "短期理财期初余额"
+  Assets:CN:DigitalBank:Investments:ShortTerm 12000.00 CNY
+  Equity:Opening-Balances              -12000.00 CNY
+
+2026-05-01 * "期初" "月度理财期初余额"
+  Assets:CN:DigitalBank:Investments:Monthly 15000.00 CNY
+  Equity:Opening-Balances              -15000.00 CNY
+
+2026-05-01 * "期初" "微信零钱期初余额"
+  Assets:CN:Wechat:Balance                650.00 CNY
+  Equity:Opening-Balances                -650.00 CNY
+
+2026-05-01 * "期初" "支付宝余额期初余额"
+  Assets:CN:Alipay:Balance               1200.00 CNY
+  Equity:Opening-Balances               -1200.00 CNY
+
+2026-05-01 * "期初" "支付宝基金期初余额"
+  Assets:CN:Alipay:Fund                  8000.00 CNY
+  Equity:Opening-Balances               -8000.00 CNY
+
+2026-05-01 * "期初" "住房公积金期初余额"
+  Assets:CN:HousingFund                 50000.00 CNY
+  Equity:Opening-Balances              -50000.00 CNY
+
+2026-05-01 * "期初" "信用卡上期账单"
+  Liabilities:CN:CreditCard             -2800.00 CNY
+  Equity:Opening-Balances                2800.00 CNY
+
+2026-05-02 * "咖啡店" "拿铁"
+  Assets:CN:Wechat:Balance                -28.00 CNY
+  Expenses:Food:Drinks                     28.00 CNY
+
+2026-05-02 * "便利蜂" "早餐"
+  Assets:CN:Alipay:Balance                -18.50 CNY
+  Expenses:Food:Meals                      18.50 CNY
+
+2026-05-02 * "地铁" "通勤"
+  Assets:CN:Wechat:Balance                 -7.00 CNY
+  Expenses:Transport:Public                 7.00 CNY
+
+2026-05-03 * "外卖平台" "午餐"
+  Liabilities:CN:CreditCard               -46.80 CNY
+  Expenses:Food:Meals                      46.80 CNY
+
+2026-05-04 * "盒马鲜生" "水果和牛奶"
+  Assets:CN:Alipay:Balance                -86.20 CNY
+  Expenses:Food:Groceries                  86.20 CNY
+
+2026-05-04 * "通信运营商" "手机话费"
+  Assets:CN:Bank:PrimaryChecking          -99.00 CNY
+  Expenses:Communication:Mobile            99.00 CNY
+
+2026-05-05 * "示例公司" "工资"
+  Assets:CN:Bank:PrimaryChecking        15000.00 CNY
+  Income:Salary                        -15000.00 CNY
+
+2026-05-05 * "示例公司" "住房公积金缴存"
+  Assets:CN:HousingFund                  1800.00 CNY
+  Income:Benefits:HousingFund           -1800.00 CNY
+
+2026-05-06 * "互联网银行" "转入活钱理财"
+  Assets:CN:Bank:PrimaryChecking        -3000.00 CNY
+  Assets:CN:DigitalBank:Yulibao          3000.00 CNY
+
+2026-05-07 * "日料小店" "晚餐"
+  Liabilities:CN:CreditCard              -168.00 CNY
+  Expenses:Food:Meals                     168.00 CNY
+
+2026-05-08 * "理财平台" "货币基金收益"
+  Assets:CN:DigitalBank:Yulibao            12.34 CNY
+  Income:Interest:Bank                    -12.34 CNY
+
+2026-05-09 * "健身房" "月卡"
+  Assets:CN:Alipay:Balance               -299.00 CNY
+  Expenses:Health:Fitness                 299.00 CNY
+
+2026-05-10 * "超市" "日用品"
+  Assets:CN:Alipay:Balance               -128.50 CNY
+  Expenses:Shopping:Daily                 128.50 CNY
+
+2026-05-11 * "网约车" "加班回家"
+  Liabilities:CN:CreditCard               -63.40 CNY
+  Expenses:Transport:Taxi                  63.40 CNY
+
+2026-05-12 * "宽带运营商" "家庭宽带"
+  Assets:CN:Bank:PrimaryChecking         -120.00 CNY
+  Expenses:Communication:Internet         120.00 CNY
+
+2026-05-13 * "AI 服务" "模型订阅"
+  Liabilities:CN:CreditCard              -148.00 CNY
+  Expenses:Digital:Subscription           148.00 CNY
+
+2026-05-14 * "菜市场" "晚餐食材"
+  Assets:CN:Wechat:Balance                -74.30 CNY
+  Expenses:Food:Groceries                  74.30 CNY
+
+2026-05-15 * "信用卡还款" "偿还上期账单"
+  Assets:CN:Bank:PrimaryChecking        -3200.00 CNY
+  Liabilities:CN:CreditCard              3200.00 CNY
+
+2026-05-16 * "朋友聚餐" "代付四人晚餐"
+  Assets:CN:Wechat:Balance               -456.00 CNY
+  Expenses:Social:Treat                   114.00 CNY
+  Assets:Receivable:Friends               342.00 CNY
+
+2026-05-17 * "朋友转账" "收回聚餐 AA"
+  Assets:CN:Wechat:Balance                342.00 CNY
+  Assets:Receivable:Friends              -342.00 CNY
+
+2026-05-18 * "物业公司" "水电燃气"
+  Assets:CN:Bank:PrimaryChecking         -236.80 CNY
+  Expenses:Housing:Utilities              236.80 CNY
+
+2026-05-19 * "服饰店" "夏装"
+  Liabilities:CN:CreditCard              -389.00 CNY
+  Expenses:Shopping:Clothing              389.00 CNY
+
+2026-05-20 * "客户 A" "小项目尾款"
+  Assets:CN:Bank:PrimaryChecking         2600.00 CNY
+  Income:SideProject                    -2600.00 CNY
+
+2026-05-21 * "停车场" "周末停车"
+  Assets:CN:Wechat:Balance                -32.00 CNY
+  Expenses:Transport:Parking               32.00 CNY
+
+2026-05-22 * "药房" "感冒药"
+  Assets:CN:Alipay:Balance                -57.60 CNY
+  Expenses:Health:Pharmacy                 57.60 CNY
+
+2026-05-23 * "朋友生日" "礼物"
+  Liabilities:CN:CreditCard              -268.00 CNY
+  Expenses:Social:Gift                    268.00 CNY
+
+2026-05-24 * "互联网银行" "买入短期理财"
+  Assets:CN:Bank:PrimaryChecking        -5000.00 CNY
+  Assets:CN:DigitalBank:Investments:ShortTerm 5000.00 CNY
+
+2026-05-25 * "银行" "活期利息"
+  Assets:CN:Bank:PrimaryChecking            8.91 CNY
+  Income:Interest:Bank                     -8.91 CNY
+
+2026-05-26 * "朋友代付" "周末民宿"
+  Expenses:Travel                         320.00 CNY
+  Liabilities:Payable:Friends            -320.00 CNY
+
+2026-05-27 * "朋友转账" "归还民宿款"
+  Assets:CN:Wechat:Balance               -320.00 CNY
+  Liabilities:Payable:Friends             320.00 CNY
+
+2026-05-28 * "租车平台" "短途租车"
+  Liabilities:CN:CreditCard              -286.50 CNY
+  Expenses:Transport:CarRental            286.50 CNY
+
+2026-05-29 * "电子商城" "机械键盘"
+  Liabilities:CN:CreditCard              -499.00 CNY
+  Expenses:Shopping:Electronics           499.00 CNY
+
+2026-05-30 * "亲友红包" "节日红包"
+  Assets:CN:Wechat:Balance                200.00 CNY
+  Income:Social:RedPacket                -200.00 CNY
+
+2026-05-31 * "视频会员" "月度订阅"
+  Assets:CN:Alipay:Balance                -35.00 CNY
+  Expenses:Digital:Subscription            35.00 CNY

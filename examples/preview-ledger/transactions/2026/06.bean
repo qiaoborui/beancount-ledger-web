@@ -1,0 +1,140 @@
+2026-06-01 * "超市" "一周食材"
+  Assets:CN:Alipay:Balance               -156.80 CNY
+  Expenses:Food:Groceries                 156.80 CNY
+
+2026-06-01 * "地铁" "通勤"
+  Assets:CN:Wechat:Balance                 -7.00 CNY
+  Expenses:Transport:Public                 7.00 CNY
+
+2026-06-02 * "咖啡店" "冰美式"
+  Assets:CN:Wechat:Balance                -24.00 CNY
+  Expenses:Food:Drinks                     24.00 CNY
+
+2026-06-03 * "外卖平台" "午餐"
+  Liabilities:CN:CreditCard               -52.30 CNY
+  Expenses:Food:Meals                      52.30 CNY
+
+2026-06-04 * "通信运营商" "手机话费"
+  Assets:CN:Bank:PrimaryChecking          -99.00 CNY
+  Expenses:Communication:Mobile            99.00 CNY
+
+2026-06-05 * "示例公司" "工资"
+  Assets:CN:Bank:PrimaryChecking        15000.00 CNY
+  Income:Salary                        -15000.00 CNY
+
+2026-06-05 * "示例公司" "住房公积金缴存"
+  Assets:CN:HousingFund                  1800.00 CNY
+  Income:Benefits:HousingFund           -1800.00 CNY
+
+2026-06-06 * "银行理财" "赎回部分活钱理财"
+  Assets:CN:Bank:PrimaryChecking         5000.00 CNY
+  Assets:CN:Bank:MoneyMarket            -5000.00 CNY
+
+2026-06-07 * "商场餐厅" "家庭聚餐"
+  Liabilities:CN:CreditCard              -328.00 CNY
+  Expenses:Food:Meals                     328.00 CNY
+
+2026-06-08 * "理财平台" "货币基金收益"
+  Assets:CN:DigitalBank:Yulibao            15.67 CNY
+  Income:Interest:Bank                    -15.67 CNY
+
+2026-06-09 * "网约车" "机场去程"
+  Liabilities:CN:CreditCard              -118.60 CNY
+  Expenses:Transport:Taxi                 118.60 CNY
+
+2026-06-10 * "酒店" "周末住宿"
+  Liabilities:CN:CreditCard              -680.00 CNY
+  Expenses:Travel                         680.00 CNY
+
+2026-06-11 * "火车票" "城际出行"
+  Assets:CN:Alipay:Balance               -247.00 CNY
+  Expenses:Travel                         247.00 CNY
+
+2026-06-12 * "宽带运营商" "家庭宽带"
+  Assets:CN:Bank:PrimaryChecking         -120.00 CNY
+  Expenses:Communication:Internet         120.00 CNY
+
+2026-06-13 * "App Store" "云存储订阅"
+  Liabilities:CN:CreditCard               -21.00 CNY
+  Expenses:Digital:Subscription            21.00 CNY
+
+2026-06-14 * "菜市场" "水果和蔬菜"
+  Assets:CN:Wechat:Balance                -93.20 CNY
+  Expenses:Food:Groceries                  93.20 CNY
+
+2026-06-15 * "信用卡还款" "偿还五月账单"
+  Assets:CN:Bank:PrimaryChecking        -2600.00 CNY
+  Liabilities:CN:CreditCard              2600.00 CNY
+
+2026-06-16 * "物业公司" "物业费"
+  Assets:CN:Bank:PrimaryChecking         -420.00 CNY
+  Expenses:Housing:Property               420.00 CNY
+
+2026-06-17 * "医院" "门诊检查"
+  Liabilities:CN:CreditCard              -312.00 CNY
+  Expenses:Health:Medical                 312.00 CNY
+
+2026-06-18 * "公司报销" "门诊商业保险报销"
+  Assets:CN:Bank:PrimaryChecking          180.00 CNY
+  Income:Reimbursement                   -180.00 CNY
+
+2026-06-18 * "支付宝" "余额充值"
+  Assets:CN:Bank:PrimaryChecking        -2000.00 CNY
+  Assets:CN:Alipay:Balance              2000.00 CNY
+
+2026-06-19 * "电商平台" "家居日用品"
+  Assets:CN:Alipay:Balance               -219.90 CNY
+  Expenses:Shopping:Daily                 219.90 CNY
+
+2026-06-20 * "客户 B" "咨询服务费"
+  Assets:CN:Bank:PrimaryChecking         1800.00 CNY
+  Income:SideProject                    -1800.00 CNY
+
+2026-06-21 * "朋友婚礼" "礼金"
+  Assets:CN:Bank:PrimaryChecking        -1000.00 CNY
+  Expenses:Social:Gift                   1000.00 CNY
+
+2026-06-22 * "健身房" "私教课"
+  Assets:CN:Alipay:Balance               -360.00 CNY
+  Expenses:Health:Fitness                 360.00 CNY
+
+2026-06-23 * "停车场" "临停"
+  Assets:CN:Wechat:Balance                -18.00 CNY
+  Expenses:Transport:Parking               18.00 CNY
+
+2026-06-24 * "支付宝基金" "定投买入"
+  Assets:CN:Alipay:Balance              -1000.00 CNY
+  Assets:CN:Alipay:Fund                  1000.00 CNY
+
+2026-06-25 * "银行" "活期利息"
+  Assets:CN:Bank:PrimaryChecking            9.43 CNY
+  Income:Interest:Bank                     -9.43 CNY
+
+2026-06-26 * "月度理财" "买入"
+  Assets:CN:Bank:PrimaryChecking        -4000.00 CNY
+  Assets:CN:DigitalBank:Investments:Monthly 4000.00 CNY
+
+2026-06-26 * "微信支付" "零钱充值"
+  Assets:CN:Bank:PrimaryChecking         -500.00 CNY
+  Assets:CN:Wechat:Balance               500.00 CNY
+
+2026-06-27 * "朋友聚餐" "代付三人晚餐"
+  Assets:CN:Wechat:Balance               -288.00 CNY
+  Expenses:Social:Treat                    96.00 CNY
+  Assets:Receivable:Friends               192.00 CNY
+
+2026-06-28 * "朋友转账" "收回聚餐 AA"
+  Assets:CN:Wechat:Balance                192.00 CNY
+  Assets:Receivable:Friends              -192.00 CNY
+
+2026-06-29 * "服饰店" "衬衫"
+  Liabilities:CN:CreditCard              -259.00 CNY
+  Expenses:Shopping:Clothing              259.00 CNY
+
+2026-06-30 * "支付宝基金" "现金分红"
+  Assets:CN:Alipay:Balance                 36.50 CNY
+  Income:Interest:AlipayFund              -36.50 CNY
+
+2026-06-30 * "视频会员" "月度订阅"
+  Assets:CN:Alipay:Balance                -35.00 CNY
+  Expenses:Digital:Subscription            35.00 CNY

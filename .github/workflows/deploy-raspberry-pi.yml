@@ -110,6 +110,7 @@ jobs:
           cp -a .next/standalone ../artifact/standalone
           cp -a .next/static ../artifact/static
           if [[ -d public ]]; then cp -a public ../artifact/public; fi
+          if [[ -d ../examples ]]; then cp -a ../examples ../artifact/examples; fi
           if [[ -d ../.agents ]]; then cp -a ../.agents ../artifact/.agents; fi
           cat > ../artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}

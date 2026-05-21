@@ -1,0 +1,60 @@
+defaultMinusAccount: Income:Other
+defaultPlusAccount: Expenses:Unknown
+defaultCashAccount: Assets:CN:Wechat:Balance
+defaultCurrency: CNY
+title: 微信支付导入示例
+wechat:
+  rules:
+    - method: 零钱
+      fullMatch: true
+      methodAccount: Assets:CN:Wechat:Balance
+    - method: 零钱通
+      fullMatch: true
+      methodAccount: Assets:CN:Wechat:Balance
+    - method: 信用卡
+      methodAccount: Liabilities:CN:CreditCard
+    - method: 储蓄卡
+      methodAccount: Assets:CN:Bank:PrimaryChecking
+    - method: /
+      methodAccount: Assets:CN:Wechat:Balance
+
+    - txType: 零钱提现
+      peer: 银行
+      methodAccount: Assets:CN:Bank:PrimaryChecking
+      targetAccount: Assets:CN:Wechat:Balance
+
+    - type: 收入
+      txType: 群收款
+      targetAccount: Income:Rental
+    - type: 收入
+      txType: 转账
+      targetAccount: Income:Other
+    - type: 支出
+      txType: 群收款
+      targetAccount: Expenses:Unknown
+
+    - peer: 外卖,餐厅,快餐,小吃,生活服务
+      targetAccount: Expenses:Food:Meals
+    - peer: 咖啡,奶茶,饮品,甜品
+      targetAccount: Expenses:Food:Drinks
+    - peer: 便利店,超市,生鲜,水果
+      targetAccount: Expenses:Food:Groceries
+    - peer: 打车,代驾,网约车
+      targetAccount: Expenses:Transport:Taxi
+    - peer: 地铁,公交,共享单车
+      targetAccount: Expenses:Transport:Public
+    - peer: 停车场,停车,通行费
+      targetAccount: Expenses:Transport:Parking
+    - peer: 电商,商城,购物平台
+      targetAccount: Expenses:Shopping:Daily
+    - peer: 药房,医院,健康
+      targetAccount: Expenses:Health:Pharmacy
+    - peer: 健身,运动
+      targetAccount: Expenses:Health:Fitness
+    - peer: 旅游,酒店,客栈,民宿,门票
+      targetAccount: Expenses:Travel
+    - peer: AI 服务,Apple,App Store,iCloud,云服务
+      targetAccount: Expenses:Digital:Subscription
+    - type: 支出
+      txType: 转账
+      targetAccount: Expenses:Unknown
