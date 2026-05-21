@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { formatCny } from "@/lib/money";
 import { MobileSheet } from "./MobileSheet";
 import type { ParsedTransaction } from "@/lib/schemas";
 import type { AccountView, MetadataValue, Txn } from "./types";
 
+function transactionKey(txn: Txn): string {
+  return `${txn.source.file}:${txn.source.line}:${txn.source.hash ?? ""}`;
+}
 
 function metadataPairs(t: Txn): [string, MetadataValue][] {
   return Object.entries(t.metadata ?? {}).filter(([, value]) => value !== "" && value != null);
@@ -127,7 +131,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
 function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
   const amt = primaryAmount(txn);
   return (
-    <button className={`card mb-1.5 block w-full p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
+    <button type="button" className={`transaction-list-card card mb-1.5 block w-full p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <strong className="block truncate">{txn.payee}</strong>
@@ -160,7 +164,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
   return (
     <button
       type="button"
-      className={`grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
       onClick={onSelect}
     >
       <div className="text-xs tabular-nums text-stone">
@@ -197,6 +201,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
@@ -252,40 +257,64 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
 
-  const hasFilters = Boolean((categoryQuery ?? "").trim() || (metadataQuery ?? "").trim() || (searchQuery ?? "").trim());
-  const selectedMatches = (txn: Txn) => selected?.source.file === txn.source.file && selected.source.line === txn.source.line && selected.source.hash === txn.source.hash;
+  const activeFilterCount = [categoryQuery, metadataQuery, searchQuery].filter((value) => Boolean(value?.trim())).length;
+  const hasFilters = activeFilterCount > 0;
+  const clearFilters = () => {
+    setCategoryQuery?.("");
+    setMetadataQuery?.("");
+    setSearchQuery?.("");
+  };
+  const selectedMatches = (txn: Txn) => Boolean(selected && transactionKey(selected) === transactionKey(txn));
   const pager = rows.length > 0 && <TransactionPager safePage={safePage} totalPages={totalPages} rowsLength={rows.length} pageSize={pageSize} setPageSize={setPageSize} setPage={setPage} />;
+  const renderFilterControls = (idPrefix: string) => (
+    <>
+      <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(180px,260px)_minmax(180px,260px)]">
+        {setSearchQuery && <input id={idPrefix === "desktop" ? "transaction-search-input" : `${idPrefix}-transaction-search-input`} className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
+        {setCategoryQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={categories.includes(categoryQuery ?? "") ? categoryQuery : ""} onChange={(e) => setCategoryQuery(e.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select>}
+        {setMetadataQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ""} onChange={(e) => setMetadataQuery(e.target.value)}><option value="">全部 metadata</option>{metadataOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
+          <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+          {setCategoryQuery && <input list={`${idPrefix}-txn-category-options`} className="w-full rounded-xl border border-line bg-paper px-3 py-1.5 text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
+          <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} />)}</datalist>
+          {setMetadataQuery && <input list={`${idPrefix}-txn-metadata-options`} className="w-full rounded-xl border border-line bg-paper px-3 py-1.5 text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
+          <datalist id={`${idPrefix}-txn-metadata-options`}>{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
+          </div>}
+          {setCategoryQuery && setMatchMode && categoryQuery && query && <div className="flex overflow-hidden rounded-lg border border-line">
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>前缀</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>精确</button>
+          </div>}
+          {hasFilters && <button type="button" className="rounded-xl border border-line bg-paper px-3 py-1.5 text-xs text-stone hover:bg-tag" onClick={clearFilters}>清空筛选</button>}
+        </div>
+      </div>
+    </>
+  );
 
   return <section className="mt-6">
     <div className="min-w-0">
       {searchable && (
-        <div className="mb-4 rounded-2xl border border-line bg-panel p-3 shadow-sm">
-          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(180px,260px)_minmax(180px,260px)]">
-            {setSearchQuery && <input id="transaction-search-input" className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
-            {setCategoryQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={categories.includes(categoryQuery ?? "") ? categoryQuery : ""} onChange={(e) => setCategoryQuery(e.target.value)}><option value="">全部分类</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select>}
-            {setMetadataQuery && <select className="w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ""} onChange={(e) => setMetadataQuery(e.target.value)}><option value="">全部 metadata</option>{metadataOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>}
+        <>
+          <div className="mb-3 flex items-center gap-2 lg:hidden">
+            <button type="button" className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-warm shadow-sm" onClick={() => setMobileFiltersOpen(true)}>
+              <SlidersHorizontal className="h-4 w-4 text-brand" />
+              筛选{activeFilterCount ? ` · ${activeFilterCount}` : ""}
+            </button>
+            {hasFilters && <button type="button" className="rounded-xl border border-line bg-paper px-3 py-2 text-sm text-stone" onClick={clearFilters}>清空</button>}
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
-              <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
-              {setCategoryQuery && <input list="txn-category-options" className="w-60 rounded-xl border border-line bg-paper px-3 py-1.5 text-xs" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
-              <datalist id="txn-category-options">{categories.map((category) => <option key={category} value={category} />)}</datalist>
-              {setMetadataQuery && <input list="txn-metadata-options" className="w-64 rounded-xl border border-line bg-paper px-3 py-1.5 text-xs" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
-              <datalist id="txn-metadata-options">{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
-                <button className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
-                <button className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
-              </div>}
-              {setCategoryQuery && setMatchMode && categoryQuery && query && <div className="flex overflow-hidden rounded-lg border border-line">
-                <button className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>前缀</button>
-                <button className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>精确</button>
-              </div>}
-              {hasFilters && <button className="rounded-xl border border-line bg-paper px-3 py-1.5 text-xs text-stone hover:bg-tag" onClick={() => { setCategoryQuery?.(""); setMetadataQuery?.(""); setSearchQuery?.(""); }}>清除筛选</button>}
-            </div>
+          <div className="mb-3 flex items-center justify-between gap-3 text-xs text-stone lg:hidden">
+            <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+            {hasFilters && <span className="truncate text-right">已应用筛选</span>}
           </div>
-        </div>
+          <div className="mb-4 hidden rounded-2xl border border-line bg-panel p-3 shadow-sm lg:block">
+            {renderFilterControls("desktop")}
+          </div>
+        </>
       )}
 
       {rows.length === 0 && <div className="card p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
@@ -301,19 +330,20 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               <span>标签</span>
             </div>
             <div className="divide-y divide-line">
-              {pageRows.map((txn, index) => <TransactionTableRow key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+              {pageRows.map((txn) => <TransactionTableRow key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
             </div>
           </div>
           <div className="lg:hidden">
-            {pageRows.map((txn, index) => <TransactionCard key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+            {pageRows.map((txn) => <TransactionCard key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
           </div>
         </>
       ) : (
-        pageRows.map((txn, index) => <TransactionCard key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)
+        pageRows.map((txn) => <TransactionCard key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)
       )}
 
       {pager}
     </div>
+    {searchable && <MobileSheet open={mobileFiltersOpen} title="筛选流水" onClose={() => setMobileFiltersOpen(false)} footer={<div className="grid grid-cols-2 gap-2"><button type="button" className="border border-line bg-panel px-4 py-3" onClick={clearFilters} disabled={!hasFilters}>清空筛选</button><button type="button" className="bg-brand px-4 py-3 text-paper" onClick={() => setMobileFiltersOpen(false)}>完成</button></div>}>{renderFilterControls("mobile")}</MobileSheet>}
     {selected && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
