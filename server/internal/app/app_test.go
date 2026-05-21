@@ -206,11 +206,12 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 		t.Fatalf("income statement status=%d body=%s", res.Code, res.Body.String())
 	}
 	var body struct {
-		Income       []IncomeStatementNode `json:"income"`
-		Expense      []IncomeStatementNode `json:"expense"`
-		TotalIncome  int                   `json:"totalIncome"`
-		TotalExpense int                   `json:"totalExpense"`
-		NetIncome    int                   `json:"netIncome"`
+		Income           []IncomeStatementNode      `json:"income"`
+		Expense          []IncomeStatementNode      `json:"expense"`
+		ExpenseAnalytics []ExpenseCategoryAnalytics `json:"expenseAnalytics"`
+		TotalIncome      int                        `json:"totalIncome"`
+		TotalExpense     int                        `json:"totalExpense"`
+		NetIncome        int                        `json:"netIncome"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -220,6 +221,9 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 	}
 	if len(body.Expense) != 1 || body.Expense[0].Account != "Expenses:Food" || body.Expense[0].Amount != 1200 || body.Expense[0].TxCount != 1 {
 		t.Fatalf("expense tree should include category detail, got %#v", body.Expense)
+	}
+	if len(body.ExpenseAnalytics) != 1 || body.ExpenseAnalytics[0].Account != "Expenses:Food" || body.ExpenseAnalytics[0].TxCount != 1 || len(body.ExpenseAnalytics[0].TopPayees) != 1 {
+		t.Fatalf("expense analytics should include transaction counts and top payees, got %#v", body.ExpenseAnalytics)
 	}
 	if body.TotalIncome != 100000 || body.TotalExpense != 1200 || body.NetIncome != 98800 {
 		t.Fatalf("unexpected income statement totals: %#v", body)

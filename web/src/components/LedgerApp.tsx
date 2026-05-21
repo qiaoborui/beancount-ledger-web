@@ -281,8 +281,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }, [authed, pathname, router, searchParams, shortcutAction, syncPendingWrites]);
 
   function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {
-    setTxnCategoryQuery(account);
-    setCategoryMatchMode(mode);
     const params = new URLSearchParams();
     params.set("category", account);
     if (mode === "exact") params.set("mode", "exact");
@@ -544,14 +542,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           txns={projectedTxns}
           accounts={accounts}
           searchable={page === "transactions"}
-          categoryQuery={txnCategoryQuery}
-          setCategoryQuery={setTxnCategoryQuery}
-          metadataQuery={txnMetadataQuery}
-          setMetadataQuery={setTxnMetadataQuery}
-          searchQuery={txnSearchQuery}
-          setSearchQuery={setTxnSearchQuery}
-          matchMode={categoryMatchMode}
-          setMatchMode={setCategoryMatchMode}
+          categoryQuery={page === "transactions" ? txnCategoryQuery : ""}
+          setCategoryQuery={page === "transactions" ? setTxnCategoryQuery : undefined}
+          metadataQuery={page === "transactions" ? txnMetadataQuery : ""}
+          setMetadataQuery={page === "transactions" ? setTxnMetadataQuery : undefined}
+          searchQuery={page === "transactions" ? txnSearchQuery : ""}
+          setSearchQuery={page === "transactions" ? setTxnSearchQuery : undefined}
+          matchMode={page === "transactions" ? categoryMatchMode : "prefix"}
+          setMatchMode={page === "transactions" ? setCategoryMatchMode : undefined}
           viewMode={txnViewMode}
           setViewMode={setTxnViewMode}
           onUpdate={guardedUpdateTransaction}

@@ -177,18 +177,137 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 }
 
 func ExpenseAnalytics(txns []Transaction, start, end string) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
-	summary := MonthSummary(start, end, txns)
-	var categories []ExpenseCategoryAnalytics
-	for account, amount := range summary.Categories {
+	current := collectExpenseCategories(txns, start, end)
+	prevStart, prevEnd := previousRange(start, end)
+	previous := collectExpenseCategories(txns, prevStart, prevEnd)
+	totalExpense := 0
+	for _, row := range current {
+		totalExpense += row.amount
+	}
+
+	categories := []ExpenseCategoryAnalytics{}
+	for account, row := range current {
 		share := (*float64)(nil)
-		if summary.Expense > 0 {
-			value := float64(amount) / float64(summary.Expense)
+		if totalExpense > 0 {
+			value := float64(row.amount) / float64(totalExpense)
 			share = &value
 		}
-		categories = append(categories, ExpenseCategoryAnalytics{Account: account, Label: labelFor(account), Amount: amount, Share: share, TopPayees: []PayeeAnalytics{}})
+		previousAmount := previous[account].amount
+		var changeRatio *float64
+		if previousAmount == 0 {
+			if row.amount == 0 {
+				value := 0.0
+				changeRatio = &value
+			}
+		} else {
+			value := float64(row.amount-previousAmount) / float64(previousAmount)
+			changeRatio = &value
+		}
+		categories = append(categories, ExpenseCategoryAnalytics{
+			Account:        account,
+			Label:          labelFor(account),
+			Amount:         row.amount,
+			TxCount:        len(row.txns),
+			Share:          share,
+			PreviousAmount: previousAmount,
+			ChangeRatio:    changeRatio,
+			TopPayees:      categoryTopPayees(row.payees),
+		})
 	}
-	sort.Slice(categories, func(i, j int) bool { return categories[i].Amount > categories[j].Amount })
+	sort.Slice(categories, func(i, j int) bool {
+		if categories[i].Amount == categories[j].Amount {
+			return categories[i].Account < categories[j].Account
+		}
+		return categories[i].Amount > categories[j].Amount
+	})
 	return categories, summarizePayees(txns, start, end), summarizePaymentAccounts(txns, start, end)
+}
+
+type expenseCategoryAccumulator struct {
+	amount int
+	txns   map[string]bool
+	payees map[string]expensePayeeAccumulator
+}
+
+type expensePayeeAccumulator struct {
+	amount int
+	txns   map[string]bool
+}
+
+func collectExpenseCategories(txns []Transaction, start, end string) map[string]expenseCategoryAccumulator {
+	categories := map[string]expenseCategoryAccumulator{}
+	for index, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		id := transactionID(txn, index)
+		for _, posting := range txn.Postings {
+			if !strings.HasPrefix(posting.Account, "Expenses:") {
+				continue
+			}
+			row := categories[posting.Account]
+			if row.txns == nil {
+				row.txns = map[string]bool{}
+			}
+			if row.payees == nil {
+				row.payees = map[string]expensePayeeAccumulator{}
+			}
+			row.amount += posting.Amount
+			row.txns[id] = true
+
+			payeeName := txn.Payee
+			if payeeName == "" {
+				payeeName = "（无商户）"
+			}
+			payee := row.payees[payeeName]
+			if payee.txns == nil {
+				payee.txns = map[string]bool{}
+			}
+			payee.amount += posting.Amount
+			payee.txns[id] = true
+			row.payees[payeeName] = payee
+			categories[posting.Account] = row
+		}
+	}
+	return categories
+}
+
+func categoryTopPayees(rows map[string]expensePayeeAccumulator) []PayeeAnalytics {
+	out := []PayeeAnalytics{}
+	for payee, row := range rows {
+		out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Amount != out[j].Amount {
+			return out[i].Amount > out[j].Amount
+		}
+		if out[i].TxCount != out[j].TxCount {
+			return out[i].TxCount > out[j].TxCount
+		}
+		return out[i].Payee < out[j].Payee
+	})
+	if len(out) > 3 {
+		out = out[:3]
+	}
+	return out
+}
+
+func previousRange(start, end string) (string, string) {
+	startDate, errStart := time.Parse("2006-01-02", start)
+	endDate, errEnd := time.Parse("2006-01-02", end)
+	if errStart != nil || errEnd != nil {
+		return start, start
+	}
+	duration := endDate.Sub(startDate)
+	return startDate.Add(-duration).Format("2006-01-02"), start
+}
+
+func transactionID(txn Transaction, index int) string {
+	id := txn.Source.File + ":" + formatInt(txn.Source.Line)
+	if id == ":0" {
+		return txn.Date + ":" + formatInt(index)
+	}
+	return id
 }
 
 func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
