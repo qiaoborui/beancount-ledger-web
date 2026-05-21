@@ -195,6 +195,37 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 	}
 }
 
+func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/income-statement?start=2026-05-01&end=2026-06-01", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("income statement status=%d body=%s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Income       []IncomeStatementNode `json:"income"`
+		Expense      []IncomeStatementNode `json:"expense"`
+		TotalIncome  int                   `json:"totalIncome"`
+		TotalExpense int                   `json:"totalExpense"`
+		NetIncome    int                   `json:"netIncome"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Income) != 1 || body.Income[0].Account != "Income:Salary" || body.Income[0].Amount != 100000 || body.Income[0].TxCount != 1 {
+		t.Fatalf("income tree should include category detail, got %#v", body.Income)
+	}
+	if len(body.Expense) != 1 || body.Expense[0].Account != "Expenses:Food" || body.Expense[0].Amount != 1200 || body.Expense[0].TxCount != 1 {
+		t.Fatalf("expense tree should include category detail, got %#v", body.Expense)
+	}
+	if body.TotalIncome != 100000 || body.TotalExpense != 1200 || body.NetIncome != 98800 {
+		t.Fatalf("unexpected income statement totals: %#v", body)
+	}
+}
+
 func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

@@ -279,12 +279,12 @@ func (s *Server) incomeStatement(c *gin.Context) {
 	start, end := parseTimeParams(c)
 	unlocked := isSensitiveUnlocked(c)
 	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end)
-	summary := MonthSummary(start, end, snapshot.Transactions)
+	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
 	incomeNodes := []IncomeStatementNode{}
 	if unlocked {
-		incomeNodes = []IncomeStatementNode{{Account: "Income", Label: "Income", Amount: summary.Income, Children: []IncomeStatementNode{}, Depth: 0, TxCount: 0}}
+		incomeNodes = allIncomeNodes
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "income": incomeNodes, "expense": []IncomeStatementNode{{Account: "Expenses", Label: "Expenses", Amount: summary.Expense, Children: []IncomeStatementNode{}, Depth: 0}}, "totalIncome": statusInt(unlocked, summary.Income), "totalExpense": summary.Expense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, summary.Net), "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "sensitiveUnlocked": unlocked})
 }
 
 func (s *Server) accounts(c *gin.Context) {

@@ -409,6 +409,143 @@ func MonthSummary(start, end string, txns []Transaction) Summary {
 	return summary
 }
 
+type incomeStatementAggregate struct {
+	Amount int
+	Txns   map[string]struct{}
+}
+
+type incomeStatementBuildNode struct {
+	Node IncomeStatementNode
+	Txns map[string]struct{}
+}
+
+func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
+	incomeMap := map[string]incomeStatementAggregate{}
+	expenseMap := map[string]incomeStatementAggregate{}
+
+	for i, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		txnID := txn.Source.File + ":" + strconv.Itoa(txn.Source.Line)
+		if txnID == ":0" {
+			txnID = txn.Date + ":" + strconv.Itoa(i)
+		}
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Income:") {
+				amount := posting.Amount
+				if amount < 0 {
+					amount = -amount
+				}
+				addIncomeStatementAmount(incomeMap, posting.Account, amount, txnID)
+			}
+			if strings.HasPrefix(posting.Account, "Expenses:") {
+				addIncomeStatementAmount(expenseMap, posting.Account, posting.Amount, txnID)
+			}
+		}
+	}
+
+	income := publicIncomeStatementNodes(buildIncomeStatementNodes("Income", incomeMap))
+	expense := publicIncomeStatementNodes(buildIncomeStatementNodes("Expenses", expenseMap))
+	totalIncome := 0
+	for _, node := range income {
+		totalIncome += node.Amount
+	}
+	totalExpense := 0
+	for _, node := range expense {
+		totalExpense += node.Amount
+	}
+	return income, expense, totalIncome, totalExpense, totalIncome - totalExpense
+}
+
+func addIncomeStatementAmount(target map[string]incomeStatementAggregate, account string, amount int, txnID string) {
+	entry := target[account]
+	if entry.Txns == nil {
+		entry.Txns = map[string]struct{}{}
+	}
+	entry.Amount += amount
+	entry.Txns[txnID] = struct{}{}
+	target[account] = entry
+}
+
+func buildIncomeStatementNodes(root string, data map[string]incomeStatementAggregate) []incomeStatementBuildNode {
+	prefix := root + ":"
+	direct := map[string]incomeStatementAggregate{}
+	for account, aggregate := range data {
+		if !strings.HasPrefix(account, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(account, prefix)
+		childKey := rest
+		if colon := strings.Index(rest, ":"); colon >= 0 {
+			childKey = rest[:colon]
+		}
+		childFull := root + ":" + childKey
+		node := direct[childFull]
+		if node.Txns == nil {
+			node.Txns = map[string]struct{}{}
+		}
+		if childFull == account {
+			node.Amount += aggregate.Amount
+			for txnID := range aggregate.Txns {
+				node.Txns[txnID] = struct{}{}
+			}
+		}
+		direct[childFull] = node
+	}
+
+	keys := make([]string, 0, len(direct))
+	for account := range direct {
+		keys = append(keys, account)
+	}
+	sort.Strings(keys)
+
+	nodes := make([]incomeStatementBuildNode, 0, len(keys))
+	for _, account := range keys {
+		directNode := direct[account]
+		children := buildIncomeStatementNodes(account, data)
+		amount := directNode.Amount
+		txns := map[string]struct{}{}
+		for txnID := range directNode.Txns {
+			txns[txnID] = struct{}{}
+		}
+		for _, child := range children {
+			amount += child.Node.Amount
+			for txnID := range child.Txns {
+				txns[txnID] = struct{}{}
+			}
+		}
+		publicChildren := publicIncomeStatementNodes(children)
+		nodes = append(nodes, incomeStatementBuildNode{
+			Node: IncomeStatementNode{
+				Account:  account,
+				Label:    account[strings.LastIndex(account, ":")+1:],
+				Amount:   amount,
+				Children: publicChildren,
+				Depth:    strings.Count(account, ":") - 1,
+				TxCount:  len(txns),
+			},
+			Txns: txns,
+		})
+	}
+
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Node.Amount == nodes[j].Node.Amount {
+			return nodes[i].Node.Account < nodes[j].Node.Account
+		}
+		return nodes[i].Node.Amount > nodes[j].Node.Amount
+	})
+	return nodes
+}
+
+func publicIncomeStatementNodes(nodes []incomeStatementBuildNode) []IncomeStatementNode {
+	public := make([]IncomeStatementNode, 0, len(nodes))
+	for _, node := range nodes {
+		public = append(public, node.Node)
+	}
+	return public
+}
+
 func NetWorthHistory(txns []Transaction) []NetWorthPoint {
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
