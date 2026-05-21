@@ -17,8 +17,8 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return <>
-    <div className="grid items-start gap-4 xl:grid-cols-[minmax(420px,0.95fr)_minmax(620px,1.05fr)]">
-      <div className="grid gap-4">
+    <div className="grid items-start gap-4 xl:grid-cols-12">
+      <div className="grid gap-4 xl:col-span-5">
         <section className="card overflow-hidden p-0">
           <div className="border-l-4 border-brand p-4 md:p-5">
             <div className="flex items-start justify-between gap-4">
@@ -45,12 +45,18 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
           <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
         </section>
       </div>
-      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
+      <div className="xl:col-span-7">
+        <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
+      </div>
     </div>
 
-    <section className="mt-4 grid gap-4 xl:grid-cols-2">
-      <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
-      <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
+    <section className="mt-4 grid gap-4 xl:grid-cols-12">
+      <div className="xl:col-span-5">
+        <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
+      </div>
+      <div className="xl:col-span-7">
+        <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
+      </div>
     </section>
 
   </>;
@@ -76,7 +82,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
     {rows.length ? showAmounts ? <div className="mt-4 min-w-0">
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={340}>
         <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
@@ -92,7 +98,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
           <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
         </ComposedChart>
       </ResponsiveContainer>
-    </div> : <div className="mt-4 grid h-[300px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid h-[300px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
+    </div> : <div className="mt-4 grid h-[340px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid h-[340px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
   </section>;
 }
 
