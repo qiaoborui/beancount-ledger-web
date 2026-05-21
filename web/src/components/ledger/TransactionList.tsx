@@ -160,14 +160,13 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
   return (
     <button
       type="button"
-      className={`grid w-full grid-cols-[84px_140px_minmax(260px,1.2fr)_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
       onClick={onSelect}
     >
       <div className="text-xs tabular-nums text-stone">
         <div>{txn.date.slice(5)}</div>
         <div className="mt-1 text-[11px] text-stone/70">{txn.date.slice(0, 4)}</div>
       </div>
-      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <strong className="truncate text-sm text-ink">{txn.payee}</strong>
@@ -176,6 +175,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
         <div className="mt-0.5 truncate text-xs text-olive">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
+      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
       <div className="min-w-0">
         <div className="truncate text-xs text-warm">{categoryAccounts.map((posting) => posting.account).join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
@@ -293,10 +293,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       {searchable && rows.length > 0 ? (
         <>
           <div className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm lg:block">
-            <div className="grid grid-cols-[84px_140px_minmax(260px,1.2fr)_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
+            <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
               <span>日期</span>
-              <span className="text-right">金额</span>
               <span>交易</span>
+              <span className="text-right">金额</span>
               <span>分类 / 账户</span>
               <span>标签</span>
             </div>

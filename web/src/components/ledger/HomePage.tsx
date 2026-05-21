@@ -1,4 +1,5 @@
 import { Eye, EyeOff } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny } from "@/lib/money";
 import { Metric } from "./shared";
 import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
@@ -13,7 +14,7 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const unknown = expenseAnalytics.find((row) => row.account === "Expenses:Unknown");
   const budgetPressure = budgetRows.filter((row) => row.ratio !== null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0)).slice(0, 3);
   const healthCounts = accountStatuses.reduce<Record<AccountStatus["status"], number>>((acc, item) => ({ ...acc, [item.status]: acc[item.status] + 1 }), { green: 0, red: 0, yellow: 0, grey: 0 });
-  const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(-18);
+  const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return <>
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
@@ -55,29 +56,44 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
 }
 
 function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean }) {
-  const max = Math.max(1, ...rows.flatMap(([, value]) => [value.income, value.expense]));
+  const label = rows.length ? `${rows[0][0].slice(5)} ~ ${rows.at(-1)?.[0].slice(5)}` : "本期";
+  const data = rows.map(([date, value]) => ({
+    date,
+    income: value.income / 100,
+    expense: value.expense / 100,
+  }));
   return <section className="card flex min-h-[220px] flex-col p-4">
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
         <h2 className="mt-1 font-serif text-xl">日收支趋势</h2>
       </div>
-      <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">近 {rows.length || 0} 天</span>
+      <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? <div className="mt-4 flex min-h-0 flex-1 items-end gap-1.5">
-      {rows.map(([date, value]) => {
-        const expenseHeight = Math.max(4, Math.round((value.expense / max) * 118));
-        const incomeHeight = Math.max(value.income > 0 ? 4 : 0, Math.round((value.income / max) * 118));
-        return <div key={date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={showAmounts ? `${date} 支出 ${formatCny(value.expense / 100)} 收入 ${formatCny(value.income / 100)}` : `${date} 金额已隐藏`}>
-          <div className="flex h-32 items-end gap-0.5">
-            <span className="w-2 rounded-t bg-[rgb(var(--color-income))]" style={{ height: showAmounts ? incomeHeight : value.income > 0 ? 12 : 0 }} />
-            <span className="w-2 rounded-t bg-[rgb(var(--color-expense))]" style={{ height: showAmounts ? expenseHeight : value.expense > 0 ? 18 : 0 }} />
-          </div>
-          <span className="truncate text-[10px] text-stone">{date.slice(5)}</span>
-        </div>;
-      })}
-    </div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
+    {rows.length ? showAmounts ? <div className="mt-4 h-44 min-w-0 flex-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
+          <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
+          <YAxis width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
+          <Tooltip
+            cursor={{ fill: "var(--selected-bg)" }}
+            contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
+            labelFormatter={(label) => String(label)}
+            formatter={(value, name) => [formatCny(Number(value)), name === "收入" ? "收入" : "支出"]}
+          />
+          <Bar dataKey="income" name="收入" fill="rgb(var(--color-income))" radius={[4, 4, 0, 0]} maxBarSize={18} />
+          <Bar dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={18} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
   </section>;
+}
+
+function compactMoney(value: number) {
+  if (Math.abs(value) >= 10000) return `${Math.round(value / 10000)}万`;
+  if (Math.abs(value) >= 1000) return `${Math.round(value / 1000)}k`;
+  return `${Math.round(value)}`;
 }
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {
