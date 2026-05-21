@@ -42,11 +42,11 @@ function AccountSparkline({ points, liability }: { points: number[]; liability: 
     return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
   const stroke = liability ? "rgb(var(--color-expense))" : "rgb(var(--color-brand))";
-  const areaPath = `${path} L${width},${height} L0,${height} Z`;
-  return <svg className="pointer-events-none absolute inset-y-0 right-0 z-0 h-full w-[76%] opacity-25" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-    <path d={areaPath} fill={stroke} opacity="0.12" />
-    <path d={path} fill="none" stroke={stroke} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
-  </svg>;
+  return <div className="pointer-events-none absolute bottom-5 right-4 top-6 z-0 w-[38%] opacity-[0.08] sm:w-[52%] sm:opacity-[0.12]" aria-hidden="true">
+    <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <path d={path} fill="none" stroke={stroke} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  </div>;
 }
 
 export function BudgetPanel({ rows, full }: { rows: BudgetRow[]; full?: boolean }) {
