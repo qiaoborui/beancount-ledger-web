@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { chatBookkeeping } from "@/lib/deepseek";
+import { logDuration } from "@/lib/diagnostics";
+import { rateLimit } from "@/lib/rateLimit";
 import { ParsedTransactionSchema } from "@/lib/schemas";
 
 const ChatMessageSchema = z.object({
@@ -16,7 +19,10 @@ const ChatRequestSchema = z.object({
   notifyOnLongTask: z.boolean().default(true),
 });
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
+  const rateLimitError = rateLimit(request, { name: "ai.chat", limit: 20, windowMs: 5 * 60_000 });
+  if (rateLimitError) return rateLimitError;
+
   const authError = await requireAuthJson();
   if (authError) return authError;
   const json = await request.json();
@@ -27,18 +33,13 @@ export async function POST(request: Request) {
 
   const today = new Date().toISOString().slice(0, 10);
   const startedAt = Date.now();
-  try {
-    const result = await chatBookkeeping({
-      message: parsed.data.message,
-      messages: parsed.data.messages,
-      draftEntries: parsed.data.draftEntries,
-      today,
-    });
-    const elapsedMs = Date.now() - startedAt;
-    return NextResponse.json({ ...result, meta: { elapsedMs } });
-  } catch (error) {
-    const elapsedMs = Date.now() - startedAt;
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message, meta: { elapsedMs } }, { status: 400 });
-  }
-}
+  const result = await chatBookkeeping({
+    message: parsed.data.message,
+    messages: parsed.data.messages,
+    draftEntries: parsed.data.draftEntries,
+    today,
+  });
+  const elapsedMs = Date.now() - startedAt;
+  logDuration("ai.chat", startedAt, { entries: result.entries.length });
+  return NextResponse.json({ ...result, meta: { elapsedMs } });
+}, { defaultStatus: 400 });

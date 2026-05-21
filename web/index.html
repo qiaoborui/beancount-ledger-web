@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Beancount ledger web app" />
+    <meta name="application-name" content="我的账本" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#1B365D" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="我的账本" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <title>我的账本</title>
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem("ledger_theme_mode");
+          var mode = stored === "light" || stored === "dark" ? stored : "system";
+          var theme = mode === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

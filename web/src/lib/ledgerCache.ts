@@ -14,6 +14,7 @@ import {
   type BudgetView,
   type TransactionView,
 } from "./beancountParser";
+import { logDuration } from "./diagnostics";
 import { ledgerRoot } from "./ledgerPaths";
 
 export type LedgerVersion = {
@@ -90,6 +91,7 @@ export function getLedgerSnapshot(): LedgerSnapshot {
   const version = getLedgerVersion();
   if (cachedSnapshot?.version === version.version) return cachedSnapshot;
 
+  const startedAt = Date.now();
   const lines = readLedgerLines();
   const transactions = parseTransactions(lines);
   const snapshot: LedgerSnapshot = {
@@ -103,9 +105,19 @@ export function getLedgerSnapshot(): LedgerSnapshot {
     parsedAt: Date.now(),
   };
   cachedSnapshot = snapshot;
+  logDuration("ledger.parse", startedAt, {
+    files: version.fileCount,
+    lines: lines.length,
+    transactions: transactions.length,
+    accounts: snapshot.accounts.length,
+  });
   return snapshot;
 }
 
-export function clearLedgerCacheForTests() {
+export function clearLedgerCache() {
   cachedSnapshot = null;
+}
+
+export function clearLedgerCacheForTests() {
+  clearLedgerCache();
 }

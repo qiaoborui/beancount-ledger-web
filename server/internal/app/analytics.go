@@ -1,0 +1,311 @@
+package app
+
+import (
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+type NetWorthDelta struct {
+	Baseline    *NetWorthPoint `json:"baseline"`
+	Change      *int           `json:"change"`
+	ChangeRatio *float64       `json:"changeRatio"`
+}
+
+type NetWorthWindows struct {
+	Latest           *NetWorthPoint `json:"latest"`
+	PreviousMonthEnd *NetWorthPoint `json:"previousMonthEnd"`
+	MonthChange      *int           `json:"monthChange"`
+	SixMonth         NetWorthDelta  `json:"sixMonth"`
+	TwelveMonth      NetWorthDelta  `json:"twelveMonth"`
+}
+
+type CreditCardAnalytics struct {
+	Account          string  `json:"account"`
+	Label            string  `json:"label"`
+	Balance          int     `json:"balance"`
+	Outstanding      int     `json:"outstanding"`
+	PeriodSpend      int     `json:"periodSpend"`
+	PeriodRepayments int     `json:"periodRepayments"`
+	BillCycleSpend   int     `json:"billCycleSpend"`
+	BillCycleStart   string  `json:"billCycleStart"`
+	BillCycleEnd     string  `json:"billCycleEnd"`
+	StatementDate    string  `json:"statementDate"`
+	DueDate          string  `json:"dueDate"`
+	TxCount          int     `json:"txCount"`
+	RepaymentCount   int     `json:"repaymentCount"`
+	LastActivityDate *string `json:"lastActivityDate"`
+}
+
+type PayeeAnalytics struct {
+	Payee   string `json:"payee"`
+	Amount  int    `json:"amount"`
+	TxCount int    `json:"txCount"`
+}
+
+type AccountAnalytics struct {
+	Account string `json:"account"`
+	Amount  int    `json:"amount"`
+	TxCount int    `json:"txCount"`
+}
+
+type ExpenseCategoryAnalytics struct {
+	Account        string           `json:"account"`
+	Label          string           `json:"label"`
+	Amount         int              `json:"amount"`
+	TxCount        int              `json:"txCount"`
+	Share          *float64         `json:"share"`
+	PreviousAmount int              `json:"previousAmount"`
+	ChangeRatio    *float64         `json:"changeRatio"`
+	TopPayees      []PayeeAnalytics `json:"topPayees"`
+}
+
+func MonthEndNetWorth(rows []NetWorthPoint) []NetWorthPoint {
+	sorted := append([]NetWorthPoint(nil), rows...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
+	byMonth := map[string]NetWorthPoint{}
+	keys := []string{}
+	for _, row := range sorted {
+		month := row.Date[:7]
+		if _, ok := byMonth[month]; !ok {
+			keys = append(keys, month)
+		}
+		byMonth[month] = row
+	}
+	sort.Strings(keys)
+	out := make([]NetWorthPoint, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, byMonth[key])
+	}
+	return out
+}
+
+func NetWorthChangeWindows(rows []NetWorthPoint) NetWorthWindows {
+	monthly := MonthEndNetWorth(rows)
+	var latest *NetWorthPoint
+	if len(rows) > 0 {
+		latest = &rows[len(rows)-1]
+	}
+	var previous *NetWorthPoint
+	if len(monthly) >= 2 {
+		previous = &monthly[len(monthly)-2]
+	}
+	var monthChange *int
+	if latest != nil && previous != nil {
+		value := latest.NetWorth - previous.NetWorth
+		monthChange = &value
+	}
+	return NetWorthWindows{Latest: latest, PreviousMonthEnd: previous, MonthChange: monthChange, SixMonth: deltaFromMonthly(monthly, latest, 6), TwelveMonth: deltaFromMonthly(monthly, latest, 12)}
+}
+
+func deltaFromMonthly(monthly []NetWorthPoint, latest *NetWorthPoint, months int) NetWorthDelta {
+	if latest == nil || len(monthly) == 0 {
+		return NetWorthDelta{}
+	}
+	index := 0
+	if len(monthly) > months {
+		index = len(monthly) - months - 1
+	}
+	baseline := monthly[index]
+	change := latest.NetWorth - baseline.NetWorth
+	var ratio *float64
+	if baseline.NetWorth != 0 {
+		value := float64(change) / float64(abs(baseline.NetWorth))
+		ratio = &value
+	}
+	return NetWorthDelta{Baseline: &baseline, Change: &change, ChangeRatio: ratio}
+}
+
+func CreditCards(txns []Transaction, balances map[string]int, accounts []Account, start, end string) []CreditCardAnalytics {
+	cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycle(time.Now().Format("2006-01-02"))
+	var out []CreditCardAnalytics
+	for _, account := range accounts {
+		if account.Group != "credit" || !strings.HasPrefix(account.Account, "Liabilities:") {
+			continue
+		}
+		row := CreditCardAnalytics{Account: account.Account, Label: account.Label, BillCycleStart: cycleStart, BillCycleEnd: cycleEnd, StatementDate: statementDate, DueDate: dueDate}
+		for _, txn := range txns {
+			var cardTotal, expenseAmount, assetOutflow int
+			for _, posting := range txn.Postings {
+				if posting.Account == account.Account {
+					cardTotal += posting.Amount
+				}
+				if strings.HasPrefix(posting.Account, "Expenses:") {
+					expenseAmount += posting.Amount
+				}
+				if strings.HasPrefix(posting.Account, "Assets:") && posting.Amount < 0 {
+					assetOutflow += -posting.Amount
+				}
+			}
+			if cardTotal != 0 && (row.LastActivityDate == nil || txn.Date > *row.LastActivityDate) {
+				date := txn.Date
+				row.LastActivityDate = &date
+			}
+			cardSpend := 0
+			if expenseAmount > 0 && cardTotal < 0 {
+				cardSpend = min(expenseAmount, -cardTotal)
+			}
+			if txn.Date >= cycleStart && txn.Date < cycleEnd && cardSpend > 0 {
+				row.BillCycleSpend += cardSpend
+			}
+			if txn.Date < start || txn.Date >= end || cardTotal == 0 {
+				continue
+			}
+			if cardSpend > 0 {
+				row.PeriodSpend += cardSpend
+				row.TxCount++
+			} else if assetOutflow > 0 && cardTotal > 0 {
+				row.PeriodRepayments += min(assetOutflow, cardTotal)
+				row.RepaymentCount++
+			}
+		}
+		row.Balance = balances[account.Account]
+		row.Outstanding = max(0, abs(min(row.Balance, 0)))
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Outstanding != out[j].Outstanding {
+			return out[i].Outstanding > out[j].Outstanding
+		}
+		if out[i].PeriodSpend != out[j].PeriodSpend {
+			return out[i].PeriodSpend > out[j].PeriodSpend
+		}
+		return out[i].Label < out[j].Label
+	})
+	return out
+}
+
+func ExpenseAnalytics(txns []Transaction, start, end string) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
+	summary := MonthSummary(start, end, txns)
+	var categories []ExpenseCategoryAnalytics
+	for account, amount := range summary.Categories {
+		share := (*float64)(nil)
+		if summary.Expense > 0 {
+			value := float64(amount) / float64(summary.Expense)
+			share = &value
+		}
+		categories = append(categories, ExpenseCategoryAnalytics{Account: account, Label: labelFor(account), Amount: amount, Share: share, TopPayees: []PayeeAnalytics{}})
+	}
+	sort.Slice(categories, func(i, j int) bool { return categories[i].Amount > categories[j].Amount })
+	return categories, summarizePayees(txns, start, end), summarizePaymentAccounts(txns, start, end)
+}
+
+func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
+	type acc struct {
+		amount int
+		txns   map[string]bool
+	}
+	rows := map[string]acc{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		var expense int
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") {
+				expense += posting.Amount
+			}
+		}
+		if expense <= 0 {
+			continue
+		}
+		payee := txn.Payee
+		if payee == "" {
+			payee = "（无商户）"
+		}
+		row := rows[payee]
+		if row.txns == nil {
+			row.txns = map[string]bool{}
+		}
+		row.amount += expense
+		row.txns[txn.Source.File+":"+formatInt(txn.Source.Line)] = true
+		rows[payee] = row
+	}
+	out := []PayeeAnalytics{}
+	for payee, row := range rows {
+		out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
+	if len(out) > 8 {
+		out = out[:8]
+	}
+	return out
+}
+
+func summarizePaymentAccounts(txns []Transaction, start, end string) []AccountAnalytics {
+	type acc struct {
+		amount int
+		txns   map[string]bool
+	}
+	rows := map[string]acc{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		hasExpense := false
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") {
+				hasExpense = true
+			}
+		}
+		if !hasExpense {
+			continue
+		}
+		id := txn.Source.File + ":" + formatInt(txn.Source.Line)
+		for _, posting := range txn.Postings {
+			if !(strings.HasPrefix(posting.Account, "Assets:") || strings.HasPrefix(posting.Account, "Liabilities:")) {
+				continue
+			}
+			outflow := -posting.Amount
+			if outflow <= 0 {
+				continue
+			}
+			row := rows[posting.Account]
+			if row.txns == nil {
+				row.txns = map[string]bool{}
+			}
+			row.amount += outflow
+			row.txns[id] = true
+			rows[posting.Account] = row
+		}
+	}
+	out := []AccountAnalytics{}
+	for account, row := range rows {
+		out = append(out, AccountAnalytics{Account: account, Amount: row.amount, TxCount: len(row.txns)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
+	if len(out) > 8 {
+		out = out[:8]
+	}
+	return out
+}
+
+func creditCardBillingCycle(asOf string) (string, string, string, string) {
+	date, _ := time.Parse("2006-01-02", asOf)
+	year, month, day := date.Date()
+	cycleMonth := int(month)
+	if day < 17 {
+		cycleMonth--
+	}
+	return dateString(year, cycleMonth, 17), dateString(year, cycleMonth+1, 17), dateString(year, cycleMonth+1, 18), dateString(year, cycleMonth+2, 5)
+}
+
+func dateString(year int, month int, day int) string {
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+}
+
+func labelFor(account string) string {
+	base := filepath.Base(strings.ReplaceAll(account, ":", string(filepath.Separator)))
+	if base == "." {
+		return account
+	}
+	return base
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}

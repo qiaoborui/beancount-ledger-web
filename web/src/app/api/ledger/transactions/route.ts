@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { isSensitiveUnlocked } from "@/lib/auth";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
@@ -31,56 +32,44 @@ export async function GET(request: Request) {
   return NextResponse.json({ start, end, transactions, sensitiveUnlocked });
 }
 
-export async function PUT(request: Request) {
+export const PUT = apiHandler(async (request: Request) => {
   const authError = await requireAuthJson();
   if (authError) return authError;
   const { source, entry } = UpdateSchema.parse(await request.json());
-  try {
-    await replaceTransactionBlock(source, entry);
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  await replaceTransactionBlock(source, entry);
+  return NextResponse.json({ ok: true });
+}, { defaultStatus: 400 });
 
-export async function DELETE(request: Request) {
+export const DELETE = apiHandler(async (request: Request) => {
   const authError = await requireAuthJson();
   if (authError) return authError;
   const { source, reason } = DeleteSchema.parse(await request.json());
-  try {
-    await commentTransactionBlock(source, reason);
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  await commentTransactionBlock(source, reason);
+  return NextResponse.json({ ok: true });
+}, { defaultStatus: 400 });
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
   const authError = await requireAuthJson();
   if (authError) return authError;
   const { source, date } = ReverseSchema.parse(await request.json());
-  try {
-    const original = findBySource(source);
-    const reverseDate = date ?? new Date().toISOString().slice(0, 10);
-    const entry = {
-      kind: "transaction" as const,
-      date: reverseDate,
-      payee: original.payee,
-      narration: `冲销：${original.narration}`,
-      metadata: { ...(original.metadata ?? {}), reversal: true },
-      tags: original.tags ?? [],
-      confidence: 1,
-      needsReview: false,
-      questions: [],
-      postings: original.postings.map((posting) => ({
-        account: posting.account,
-        amount: (-(posting.amount / 100)).toFixed(2),
-        currency: posting.currency,
-      })),
-    };
-    await appendBeanText(reverseDate, transactionToBean(entry));
-    return NextResponse.json({ ok: true, entry });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  const original = findBySource(source);
+  const reverseDate = date ?? new Date().toISOString().slice(0, 10);
+  const entry = {
+    kind: "transaction" as const,
+    date: reverseDate,
+    payee: original.payee,
+    narration: `冲销：${original.narration}`,
+    metadata: { ...(original.metadata ?? {}), reversal: true },
+    tags: original.tags ?? [],
+    confidence: 1,
+    needsReview: false,
+    questions: [],
+    postings: original.postings.map((posting) => ({
+      account: posting.account,
+      amount: (-(posting.amount / 100)).toFixed(2),
+      currency: posting.currency,
+    })),
+  };
+  await appendBeanText(reverseDate, transactionToBean(entry));
+  return NextResponse.json({ ok: true, entry });
+}, { defaultStatus: 400 });

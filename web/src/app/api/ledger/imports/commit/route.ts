@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { commitBillImportAsync } from "@/lib/billImport";
+import { rateLimit } from "@/lib/rateLimit";
 
 const PostingSchema = z.object({ account: z.string().min(1), amount: z.string().min(1), currency: z.string().min(1) });
 
@@ -34,15 +36,14 @@ const CommitSchema = z.object({
   alipayFundRounding: z.boolean().optional(),
 });
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
+  const rateLimitError = rateLimit(request, { name: "imports.commit", limit: 10, windowMs: 60_000 });
+  if (rateLimitError) return rateLimitError;
+
   const authError = await requireAuthJson();
   if (authError) return authError;
 
-  try {
-    const input = CommitSchema.parse(await request.json());
-    const result = await commitBillImportAsync(input);
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  const input = CommitSchema.parse(await request.json());
+  const result = await commitBillImportAsync(input);
+  return NextResponse.json(result);
+}, { defaultStatus: 400 });

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
 import { appendAccount } from "@/lib/ledgerWriter";
@@ -17,17 +18,13 @@ export async function GET() {
   return NextResponse.json({ accounts: getLedgerSnapshot().accounts });
 }
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
   const authError = await requireAuthJson();
   if (authError) return authError;
   const input = AccountSchema.parse(await request.json());
   const exists = getLedgerSnapshot().accounts.some((account) => account.account === input.account);
   if (exists) return NextResponse.json({ error: "账户已存在" }, { status: 400 });
 
-  try {
-    await appendAccount(input);
-    return NextResponse.json({ ok: true, account: input });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  await appendAccount(input);
+  return NextResponse.json({ ok: true, account: input });
+}, { defaultStatus: 400 });

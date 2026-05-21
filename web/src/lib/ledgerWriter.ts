@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { logDuration } from "./diagnostics";
+import { clearLedgerCache } from "./ledgerCache";
 import { accountsBeanPath, mainBeanPath, transactionFileForDate, transactionsDir } from "./ledgerPaths";
 import type { BalanceAssertion, LedgerEntry, MetadataValue, ParsedTransaction } from "./schemas";
 import { transactionSourceHash } from "./beancountParser";
@@ -66,18 +68,26 @@ function runBeanCheck() {
     "/usr/local/bin",
   ].filter(Boolean).join(path.delimiter);
 
+  const startedAt = Date.now();
   try {
     execFileSync(beanCheckCommand(), [mainBeanPath()], {
       cwd: path.dirname(mainBeanPath()),
       stdio: "pipe",
       env: { ...process.env, PATH: envPath },
     });
+    logDuration("bean-check", startedAt, { ok: true });
   } catch (error) {
+    logDuration("bean-check", startedAt, { ok: false });
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error("找不到 bean-check。请设置 BEAN_CHECK_BIN 为 bean-check 的绝对路径，或确保运行 Web 服务的 PATH 包含 bean-check。");
     }
     throw error;
   }
+}
+
+function validateLedgerAndClearCache() {
+  runBeanCheck();
+  clearLedgerCache();
 }
 
 type FileSnapshot = { existed: boolean; content: string };
@@ -162,7 +172,7 @@ function appendItemsChecked(items: AppendItem[]) {
       fs.writeFileSync(file, next, "utf8");
     }
 
-    runBeanCheck();
+    validateLedgerAndClearCache();
   } catch (error) {
     restoreSnapshots(snapshots);
     throw error;
@@ -248,7 +258,7 @@ export async function writeImportedBeanFile(input: { dateStart: string; dateEnd:
         fs.writeFileSync(monthFile, `${monthBefore}${separator}${includeLine}\n`, "utf8");
       }
 
-      runBeanCheck();
+      validateLedgerAndClearCache();
     } catch (error) {
       restoreSnapshots(snapshots);
       throw error;
@@ -266,7 +276,7 @@ export async function appendAccount(entry: { date: string; account: string; alia
     const next = `${before}${separator}${accountToBean(entry).trimEnd()}\n`;
     fs.writeFileSync(file, next, "utf8");
     try {
-      runBeanCheck();
+      validateLedgerAndClearCache();
     } catch (error) {
       fs.writeFileSync(file, before, "utf8");
       throw error;
@@ -322,7 +332,7 @@ function transactionBlock(text: string, source: TransactionSource) {
 function writeChecked(file: string, before: string, next: string) {
   fs.writeFileSync(file, next, "utf8");
   try {
-    runBeanCheck();
+    validateLedgerAndClearCache();
   } catch (error) {
     fs.writeFileSync(file, before, "utf8");
     throw error;

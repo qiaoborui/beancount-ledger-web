@@ -2,10 +2,14 @@
 node_modules/
 web/node_modules/
 
-# Next.js
+# Frontend build
 web/.next/
 web/out/
+web/dist/
 web/tsconfig.tsbuildinfo
+
+# Go build
+server/ledger-web
 
 # Environment
 .env

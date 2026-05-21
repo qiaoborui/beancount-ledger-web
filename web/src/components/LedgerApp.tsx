@@ -1,10 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useTransition, type ComponentProps } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell, ledgerNavItems } from "./AppShell";
+import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
@@ -42,13 +41,17 @@ import { TransactionList } from "./ledger/TransactionList";
 import { haptic } from "./ledger/haptics";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 
-const NetWorthPage = dynamic(() => import("./ledger/NetWorthPage").then((mod) => mod.NetWorthPage), {
-  loading: () => <section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>,
-});
+const LazyNetWorthPage = lazy(() => import("./ledger/NetWorthPage").then((mod) => ({ default: mod.NetWorthPage })));
 
-const IncomeStatementPage = dynamic(() => import("./ledger/IncomeStatementPage").then((mod) => mod.IncomeStatementPage), {
-  loading: () => <section className="card p-6 text-sm text-stone">正在准备损益分析…</section>,
-});
+const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage").then((mod) => ({ default: mod.IncomeStatementPage })));
+
+function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
+}
+
+function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
+}
 
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
@@ -100,9 +103,9 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const router = useBrowserRouter();
+  const { pathname, search } = useBrowserLocation();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireSensitiveUnlockJson } from "@/lib/apiAuth";
 import { accountGroup, currentBalances, type AccountView, type TransactionView } from "@/lib/beancountParser";
 import { getLedgerSnapshot } from "@/lib/ledgerCache";
@@ -107,7 +108,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ start, end, monthPrefix, rows });
 }
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
   const authError = await requireSensitiveUnlockJson();
   if (authError) return authError;
   const input = ReconcileSchema.parse(await request.json());
@@ -125,10 +126,6 @@ export async function POST(request: Request) {
   const adjustment = adjustmentEntry(input.account, accountInfo.label, diff, adjustmentDate, accounts.map((account) => account.account));
   const beanText = `${adjustment ? `${transactionToBean(adjustment)}\n` : ""}${balanceToBean(balance)}`;
 
-  try {
-    await appendBeanText(input.balanceDate, beanText);
-    return NextResponse.json({ ok: true, ledgerBalance, actual, diff, adjustment, balance, beanText });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  await appendBeanText(input.balanceDate, beanText);
+  return NextResponse.json({ ok: true, ledgerBalance, actual, diff, adjustment, balance, beanText });
+}, { defaultStatus: 400 });

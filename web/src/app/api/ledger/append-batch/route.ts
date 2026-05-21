@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { apiHandler } from "@/lib/apiRoute";
 import { requireAuthJson } from "@/lib/apiAuth";
 import { appendLedgerEntries } from "@/lib/ledgerWriter";
 import { LedgerEntrySchema } from "@/lib/schemas";
 
-export async function POST(request: Request) {
+export const POST = apiHandler(async (request: Request) => {
   const authError = await requireAuthJson();
   if (authError) return authError;
   const body = await request.json();
@@ -12,11 +13,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "entries is required" }, { status: 400 });
   }
 
-  try {
-    const entries = rawEntries.map((entry: unknown) => LedgerEntrySchema.parse(entry));
-    const beanTexts = await appendLedgerEntries(entries);
-    return NextResponse.json({ ok: true, count: entries.length, beanTexts });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
-  }
-}
+  const entries = rawEntries.map((entry: unknown) => LedgerEntrySchema.parse(entry));
+  const beanTexts = await appendLedgerEntries(entries);
+  return NextResponse.json({ ok: true, count: entries.length, beanTexts });
+}, { defaultStatus: 400 });

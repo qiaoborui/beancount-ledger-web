@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: deploy-web-artifact.sh <environment> <port> <artifact-dir>
 
-Deploy a GitHub-built Next.js standalone artifact on a Raspberry Pi/self-hosted runner.
+Deploy a GitHub-built Go/Vite artifact on a Raspberry Pi/self-hosted runner.
 
 Arguments:
   environment   prod | preview
@@ -58,28 +58,20 @@ mkdir -p "$RELEASES_DIR" "$DEFAULT_LEDGER_ROOT" "$DEFAULT_RUNTIME_DIR"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 
-if [[ -d "$ARTIFACT_DIR/standalone" ]]; then
-  cp -a "$ARTIFACT_DIR/standalone/." "$RELEASE_DIR/"
-elif [[ -f "$ARTIFACT_DIR/server.js" ]]; then
-  cp -a "$ARTIFACT_DIR/." "$RELEASE_DIR/"
+if [[ -x "$ARTIFACT_DIR/ledger-web" || -f "$ARTIFACT_DIR/ledger-web" ]]; then
+  cp -a "$ARTIFACT_DIR/ledger-web" "$RELEASE_DIR/ledger-web"
+  chmod +x "$RELEASE_DIR/ledger-web"
+  if [[ -d "$ARTIFACT_DIR/web" ]]; then cp -a "$ARTIFACT_DIR/web" "$RELEASE_DIR/web"; fi
 else
-  echo "artifact does not look like a Next.js standalone bundle: $ARTIFACT_DIR" >&2
+  echo "artifact does not look like a Go/Vite ledger-web bundle: $ARTIFACT_DIR" >&2
   exit 1
 fi
 
-# Static files must sit next to the standalone server's .next directory.
-if [[ -d "$ARTIFACT_DIR/static" ]]; then
-  mkdir -p "$RELEASE_DIR/.next"
-  cp -a "$ARTIFACT_DIR/static" "$RELEASE_DIR/.next/static"
-fi
-if [[ -d "$ARTIFACT_DIR/public" ]]; then
-  cp -a "$ARTIFACT_DIR/public" "$RELEASE_DIR/public"
-fi
 if [[ -d "$ARTIFACT_DIR/examples" ]]; then
   cp -a "$ARTIFACT_DIR/examples" "$RELEASE_DIR/examples"
 fi
 
-# Agent skills live at the repository root, outside the Next.js standalone bundle.
+# Agent skills live at the repository root, outside the Go/Vite bundle.
 # Copy them into the release so agent runtimes using this release as their
 # workspace can discover project-local skills.
 if [[ -d "$ARTIFACT_DIR/.agents" ]]; then
@@ -148,11 +140,11 @@ mkdir -p "$RUNTIME_DIR_EFFECTIVE"
 # with EnvironmentFile=<deploy-base>/<env>/systemd.env.
 cat > "$ENV_DIR/systemd.env" << SYSEOF
 PORT=$PORT
-NODE_ENV=production
-HOSTNAME=${APP_HOSTNAME:-0.0.0.0}
+GIN_MODE=release
 PATH=$PATH_EFFECTIVE
 LEDGER_ROOT=$LEDGER_ROOT_EFFECTIVE
 RUNTIME_DIR=$RUNTIME_DIR_EFFECTIVE
+STATIC_DIR=$CURRENT_LINK/web/dist
 AUTH_SECRET=${AUTH_SECRET:-}
 APP_PASSWORD=${APP_PASSWORD:-}
 LEDGER_AUTH_DISABLED=$LEDGER_AUTH_DISABLED_EFFECTIVE
@@ -164,7 +156,6 @@ OPENAI_API_KEY=${OPENAI_API_KEY:-}
 OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
 OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
 WEB_PUSH_VAPID_PUBLIC_KEY=${WEB_PUSH_VAPID_PUBLIC_KEY:-}
-NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY:-}
 WEB_PUSH_VAPID_PRIVATE_KEY=${WEB_PUSH_VAPID_PRIVATE_KEY:-}
 WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-}
 BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-}
@@ -176,7 +167,28 @@ LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=${LEDGER_GIT_COMMIT_INTERVAL_MINUTES:-60}
 SYSEOF
 
-# Restart via systemd (service unit must already exist on the host)
+# Install/update the systemd service so older Node/Next units are replaced by the Go binary.
+sudo tee "/etc/systemd/system/$APP_NAME.service" >/dev/null << SERVICEEOF
+[Unit]
+Description=Beancount Ledger Web ($ENVIRONMENT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$CURRENT_LINK
+EnvironmentFile=$ENV_DIR/systemd.env
+ExecStart=$CURRENT_LINK/ledger-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+sudo systemctl daemon-reload
+sudo systemctl enable "$APP_NAME" >/dev/null
+
+# Restart via systemd.
 sudo systemctl restart "$APP_NAME"
 if systemctl is-active --quiet "$APP_NAME"; then
   echo "==> $APP_NAME restarted successfully"
