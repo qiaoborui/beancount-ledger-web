@@ -21,8 +21,4 @@ export default defineConfig({
       "/api": apiProxyTarget,
     },
   },
-  test: {
-    environment: "node",
-    include: ["src/components/**/*.test.{ts,tsx}", "src/lib/{clientFetch,indexedLedgerCache,money,schemas,timeRange}.test.{ts,tsx}"],
-  },
 });

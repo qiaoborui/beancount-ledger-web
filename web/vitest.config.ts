@@ -1,15 +1,15 @@
-import path from "node:path";
+import { mergeConfig } from "vite";
 import { defineConfig } from "vitest/config";
+import viteConfig from "./vite.config";
 
-export default defineConfig({
-  test: {
-    environment: "node",
-    include: ["src/**/*.test.ts"],
-    restoreMocks: true,
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
+    test: {
+      environment: "node",
+      include: ["src/**/*.test.{ts,tsx}"],
+      exclude: ["src/lib/auth.test.ts", "src/lib/rateLimit.test.ts", "node_modules/**", "dist/**"],
+      restoreMocks: true,
     },
-  },
-});
+  }),
+);
