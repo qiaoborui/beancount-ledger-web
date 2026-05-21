@@ -17,35 +17,36 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return <>
-    <div className="grid items-start gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(620px,1.15fr)]">
-      <section className="card overflow-hidden p-0">
-        <div className="border-l-4 border-brand p-4 md:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
-              <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(420px,0.95fr)_minmax(620px,1.05fr)]">
+      <div className="grid gap-4">
+        <section className="card overflow-hidden p-0">
+          <div className="border-l-4 border-brand p-4 md:p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
+                <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
+              </div>
+              <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
+                {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
+              </button>
             </div>
-            <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
-              {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
-            </button>
           </div>
-        </div>
-        <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
-          <Metric label="收入" value={mask(formatCny((summary?.income ?? 0) / 100))} cls="amount-income text-base sm:text-xl" />
-          <Metric label="支出" value={mask(formatCny((summary?.expense ?? 0) / 100), false)} cls="amount-expense text-base sm:text-xl" />
-          <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
-        </div>
-      </section>
+          <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
+            <Metric label="收入" value={mask(formatCny((summary?.income ?? 0) / 100))} cls="amount-income text-base sm:text-xl" />
+            <Metric label="支出" value={mask(formatCny((summary?.expense ?? 0) / 100), false)} cls="amount-expense text-base sm:text-xl" />
+            <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
+          </div>
+        </section>
+        <section className="grid gap-3 sm:grid-cols-2">
+          <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
+          <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0]?.account.replace(/^Expenses:/, "") ?? "暂无预算数据"} />
+          <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
+          <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
+        </section>
+      </div>
       <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
     </div>
-
-    <section className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
-      <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0]?.account.replace(/^Expenses:/, "") ?? "暂无预算数据"} />
-      <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
-      <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
-    </section>
 
     <section className="mt-4 grid gap-4 xl:grid-cols-2">
       <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
