@@ -445,6 +445,40 @@ func TestCmbImportHelpers(t *testing.T) {
 	}
 }
 
+func TestCmbPDFTableHelpers(t *testing.T) {
+	headerLine := pdfTextLine{Y: 700, Items: []pdfTextItem{
+		{Text: "交易日", X: 10, Y: 700},
+		{Text: "记账日", X: 60, Y: 700},
+		{Text: "交易摘要", X: 110, Y: 700},
+		{Text: "人民币金额", X: 260, Y: 700},
+		{Text: "卡号末四位", X: 340, Y: 700},
+		{Text: "交易地金额", X: 430, Y: 700},
+	}}
+	x, ok := findHeaderX(headerLine, "卡号末四位")
+	if !ok || x != 340 {
+		t.Fatalf("header x = %v, %v", x, ok)
+	}
+	ranges := []cmbPDFColumnRange{
+		{Index: 0, Left: 10, Right: 59.99},
+		{Index: 1, Left: 60, Right: 109.99},
+		{Index: 2, Left: 110, Right: 259.99},
+		{Index: 3, Left: 260, Right: 339.99},
+		{Index: 4, Left: 340, Right: 429.99},
+		{Index: 5, Left: 430, Right: 9999},
+	}
+	if got := cmbPDFColumnForX(431, ranges); got != 5 {
+		t.Fatalf("column = %d", got)
+	}
+	row := normalizeCmbPDFRow([]string{"05/01", "05/02", "支付宝-商户", "10.00", "", "10.00(CNY)"})
+	if !looksLikeCmbPDFDataRow(row) {
+		t.Fatalf("row should be recognized: %#v", row)
+	}
+	line := csvLine([]string{"交易摘要", "A,B", `C"D`})
+	if line != `交易摘要,"A,B","C""D"` {
+		t.Fatalf("csv line = %s", line)
+	}
+}
+
 func TestRateLimitUsesRemoteAddrByDefault(t *testing.T) {
 	limiter := NewRateLimiter()
 	cfg := testLedger(t)

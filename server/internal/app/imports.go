@@ -308,7 +308,7 @@ func (s *Server) prepareProviderInput(provider, inputFile, originalFilename, imp
 	warnings := []string{}
 	normalizedFile := inputFile
 	if ext == ".pdf" {
-		converted, err := s.convertCmbPDFToCSV(inputFile, importID)
+		converted, err := writeCmbPDFCSV(inputFile, previewPath(s.cfg, importID, "cmb-normalized.csv"))
 		if err != nil {
 			return preparedImportInput{}, err
 		}
@@ -378,22 +378,6 @@ func (s *Server) prefilterCmbCSV(inputFile, outputFile string) (cmbCSVPrefilter,
 		return cmbCSVPrefilter{}, err
 	}
 	return cmbCSVPrefilter{RawRowCount: len(body), FilteredRowCount: len(kept), Skipped: skipped, Warnings: warnings}, nil
-}
-
-func (s *Server) convertCmbPDFToCSV(inputFile, importID string) (preparedImportInput, error) {
-	converter := strings.TrimSpace(os.Getenv("CMB_PDF_TO_CSV_BIN"))
-	if converter == "" {
-		return preparedImportInput{}, errors.New("Go 后端尚未内置招商银行 PDF 坐标解析器；请先上传招商银行 CSV，或设置 CMB_PDF_TO_CSV_BIN 为 PDF 转 CSV 工具")
-	}
-	outputFile := previewPath(s.cfg, importID, "cmb-normalized.csv")
-	if _, err := s.runCommand(converter, []string{inputFile, outputFile}); err != nil {
-		return preparedImportInput{}, err
-	}
-	rows := len(nonEmptyLines(mustReadString(outputFile))) - 2
-	if rows < 0 {
-		rows = 0
-	}
-	return preparedImportInput{InputFile: outputFile, Warnings: []string{fmt.Sprintf("已从招商银行信用卡 PDF 解析 %d 条账单明细。", rows)}, RawRowCount: rows, FilteredRowCount: rows}, nil
 }
 
 func (s *Server) runTranslate(provider, inputFile, outputFile string) error {
