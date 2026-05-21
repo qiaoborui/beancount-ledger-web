@@ -245,19 +245,22 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   useEffect(() => {
     if (page !== "transactions") return;
-    const params = new URLSearchParams(searchParams.toString());
-    const setOrDelete = (key: string, value: string) => {
-      if (value) params.set(key, value);
-      else params.delete(key);
-    };
-    setOrDelete("category", txnCategoryQuery.trim());
-    setOrDelete("metadata", txnMetadataQuery.trim());
-    setOrDelete("q", txnSearchQuery.trim());
-    if (categoryMatchMode === "exact") params.set("mode", "exact");
-    else params.delete("mode");
-    const query = params.toString();
-    if (query === searchKey) return;
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    const id = window.setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      const setOrDelete = (key: string, value: string) => {
+        if (value) params.set(key, value);
+        else params.delete(key);
+      };
+      setOrDelete("category", txnCategoryQuery.trim());
+      setOrDelete("metadata", txnMetadataQuery.trim());
+      setOrDelete("q", txnSearchQuery.trim());
+      if (categoryMatchMode === "exact") params.set("mode", "exact");
+      else params.delete("mode");
+      const query = params.toString();
+      if (query === searchKey) return;
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 180);
+    return () => window.clearTimeout(id);
   }, [categoryMatchMode, page, pathname, router, searchKey, searchParams, txnCategoryQuery, txnMetadataQuery, txnSearchQuery]);
 
   useEffect(() => {

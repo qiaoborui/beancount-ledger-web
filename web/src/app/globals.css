@@ -190,6 +190,20 @@ input:focus, textarea:focus, select:focus {
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 button.card:active, a.card:active { transform: scale(0.992); }
+.transaction-list-card:active, .account-detail-row-button:active { transform: none; }
+.account-balance-chart .recharts-wrapper,
+.account-balance-chart .recharts-surface {
+  max-width: 100% !important;
+}
+.account-balance-chart > div {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+.account-balance-chart .recharts-tooltip-wrapper {
+  max-width: calc(100vw - 3rem);
+  white-space: normal !important;
+}
 
 .kami-float { box-shadow: var(--float-shadow); }
 .kami-overlay { background: var(--overlay); }
