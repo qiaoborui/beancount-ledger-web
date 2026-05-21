@@ -25,18 +25,6 @@ function useDebouncedValue<T>(value: T, delay = 160) {
   return debounced;
 }
 
-function useDesktopInspector() {
-  const [desktop, setDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 1024px)");
-    const update = () => setDesktop(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return desktop;
-}
-
 function matchesMetadataQuery(t: Txn, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -172,13 +160,14 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
   return (
     <button
       type="button"
-      className={`grid w-full grid-cols-[92px_minmax(240px,1.2fr)_minmax(220px,0.9fr)_minmax(180px,0.7fr)_120px] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`grid w-full grid-cols-[84px_140px_minmax(260px,1.2fr)_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
       onClick={onSelect}
     >
       <div className="text-xs tabular-nums text-stone">
         <div>{txn.date.slice(5)}</div>
         <div className="mt-1 text-[11px] text-stone/70">{txn.date.slice(0, 4)}</div>
       </div>
+      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <strong className="truncate text-sm text-ink">{txn.payee}</strong>
@@ -200,7 +189,6 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
           </div>
         ) : <span className="text-xs text-stone/60">—</span>}
       </div>
-      <div className={`text-right text-sm font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
     </button>
   );
 }
@@ -209,7 +197,6 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
-  const desktopInspector = useDesktopInspector();
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
@@ -264,21 +251,12 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
-  useEffect(() => {
-    if (!desktopInspector || !searchable) return;
-    if (!pageRows.length) {
-      if (selected) setSelected(null);
-      return;
-    }
-    const selectedStillVisible = selected && pageRows.some((row) => row.source.file === selected.source.file && row.source.line === selected.source.line && row.source.hash === selected.source.hash);
-    if (!selectedStillVisible) setSelected(pageRows[0]);
-  }, [desktopInspector, pageRows, searchable, selected]);
 
   const hasFilters = Boolean((categoryQuery ?? "").trim() || (metadataQuery ?? "").trim() || (searchQuery ?? "").trim());
   const selectedMatches = (txn: Txn) => selected?.source.file === txn.source.file && selected.source.line === txn.source.line && selected.source.hash === txn.source.hash;
   const pager = rows.length > 0 && <TransactionPager safePage={safePage} totalPages={totalPages} rowsLength={rows.length} pageSize={pageSize} setPageSize={setPageSize} setPage={setPage} />;
 
-  return <section className={`mt-6 ${searchable ? "lg:grid lg:grid-cols-[minmax(0,1fr)_460px] lg:items-start lg:gap-5" : ""}`}>
+  return <section className="mt-6">
     <div className="min-w-0">
       {searchable && (
         <div className="mb-4 rounded-2xl border border-line bg-panel p-3 shadow-sm">
@@ -315,12 +293,12 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       {searchable && rows.length > 0 ? (
         <>
           <div className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm lg:block">
-            <div className="grid grid-cols-[92px_minmax(240px,1.2fr)_minmax(220px,0.9fr)_minmax(180px,0.7fr)_120px] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
+            <div className="grid grid-cols-[84px_140px_minmax(260px,1.2fr)_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
               <span>日期</span>
+              <span className="text-right">金额</span>
               <span>交易</span>
               <span>分类 / 账户</span>
               <span>标签</span>
-              <span className="text-right">金额</span>
             </div>
             <div className="divide-y divide-line">
               {pageRows.map((txn, index) => <TransactionTableRow key={`${txn.source.file}-${txn.source.line}-${index}`} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
@@ -336,8 +314,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 
       {pager}
     </div>
-    {desktopInspector && searchable && (selected ? <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:desktop`} variant="inspector" txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} /> : <TransactionInspectorEmpty />)}
-    {selected && !desktopInspector && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+    {selected && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
 
@@ -352,14 +329,6 @@ function TransactionPager({ safePage, totalPages, rowsLength, pageSize, setPageS
   </div>;
 }
 
-function TransactionInspectorEmpty() {
-  return <aside className="sticky top-24 hidden min-h-[520px] rounded-2xl border border-dashed border-line bg-panel p-5 lg:block">
-    <div className="text-xs uppercase tracking-[0.2em] text-stone">inspector</div>
-    <h2 className="mt-2 font-serif text-xl">流水详情</h2>
-    <p className="mt-2 text-sm leading-6 text-olive">选择左侧任意一笔流水后，可在这里查看完整分录、metadata，并直接编辑、注释删除或冲销。</p>
-  </aside>;
-}
-
 type TransactionDrawerProps = {
   txn: Txn;
   accounts: AccountView[];
@@ -367,10 +336,9 @@ type TransactionDrawerProps = {
   onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
   onDelete?: (source: Txn["source"], reason: string) => void;
   onReverse?: (source: Txn["source"], date: string) => void;
-  variant?: "sheet" | "inspector";
 };
 
-function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse, variant = "sheet" }: TransactionDrawerProps) {
+function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
@@ -442,19 +410,6 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
     </div>}
   </>;
-
-  if (variant === "inspector") {
-    return <aside className="sticky top-24 hidden max-h-[calc(100dvh-7rem)] min-h-[520px] flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-sm lg:flex">
-      <div className="shrink-0 border-b border-line bg-paper/95 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="min-w-0 truncate font-serif text-xl">流水详情</h2>
-          <span className="shrink-0 rounded-full bg-tag px-2 py-1 text-xs text-stone">Inspector</span>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{body}</div>
-      <div className="shrink-0 border-t border-line bg-paper/95 px-4 py-3">{footer}</div>
-    </aside>;
-  }
 
   return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>{body}</MobileSheet>;
 }
