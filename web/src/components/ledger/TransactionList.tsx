@@ -25,6 +25,18 @@ function useDebouncedValue<T>(value: T, delay = 160) {
   return debounced;
 }
 
+function useDesktopInspector() {
+  const [desktop, setDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const update = () => setDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return desktop;
+}
+
 function matchesMetadataQuery(t: Txn, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -128,6 +140,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const desktopInspector = useDesktopInspector();
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
@@ -183,10 +196,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
 
-  return <section className="mt-6"><div className="mb-3 flex flex-col gap-3">
+  return <section className={`mt-6 ${selected && desktopInspector ? "lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-4" : ""}`}><div className="min-w-0"><div className="mb-3 flex flex-col gap-3">
     {/* 搜索框 */}
     {searchable && setSearchQuery && (
       <input
+        id="transaction-search-input"
         className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm"
         placeholder="搜索商户名、说明、账户、metadata…（空格分多个关键词）"
         value={searchQuery ?? ""}
@@ -253,7 +267,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   {pageRows.map((t, i) => {
     const amt = primaryAmount(t);
     return (
-      <button key={`${t.source.file}-${t.source.line}-${i}`} className="card mb-1.5 block w-full p-4 text-left" onClick={() => setSelected(t)}>
+      <button key={`${t.source.file}-${t.source.line}-${i}`} className={`card mb-1.5 block w-full p-4 text-left ${selected?.source.file === t.source.file && selected.source.line === t.source.line ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={() => setSelected(t)}>
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
             <strong className="block truncate">{t.payee}</strong>
@@ -276,7 +290,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     );
   })}
   {rows.length > 0 && <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between"><div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} 条</div><div className="flex items-center gap-2"><select className="rounded-xl border border-line bg-panel px-2 py-2" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}><option value={10}>10 条/页</option><option value={20}>20 条/页</option><option value={50}>50 条/页</option><option value={100}>100 条/页</option></select><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button className="rounded-xl border border-line px-3 py-2 disabled:opacity-40" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>}
-  {selected && <TransactionDrawer txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+  </div>
+  {selected && desktopInspector && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:desktop`} variant="inspector" txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+  {selected && !desktopInspector && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
   </section>;
 }
 
@@ -287,9 +303,10 @@ type TransactionDrawerProps = {
   onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
   onDelete?: (source: Txn["source"], reason: string) => void;
   onReverse?: (source: Txn["source"], date: string) => void;
+  variant?: "sheet" | "inspector";
 };
 
-function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
+function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse, variant = "sheet" }: TransactionDrawerProps) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
@@ -335,7 +352,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     <button className="bg-brand px-4 py-3 text-paper" onClick={() => { const date = prompt("冲销日期", reverseDate) || reverseDate; onReverse?.(txn.source, date); }}>冲销</button>
   </div>;
 
-  return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>
+  const body = <>
     <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
     {editing ? <div className="grid gap-3">
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -360,5 +377,20 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       <MetadataBadges txn={txn} />
       <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
     </div>}
-  </MobileSheet>;
+  </>;
+
+  if (variant === "inspector") {
+    return <aside className="sticky top-24 hidden max-h-[calc(100dvh-7rem)] min-h-[520px] flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-sm lg:flex">
+      <div className="shrink-0 border-b border-line bg-paper/95 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="min-w-0 truncate font-serif text-xl">流水详情</h2>
+          <button className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm text-stone hover:bg-tag" onClick={() => { if (shouldClose()) onClose(); }}>关闭</button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{body}</div>
+      <div className="shrink-0 border-t border-line bg-paper/95 px-4 py-3">{footer}</div>
+    </aside>;
+  }
+
+  return <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>{body}</MobileSheet>;
 }

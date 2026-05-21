@@ -13,27 +13,31 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const unknown = expenseAnalytics.find((row) => row.account === "Expenses:Unknown");
   const budgetPressure = budgetRows.filter((row) => row.ratio !== null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0)).slice(0, 3);
   const healthCounts = accountStatuses.reduce<Record<AccountStatus["status"], number>>((acc, item) => ({ ...acc, [item.status]: acc[item.status] + 1 }), { green: 0, red: 0, yellow: 0, grey: 0 });
+  const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(-18);
 
   return <>
-    <section className="card overflow-hidden p-0">
-      <div className="border-l-4 border-brand p-4 md:p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
-            <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+      <section className="card overflow-hidden p-0">
+        <div className="border-l-4 border-brand p-4 md:p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
+              <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
+            </div>
+            <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
+              {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
+            </button>
           </div>
-          <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
-            {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
-          </button>
         </div>
-      </div>
-      <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
-        <Metric label="收入" value={mask(formatCny((summary?.income ?? 0) / 100))} cls="amount-income text-base sm:text-xl" />
-        <Metric label="支出" value={mask(formatCny((summary?.expense ?? 0) / 100), false)} cls="amount-expense text-base sm:text-xl" />
-        <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
-      </div>
-    </section>
+        <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
+          <Metric label="收入" value={mask(formatCny((summary?.income ?? 0) / 100))} cls="amount-income text-base sm:text-xl" />
+          <Metric label="支出" value={mask(formatCny((summary?.expense ?? 0) / 100), false)} cls="amount-expense text-base sm:text-xl" />
+          <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
+        </div>
+      </section>
+      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
+    </div>
 
     <section className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
@@ -48,6 +52,32 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
     </section>
 
   </>;
+}
+
+function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean }) {
+  const max = Math.max(1, ...rows.flatMap(([, value]) => [value.income, value.expense]));
+  return <section className="card flex min-h-[220px] flex-col p-4">
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
+        <h2 className="mt-1 font-serif text-xl">日收支趋势</h2>
+      </div>
+      <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">近 {rows.length || 0} 天</span>
+    </div>
+    {rows.length ? <div className="mt-4 flex min-h-0 flex-1 items-end gap-1.5">
+      {rows.map(([date, value]) => {
+        const expenseHeight = Math.max(4, Math.round((value.expense / max) * 118));
+        const incomeHeight = Math.max(value.income > 0 ? 4 : 0, Math.round((value.income / max) * 118));
+        return <div key={date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={showAmounts ? `${date} 支出 ${formatCny(value.expense / 100)} 收入 ${formatCny(value.income / 100)}` : `${date} 金额已隐藏`}>
+          <div className="flex h-32 items-end gap-0.5">
+            <span className="w-2 rounded-t bg-[rgb(var(--color-income))]" style={{ height: showAmounts ? incomeHeight : value.income > 0 ? 12 : 0 }} />
+            <span className="w-2 rounded-t bg-[rgb(var(--color-expense))]" style={{ height: showAmounts ? expenseHeight : value.expense > 0 ? 18 : 0 }} />
+          </div>
+          <span className="truncate text-[10px] text-stone">{date.slice(5)}</span>
+        </div>;
+      })}
+    </div> : <div className="mt-4 grid flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
+  </section>;
 }
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {

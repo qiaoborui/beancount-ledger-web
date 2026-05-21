@@ -197,7 +197,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
         </aside>
 
         <main className="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-10">
-          <div className="mx-auto max-w-5xl">{children}</div>
+          <div className="mx-auto w-full max-w-[1500px]">{children}</div>
         </main>
       </div>
 
