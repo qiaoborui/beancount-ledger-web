@@ -15,10 +15,11 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const budgetPressure = budgetRows.filter((row) => row.ratio !== null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0)).slice(0, 3);
   const healthCounts = accountStatuses.reduce<Record<AccountStatus["status"], number>>((acc, item) => ({ ...acc, [item.status]: acc[item.status] + 1 }), { green: 0, red: 0, yellow: 0, grey: 0 });
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const dashboardGridClass = "grid gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
 
   return <>
-    <div className="grid items-start gap-4 xl:grid-cols-12">
-      <div className="grid gap-4 xl:col-span-5">
+    <div className={`${dashboardGridClass} xl:items-stretch`}>
+      <div className="flex flex-col gap-4 xl:h-full">
         <section className="card overflow-hidden p-0">
           <div className="border-l-4 border-brand p-4 md:p-5">
             <div className="flex items-start justify-between gap-4">
@@ -38,26 +39,20 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
             <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
           </div>
         </section>
-        <section className="grid gap-3 sm:grid-cols-2">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-rows-2 xl:flex-1">
           <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
           <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0]?.account.replace(/^Expenses:/, "") ?? "暂无预算数据"} />
           <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
           <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
         </section>
       </div>
-      <div className="xl:col-span-7">
-        <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
-      </div>
+      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
     </div>
 
-    <section className="mt-4 grid gap-4 xl:grid-cols-12">
-      <div className="xl:col-span-5">
-        <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
-      </div>
-      <div className="xl:col-span-7">
-        <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
-      </div>
-    </section>
+    <div className={`${dashboardGridClass} mt-4 items-start`}>
+      <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: row.label, value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
+      <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: row.account.replace(/^Expenses:/, ""), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
+    </div>
 
   </>;
 }
@@ -69,7 +64,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
     income: value.income / 100,
     expense: value.expense / 100,
   }));
-  return <section className="card p-4">
+  return <section className="card flex h-full min-h-[360px] flex-col p-4 xl:min-h-0">
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
@@ -81,8 +76,8 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="mt-4 min-w-0">
-      <ResponsiveContainer width="100%" height={340}>
+    {rows.length ? showAmounts ? <div className="mt-4 min-h-[260px] min-w-0 flex-1 xl:min-h-0">
+      <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
@@ -98,7 +93,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
           <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
         </ComposedChart>
       </ResponsiveContainer>
-    </div> : <div className="mt-4 grid h-[340px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid h-[340px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">暂无日趋势数据</div>}
+    </div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">暂无日趋势数据</div>}
   </section>;
 }
 
@@ -110,8 +105,8 @@ function compactMoney(value: number) {
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {
   const content = <><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</>;
-  if (!onClick) return <div className="rounded-2xl border border-line bg-panel p-3">{content}</div>;
-  return <button className="rounded-2xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={onClick}>{content}</button>;
+  if (!onClick) return <div className="h-full rounded-2xl border border-line bg-panel p-3">{content}</div>;
+  return <button className="h-full rounded-2xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={onClick}>{content}</button>;
 }
 
 function ListCard({ title, items, empty }: { title: string; items: { key: string; title: string; value: string; detail?: string; onClick?: () => void }[]; empty: string }) {
