@@ -159,6 +159,42 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	if !body.SensitiveUnlocked || body.Summary.Income != 100000 || body.Summary.Expense != 1200 {
 		t.Fatalf("unexpected summary: %#v", body)
 	}
+
+	lock := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
+	for _, cookie := range login.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	for _, cookie := range summary.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(lock, req)
+	if lock.Code != http.StatusOK {
+		t.Fatalf("lock status = %d body=%s", lock.Code, lock.Body.String())
+	}
+
+	me := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	for _, cookie := range login.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	for _, cookie := range lock.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(me, req)
+	if me.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", me.Code, me.Body.String())
+	}
+	var meBody struct {
+		Authenticated     bool `json:"authenticated"`
+		SensitiveUnlocked bool `json:"sensitiveUnlocked"`
+	}
+	if err := json.Unmarshal(me.Body.Bytes(), &meBody); err != nil {
+		t.Fatal(err)
+	}
+	if !meBody.Authenticated || meBody.SensitiveUnlocked {
+		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
+	}
 }
 
 func TestAccountDetailReturnsFrontendContract(t *testing.T) {

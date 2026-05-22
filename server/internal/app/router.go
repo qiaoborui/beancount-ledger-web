@@ -33,6 +33,7 @@ func NewRouter(cfg Config) *gin.Engine {
 func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.GET("/health", s.health)
 	api.POST("/auth/login", s.login)
+	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
 	api.GET("/auth/me", s.me)
 	api.GET("/passkey/status", s.passkeyStatus)
@@ -125,6 +126,14 @@ func (s *Server) login(c *gin.Context) {
 
 func (s *Server) logout(c *gin.Context) {
 	clearAuthCookies(c)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) lockSensitive(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	clearSensitiveCookie(c)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

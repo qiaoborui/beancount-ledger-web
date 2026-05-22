@@ -119,5 +119,9 @@ func setSensitiveCookie(c *gin.Context) {
 
 func clearAuthCookies(c *gin.Context) {
 	c.SetCookie(sessionCookieName, "", -1, "/", "", gin.Mode() == gin.ReleaseMode, true)
+	clearSensitiveCookie(c)
+}
+
+func clearSensitiveCookie(c *gin.Context) {
 	c.SetCookie(sensitiveCookieName, "", -1, "/", "", gin.Mode() == gin.ReleaseMode, true)
 }

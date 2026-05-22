@@ -159,6 +159,15 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     sessionStorage.setItem("ledger_locked_at", String(Date.now()));
     setUnlocked(false);
   }, [setUnlocked]);
+
+  const lockSensitive = useCallback(async () => {
+    handleSensitiveLocked();
+    try {
+      await fetch("/api/auth/lock", { method: "POST" });
+    } catch {
+      showToast("error", "已在本机隐藏敏感数据，但服务端锁定请求失败；请刷新后确认。");
+    }
+  }, [handleSensitiveLocked, showToast]);
   const {
     summary,
     balances,
@@ -431,6 +440,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       onUnlockSensitive={loginWithPasskey}
+      onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
     >
       <Toast toast={toast} />
@@ -469,7 +479,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={syncPendingWrites} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
               <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
-              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={handleSensitiveLocked}>敏感数据已解锁 · 重新隐藏</button>}
+              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
             </div>
           </div>
           <div className="flex items-center gap-2">
