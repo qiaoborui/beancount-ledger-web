@@ -1,0 +1,76 @@
+2026-03-01 * "超市" "一周食材"
+  Assets:CN:Alipay:Balance               -176.40 CNY
+  Expenses:Food:Groceries                 176.40 CNY
+
+2026-03-03 * "地铁" "通勤"
+  Assets:CN:Wechat:Balance                 -7.00 CNY
+  Expenses:Transport:Public                 7.00 CNY
+
+2026-03-05 * "示例公司" "工资"
+  Assets:CN:Bank:PrimaryChecking        15200.00 CNY
+  Income:Salary                        -15200.00 CNY
+
+2026-03-05 * "示例公司" "住房公积金缴存"
+  Assets:CN:HousingFund                  1800.00 CNY
+  Income:Benefits:HousingFund           -1800.00 CNY
+
+2026-03-07 * "外卖平台" "午餐"
+  Liabilities:CN:CreditCard               -58.20 CNY
+  Expenses:Food:Meals                      58.20 CNY
+
+2026-03-08 * "咖啡店" "拿铁"
+  Assets:CN:Wechat:Balance                -28.00 CNY
+  Expenses:Food:Drinks                     28.00 CNY
+
+2026-03-10 * "电商平台" "家居收纳"
+  Assets:CN:Alipay:Balance               -312.90 CNY
+  Expenses:Shopping:Daily                 312.90 CNY
+
+2026-03-12 * "通信运营商" "手机话费"
+  Assets:CN:Bank:PrimaryChecking          -99.00 CNY
+  Expenses:Communication:Mobile            99.00 CNY
+
+2026-03-13 * "宽带运营商" "家庭宽带"
+  Assets:CN:Bank:PrimaryChecking         -120.00 CNY
+  Expenses:Communication:Internet         120.00 CNY
+
+2026-03-15 * "信用卡还款" "偿还二月账单"
+  Assets:CN:Bank:PrimaryChecking        -2400.00 CNY
+  Liabilities:CN:CreditCard              2400.00 CNY
+
+2026-03-16 * "医院" "牙科检查"
+  Liabilities:CN:CreditCard              -460.00 CNY
+  Expenses:Health:Medical                 460.00 CNY
+
+2026-03-17 * "公司报销" "牙科商业保险报销"
+  Assets:CN:Bank:PrimaryChecking          200.00 CNY
+  Income:Reimbursement                   -200.00 CNY
+
+2026-03-19 * "朋友生日" "礼物"
+  Liabilities:CN:CreditCard              -320.00 CNY
+  Expenses:Social:Gift                    320.00 CNY
+
+2026-03-21 * "网约车" "加班回家"
+  Liabilities:CN:CreditCard               -76.50 CNY
+  Expenses:Transport:Taxi                  76.50 CNY
+
+2026-03-24 * "支付宝基金" "定投买入"
+  Assets:CN:Alipay:Balance              -1200.00 CNY
+  Assets:CN:Alipay:Fund                  1200.00 CNY
+
+2026-03-25 * "银行" "活期利息"
+  Assets:CN:Bank:PrimaryChecking            8.74 CNY
+  Income:Interest:Bank                     -8.74 CNY
+
+2026-03-26 * "AI 服务" "模型订阅"
+  Liabilities:CN:CreditCard              -148.00 CNY
+  Expenses:Digital:Subscription           148.00 CNY
+
+2026-03-29 * "电子商城" "显示器支架"
+  Liabilities:CN:CreditCard              -269.00 CNY
+  Expenses:Shopping:Electronics           269.00 CNY
+
+2026-03-31 * "视频会员" "月度订阅"
+  Assets:CN:Alipay:Balance                -35.00 CNY
+  Expenses:Digital:Subscription            35.00 CNY
+

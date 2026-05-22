@@ -165,6 +165,15 @@ func (s *Server) incomeStatement(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "sensitiveUnlocked": unlocked})
 }
 
+func (s *Server) dashboard(c *gin.Context) {
+	snapshot, ok := s.snapshot(c, true)
+	if !ok {
+		return
+	}
+	start, end := parseTimeParams(c)
+	c.JSON(http.StatusOK, BuildDashboardSummary(snapshot, start, end))
+}
+
 func (s *Server) accounts(c *gin.Context) {
 	snapshot, ok := s.snapshot(c, false)
 	if ok {
