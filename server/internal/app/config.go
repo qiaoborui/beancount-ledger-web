@@ -7,11 +7,12 @@ import (
 )
 
 type Config struct {
-	AppRoot    string
-	LedgerRoot string
-	RuntimeDir string
-	StaticDir  string
-	Port       string
+	AppRoot     string
+	LedgerRoot  string
+	RuntimeDir  string
+	StaticDir   string
+	ServeStatic bool
+	Port        string
 }
 
 func LoadConfig() Config {
@@ -22,11 +23,12 @@ func LoadConfig() Config {
 	}
 	ledgerRoot := env("LEDGER_ROOT", filepath.Join(appRoot, "examples", "minimal-ledger"))
 	return Config{
-		AppRoot:    appRoot,
-		LedgerRoot: filepath.Clean(ledgerRoot),
-		RuntimeDir: filepath.Clean(env("RUNTIME_DIR", filepath.Join(ledgerRoot, ".runtime"))),
-		StaticDir:  filepath.Clean(env("STATIC_DIR", filepath.Join(appRoot, "web", "dist"))),
-		Port:       env("PORT", "3000"),
+		AppRoot:     appRoot,
+		LedgerRoot:  filepath.Clean(ledgerRoot),
+		RuntimeDir:  filepath.Clean(env("RUNTIME_DIR", filepath.Join(ledgerRoot, ".runtime"))),
+		StaticDir:   filepath.Clean(env("STATIC_DIR", filepath.Join(appRoot, "web", "dist"))),
+		ServeStatic: envBool("SERVE_STATIC", true),
+		Port:        env("PORT", "3000"),
 	}
 }
 
@@ -38,10 +40,20 @@ func env(key, fallback string) string {
 }
 
 func truthyEnv(key string) bool {
+	return envBool(key, false)
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
 	case "1", "true", "yes", "on":
 		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return fallback
 	}
 }

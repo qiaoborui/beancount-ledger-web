@@ -6,23 +6,23 @@ on:
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
       - ".agents/**"
-      - "scripts/deploy-web-artifact.sh"
-      - "scripts/install-agent-skills.sh"
+      - "scripts/deploy-backend-artifact.sh"
+      - "scripts/deploy-frontend-artifact.sh"
       - "server/**"
       - "web/**"
       - "examples/**"
-      - "package*.json"
+      - "docker/**"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
       - ".agents/**"
-      - "scripts/deploy-web-artifact.sh"
-      - "scripts/install-agent-skills.sh"
+      - "scripts/deploy-backend-artifact.sh"
+      - "scripts/deploy-frontend-artifact.sh"
       - "server/**"
       - "web/**"
       - "examples/**"
-      - "package*.json"
+      - "docker/**"
   workflow_dispatch:
     inputs:
       target:
@@ -30,6 +30,11 @@ on:
         type: choice
         options: [production, preview]
         default: production
+      component:
+        description: Component to deploy
+        type: choice
+        options: [all, backend, frontend]
+        default: all
 
 concurrency:
   group: deploy-${{ github.event_name == 'pull_request' && 'preview' || github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
@@ -39,18 +44,17 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
-    name: Build Go/Vite artifact
-    # ARM64 artifact matches Raspberry Pi native dependencies.
-    runs-on: ubuntu-24.04-arm
-    # Avoid deploying draft PRs until they are marked ready for review.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+  plan:
+    name: Plan component deploys
+    runs-on: ubuntu-latest
     outputs:
       target: ${{ steps.target.outputs.target }}
       short_target: ${{ steps.target.outputs.short_target }}
-      port: ${{ steps.target.outputs.port }}
+      backend_port: ${{ steps.target.outputs.backend_port }}
       env_file_secret: ${{ steps.target.outputs.env_file_secret }}
       environment_url: ${{ steps.target.outputs.environment_url }}
+      deploy_backend: ${{ steps.changes.outputs.deploy_backend }}
+      deploy_frontend: ${{ steps.changes.outputs.deploy_frontend }}
     steps:
       - name: Select deployment target
         id: target
@@ -66,17 +70,127 @@ jobs:
           if [[ "$target" == "production" ]]; then
             echo "target=production" >> "$GITHUB_OUTPUT"
             echo "short_target=prod" >> "$GITHUB_OUTPUT"
-            echo "port=${{ vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PROD_BACKEND_PORT || vars.RASPI_PROD_PORT || '3101' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PROD_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
           else
             echo "target=preview" >> "$GITHUB_OUTPUT"
             echo "short_target=preview" >> "$GITHUB_OUTPUT"
-            echo "port=${{ vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PREVIEW_BACKEND_PORT || vars.RASPI_PREVIEW_PORT || '3102' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PREVIEW_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed components
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ inputs.component }}" in
+              all)
+                deploy_backend=true
+                deploy_frontend=true
+                ;;
+              backend)
+                deploy_backend=true
+                deploy_frontend=false
+                ;;
+              frontend)
+                deploy_backend=false
+                deploy_frontend=true
+                ;;
+            esac
+          else
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
+            elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
+              files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
+            else
+              files="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
+            fi
+
+            deploy_backend=false
+            deploy_frontend=false
+            while IFS= read -r file; do
+              case "$file" in
+                .github/workflows/deploy-raspberry-pi.yml|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
+                  deploy_backend=true
+                  ;;
+              esac
+              case "$file" in
+                .github/workflows/deploy-raspberry-pi.yml|web/*|web/**/*|scripts/deploy-frontend-artifact.sh)
+                  deploy_frontend=true
+                  ;;
+              esac
+            done <<< "$files"
+          fi
+
+          echo "deploy_backend=$deploy_backend" >> "$GITHUB_OUTPUT"
+          echo "deploy_frontend=$deploy_frontend" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deploy plan"
+            echo
+            echo "- Backend: \`$deploy_backend\`"
+            echo "- Frontend: \`$deploy_frontend\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build_backend:
+    name: Build backend artifact
+    needs: plan
+    runs-on: ubuntu-24.04-arm
+    if: ${{ needs.plan.outputs.deploy_backend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Test backend
+        working-directory: server
+        run: go test ./...
+
+      - name: Build backend
+        working-directory: server
+        run: go build -o ../ledger-web ./cmd/ledger-web
+
+      - name: Pack backend artifact
+        run: |
+          mkdir -p artifact
+          cp ledger-web artifact/ledger-web
+          if [[ -d examples ]]; then cp -a examples artifact/examples; fi
+          if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
+          cat > artifact/DEPLOYMENT.txt <<EOF
+          repository=${{ github.repository }}
+          sha=${{ github.sha }}
+          ref=${{ github.ref }}
+          component=backend
+          target=${{ needs.plan.outputs.target }}
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          tar -czf ledger-web-backend-${{ github.sha }}.tar.gz -C artifact .
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-web-backend-${{ github.sha }}
+          path: ledger-web-backend-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build_frontend:
+    name: Build frontend artifact
+    needs: plan
+    runs-on: ubuntu-latest
+    if: ${{ needs.plan.outputs.deploy_frontend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -87,94 +201,140 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
       - name: Install dependencies
         working-directory: web
         run: npm ci
+
+      - name: Typecheck frontend
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Test frontend
+        working-directory: web
+        run: npm run test
+
+      - name: Audit high severity vulnerabilities
+        working-directory: web
+        run: npm audit --audit-level=high
 
       - name: Build frontend
         working-directory: web
         run: npm run build
 
-      - name: Build Go backend
-        working-directory: server
-        run: go build -o ../ledger-web ./cmd/ledger-web
-
-      - name: Pack artifact
+      - name: Pack frontend artifact
         run: |
-          mkdir -p artifact/web
-          cp ledger-web artifact/ledger-web
-          cp -a web/dist artifact/web/dist
-          if [[ -d examples ]]; then cp -a examples artifact/examples; fi
-          if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
+          mkdir -p artifact
+          cp -a web/dist artifact/dist
           cat > artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
           sha=${{ github.sha }}
           ref=${{ github.ref }}
-          target=${{ steps.target.outputs.target }}
+          component=frontend
+          target=${{ needs.plan.outputs.target }}
           built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
+          tar -czf ledger-web-frontend-${{ github.sha }}.tar.gz -C artifact .
 
-      - name: Compress artifact
-        run: tar -czf ledger-web-${{ github.sha }}.tar.gz -C artifact .
-
-      - name: Upload artifact
+      - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ledger-web-${{ github.sha }}
-          path: ledger-web-${{ github.sha }}.tar.gz
+          name: ledger-web-frontend-${{ github.sha }}
+          path: ledger-web-frontend-${{ github.sha }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
-  deploy:
-    name: Deploy to Raspberry Pi
-    needs: build
+  deploy_backend:
+    name: Deploy backend to Raspberry Pi
+    needs: [plan, build_backend]
     runs-on: [self-hosted, raspberry-pi]
+    if: ${{ needs.plan.outputs.deploy_backend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
-      name: ${{ needs.build.outputs.target }}
-      url: ${{ needs.build.outputs.environment_url }}
+      name: ${{ needs.plan.outputs.target }}
+      url: ${{ needs.plan.outputs.environment_url }}
     steps:
-      - name: Checkout deployment script
+      - name: Checkout deployment scripts
         uses: actions/checkout@v4
 
-      - name: Clean old artifacts
-        run: rm -rf /tmp/beancount-ledger-web-artifact-*
+      - name: Clean old backend artifacts
+        run: rm -rf /tmp/beancount-ledger-web-backend-*
 
-      - name: Download artifact
+      - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: ledger-web-${{ github.sha }}
-          path: /tmp/beancount-ledger-web-artifact-download-${{ github.sha }}
+          name: ledger-web-backend-${{ github.sha }}
+          path: /tmp/beancount-ledger-web-backend-download-${{ github.sha }}
 
-      - name: Extract artifact
+      - name: Extract backend artifact
         run: |
-          mkdir -p /tmp/beancount-ledger-web-artifact-${{ github.sha }}
-          tar -xzf "/tmp/beancount-ledger-web-artifact-download-${{ github.sha }}/ledger-web-${{ github.sha }}.tar.gz" \
-            -C "/tmp/beancount-ledger-web-artifact-${{ github.sha }}"
+          mkdir -p /tmp/beancount-ledger-web-backend-${{ github.sha }}
+          tar -xzf "/tmp/beancount-ledger-web-backend-download-${{ github.sha }}/ledger-web-backend-${{ github.sha }}.tar.gz" \
+            -C "/tmp/beancount-ledger-web-backend-${{ github.sha }}"
 
-      - name: Deploy artifact
+      - name: Deploy backend artifact
         env:
           DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
-          APP_ENV_FILE: ${{ needs.build.outputs.env_file_secret == 'RASPI_PROD_ENV_FILE' && secrets.RASPI_PROD_ENV_FILE || secrets.RASPI_PREVIEW_ENV_FILE }}
+          APP_ENV_FILE: ${{ needs.plan.outputs.env_file_secret == 'RASPI_PROD_ENV_FILE' && secrets.RASPI_PROD_ENV_FILE || secrets.RASPI_PREVIEW_ENV_FILE }}
         run: |
-          chmod +x scripts/deploy-web-artifact.sh
-          scripts/deploy-web-artifact.sh \
-            "${{ needs.build.outputs.short_target }}" \
-            "${{ needs.build.outputs.port }}" \
-            "/tmp/beancount-ledger-web-artifact-${{ github.sha }}"
+          chmod +x scripts/deploy-backend-artifact.sh
+          scripts/deploy-backend-artifact.sh \
+            "${{ needs.plan.outputs.short_target }}" \
+            "${{ needs.plan.outputs.backend_port }}" \
+            "/tmp/beancount-ledger-web-backend-${{ github.sha }}"
 
-      - name: Deployment summary
+      - name: Backend deployment summary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## Deployment complete
+          ## Backend deployment complete
 
-          - Environment: `${{ needs.build.outputs.target }}`
-          - Port: `${{ needs.build.outputs.port }}`
+          - Environment: `${{ needs.plan.outputs.target }}`
+          - Port: `${{ needs.plan.outputs.backend_port }}`
           - Commit: `${{ github.sha }}`
-          - URL: ${{ needs.build.outputs.environment_url }}
+          - URL: ${{ needs.plan.outputs.environment_url }}
+          EOF
+
+  deploy-frontend:
+    name: Deploy frontend to Raspberry Pi
+    needs: [plan, build_frontend, deploy_backend]
+    runs-on: [self-hosted, raspberry-pi]
+    if: ${{ always() && needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (needs.plan.outputs.deploy_backend != 'true' || needs.deploy_backend.result == 'success' || needs.deploy_backend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    environment:
+      name: ${{ needs.plan.outputs.target }}
+      url: ${{ needs.plan.outputs.environment_url }}
+    steps:
+      - name: Checkout deployment scripts
+        uses: actions/checkout@v4
+
+      - name: Clean old frontend artifacts
+        run: rm -rf /tmp/beancount-ledger-web-frontend-*
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-web-frontend-${{ github.sha }}
+          path: /tmp/beancount-ledger-web-frontend-download-${{ github.sha }}
+
+      - name: Extract frontend artifact
+        run: |
+          mkdir -p /tmp/beancount-ledger-web-frontend-${{ github.sha }}
+          tar -xzf "/tmp/beancount-ledger-web-frontend-download-${{ github.sha }}/ledger-web-frontend-${{ github.sha }}.tar.gz" \
+            -C "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+
+      - name: Deploy frontend artifact
+        env:
+          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
+          FRONTEND_RELOAD_COMMAND: ${{ secrets.RASPI_FRONTEND_RELOAD_COMMAND }}
+        run: |
+          chmod +x scripts/deploy-frontend-artifact.sh
+          scripts/deploy-frontend-artifact.sh \
+            "${{ needs.plan.outputs.short_target }}" \
+            "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+
+      - name: Frontend deployment summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Frontend deployment complete
+
+          - Environment: `${{ needs.plan.outputs.target }}`
+          - Commit: `${{ github.sha }}`
+          - URL: ${{ needs.plan.outputs.environment_url }}
           EOF

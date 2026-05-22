@@ -1,6 +1,9 @@
 # Raspberry Pi deployment
 
-This repository includes a GitHub Actions workflow for deploying the application to a Raspberry Pi self-hosted runner while keeping your real ledger in a separate private repository on the Pi.
+This repository deploys the Go API and the Vite frontend as separate release
+streams on a Raspberry Pi self-hosted GitHub Actions runner. Real ledger data
+still lives outside this public application repository and is selected with
+`LEDGER_ROOT`.
 
 ## Target layout
 
@@ -8,19 +11,34 @@ Recommended layout on the Pi:
 
 ```text
 /home/pi/beancount-ledger-web-deploy/
+├── env/
+│   ├── prod.env
+│   └── preview.env
 ├── prod/
-│   ├── releases/
-│   ├── current -> releases/<sha>/
-│   ├── runtime/
-│   └── systemd.env
+│   ├── backend/
+│   │   ├── releases/<sha>/
+│   │   ├── current -> releases/<sha>/
+│   │   └── systemd.env
+│   ├── frontend/
+│   │   ├── releases/<sha>/
+│   │   └── current -> releases/<sha>/
+│   └── runtime/
 └── preview/
-    ├── releases/
-    ├── current -> releases/<sha>/   # contains examples/preview-ledger
-    ├── runtime/
-    └── systemd.env
+    ├── backend/
+    │   ├── releases/<sha>/      # contains examples/preview-ledger
+    │   ├── current -> releases/<sha>/
+    │   └── systemd.env
+    ├── frontend/
+    │   ├── releases/<sha>/
+    │   └── current -> releases/<sha>/
+    └── runtime/
 
-/home/pi/beancount-ledger/              # private ledger repo for production
+/home/pi/beancount-ledger/          # private production ledger repo
 ```
+
+The backend release owns the Go binary, `.agents/`, example ledgers, runtime
+configuration, and the systemd service. The frontend release owns only the Vite
+`dist/` output and can be updated without restarting the API.
 
 ## GitHub runner
 
@@ -30,11 +48,12 @@ Install a self-hosted runner on the Raspberry Pi and add the label:
 raspberry-pi
 ```
 
-The workflow builds on GitHub-hosted ARM64 and deploys the built artifact on the Pi.
+Backend artifacts are built on GitHub-hosted ARM64 runners so the binary matches
+the Pi. Frontend artifacts are static and build on Ubuntu x64.
 
-## Environment files on the Pi
+## Environment files
 
-Create env files on the Pi, for example:
+Create Pi-side env files:
 
 ```bash
 mkdir -p ~/beancount-ledger-web-deploy/env
@@ -66,98 +85,92 @@ LEDGER_GIT_PULL_INTERVAL_MINUTES=15
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=60
 ```
 
-Preview uses the sanitized ledger packaged with the application artifact:
+Preview uses the sanitized ledger packaged with the backend artifact. The
+backend deploy script forces preview to `backend/current/examples/preview-ledger`,
+initializes it as a local Git repository, disables remote sync, and enables
+`LEDGER_AUTH_DISABLED=true`.
 
-```bash
-RUNTIME_DIR=/home/pi/beancount-ledger-web-deploy/preview/runtime
-```
+## GitHub secrets
 
-The deploy script forces preview to use `current/examples/preview-ledger`,
-initializes that directory as a local Git repository, disables remote Git sync,
-and writes tool paths such as `DOUBLE_ENTRY_GENERATOR_BIN` into `systemd.env`.
-
-## GitHub Secrets
-
-In the new application repository, configure Actions secrets:
+Configure these Actions secrets:
 
 ```text
 RASPI_DEPLOY_BASE=/home/pi/beancount-ledger-web-deploy
 RASPI_PROD_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/prod.env
 RASPI_PREVIEW_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/preview.env
+RASPI_FRONTEND_RELOAD_COMMAND=sudo systemctl reload nginx
 ```
 
-## GitHub Variables
+`RASPI_FRONTEND_RELOAD_COMMAND` is optional. It is useful when your reverse proxy
+needs a reload after the frontend symlink changes.
+
+## GitHub variables
 
 Configure Actions variables:
 
 ```text
 PRODUCTION_URL=https://your-production-domain.example
 PREVIEW_URL=https://your-preview-domain.example
-RASPI_PROD_PORT=3001
-RASPI_PREVIEW_PORT=3002
+RASPI_PROD_BACKEND_PORT=3101
+RASPI_PREVIEW_BACKEND_PORT=3102
 ```
 
-Ports default to `3001` and `3002` if omitted.
+The backend port variables fall back to the older `RASPI_PROD_PORT` and
+`RASPI_PREVIEW_PORT` names, then to `3101` and `3102`.
 
-## systemd units
+## Backend systemd services
 
-Create production service:
+The backend deploy script writes and restarts these services automatically:
 
-```ini
-# /etc/systemd/system/beancount-web-prod.service
-[Unit]
-Description=Beancount Ledger Web production
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/beancount-ledger-web-deploy/prod/current
-EnvironmentFile=/home/pi/beancount-ledger-web-deploy/prod/systemd.env
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
+```text
+beancount-ledger-api-prod.service
+beancount-ledger-api-preview.service
 ```
 
-Create preview service:
+The generated service runs the Go binary with `SERVE_STATIC=false`, so it only
+serves API responses. Static HTML/CSS/JS comes from the frontend release through
+your reverse proxy.
 
-```ini
-# /etc/systemd/system/beancount-web-preview.service
-[Unit]
-Description=Beancount Ledger Web preview
-After=network.target
+## Reverse proxy
 
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/beancount-ledger-web-deploy/preview/current
-EnvironmentFile=/home/pi/beancount-ledger-web-deploy/preview/systemd.env
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=3
+Use Nginx, Caddy, or another HTTPS reverse proxy. Route `/api/` to the local Go
+backend and everything else to the frontend release.
 
-[Install]
-WantedBy=multi-user.target
+Example Nginx production server:
+
+```nginx
+server {
+  listen 443 ssl http2;
+  server_name ledger.example.com;
+
+  root /home/pi/beancount-ledger-web-deploy/prod/frontend/current/dist;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3101;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
 ```
 
-Enable them once after first deployment directories exist:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable beancount-web-prod
-sudo systemctl enable beancount-web-preview
-```
-
-The deployment script restarts these services after each artifact deploy.
+Preview should use the preview frontend path and preview backend port.
 
 ## Workflow behavior
 
 - Push to `main` deploys production.
-- Manual `workflow_dispatch` can deploy production or preview.
-- The app artifact is built from this public application repo.
-- Production runtime reads/writes are directed by `LEDGER_ROOT` and `RUNTIME_DIR` from the Pi-side env file.
-- Preview runtime uses `examples/preview-ledger` from the deployed release, so test data follows this repository's Git history and is reset on each preview deployment.
-- Git sync APIs and scheduler operate on `LEDGER_ROOT`.
+- Pull requests deploy preview when the PR is not a draft.
+- Manual `workflow_dispatch` can deploy production or preview and can choose
+  `all`, `backend`, or `frontend`.
+- Changes under `server/**`, `examples/**`, `.agents/**`, `docker/**`, or the
+  backend deploy script build and deploy only the backend.
+- Changes under `web/**` or the frontend deploy script build and deploy only the
+  frontend.
+- Changes to the deploy workflow deploy both components.
+- When both components changed, backend deploy completes before frontend deploy.
+
+Each component keeps the latest five releases for quick manual rollback.
