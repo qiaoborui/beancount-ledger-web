@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,10 +25,7 @@ func authDisabled() bool {
 func authSecret() ([]byte, error) {
 	raw := os.Getenv("AUTH_SECRET")
 	if raw == "" {
-		raw = os.Getenv("APP_PASSWORD")
-	}
-	if raw == "" {
-		return nil, errors.New("AUTH_SECRET or APP_PASSWORD is required")
+		return nil, errors.New("AUTH_SECRET is required")
 	}
 	return []byte(raw), nil
 }
@@ -49,9 +47,25 @@ func createSessionToken() (string, error) {
 		return "", err
 	}
 	claims := jwt.MapClaims{
+		"typ": "session",
 		"sub": "owner",
 		"iat": time.Now().Unix(),
 		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
+}
+
+func createSensitiveToken() (string, error) {
+	secret, err := authSecret()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"typ": "sensitive",
+		"sub": "owner",
+		"iat": now.Unix(),
+		"exp": now.Add(15 * time.Minute).Unix(),
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
 }
@@ -74,19 +88,36 @@ func isAuthenticated(c *gin.Context) bool {
 		}
 		return secret, nil
 	})
-	return err == nil && parsed.Valid
+	if err != nil || !parsed.Valid {
+		return false
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	return ok && claims["typ"] == "session" && claims["sub"] == "owner"
 }
 
 func isSensitiveUnlocked(c *gin.Context) bool {
 	if authDisabled() {
 		return true
 	}
-	raw, err := c.Cookie(sensitiveCookieName)
+	token, err := c.Cookie(sensitiveCookieName)
 	if err != nil {
 		return false
 	}
-	until, err := parseInt64(raw)
-	return err == nil && until > time.Now().UnixMilli()
+	secret, err := authSecret()
+	if err != nil {
+		return false
+	}
+	parsed, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, errors.New("unexpected signing method")
+		}
+		return secret, nil
+	})
+	if err != nil || !parsed.Valid {
+		return false
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	return ok && claims["typ"] == "sensitive" && claims["sub"] == "owner"
 }
 
 func requireAuth(c *gin.Context) bool {
@@ -109,19 +140,99 @@ func requireSensitive(c *gin.Context) bool {
 }
 
 func setSessionCookie(c *gin.Context, token string) {
-	c.SetCookie(sessionCookieName, token, 60*60*24*30, "/", "", gin.Mode() == gin.ReleaseMode, true)
+	setAuthCookie(c, sessionCookieName, token, 60*60*24*30)
 }
 
 func setSensitiveCookie(c *gin.Context) {
-	until := time.Now().Add(15 * time.Minute).UnixMilli()
-	c.SetCookie(sensitiveCookieName, formatInt64(until), 15*60, "/", "", gin.Mode() == gin.ReleaseMode, true)
+	token, err := createSensitiveToken()
+	if err != nil {
+		return
+	}
+	setAuthCookie(c, sensitiveCookieName, token, 15*60)
 }
 
 func clearAuthCookies(c *gin.Context) {
-	c.SetCookie(sessionCookieName, "", -1, "/", "", gin.Mode() == gin.ReleaseMode, true)
+	clearAuthCookie(c, sessionCookieName)
 	clearSensitiveCookie(c)
 }
 
 func clearSensitiveCookie(c *gin.Context) {
-	c.SetCookie(sensitiveCookieName, "", -1, "/", "", gin.Mode() == gin.ReleaseMode, true)
+	clearAuthCookie(c, sensitiveCookieName)
+}
+
+func setAuthCookie(c *gin.Context, name, value string, maxAge int) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAge,
+		Secure:   gin.Mode() == gin.ReleaseMode,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearAuthCookie(c *gin.Context, name string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   gin.Mode() == gin.ReleaseMode,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func sameOriginMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !strings.HasPrefix(c.Request.URL.Path, "/api/") || !unsafeHTTPMethod(c.Request.Method) {
+			c.Next()
+			return
+		}
+		if site := strings.ToLower(strings.TrimSpace(c.GetHeader("Sec-Fetch-Site"))); site == "cross-site" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Cross-site requests are not allowed"})
+			return
+		}
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if origin == "" {
+			c.Next()
+			return
+		}
+		if !sameOriginAllowed(c, origin) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Cross-site requests are not allowed"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func unsafeHTTPMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
+}
+
+func sameOriginAllowed(c *gin.Context, origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	for _, allowed := range allowedOrigins(c) {
+		if strings.EqualFold(strings.TrimRight(origin, "/"), strings.TrimRight(allowed, "/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func allowedOrigins(c *gin.Context) []string {
+	origins := []string{requestOrigin(c)}
+	if configured := configuredPublicOrigin(); configured != "" {
+		origins = append(origins, configured)
+	}
+	return origins
 }

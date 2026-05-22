@@ -95,6 +95,7 @@ LEDGER_ROOT=/absolute/path/to/my-beancount-ledger
 RUNTIME_DIR=/absolute/path/to/beancount-ledger-runtime
 AUTH_SECRET=replace-with-openssl-rand-base64-32
 APP_PASSWORD=replace-with-a-long-password
+PUBLIC_ORIGIN=http://localhost:3000
 LEDGER_AI_PROVIDER=deepseek
 DEEPSEEK_API_KEY=
 LEDGER_GIT_SCHEDULER=false
@@ -118,6 +119,7 @@ Important variables:
 - `RUNTIME_DIR` — path for runtime-only state such as passkeys, web push subscriptions, notifications, and write locks. Defaults to `$LEDGER_ROOT/.runtime`.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
+- `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID when served behind a proxy or custom domain.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if it is not on `PATH`.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
 

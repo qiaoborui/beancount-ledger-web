@@ -13,6 +13,9 @@ import (
 
 func testLedger(t *testing.T) Config {
 	t.Helper()
+	if os.Getenv("AUTH_SECRET") == "" {
+		t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
+	}
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "commodities.bean"), "2026-01-01 commodity CNY\n")
 	mustWrite(t, filepath.Join(root, "accounts.bean"), strings.Join([]string{

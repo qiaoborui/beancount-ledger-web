@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,8 +197,14 @@ func (s *Server) passkeyLoginVerify(c *gin.Context) {
 }
 
 func (s *Server) webAuthn(c *gin.Context) (*webauthn.WebAuthn, error) {
-	rpID := rpIDFromRequest(c)
-	origin := originFromRequest(c)
+	origin := configuredPublicOrigin()
+	if origin == "" {
+		origin = requestOrigin(c)
+	}
+	rpID := strings.TrimSpace(os.Getenv("WEBAUTHN_RP_ID"))
+	if rpID == "" {
+		rpID = rpIDFromOrigin(origin)
+	}
 	return webauthn.New(&webauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: "我的账本",
@@ -380,19 +387,19 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-func rpIDFromRequest(c *gin.Context) string {
-	host := c.GetHeader("X-Forwarded-Host")
-	if host == "" {
-		host = c.Request.Host
+func configuredPublicOrigin() string {
+	origin := strings.TrimSpace(os.Getenv("PUBLIC_ORIGIN"))
+	if origin == "" {
+		origin = strings.TrimSpace(os.Getenv("LEDGER_PUBLIC_ORIGIN"))
 	}
-	if host == "" {
-		host = c.Request.URL.Host
-	}
-	return strings.Split(host, ":")[0]
+	return strings.TrimRight(origin, "/")
 }
 
-func originFromRequest(c *gin.Context) string {
+func requestOrigin(c *gin.Context) string {
 	proto := c.GetHeader("X-Forwarded-Proto")
+	if proto != "" && !truthyEnv("TRUST_PROXY_HEADERS") {
+		proto = ""
+	}
 	if proto == "" {
 		if c.Request.TLS != nil {
 			proto = "https"
@@ -400,7 +407,10 @@ func originFromRequest(c *gin.Context) string {
 			proto = "http"
 		}
 	}
-	host := c.GetHeader("X-Forwarded-Host")
+	host := ""
+	if truthyEnv("TRUST_PROXY_HEADERS") {
+		host = c.GetHeader("X-Forwarded-Host")
+	}
 	if host == "" {
 		host = c.Request.Host
 	}
@@ -408,6 +418,14 @@ func originFromRequest(c *gin.Context) string {
 		host = c.Request.URL.Host
 	}
 	return proto + "://" + host
+}
+
+func rpIDFromOrigin(origin string) string {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return strings.Split(strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://"), ":")[0]
+	}
+	return strings.Split(parsed.Host, ":")[0]
 }
 
 func timeMinute() time.Duration {
