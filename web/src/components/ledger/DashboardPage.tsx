@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { Area, AreaChart, Bar, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { timeRangeToParams } from "@/lib/timeRange";
@@ -14,26 +14,35 @@ const COLORS = [
   "var(--chart-palette-4)",
   "var(--chart-palette-5)",
   "var(--chart-palette-6)",
+  "var(--chart-primary)",
+  "var(--chart-secondary)",
 ];
 
 export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onSelectCategory }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
-  const { data, loading, error } = useDashboardSummary(timeRange, onSensitiveLocked);
+  const dashboardRange = useMemo(() => dashboardTimeRange(timeRange), [timeRange]);
+  const { data, loading, error } = useDashboardSummary(dashboardRange, onSensitiveLocked);
   const mask = (value: string) => visible ? value : "••••••";
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
   if (error && !data) return <section className="card p-6 text-sm text-stone">{error}</section>;
   if (!data) return <section className="card p-6 text-sm text-stone">暂无看板数据</section>;
 
-  return <div className="space-y-4">
+  const maxExpense = data.anomalies[0]?.amount ?? 0;
+  const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
+  const topCategory = data.categorySeries[0];
+  const topCategoryText = topCategory ? `${topCategory.label} · ${mask(formatCompactCny(topCategory.total / 100))}` : "暂无";
+
+  return <div className="space-y-7">
+    <RowHeader title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" />
     <section className="card p-3 md:p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-xl border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
-          <Kpi label="净资产" value={mask(formatCompactCny(data.kpis.netWorth / 100))} tone={tone(data.kpis.netWorth)} />
-          <Kpi label="资产" value={mask(formatCompactCny(data.kpis.assets / 100))} tone="amount-income" />
-          <Kpi label="负债" value={mask(formatCompactCny(data.kpis.liabilities / 100))} tone="amount-expense" />
-          <Kpi label="收入" value={mask(formatCompactCny(data.kpis.income / 100))} tone="amount-income" />
-          <Kpi label="支出" value={mask(formatCompactCny(data.kpis.expense / 100))} tone="amount-expense" />
-          <Kpi label="结余率" value={visible ? ratioLabel(data.kpis.savingsRate) : "••••••"} tone={tone(data.kpis.net)} />
+          <Kpi label="本期支出" value={mask(formatCompactCny(data.kpis.expense / 100))} tone="amount-expense" />
+          <Kpi label="预算使用" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} />
+          <Kpi label="最大单笔" value={mask(formatCompactCny(maxExpense / 100))} tone="amount-expense" />
+          <Kpi label="高额支出" value={`${data.anomalies.length} 笔`} tone="text-warm" />
+          <Kpi label="Top 分类" value={topCategoryText} tone="text-warm" />
+          <Kpi label="结余" value={mask(formatCompactCny(data.kpis.net / 100))} tone={tone(data.kpis.net)} />
         </div>
         <button className="shrink-0 self-end rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag lg:self-auto" onClick={onToggleVisible} aria-label={visible ? "隐藏看板金额" : "显示看板金额"} title={visible ? "隐藏看板金额" : "显示看板金额"}>
           {visible ? <EyeOff className="inline h-4 w-4 text-brand" /> : <Eye className="inline h-4 w-4 text-brand" />} <span className="ml-1">{visible ? "隐藏金额" : "显示金额"}</span>
@@ -41,27 +50,51 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
       </div>
     </section>
 
+    <RowHeader title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" />
     <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-7" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date.slice(0, 7)} ~ ${data.netWorthSeries.at(-1)?.date.slice(0, 7)}` : "暂无"}>
-        {visible ? <NetWorthChart data={data} /> : <HiddenChart />}
+      <Panel className="xl:col-span-7" title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
+        {visible ? <DailyExpenseChart data={data} /> : <HiddenChart />}
       </Panel>
-      <Panel className="xl:col-span-5" title="月度现金流" subtitle={cashflowSubtitle(data)}>
-        {visible ? <CashflowChart data={data} /> : <HiddenChart />}
+      <Panel className="xl:col-span-5" title="星期分布" subtitle="消费节律">
+        {visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />}
       </Panel>
-      <Panel className="xl:col-span-7" title="分类支出趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
-        {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
+      <Panel className="xl:col-span-4" title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
+        <CategoryRank rows={data.categorySeries} visible={visible} onSelectCategory={onSelectCategory} />
       </Panel>
-      <Panel className="xl:col-span-5" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
-        {visible ? <AccountTrendChart data={data} /> : <HiddenChart />}
+      <Panel className="xl:col-span-4" title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
+        <PayeeList data={data} visible={visible} />
       </Panel>
+      <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
+        <PaymentAccounts data={data} visible={visible} />
+      </Panel>
+    </div>
+
+    <RowHeader title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" />
+    <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-4" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
         <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={onSelectCategory} />
       </Panel>
       <Panel className="xl:col-span-4" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
         <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={onSelectCategory} />
       </Panel>
-      <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
-        <PaymentAccounts data={data} visible={visible} />
+      <Panel className="xl:col-span-4" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
+        {visible ? <CategoryTrendChart data={data} /> : <HiddenChart compact />}
+      </Panel>
+    </div>
+
+    <RowHeader title="资产与收入" subtitle="更敏感的资产、收入和账户趋势放在底部" />
+    <div className="grid gap-4 xl:grid-cols-12">
+      <Panel className="xl:col-span-4" title="资产 KPI" subtitle="敏感">
+        <PrivateKpis data={data} visible={visible} />
+      </Panel>
+      <Panel className="xl:col-span-4" title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
+        {visible ? <CashflowChart data={data} /> : <HiddenChart compact />}
+      </Panel>
+      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date.slice(0, 7)} ~ ${data.netWorthSeries.at(-1)?.date.slice(0, 7)}` : "暂无"}>
+        {visible ? <NetWorthChart data={data} /> : <HiddenChart compact />}
+      </Panel>
+      <Panel className="xl:col-span-12" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
+        {visible ? <AccountTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
   </div>;
@@ -102,6 +135,23 @@ function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void
   return { data, loading, error };
 }
 
+function dashboardTimeRange(range: TimeRange): TimeRange {
+  if (range.preset === "all" || range.preset === "custom") return range;
+  const start = new Date(`${range.start}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return range;
+  const months = range.preset === "week" ? 2 : range.preset === "year" ? 0 : 5;
+  start.setMonth(start.getMonth() - months);
+  const widenedStart = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
+  return { ...range, start: widenedStart };
+}
+
+function RowHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return <div className="flex flex-col gap-1 border-b border-line pb-2 sm:flex-row sm:items-end sm:justify-between">
+    <h2 className="font-serif text-2xl font-medium">{title}</h2>
+    <span className="text-xs text-stone">{subtitle}</span>
+  </div>;
+}
+
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
   return <div className="min-w-0 bg-panel p-3 text-center"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold md:text-lg ${tone}`}>{value}</div></div>;
 }
@@ -109,16 +159,48 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: strin
 function Panel({ title, subtitle, className, children }: { title: string; subtitle?: string; className?: string; children: ReactNode }) {
   return <section className={`card min-w-0 p-4 ${className ?? ""}`}>
     <div className="flex items-start justify-between gap-3">
-      <h2 className="font-serif text-xl">{title}</h2>
+      <h3 className="font-serif text-xl">{title}</h3>
       {subtitle && <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{subtitle}</span>}
     </div>
     {children}
   </section>;
 }
 
+function DailyExpenseChart({ data }: { data: DashboardSummary }) {
+  const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), 支出: row.amount / 100, 笔数: row.txCount }));
+  return <ChartBox empty={!rows.length}>
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%">
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={10} />
+        <YAxis yAxisId="money" width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
+        <YAxis yAxisId="count" orientation="right" width={36} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatCny(Number(value)), name]} />
+        <Bar yAxisId="money" dataKey="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
+        <Line yAxisId="count" type="monotone" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2 }} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  </ChartBox>;
+}
+
+function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
+  const rows = data.weekdayExpense.map((row) => ({ weekday: row.weekday, 支出: row.amount / 100, 笔数: row.txCount }));
+  return <ChartBox empty={!rows.some((row) => row.支出 > 0)}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%">
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <XAxis dataKey="weekday" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
+        <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatCny(Number(value)), name]} />
+        <Bar dataKey="支出" fill="var(--chart-tertiary)" radius={[4, 4, 0, 0]} maxBarSize={34} />
+      </BarChart>
+    </ResponsiveContainer>
+  </ChartBox>;
+}
+
 function NetWorthChart({ data }: { data: DashboardSummary }) {
   const rows = data.netWorthSeries.map((row) => ({ month: row.date.slice(0, 7), 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -136,7 +218,7 @@ function NetWorthChart({ data }: { data: DashboardSummary }) {
 
 function CashflowChart({ data }: { data: DashboardSummary }) {
   const rows = data.cashflowSeries.map((row) => ({ month: row.month, 收入: row.income / 100, 支出: row.expense / 100, 结余: row.net / 100 }));
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="28%">
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -154,15 +236,14 @@ function CashflowChart({ data }: { data: DashboardSummary }) {
 
 function CategoryTrendChart({ data }: { data: DashboardSummary }) {
   const rows = useMemo(() => seriesRows(data.categorySeries), [data.categorySeries]);
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
         <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
         <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(data.categorySeries, String(name))]} />
-        <Legend formatter={(value) => labelForSeries(data.categorySeries, String(value))} />
-        {data.categorySeries.map((series, index) => <Area key={series.account} type="monotone" dataKey={series.account} stackId="expense" stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />)}
+        {data.categorySeries.slice(0, 5).map((series, index) => <Area key={series.account} type="monotone" dataKey={series.account} stackId="expense" stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />)}
       </AreaChart>
     </ResponsiveContainer>
   </ChartBox>;
@@ -184,10 +265,41 @@ function AccountTrendChart({ data }: { data: DashboardSummary }) {
   </ChartBox>;
 }
 
+function CategoryRank({ rows, visible, onSelectCategory }: { rows: DashboardSummary["categorySeries"]; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
+  if (!rows.length) return <EmptyPanel text="暂无分类支出" />;
+  const maxValue = Math.max(1, ...rows.map((row) => row.total));
+  return <div className="mt-4 space-y-3">
+    {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onSelectCategory(row.account, "prefix")}>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate text-olive">{row.label}</span>
+        <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.total / 100) : "••••••"}</strong>
+      </div>
+      <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full" style={{ width: `${row.total / maxValue * 100}%`, background: COLORS[index % COLORS.length] }} /></div>
+    </button>)}
+  </div>;
+}
+
+function PayeeList({ data, visible }: { data: DashboardSummary; visible: boolean }) {
+  if (!data.topPayees.length) return <EmptyPanel text="暂无商户数据" />;
+  const maxValue = Math.max(1, ...data.topPayees.map((row) => row.amount));
+  return <div className="mt-4 space-y-3">
+    {data.topPayees.slice(0, 8).map((row) => <div key={row.payee}>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate text-olive">{row.payee}</span>
+        <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-line"><div className="h-full bg-[rgb(var(--color-expense))]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
+        <span className="w-10 text-right text-xs text-stone">{row.txCount} 笔</span>
+      </div>
+    </div>)}
+  </div>;
+}
+
 function BudgetPressure({ rows, visible, onSelectCategory }: { rows: DashboardSummary["budgetPressure"]; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   if (!rows.length) return <EmptyPanel text="暂无预算数据" />;
   return <div className="mt-4 space-y-3">
-    {rows.slice(0, 6).map((row) => {
+    {rows.slice(0, 7).map((row) => {
       const pct = Math.max(0, Math.min(140, (row.ratio ?? 0) * 100));
       return <button key={row.account} className="w-full rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
         <div className="flex items-center justify-between gap-3 text-sm">
@@ -204,7 +316,7 @@ function BudgetPressure({ rows, visible, onSelectCategory }: { rows: DashboardSu
 function AnomalyList({ rows, visible, onSelectCategory }: { rows: DashboardSummary["anomalies"]; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   if (!rows.length) return <EmptyPanel text="暂无高额支出" />;
   return <div className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
-    {rows.slice(0, 7).map((row) => <button key={`${row.source}:${row.account}`} className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
+    {rows.slice(0, 8).map((row) => <button key={`${row.source}:${row.account}`} className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-olive">{row.payee || row.narration || row.account}</span>
         <span className="mt-0.5 block truncate text-xs text-stone">{row.date} · {row.account.replace(/^Expenses:/, "")}</span>
@@ -229,17 +341,33 @@ function PaymentAccounts({ data, visible }: { data: DashboardSummary; visible: b
   </div>;
 }
 
-function ChartBox({ empty, children }: { empty: boolean; children: ReactNode }) {
-  if (empty) return <EmptyPanel text="暂无趋势数据" />;
-  return <div className="ledger-chart mt-4 h-80 min-w-0">{children}</div>;
+function PrivateKpis({ data, visible }: { data: DashboardSummary; visible: boolean }) {
+  const mask = (value: string) => visible ? value : "••••••";
+  return <div className="mt-4 grid grid-cols-2 gap-3">
+    <SmallMetric label="资产" value={mask(formatCompactCny(data.kpis.assets / 100))} tone="amount-income" />
+    <SmallMetric label="负债" value={mask(formatCompactCny(data.kpis.liabilities / 100))} tone="amount-expense" />
+    <SmallMetric label="净资产" value={mask(formatCompactCny(data.kpis.netWorth / 100))} tone={tone(data.kpis.netWorth)} />
+    <SmallMetric label="收入" value={mask(formatCompactCny(data.kpis.income / 100))} tone="amount-income" />
+    <SmallMetric label="结余率" value={visible ? ratioLabel(data.kpis.savingsRate) : "••••••"} tone={tone(data.kpis.net)} />
+    <SmallMetric label="预算剩余" value={mask(formatCompactCny(data.kpis.budgetRemaining / 100))} tone={data.kpis.budgetRemaining >= 0 ? "amount-income" : "amount-expense"} />
+  </div>;
 }
 
-function HiddenChart() {
-  return <div className="mt-4 grid h-80 place-items-center rounded-xl border border-line bg-panel text-sm text-stone">金额已隐藏</div>;
+function SmallMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
 }
 
-function EmptyPanel({ text }: { text: string }) {
-  return <div className="mt-4 grid min-h-40 place-items-center rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone">{text}</div>;
+function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
+  if (empty) return <EmptyPanel text="暂无趋势数据" compact={compact} />;
+  return <div className={`ledger-chart mt-4 min-w-0 ${compact ? "h-64" : "h-80"}`}>{children}</div>;
+}
+
+function HiddenChart({ compact = false }: { compact?: boolean }) {
+  return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel text-sm text-stone ${compact ? "h-64" : "h-80"}`}>金额已隐藏</div>;
+}
+
+function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean }) {
+  return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone ${compact ? "min-h-32" : "min-h-40"}`}>{text}</div>;
 }
 
 function seriesRows(series: { account: string; values: { month: string; value: number }[] }[]) {
@@ -272,7 +400,8 @@ function tone(value: number) {
   return value >= 0 ? "amount-income" : "amount-expense";
 }
 
-function cashflowSubtitle(data: DashboardSummary) {
+function cashflowSubtitle(data: DashboardSummary, visible: boolean) {
+  if (!visible) return "金额已隐藏";
   if (!data.cashflowSeries.length) return "暂无";
   const latest = data.cashflowSeries.at(-1);
   return latest ? `${latest.month} 结余 ${formatCompactCny(latest.net / 100)}` : "暂无";

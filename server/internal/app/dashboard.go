@@ -32,6 +32,19 @@ type DashboardSeriesPoint struct {
 	Value int    `json:"value"`
 }
 
+type DashboardDailyExpense struct {
+	Date    string `json:"date"`
+	Weekday string `json:"weekday"`
+	Amount  int    `json:"amount"`
+	TxCount int    `json:"txCount"`
+}
+
+type DashboardWeekdayExpense struct {
+	Weekday string `json:"weekday"`
+	Amount  int    `json:"amount"`
+	TxCount int    `json:"txCount"`
+}
+
 type DashboardCategorySeries struct {
 	Account string                 `json:"account"`
 	Label   string                 `json:"label"`
@@ -71,6 +84,8 @@ type DashboardSummary struct {
 	KPIs                 DashboardKPI              `json:"kpis"`
 	NetWorthSeries       []NetWorthPoint           `json:"netWorthSeries"`
 	CashflowSeries       []DashboardCashflowPoint  `json:"cashflowSeries"`
+	DailyExpenseSeries   []DashboardDailyExpense   `json:"dailyExpenseSeries"`
+	WeekdayExpense       []DashboardWeekdayExpense `json:"weekdayExpense"`
 	CategorySeries       []DashboardCategorySeries `json:"categorySeries"`
 	AccountBalanceSeries []DashboardAccountSeries  `json:"accountBalanceSeries"`
 	BudgetPressure       []DashboardBudgetPressure `json:"budgetPressure"`
@@ -103,10 +118,12 @@ func BuildDashboardSummary(snapshot *LedgerSnapshot, start, end string) Dashboar
 		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
 		NetWorthSeries:       dashboardNetWorthSeries(snapshot.Transactions, start, end),
 		CashflowSeries:       dashboardCashflowSeries(snapshot.Transactions, start, end),
-		CategorySeries:       dashboardCategorySeries(snapshot.Transactions, start, end, 6),
+		DailyExpenseSeries:   dashboardDailyExpenseSeries(snapshot.Transactions, start, end),
+		WeekdayExpense:       dashboardWeekdayExpense(snapshot.Transactions, start, end),
+		CategorySeries:       dashboardCategorySeries(snapshot.Transactions, start, end, 8),
 		AccountBalanceSeries: dashboardAccountBalanceSeries(snapshot.Transactions, snapshot.Accounts, snapshot.Balances, start, end, 6),
 		BudgetPressure:       budgetPressure,
-		Anomalies:            dashboardAnomalies(snapshot.Transactions, start, end, 8),
+		Anomalies:            dashboardAnomalies(snapshot.Transactions, start, end, 10),
 		TopPayees:            topPayees,
 		TopPaymentAccounts:   topPaymentAccounts,
 		GeneratedAt:          time.Now().Format(time.RFC3339),
@@ -164,6 +181,71 @@ func dashboardCashflowSeries(txns []Transaction, start, end string) []DashboardC
 	return out
 }
 
+func dashboardDailyExpenseSeries(txns []Transaction, start, end string) []DashboardDailyExpense {
+	byDate := map[string]*DashboardDailyExpense{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		var expense int
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+				expense += posting.Amount
+			}
+		}
+		if expense <= 0 {
+			continue
+		}
+		row := byDate[txn.Date]
+		if row == nil {
+			row = &DashboardDailyExpense{Date: txn.Date, Weekday: weekdayLabel(txn.Date)}
+			byDate[txn.Date] = row
+		}
+		row.Amount += expense
+		row.TxCount++
+	}
+	dates := make([]string, 0, len(byDate))
+	for date := range byDate {
+		dates = append(dates, date)
+	}
+	sort.Strings(dates)
+	out := make([]DashboardDailyExpense, 0, len(dates))
+	for _, date := range dates {
+		out = append(out, *byDate[date])
+	}
+	return out
+}
+
+func dashboardWeekdayExpense(txns []Transaction, start, end string) []DashboardWeekdayExpense {
+	order := []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
+	rows := map[string]*DashboardWeekdayExpense{}
+	for _, label := range order {
+		rows[label] = &DashboardWeekdayExpense{Weekday: label}
+	}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		var expense int
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+				expense += posting.Amount
+			}
+		}
+		if expense <= 0 {
+			continue
+		}
+		row := rows[weekdayLabel(txn.Date)]
+		row.Amount += expense
+		row.TxCount++
+	}
+	out := make([]DashboardWeekdayExpense, 0, len(order))
+	for _, label := range order {
+		out = append(out, *rows[label])
+	}
+	return out
+}
+
 func dashboardCategorySeries(txns []Transaction, start, end string, limit int) []DashboardCategorySeries {
 	months := monthsBetween(start, end)
 	byAccount := map[string]map[string]int{}
@@ -201,6 +283,29 @@ func dashboardCategorySeries(txns []Transaction, start, end string, limit int) [
 		out = append(out, DashboardCategorySeries{Account: account, Label: labelFor(account), Total: totals[account], Values: values})
 	}
 	return out
+}
+
+func weekdayLabel(date string) string {
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return ""
+	}
+	switch parsed.Weekday() {
+	case time.Monday:
+		return "周一"
+	case time.Tuesday:
+		return "周二"
+	case time.Wednesday:
+		return "周三"
+	case time.Thursday:
+		return "周四"
+	case time.Friday:
+		return "周五"
+	case time.Saturday:
+		return "周六"
+	default:
+		return "周日"
+	}
 }
 
 func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balances map[string]int, start, end string, limit int) []DashboardAccountSeries {

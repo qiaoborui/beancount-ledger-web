@@ -1,0 +1,100 @@
+2026-01-01 * "期初" "主力储蓄卡期初余额"
+  Assets:CN:Bank:PrimaryChecking        30000.00 CNY
+  Equity:Opening-Balances              -30000.00 CNY
+
+2026-01-01 * "期初" "备用储蓄卡期初余额"
+  Assets:CN:Bank:SecondaryChecking       5000.00 CNY
+  Equity:Opening-Balances               -5000.00 CNY
+
+2026-01-01 * "期初" "银行活钱理财期初余额"
+  Assets:CN:Bank:MoneyMarket            20000.00 CNY
+  Equity:Opening-Balances              -20000.00 CNY
+
+2026-01-01 * "期初" "互联网银行活钱理财期初余额"
+  Assets:CN:DigitalBank:Yulibao          6000.00 CNY
+  Equity:Opening-Balances               -6000.00 CNY
+
+2026-01-01 * "期初" "短期理财期初余额"
+  Assets:CN:DigitalBank:Investments:ShortTerm 12000.00 CNY
+  Equity:Opening-Balances              -12000.00 CNY
+
+2026-01-01 * "期初" "月度理财期初余额"
+  Assets:CN:DigitalBank:Investments:Monthly 15000.00 CNY
+  Equity:Opening-Balances              -15000.00 CNY
+
+2026-01-01 * "期初" "微信零钱期初余额"
+  Assets:CN:Wechat:Balance                650.00 CNY
+  Equity:Opening-Balances                -650.00 CNY
+
+2026-01-01 * "期初" "支付宝余额期初余额"
+  Assets:CN:Alipay:Balance               1200.00 CNY
+  Equity:Opening-Balances               -1200.00 CNY
+
+2026-01-01 * "期初" "支付宝基金期初余额"
+  Assets:CN:Alipay:Fund                  8000.00 CNY
+  Equity:Opening-Balances               -8000.00 CNY
+
+2026-01-01 * "期初" "住房公积金期初余额"
+  Assets:CN:HousingFund                 50000.00 CNY
+  Equity:Opening-Balances              -50000.00 CNY
+
+2026-01-01 * "期初" "信用卡上期账单"
+  Liabilities:CN:CreditCard             -2800.00 CNY
+  Equity:Opening-Balances                2800.00 CNY
+
+2026-01-03 * "超市" "元旦采购"
+  Assets:CN:Alipay:Balance               -218.60 CNY
+  Expenses:Food:Groceries                 218.60 CNY
+
+2026-01-05 * "示例公司" "工资"
+  Assets:CN:Bank:PrimaryChecking        14800.00 CNY
+  Income:Salary                        -14800.00 CNY
+
+2026-01-05 * "示例公司" "住房公积金缴存"
+  Assets:CN:HousingFund                  1800.00 CNY
+  Income:Benefits:HousingFund           -1800.00 CNY
+
+2026-01-07 * "咖啡店" "拿铁"
+  Assets:CN:Wechat:Balance                -26.00 CNY
+  Expenses:Food:Drinks                     26.00 CNY
+
+2026-01-09 * "外卖平台" "午餐"
+  Liabilities:CN:CreditCard               -42.50 CNY
+  Expenses:Food:Meals                      42.50 CNY
+
+2026-01-11 * "通信运营商" "手机话费"
+  Assets:CN:Bank:PrimaryChecking          -99.00 CNY
+  Expenses:Communication:Mobile            99.00 CNY
+
+2026-01-12 * "宽带运营商" "家庭宽带"
+  Assets:CN:Bank:PrimaryChecking         -120.00 CNY
+  Expenses:Communication:Internet         120.00 CNY
+
+2026-01-14 * "电商平台" "新年日用品"
+  Assets:CN:Alipay:Balance               -268.80 CNY
+  Expenses:Shopping:Daily                 268.80 CNY
+
+2026-01-16 * "朋友聚餐" "火锅"
+  Liabilities:CN:CreditCard              -268.00 CNY
+  Expenses:Food:Meals                     268.00 CNY
+
+2026-01-18 * "信用卡还款" "偿还上期账单"
+  Assets:CN:Bank:PrimaryChecking        -3000.00 CNY
+  Liabilities:CN:CreditCard              3000.00 CNY
+
+2026-01-20 * "客户 A" "咨询费"
+  Assets:CN:Bank:PrimaryChecking         1200.00 CNY
+  Income:SideProject                    -1200.00 CNY
+
+2026-01-22 * "药房" "常备药"
+  Assets:CN:Alipay:Balance                -83.40 CNY
+  Expenses:Health:Pharmacy                 83.40 CNY
+
+2026-01-25 * "银行" "活期利息"
+  Assets:CN:Bank:PrimaryChecking            7.88 CNY
+  Income:Interest:Bank                     -7.88 CNY
+
+2026-01-28 * "视频会员" "月度订阅"
+  Assets:CN:Alipay:Balance                -35.00 CNY
+  Expenses:Digital:Subscription            35.00 CNY
+
