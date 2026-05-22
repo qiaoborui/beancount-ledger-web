@@ -71,14 +71,14 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
 
     <RowHeader title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" />
     <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-4" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
+      <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
         <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={onSelectCategory} />
       </Panel>
-      <Panel className="xl:col-span-4" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
+      <Panel className="xl:col-span-6" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
         <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={onSelectCategory} />
       </Panel>
-      <Panel className="xl:col-span-4" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
-        {visible ? <CategoryTrendChart data={data} /> : <HiddenChart compact />}
+      <Panel className="xl:col-span-12" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
+        {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
 
@@ -236,14 +236,15 @@ function CashflowChart({ data }: { data: DashboardSummary }) {
 
 function CategoryTrendChart({ data }: { data: DashboardSummary }) {
   const rows = useMemo(() => seriesRows(data.categorySeries), [data.categorySeries]);
-  return <ChartBox empty={!rows.length} compact>
+  return <ChartBox empty={!rows.length}>
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
         <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
         <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(data.categorySeries, String(name))]} />
-        {data.categorySeries.slice(0, 5).map((series, index) => <Area key={series.account} type="monotone" dataKey={series.account} stackId="expense" stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />)}
+        <Legend formatter={(value) => labelForSeries(data.categorySeries, String(value))} />
+        {data.categorySeries.slice(0, 8).map((series, index) => <Area key={series.account} type="monotone" dataKey={series.account} stackId="expense" stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />)}
       </AreaChart>
     </ResponsiveContainer>
   </ChartBox>;
