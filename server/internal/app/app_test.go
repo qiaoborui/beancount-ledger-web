@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -213,6 +214,181 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 	if !meBody.Authenticated || meBody.SensitiveUnlocked {
 		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
+	}
+}
+
+func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
+	cfg := testLedger(t)
+	router := NewRouter(cfg)
+	actual := map[string]bool{}
+	for _, route := range router.Routes() {
+		if strings.HasPrefix(route.Path, "/api/") {
+			actual[route.Method+" "+route.Path] = true
+		}
+	}
+	covered := map[string]bool{
+		"GET /api/health":                    true,
+		"POST /api/auth/login":               true,
+		"POST /api/auth/lock":                true,
+		"POST /api/auth/logout":              true,
+		"GET /api/auth/me":                   true,
+		"GET /api/passkey/status":            true,
+		"POST /api/passkey/login/options":    true,
+		"POST /api/passkey/login/verify":     true,
+		"POST /api/passkey/register/options": true,
+		"POST /api/passkey/register/verify":  true,
+		"GET /api/ledger/version":            true,
+		"GET /api/ledger/summary":            true,
+		"GET /api/ledger/transactions":       true,
+		"POST /api/ledger/transactions":      true,
+		"PUT /api/ledger/transactions":       true,
+		"DELETE /api/ledger/transactions":    true,
+		"GET /api/ledger/balances":           true,
+		"GET /api/ledger/budget":             true,
+		"GET /api/ledger/income-statement":   true,
+		"GET /api/ledger/accounts":           true,
+		"POST /api/ledger/accounts":          true,
+		"GET /api/ledger/accounts/detail":    true,
+		"GET /api/ledger/account-status":     true,
+		"GET /api/ledger/reconciliation":     true,
+		"POST /api/ledger/reconciliation":    true,
+		"POST /api/ledger/append":            true,
+		"POST /api/ledger/append-batch":      true,
+		"GET /api/ledger/insights":           true,
+		"GET /api/ledger/notifications":      true,
+		"PATCH /api/ledger/notifications":    true,
+		"POST /api/ledger/imports/preview":   true,
+		"POST /api/ledger/imports/commit":    true,
+		"POST /api/ai/parse":                 true,
+		"POST /api/ai/chat":                  true,
+		"GET /api/git/status":                true,
+		"POST /api/git/pull":                 true,
+		"POST /api/git/commit":               true,
+		"GET /api/push/subscription":         true,
+		"POST /api/push/subscription":        true,
+		"DELETE /api/push/subscription":      true,
+		"PUT /api/push/subscription":         true,
+		"POST /api/push/notify":              true,
+	}
+	missing := []string{}
+	for route := range actual {
+		if !covered[route] {
+			missing = append(missing, route)
+		}
+	}
+	extra := []string{}
+	for route := range covered {
+		if !actual[route] {
+			extra = append(extra, route)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	if len(missing) > 0 || len(extra) > 0 {
+		t.Fatalf("API coverage inventory mismatch\nmissing coverage: %v\nstale coverage: %v", missing, extra)
+	}
+}
+
+func TestAPIRouteSmokeCoverage(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	runGit(t, cfg, "init")
+	runGit(t, cfg, "config", "user.email", "ledger@example.test")
+	runGit(t, cfg, "config", "user.name", "Ledger Test")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	health := requestWithCookies(router, http.MethodGet, "/api/health", "", nil)
+	if health.Code != http.StatusOK {
+		t.Fatalf("health=%d body=%s", health.Code, health.Body.String())
+	}
+	var healthBody struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(health.Body.Bytes(), &healthBody); err != nil {
+		t.Fatal(err)
+	}
+	if !healthBody.OK {
+		t.Fatalf("health should be ok: %#v", healthBody)
+	}
+
+	badLogin := requestWithCookies(router, http.MethodPost, "/api/auth/login", `{"password":"bad"}`, nil)
+	if badLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("bad login=%d body=%s", badLogin.Code, badLogin.Body.String())
+	}
+
+	for _, route := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/ledger/version", ""},
+		{http.MethodGet, "/api/ledger/transactions?start=2026-05-01&end=2026-06-01", ""},
+		{http.MethodGet, "/api/ledger/balances", ""},
+		{http.MethodGet, "/api/ledger/budget?start=2026-05-01&end=2026-06-01", ""},
+		{http.MethodGet, "/api/ledger/accounts", ""},
+		{http.MethodGet, "/api/ledger/account-status", ""},
+		{http.MethodGet, "/api/ledger/reconciliation?start=2026-05-01&end=2026-06-01", ""},
+		{http.MethodGet, "/api/git/status", ""},
+		{http.MethodPost, "/api/git/pull", ""},
+	} {
+		res := requestWithCookies(router, route.method, route.path, route.body, cookies)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s %s=%d body=%s", route.method, route.path, res.Code, res.Body.String())
+		}
+	}
+
+	account := requestWithCookies(router, http.MethodPost, "/api/ledger/accounts", `{"date":"2026-01-01","account":"Expenses:Travel","alias":"差旅","currency":"CNY"}`, cookies)
+	if account.Code != http.StatusOK {
+		t.Fatalf("append account=%d body=%s", account.Code, account.Body.String())
+	}
+	if text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"))); !strings.Contains(text, "open Expenses:Travel CNY") || !strings.Contains(text, `alias: "差旅"`) {
+		t.Fatalf("account was not appended:\n%s", text)
+	}
+
+	batchBody := `{"entries":[{"kind":"transaction","date":"2026-05-03","payee":"Bakery","narration":"Bread","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"9.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-9.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]},{"kind":"balance","date":"2026-05-31","account":"Assets:Cash","amount":"979.00","currency":"CNY"}]}`
+	batch := requestWithCookies(router, http.MethodPost, "/api/ledger/append-batch", batchBody, cookies)
+	if batch.Code != http.StatusOK {
+		t.Fatalf("append batch=%d body=%s", batch.Code, batch.Body.String())
+	}
+	var batchResp struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(batch.Body.Bytes(), &batchResp); err != nil {
+		t.Fatal(err)
+	}
+	if batchResp.Count != 2 {
+		t.Fatalf("append batch count=%d", batchResp.Count)
+	}
+
+	logout := requestWithCookies(router, http.MethodPost, "/api/auth/logout", "", cookies)
+	if logout.Code != http.StatusOK {
+		t.Fatalf("logout=%d body=%s", logout.Code, logout.Body.String())
+	}
+	me := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	for _, cookie := range logout.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(me, req)
+	if me.Code != http.StatusOK {
+		t.Fatalf("me after logout=%d body=%s", me.Code, me.Body.String())
+	}
+	var meBody struct {
+		Authenticated bool `json:"authenticated"`
+	}
+	if err := json.Unmarshal(me.Body.Bytes(), &meBody); err != nil {
+		t.Fatal(err)
+	}
+	if meBody.Authenticated {
+		t.Fatalf("logout should clear auth: %#v", meBody)
 	}
 }
 
@@ -433,6 +609,50 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	if len(body.Entries) != 1 || body.Entries[0].Payee != "Shop" {
 		t.Fatalf("unexpected AI entries: %#v", body.Entries)
+	}
+}
+
+func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected AI path: %s", r.URL.Path)
+		}
+		var body struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Messages) == 0 || !strings.Contains(body.Messages[len(body.Messages)-1].Content, "用户最新消息") {
+			t.Fatalf("chat payload missing latest message context: %#v", body.Messages)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"可以这样记。\",\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-04\",\"payee\":\"Cafe\",\"narration\":\"Coffee\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"18.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-18.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}]}"}}]}`))
+	}))
+	defer fakeAI.Close()
+	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[{"role":"assistant","text":"你好"}],"draftEntries":[]}`, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ai chat=%d body=%s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Message string        `json:"message"`
+		Entries []LedgerEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Message != "可以这样记。" || len(body.Entries) != 1 || body.Entries[0].Narration != "Coffee" {
+		t.Fatalf("unexpected chat response: %#v", body)
 	}
 }
 
@@ -770,6 +990,23 @@ func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 	}
 }
 
+func TestPasskeyVerifyRoutesRequireActiveChallenge(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	register := requestWithCookies(router, http.MethodPost, "/api/passkey/register/verify", `{}`, cookies)
+	if register.Code != http.StatusBadRequest || !strings.Contains(register.Body.String(), "No active passkey challenge") {
+		t.Fatalf("register verify=%d body=%s", register.Code, register.Body.String())
+	}
+
+	login := requestWithCookies(router, http.MethodPost, "/api/passkey/login/verify", `{}`, nil)
+	if login.Code != http.StatusBadRequest || !strings.Contains(login.Body.String(), "No active passkey challenge") {
+		t.Fatalf("login verify=%d body=%s", login.Code, login.Body.String())
+	}
+}
+
 func TestPushSubscriptionLifecycle(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
@@ -822,6 +1059,33 @@ func TestPushSubscriptionLifecycle(t *testing.T) {
 	}
 	if deleted.Removed != 1 || deleted.Count != 0 {
 		t.Fatalf("unexpected delete response: %#v", deleted)
+	}
+}
+
+func TestPushNotificationRoutesValidateRequestsAndConfiguration(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	invalidSave := requestWithCookies(router, http.MethodPost, "/api/push/subscription", `{"subscription":{"endpoint":"","keys":{"auth":"","p256dh":""}}}`, cookies)
+	if invalidSave.Code != http.StatusBadRequest {
+		t.Fatalf("invalid push save=%d body=%s", invalidSave.Code, invalidSave.Body.String())
+	}
+
+	testSend := requestWithCookies(router, http.MethodPut, "/api/push/subscription", "", cookies)
+	if testSend.Code != http.StatusBadRequest || !strings.Contains(testSend.Body.String(), "WEB_PUSH_VAPID") {
+		t.Fatalf("push test=%d body=%s", testSend.Code, testSend.Body.String())
+	}
+
+	invalidNotify := requestWithCookies(router, http.MethodPost, "/api/push/notify", `{"title":"","body":""}`, cookies)
+	if invalidNotify.Code != http.StatusBadRequest {
+		t.Fatalf("invalid notify=%d body=%s", invalidNotify.Code, invalidNotify.Body.String())
+	}
+
+	notify := requestWithCookies(router, http.MethodPost, "/api/push/notify", `{"title":"提醒","body":"测试"}`, cookies)
+	if notify.Code != http.StatusBadRequest || !strings.Contains(notify.Body.String(), "WEB_PUSH_VAPID") {
+		t.Fatalf("push notify=%d body=%s", notify.Code, notify.Body.String())
 	}
 }
 
