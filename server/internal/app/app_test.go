@@ -160,12 +160,33 @@ func TestRouterAuthAndSummary(t *testing.T) {
 		t.Fatalf("unexpected summary: %#v", body)
 	}
 
+	mergeCookies := func(groups ...[]*http.Cookie) []*http.Cookie {
+		byName := map[string]*http.Cookie{}
+		order := []string{}
+		for _, group := range groups {
+			for _, cookie := range group {
+				if cookie.MaxAge < 0 {
+					delete(byName, cookie.Name)
+					continue
+				}
+				if _, ok := byName[cookie.Name]; !ok {
+					order = append(order, cookie.Name)
+				}
+				byName[cookie.Name] = cookie
+			}
+		}
+		out := []*http.Cookie{}
+		for _, name := range order {
+			if cookie := byName[name]; cookie != nil {
+				out = append(out, cookie)
+			}
+		}
+		return out
+	}
+
 	lock := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
 	for _, cookie := range login.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	for _, cookie := range summary.Result().Cookies() {
 		req.AddCookie(cookie)
 	}
 	router.ServeHTTP(lock, req)
@@ -175,10 +196,7 @@ func TestRouterAuthAndSummary(t *testing.T) {
 
 	me := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	for _, cookie := range login.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	for _, cookie := range lock.Result().Cookies() {
+	for _, cookie := range mergeCookies(login.Result().Cookies(), lock.Result().Cookies()) {
 		req.AddCookie(cookie)
 	}
 	router.ServeHTTP(me, req)
