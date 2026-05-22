@@ -35,6 +35,9 @@ concurrency:
   group: deploy-${{ github.event_name == 'pull_request' && 'preview' || github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build Go/Vite artifact
