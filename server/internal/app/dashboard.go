@@ -144,7 +144,7 @@ func balanceTotals(balances map[string]int) (int, int) {
 }
 
 func dashboardNetWorthSeries(txns []Transaction, start, end string) []NetWorthPoint {
-	months := monthsBetween(start, end)
+	buckets := dashboardBuckets(start, end)
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].Date == sorted[j].Date {
@@ -153,30 +153,27 @@ func dashboardNetWorthSeries(txns []Transaction, start, end string) []NetWorthPo
 		return sorted[i].Date < sorted[j].Date
 	})
 	balances := map[string]int{}
-	out := make([]NetWorthPoint, 0, len(months))
+	out := make([]NetWorthPoint, 0, len(buckets))
 	index := 0
-	for _, month := range months {
-		monthEnd := monthEnd(month)
-		for index < len(sorted) && sorted[index].Date < monthEnd {
+	for _, bucket := range buckets {
+		for index < len(sorted) && sorted[index].Date < bucket.End {
 			for _, posting := range sorted[index].Postings {
 				balances[posting.Account] += posting.Amount
 			}
 			index++
 		}
 		assets, liabilities := balanceTotals(balances)
-		out = append(out, NetWorthPoint{Date: monthEnd, Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities})
+		out = append(out, NetWorthPoint{Date: bucket.Label, Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities})
 	}
 	return out
 }
 
 func dashboardCashflowSeries(txns []Transaction, start, end string) []DashboardCashflowPoint {
-	months := monthsBetween(start, end)
-	out := make([]DashboardCashflowPoint, 0, len(months))
-	for _, month := range months {
-		monthStart := month + "-01"
-		monthEnd := monthEnd(month)
-		summary := MonthSummary(monthStart, monthEnd, txns)
-		out = append(out, DashboardCashflowPoint{Month: month, Income: summary.Income, Expense: summary.Expense, Net: summary.Net})
+	buckets := dashboardBuckets(start, end)
+	out := make([]DashboardCashflowPoint, 0, len(buckets))
+	for _, bucket := range buckets {
+		summary := MonthSummary(bucket.Start, bucket.End, txns)
+		out = append(out, DashboardCashflowPoint{Month: bucket.Label, Income: summary.Income, Expense: summary.Expense, Net: summary.Net})
 	}
 	return out
 }
@@ -247,17 +244,15 @@ func dashboardWeekdayExpense(txns []Transaction, start, end string) []DashboardW
 }
 
 func dashboardCategorySeries(txns []Transaction, start, end string, limit int) []DashboardCategorySeries {
-	months := monthsBetween(start, end)
+	buckets := dashboardBuckets(start, end)
 	byAccount := map[string]map[string]int{}
 	totals := map[string]int{}
-	for _, month := range months {
-		monthStart := month + "-01"
-		monthEnd := monthEnd(month)
-		for account, amount := range MonthSummary(monthStart, monthEnd, txns).Categories {
+	for _, bucket := range buckets {
+		for account, amount := range MonthSummary(bucket.Start, bucket.End, txns).Categories {
 			if byAccount[account] == nil {
 				byAccount[account] = map[string]int{}
 			}
-			byAccount[account][month] += amount
+			byAccount[account][bucket.Label] += amount
 			totals[account] += amount
 		}
 	}
@@ -276,9 +271,9 @@ func dashboardCategorySeries(txns []Transaction, start, end string, limit int) [
 	}
 	out := make([]DashboardCategorySeries, 0, len(accounts))
 	for _, account := range accounts {
-		values := make([]DashboardSeriesPoint, 0, len(months))
-		for _, month := range months {
-			values = append(values, DashboardSeriesPoint{Month: month, Value: byAccount[account][month]})
+		values := make([]DashboardSeriesPoint, 0, len(buckets))
+		for _, bucket := range buckets {
+			values = append(values, DashboardSeriesPoint{Month: bucket.Label, Value: byAccount[account][bucket.Label]})
 		}
 		out = append(out, DashboardCategorySeries{Account: account, Label: labelFor(account), Total: totals[account], Values: values})
 	}
@@ -333,8 +328,8 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 		selected = selected[:limit]
 	}
 
-	months := monthsBetween(start, end)
-	seriesValues := accountMonthEndBalances(txns, selected, months)
+	buckets := dashboardBuckets(start, end)
+	seriesValues := accountBucketEndBalances(txns, selected, buckets)
 	out := make([]DashboardAccountSeries, 0, len(selected))
 	for _, accountName := range selected {
 		acct := labels[accountName]
@@ -351,10 +346,10 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 	return out
 }
 
-func accountMonthEndBalances(txns []Transaction, accounts []string, months []string) map[string][]DashboardSeriesPoint {
+func accountBucketEndBalances(txns []Transaction, accounts []string, buckets []dashboardBucket) map[string][]DashboardSeriesPoint {
 	out := map[string][]DashboardSeriesPoint{}
 	for _, account := range accounts {
-		out[account] = make([]DashboardSeriesPoint, 0, len(months))
+		out[account] = make([]DashboardSeriesPoint, 0, len(buckets))
 	}
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool {
@@ -365,16 +360,15 @@ func accountMonthEndBalances(txns []Transaction, accounts []string, months []str
 	})
 	balances := map[string]int{}
 	index := 0
-	for _, month := range months {
-		monthEnd := monthEnd(month)
-		for index < len(sorted) && sorted[index].Date < monthEnd {
+	for _, bucket := range buckets {
+		for index < len(sorted) && sorted[index].Date < bucket.End {
 			for _, posting := range sorted[index].Postings {
 				balances[posting.Account] += posting.Amount
 			}
 			index++
 		}
 		for _, account := range accounts {
-			out[account] = append(out[account], DashboardSeriesPoint{Month: month, Value: balances[account]})
+			out[account] = append(out[account], DashboardSeriesPoint{Month: bucket.Label, Value: balances[account]})
 		}
 	}
 	return out
@@ -455,21 +449,70 @@ func dashboardAnomalies(txns []Transaction, start, end string, limit int) []Dash
 	return rows
 }
 
-func monthsBetween(start, end string) []string {
+type dashboardBucket struct {
+	Label string
+	Start string
+	End   string
+}
+
+func dashboardBuckets(start, end string) []dashboardBucket {
 	startDate, errStart := time.Parse("2006-01-02", start)
 	endDate, errEnd := time.Parse("2006-01-02", end)
 	if errStart != nil || errEnd != nil || !startDate.Before(endDate) {
 		return nil
 	}
+	days := int(endDate.Sub(startDate).Hours() / 24)
+	if days <= 10 {
+		return dayBuckets(startDate, endDate)
+	}
+	if days <= 45 {
+		return weekBuckets(startDate, endDate)
+	}
+	return monthBuckets(startDate, endDate)
+}
+
+func dayBuckets(startDate, endDate time.Time) []dashboardBucket {
+	out := []dashboardBucket{}
+	for current := startDate; current.Before(endDate); current = current.AddDate(0, 0, 1) {
+		next := current.AddDate(0, 0, 1)
+		out = append(out, dashboardBucket{Label: current.Format("01-02"), Start: current.Format("2006-01-02"), End: next.Format("2006-01-02")})
+	}
+	return out
+}
+
+func weekBuckets(startDate, endDate time.Time) []dashboardBucket {
+	out := []dashboardBucket{}
+	for current := startDate; current.Before(endDate); current = current.AddDate(0, 0, 7) {
+		next := current.AddDate(0, 0, 7)
+		if next.After(endDate) {
+			next = endDate
+		}
+		labelEnd := next.AddDate(0, 0, -1)
+		label := current.Format("01-02") + "~" + labelEnd.Format("01-02")
+		out = append(out, dashboardBucket{Label: label, Start: current.Format("2006-01-02"), End: next.Format("2006-01-02")})
+	}
+	return out
+}
+
+func monthBuckets(startDate, endDate time.Time) []dashboardBucket {
 	current := time.Date(startDate.Year(), startDate.Month(), 1, 0, 0, 0, 0, time.UTC)
 	last := time.Date(endDate.Year(), endDate.Month(), 1, 0, 0, 0, 0, time.UTC)
 	if endDate.Day() > 1 {
 		last = last.AddDate(0, 1, 0)
 	}
-	months := []string{}
+	out := []dashboardBucket{}
 	for current.Before(last) {
-		months = append(months, current.Format("2006-01"))
-		current = current.AddDate(0, 1, 0)
+		next := current.AddDate(0, 1, 0)
+		bucketStart := current
+		if bucketStart.Before(startDate) {
+			bucketStart = startDate
+		}
+		bucketEnd := next
+		if bucketEnd.After(endDate) {
+			bucketEnd = endDate
+		}
+		out = append(out, dashboardBucket{Label: current.Format("2006-01"), Start: bucketStart.Format("2006-01-02"), End: bucketEnd.Format("2006-01-02")})
+		current = next
 	}
-	return months
+	return out
 }

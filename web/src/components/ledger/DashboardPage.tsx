@@ -19,8 +19,7 @@ const COLORS = [
 ];
 
 export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onSelectCategory }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
-  const dashboardRange = useMemo(() => dashboardTimeRange(timeRange), [timeRange]);
-  const { data, loading, error } = useDashboardSummary(dashboardRange, onSensitiveLocked);
+  const { data, loading, error } = useDashboardSummary(timeRange, onSensitiveLocked);
   const mask = (value: string) => visible ? value : "••••••";
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
@@ -90,7 +89,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
       <Panel className="xl:col-span-4" title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
         {visible ? <CashflowChart data={data} /> : <HiddenChart compact />}
       </Panel>
-      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date.slice(0, 7)} ~ ${data.netWorthSeries.at(-1)?.date.slice(0, 7)}` : "暂无"}>
+      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无"}>
         {visible ? <NetWorthChart data={data} /> : <HiddenChart compact />}
       </Panel>
       <Panel className="xl:col-span-12" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
@@ -133,16 +132,6 @@ function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void
   }, [onSensitiveLocked, params]);
 
   return { data, loading, error };
-}
-
-function dashboardTimeRange(range: TimeRange): TimeRange {
-  if (range.preset === "all" || range.preset === "custom") return range;
-  const start = new Date(`${range.start}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return range;
-  const months = range.preset === "week" ? 2 : range.preset === "year" ? 0 : 5;
-  start.setMonth(start.getMonth() - months);
-  const widenedStart = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
-  return { ...range, start: widenedStart };
 }
 
 function RowHeader({ title, subtitle }: { title: string; subtitle: string }) {
@@ -199,7 +188,7 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
 }
 
 function NetWorthChart({ data }: { data: DashboardSummary }) {
-  const rows = data.netWorthSeries.map((row) => ({ month: row.date.slice(0, 7), 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
+  const rows = data.netWorthSeries.map((row) => ({ month: row.date, 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
   return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
