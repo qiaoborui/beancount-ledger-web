@@ -1,10 +1,7 @@
 package app
 
 import (
-	"errors"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,134 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-type Server struct {
-	cfg     Config
-	cache   *LedgerCache
-	writer  *LedgerWriter
-	limiter *RateLimiter
-}
-
-func NewRouter(cfg Config) *gin.Engine {
-	cache := NewLedgerCache(cfg)
-	server := &Server{cfg: cfg, cache: cache, writer: NewLedgerWriter(cfg, cache), limiter: NewRateLimiter()}
-	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
-	server.registerAPI(router.Group("/api"))
-	router.NoRoute(server.staticFallback)
-	return router
-}
-
-func (s *Server) registerAPI(api *gin.RouterGroup) {
-	api.GET("/health", s.health)
-	api.POST("/auth/login", s.login)
-	api.POST("/auth/lock", s.lockSensitive)
-	api.POST("/auth/logout", s.logout)
-	api.GET("/auth/me", s.me)
-	api.GET("/passkey/status", s.passkeyStatus)
-	api.POST("/passkey/login/options", s.passkeyLoginOptions)
-	api.POST("/passkey/login/verify", s.passkeyLoginVerify)
-	api.POST("/passkey/register/options", s.passkeyRegisterOptions)
-	api.POST("/passkey/register/verify", s.passkeyRegisterVerify)
-
-	ledger := api.Group("/ledger")
-	ledger.GET("/version", s.ledgerVersion)
-	ledger.GET("/summary", s.summary)
-	ledger.GET("/transactions", s.transactions)
-	ledger.POST("/transactions", s.reverseTransaction)
-	ledger.PUT("/transactions", s.updateTransaction)
-	ledger.DELETE("/transactions", s.deleteTransaction)
-	ledger.GET("/balances", s.balances)
-	ledger.GET("/budget", s.budget)
-	ledger.GET("/income-statement", s.incomeStatement)
-	ledger.GET("/accounts", s.accounts)
-	ledger.POST("/accounts", s.appendAccount)
-	ledger.GET("/accounts/detail", s.accountDetail)
-	ledger.GET("/account-status", s.accountStatus)
-	ledger.GET("/reconciliation", s.reconciliation)
-	ledger.POST("/reconciliation", s.reconcile)
-	ledger.POST("/append", s.appendEntry)
-	ledger.POST("/append-batch", s.appendBatch)
-	ledger.GET("/insights", s.insights)
-	ledger.GET("/notifications", s.notifications)
-	ledger.PATCH("/notifications", s.updateNotifications)
-	ledger.POST("/imports/preview", s.importsPreview)
-	ledger.POST("/imports/commit", s.importsCommit)
-
-	api.POST("/ai/parse", s.aiParse)
-	api.POST("/ai/chat", s.aiChat)
-	api.GET("/git/status", s.gitStatus)
-	api.POST("/git/pull", s.gitPull)
-	api.POST("/git/commit", s.gitCommit)
-	api.GET("/push/subscription", s.pushStatus)
-	api.POST("/push/subscription", s.pushSave)
-	api.DELETE("/push/subscription", s.pushDelete)
-	api.PUT("/push/subscription", s.pushTest)
-	api.POST("/push/notify", s.pushNotify)
-}
-
-func (s *Server) health(c *gin.Context) {
-	_, ledgerErr := os.Stat(s.cfg.LedgerRoot)
-	_, mainErr := os.Stat(mainBeanPath(s.cfg))
-	_, runtimeErr := os.Stat(s.cfg.RuntimeDir)
-	ok := ledgerErr == nil && mainErr == nil
-	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), gin.H{
-		"ok": ok, "uptimeSeconds": int(time.Since(startedAt).Seconds()),
-		"ledgerRootExists": ledgerErr == nil, "mainBeanExists": mainErr == nil, "runtimeDirExists": runtimeErr == nil,
-	})
-}
-
-var startedAt = time.Now()
-
-func (s *Server) login(c *gin.Context) {
-	if !s.limiter.Check(c, "auth.login", 10, time.Minute) {
-		return
-	}
-	if authDisabled() {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-		return
-	}
-	var input struct {
-		Password string `json:"password"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	ok, err := verifyPassword(input.Password)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
-		return
-	}
-	token, err := createSessionToken()
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	setSessionCookie(c, token)
-	setSensitiveCookie(c)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
-}
-
-func (s *Server) logout(c *gin.Context) {
-	clearAuthCookies(c)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
-}
-
-func (s *Server) lockSensitive(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	clearSensitiveCookie(c)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
-}
-
-func (s *Server) me(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"authenticated": isAuthenticated(c), "sensitiveUnlocked": isSensitiveUnlocked(c), "authDisabled": authDisabled()})
-}
 
 func (s *Server) ledgerVersion(c *gin.Context) {
 	if !requireAuth(c) {
@@ -410,14 +279,8 @@ func (s *Server) appendBatch(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	var input struct {
-		Entries []LedgerEntry `json:"entries"`
-	}
+	var input AppendBatchRequest
 	if !bindJSON(c, &input) {
-		return
-	}
-	if len(input.Entries) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "entries is required"})
 		return
 	}
 	texts, err := s.writer.AppendEntries(input.Entries)
@@ -432,10 +295,7 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	var input struct {
-		Source TransactionSource `json:"source"`
-		Date   string            `json:"date"`
-	}
+	var input ReverseTransactionRequest
 	if !bindJSON(c, &input) {
 		return
 	}
@@ -475,10 +335,7 @@ func (s *Server) updateTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	var input struct {
-		Source TransactionSource `json:"source"`
-		Entry  LedgerEntry       `json:"entry"`
-	}
+	var input UpdateTransactionRequest
 	if !bindJSON(c, &input) {
 		return
 	}
@@ -493,10 +350,7 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	var input struct {
-		Source TransactionSource `json:"source"`
-		Reason string            `json:"reason"`
-	}
+	var input DeleteTransactionRequest
 	if !bindJSON(c, &input) {
 		return
 	}
@@ -511,12 +365,7 @@ func (s *Server) reconcile(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
-	var input struct {
-		Account        string `json:"account"`
-		ActualAmount   string `json:"actualAmount"`
-		BalanceDate    string `json:"balanceDate"`
-		AdjustmentDate string `json:"adjustmentDate"`
-	}
+	var input ReconcileRequest
 	if !bindJSON(c, &input) {
 		return
 	}
@@ -566,174 +415,6 @@ func (s *Server) reconcile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ledgerBalance": ledgerBalance, "actual": actual, "diff": diff, "adjustment": adjustment, "balance": balance, "beanText": beanText})
 }
 
-func (s *Server) gitStatus(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
-	output, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	changes := parseGitChanges(output)
-	c.JSON(http.StatusOK, gin.H{"status": output, "dirty": len(changes) > 0, "changedFileCount": len(changes), "changes": changes})
-}
-
-func (s *Server) gitPull(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	if gitRemoteDisabled() {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "output": "Git remote sync disabled\n"})
-		return
-	}
-	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
-}
-
-func (s *Server) gitCommit(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	var input struct {
-		Message string `json:"message"`
-	}
-	_ = c.ShouldBindJSON(&input)
-	if strings.TrimSpace(input.Message) == "" {
-		input.Message = "chore: update ledger"
-	}
-	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
-	before, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	beforeChanges := parseGitChanges(before)
-	if len(beforeChanges) == 0 {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "output": "No ledger changes to commit."})
-		return
-	}
-	output, err := ledgerGitCommitPullPush(s.cfg, input.Message)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	after, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": len(beforeChanges), "remainingChangedFileCount": len(parseGitChanges(after)), "output": output})
-}
-
-func (s *Server) aiParse(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.parse", 20, 5*time.Minute) {
-		return
-	}
-	if !requireAuth(c) {
-		return
-	}
-	var input struct {
-		Input string `json:"input"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	if strings.TrimSpace(input.Input) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "input is required"})
-		return
-	}
-	start := time.Now()
-	entries, err := s.parseNaturalLanguage(input.Input, time.Now().Format("2006-01-02"))
-	logDuration("ai.parse", start, map[string]any{"entries": len(entries)})
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	var first any
-	if len(entries) > 0 {
-		first = entries[0]
-	}
-	c.JSON(http.StatusOK, gin.H{"entries": entries, "entry": first})
-}
-
-func (s *Server) aiChat(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.chat", 20, 5*time.Minute) {
-		return
-	}
-	if !requireAuth(c) {
-		return
-	}
-	var input struct {
-		Message      string        `json:"message"`
-		Messages     []ChatMessage `json:"messages"`
-		DraftEntries []LedgerEntry `json:"draftEntries"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	if strings.TrimSpace(input.Message) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chat request"})
-		return
-	}
-	start := time.Now()
-	result, err := s.chatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"))
-	elapsed := time.Since(start).Milliseconds()
-	logDuration("ai.chat", start, map[string]any{"entries": len(result.Entries)})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
-}
-func (s *Server) importsPreview(c *gin.Context) {
-	if !s.limiter.Check(c, "imports.preview", 10, time.Minute) {
-		return
-	}
-	if !requireAuth(c) {
-		return
-	}
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
-		return
-	}
-	_ = file.Close()
-	result, err := s.createImportPreview(c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
-func (s *Server) importsCommit(c *gin.Context) {
-	if !s.limiter.Check(c, "imports.commit", 10, time.Minute) {
-		return
-	}
-	if !requireAuth(c) {
-		return
-	}
-	var input struct {
-		ImportID string        `json:"importId"`
-		Provider string        `json:"provider"`
-		Entries  []ImportEntry `json:"entries"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	result, err := s.commitImport(input.ImportID, input.Provider, input.Entries)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
 func (s *Server) staticFallback(c *gin.Context) {
 	path := c.Request.URL.Path
 	if strings.HasPrefix(path, "/api/") {
@@ -799,108 +480,4 @@ func status(ok bool, yes, no int) int {
 		return yes
 	}
 	return no
-}
-
-var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"}
-
-type GitChange struct {
-	Path           string `json:"path"`
-	OriginalPath   string `json:"originalPath,omitempty"`
-	IndexStatus    string `json:"indexStatus"`
-	WorkTreeStatus string `json:"workTreeStatus"`
-	Status         string `json:"status"`
-	Label          string `json:"label"`
-}
-
-func gitLedger(cfg Config, args ...string) (string, error) {
-	return gitLedgerOutput(cfg, args...)
-}
-
-func gitLedgerOutput(cfg Config, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-c", "safe.directory=" + cfg.LedgerRoot, "-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
-	text := string(out)
-	if err != nil {
-		message := strings.TrimSpace(text)
-		if message == "" {
-			message = err.Error()
-		}
-		return text, errors.New(message)
-	}
-	return text, nil
-}
-
-func gitRemoteDisabled() bool {
-	return truthyEnv("LEDGER_GIT_REMOTE_DISABLED")
-}
-
-func ledgerGitTrackedPathspecs(cfg Config) []string {
-	paths := []string{}
-	for _, path := range ledgerGitCandidatePaths {
-		if _, err := os.Stat(filepath.Join(cfg.LedgerRoot, path)); err == nil {
-			paths = append(paths, path)
-			continue
-		}
-		output, err := gitLedgerOutput(cfg, "ls-files", "--", path)
-		if err == nil && strings.TrimSpace(output) != "" {
-			paths = append(paths, path)
-		}
-	}
-	return paths
-}
-
-func parseGitChanges(status string) []GitChange {
-	changes := []GitChange{}
-	for _, line := range strings.Split(status, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		for len(line) < 3 {
-			line += " "
-		}
-		indexStatus := string(line[0])
-		workTreeStatus := string(line[1])
-		rawPath := strings.TrimSpace(line[3:])
-		originalPath := ""
-		path := rawPath
-		if before, after, ok := strings.Cut(rawPath, " -> "); ok {
-			originalPath = before
-			path = after
-		}
-		combined := strings.TrimSpace(indexStatus + workTreeStatus)
-		if combined == "" {
-			combined = "changed"
-		}
-		changes = append(changes, GitChange{
-			Path:           path,
-			OriginalPath:   originalPath,
-			IndexStatus:    indexStatus,
-			WorkTreeStatus: workTreeStatus,
-			Status:         combined,
-			Label:          gitStatusLabel(indexStatus, workTreeStatus),
-		})
-	}
-	return changes
-}
-
-func gitStatusLabel(indexStatus, workTreeStatus string) string {
-	combined := indexStatus + workTreeStatus
-	switch {
-	case combined == "??":
-		return "未跟踪"
-	case indexStatus == "R" || workTreeStatus == "R":
-		return "重命名"
-	case indexStatus == "C" || workTreeStatus == "C":
-		return "复制"
-	case indexStatus == "A" || workTreeStatus == "A":
-		return "新增"
-	case indexStatus == "D" || workTreeStatus == "D":
-		return "删除"
-	case indexStatus == "M" || workTreeStatus == "M":
-		return "修改"
-	case indexStatus == "U" || workTreeStatus == "U":
-		return "冲突"
-	default:
-		return "变更"
-	}
 }

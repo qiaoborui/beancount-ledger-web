@@ -5,19 +5,13 @@ usage() {
   cat <<'EOF'
 Usage: deploy-web-artifact.sh <environment> <port> <artifact-dir>
 
-Deploy a GitHub-built Go/Vite artifact on a Raspberry Pi/self-hosted runner.
+Compatibility wrapper for older combined Go/Vite artifacts. New deployments
+should call deploy-backend-artifact.sh and deploy-frontend-artifact.sh directly.
 
 Arguments:
   environment   prod | preview
-  port          Port to bind, e.g. 3001 or 3002
-  artifact-dir  Directory containing the downloaded artifact
-
-Environment:
-  DEPLOY_BASE       Base directory for app releases (default: $HOME/beancount-ledger-web-deploy)
-  APP_ENV_FILE      Optional env file copied into the release as .env.local.
-                    Variables inside it override script defaults.
-                    In production this should set LEDGER_ROOT to your private ledger repo.
-  GITHUB_SHA        Commit SHA, provided by GitHub Actions
+  port          Backend API port to bind
+  artifact-dir  Directory containing ledger-web and optionally web/dist or dist
 EOF
 }
 
@@ -29,196 +23,20 @@ fi
 ENVIRONMENT="${1:?environment is required}"
 PORT="${2:?port is required}"
 ARTIFACT_DIR="${3:?artifact directory is required}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-case "$ENVIRONMENT" in
-  prod|preview) ;;
-  *) echo "environment must be prod or preview" >&2; exit 2 ;;
-esac
+"$SCRIPT_DIR/deploy-backend-artifact.sh" "$ENVIRONMENT" "$PORT" "$ARTIFACT_DIR"
 
-if [[ ! -d "$ARTIFACT_DIR" ]]; then
-  echo "artifact directory does not exist: $ARTIFACT_DIR" >&2
-  exit 2
-fi
-
-DEPLOY_BASE="${DEPLOY_BASE:-$HOME/beancount-ledger-web-deploy}"
-ENV_DIR="$DEPLOY_BASE/$ENVIRONMENT"
-RELEASES_DIR="$ENV_DIR/releases"
-SHA="${GITHUB_SHA:-manual-$(date +%Y%m%d%H%M%S)}"
-RELEASE_DIR="$RELEASES_DIR/${SHA:0:12}"
-CURRENT_LINK="$ENV_DIR/current"
-DEFAULT_LEDGER_ROOT="$ENV_DIR/ledger-root"
-DEFAULT_RUNTIME_DIR="$ENV_DIR/runtime"
-APP_NAME="beancount-web-$ENVIRONMENT"
-DEFAULT_AUTH_DISABLED=false
-if [[ "$ENVIRONMENT" == "preview" ]]; then
-  DEFAULT_AUTH_DISABLED=true
-fi
-
-mkdir -p "$RELEASES_DIR" "$DEFAULT_LEDGER_ROOT" "$DEFAULT_RUNTIME_DIR"
-rm -rf "$RELEASE_DIR"
-mkdir -p "$RELEASE_DIR"
-
-if [[ -x "$ARTIFACT_DIR/ledger-web" || -f "$ARTIFACT_DIR/ledger-web" ]]; then
-  cp -a "$ARTIFACT_DIR/ledger-web" "$RELEASE_DIR/ledger-web"
-  chmod +x "$RELEASE_DIR/ledger-web"
-  if [[ -d "$ARTIFACT_DIR/web" ]]; then cp -a "$ARTIFACT_DIR/web" "$RELEASE_DIR/web"; fi
-else
-  echo "artifact does not look like a Go/Vite ledger-web bundle: $ARTIFACT_DIR" >&2
-  exit 1
-fi
-
-if [[ -d "$ARTIFACT_DIR/examples" ]]; then
-  cp -a "$ARTIFACT_DIR/examples" "$RELEASE_DIR/examples"
-fi
-
-# Agent skills live at the repository root, outside the Go/Vite bundle.
-# Copy them into the release so agent runtimes using this release as their
-# workspace can discover project-local skills.
-if [[ -d "$ARTIFACT_DIR/.agents" ]]; then
-  cp -a "$ARTIFACT_DIR/.agents" "$RELEASE_DIR/.agents"
-fi
-
-if [[ -n "${APP_ENV_FILE:-}" ]]; then
-  if [[ -f "$APP_ENV_FILE" ]]; then
-    install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
-  else
-    umask 077
-    printf '%s\n' "$APP_ENV_FILE" > "$RELEASE_DIR/.env.local"
+if [[ -d "$ARTIFACT_DIR/dist" ]]; then
+  "$SCRIPT_DIR/deploy-frontend-artifact.sh" "$ENVIRONMENT" "$ARTIFACT_DIR"
+elif [[ -d "$ARTIFACT_DIR/web/dist" ]]; then
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  cp -a "$ARTIFACT_DIR/web/dist" "$tmp/dist"
+  if [[ -f "$ARTIFACT_DIR/DEPLOYMENT.txt" ]]; then
+    cp -a "$ARTIFACT_DIR/DEPLOYMENT.txt" "$tmp/DEPLOYMENT.txt"
   fi
-fi
-
-ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
-
-echo "==> Starting/reloading $APP_NAME on port $PORT"
-cd "$CURRENT_LINK"
-set -a
-if [[ -f .env.local ]]; then
-  # shellcheck disable=SC1091
-  source .env.local
-fi
-set +a
-
-LEDGER_ROOT_EFFECTIVE="${LEDGER_ROOT:-$DEFAULT_LEDGER_ROOT}"
-LEDGER_GIT_SCHEDULER_EFFECTIVE="${LEDGER_GIT_SCHEDULER:-false}"
-LEDGER_AUTH_DISABLED_EFFECTIVE="${LEDGER_AUTH_DISABLED:-$DEFAULT_AUTH_DISABLED}"
-LEDGER_GIT_REMOTE_DISABLED_EFFECTIVE="${LEDGER_GIT_REMOTE_DISABLED:-false}"
-if [[ "$ENVIRONMENT" == "preview" ]]; then
-  LEDGER_ROOT_EFFECTIVE="$CURRENT_LINK/examples/preview-ledger"
-  LEDGER_GIT_SCHEDULER_EFFECTIVE=false
-  LEDGER_AUTH_DISABLED_EFFECTIVE=true
-  LEDGER_GIT_REMOTE_DISABLED_EFFECTIVE=true
-fi
-RUNTIME_DIR_EFFECTIVE="${RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
-DEFAULT_SERVICE_PATH="/home/pi/.local/share/uv/tools/beancount/bin:/home/pi/go/bin:/home/pi/.local/bin:/home/pi/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin"
-PATH_EFFECTIVE="$DEFAULT_SERVICE_PATH"
-if [[ -n "${PATH:-}" ]]; then
-  PATH_EFFECTIVE="$DEFAULT_SERVICE_PATH:$PATH"
-fi
-DOUBLE_ENTRY_GENERATOR_BIN_EFFECTIVE="${DOUBLE_ENTRY_GENERATOR_BIN:-}"
-if [[ -z "$DOUBLE_ENTRY_GENERATOR_BIN_EFFECTIVE" ]]; then
-  DOUBLE_ENTRY_GENERATOR_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v double-entry-generator || true)"
-fi
-PYTHON_BIN_EFFECTIVE="${PYTHON_BIN:-}"
-if [[ -z "$PYTHON_BIN_EFFECTIVE" ]]; then
-  PYTHON_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v python3 || true)"
-fi
-PDFTOTEXT_BIN_EFFECTIVE="${PDFTOTEXT_BIN:-}"
-if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]]; then
-  PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
-fi
-if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1; then
-  echo "==> Installing poppler-utils for PDF statement import"
-  sudo apt-get update
-  sudo apt-get install -y poppler-utils
-  PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
-fi
-git_ledger() {
-  git -c "safe.directory=$LEDGER_ROOT_EFFECTIVE" -C "$LEDGER_ROOT_EFFECTIVE" "$@"
-}
-if [[ "$ENVIRONMENT" == "preview" ]]; then
-  test -f "$LEDGER_ROOT_EFFECTIVE/main.bean"
-  if ! git_ledger rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git_ledger init
-    git_ledger config user.name "Preview Ledger"
-    git_ledger config user.email "preview@example.invalid"
-    git_ledger add .
-    git_ledger commit -m "Initialize preview ledger"
-  fi
+  "$SCRIPT_DIR/deploy-frontend-artifact.sh" "$ENVIRONMENT" "$tmp"
 else
-  mkdir -p "$LEDGER_ROOT_EFFECTIVE"
+  echo "==> No frontend dist/ found in artifact; backend deployed only"
 fi
-mkdir -p "$RUNTIME_DIR_EFFECTIVE"
-
-# Write runtime env for systemd service. The service unit should reference this file
-# with EnvironmentFile=<deploy-base>/<env>/systemd.env.
-cat > "$ENV_DIR/systemd.env" << SYSEOF
-PORT=$PORT
-GIN_MODE=release
-PATH=$PATH_EFFECTIVE
-LEDGER_ROOT=$LEDGER_ROOT_EFFECTIVE
-RUNTIME_DIR=$RUNTIME_DIR_EFFECTIVE
-STATIC_DIR=$CURRENT_LINK/web/dist
-AUTH_SECRET=${AUTH_SECRET:-}
-APP_PASSWORD=${APP_PASSWORD:-}
-LEDGER_AUTH_DISABLED=$LEDGER_AUTH_DISABLED_EFFECTIVE
-LEDGER_AI_PROVIDER=${LEDGER_AI_PROVIDER:-deepseek}
-DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
-OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
-WEB_PUSH_VAPID_PUBLIC_KEY=${WEB_PUSH_VAPID_PUBLIC_KEY:-}
-WEB_PUSH_VAPID_PRIVATE_KEY=${WEB_PUSH_VAPID_PRIVATE_KEY:-}
-WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-}
-BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-}
-DOUBLE_ENTRY_GENERATOR_BIN=$DOUBLE_ENTRY_GENERATOR_BIN_EFFECTIVE
-PYTHON_BIN=$PYTHON_BIN_EFFECTIVE
-PDFTOTEXT_BIN=$PDFTOTEXT_BIN_EFFECTIVE
-LEDGER_GIT_SCHEDULER=$LEDGER_GIT_SCHEDULER_EFFECTIVE
-LEDGER_GIT_REMOTE_DISABLED=$LEDGER_GIT_REMOTE_DISABLED_EFFECTIVE
-LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
-LEDGER_GIT_COMMIT_INTERVAL_MINUTES=${LEDGER_GIT_COMMIT_INTERVAL_MINUTES:-60}
-SYSEOF
-
-# Install/update the systemd service so older Node units are replaced by the Go binary.
-sudo tee "/etc/systemd/system/$APP_NAME.service" >/dev/null << SERVICEEOF
-[Unit]
-Description=Beancount Ledger Web ($ENVIRONMENT)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$CURRENT_LINK
-EnvironmentFile=$ENV_DIR/systemd.env
-ExecStart=$CURRENT_LINK/ledger-web
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-SERVICEEOF
-sudo systemctl daemon-reload
-sudo systemctl enable "$APP_NAME" >/dev/null
-
-# Restart via systemd.
-sudo systemctl restart "$APP_NAME"
-if systemctl is-active --quiet "$APP_NAME"; then
-  echo "==> $APP_NAME restarted successfully"
-else
-  echo "==> WARNING: $APP_NAME failed to start, checking logs..." >&2
-  sudo journalctl -u "$APP_NAME" --no-pager -n 10 >&2
-  exit 1
-fi
-
-# Keep the latest 5 releases for quick rollback, remove older ones.
-find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 \
-  | xargs -0 ls -dt 2>/dev/null \
-  | tail -n +6 \
-  | xargs -r rm -rf
-
-echo "==> Deployed $APP_NAME at http://127.0.0.1:$PORT"
-echo "    Release: $RELEASE_DIR"
-echo "    LEDGER_ROOT: $LEDGER_ROOT_EFFECTIVE"
-echo "    RUNTIME_DIR: $RUNTIME_DIR_EFFECTIVE"

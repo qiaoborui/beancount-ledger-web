@@ -9,7 +9,56 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  plan:
+    name: Plan checks
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      web: ${{ steps.changes.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed components
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
+          elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
+            files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
+          else
+            files="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
+          fi
+
+          backend=false
+          web=false
+          while IFS= read -r file; do
+            case "$file" in
+              .github/workflows/ci.yml|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*)
+                backend=true
+                ;;
+            esac
+            case "$file" in
+              .github/workflows/ci.yml|web/*|web/**/*|docker/*|docker/**/*)
+                web=true
+                ;;
+            esac
+          done <<< "$files"
+
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+          {
+            echo "## CI plan"
+            echo
+            echo "- Backend: \`$backend\`"
+            echo "- Web: \`$web\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   go:
+    name: Backend
+    needs: plan
+    if: ${{ needs.plan.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +74,9 @@ jobs:
         run: go build ./cmd/ledger-web
 
   web:
+    name: Frontend
+    needs: plan
+    if: ${{ needs.plan.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +99,4 @@ jobs:
         run: npm audit --audit-level=high
       - name: Build
         working-directory: web
-        env:
-          LEDGER_ROOT: ../examples/minimal-ledger
-          RUNTIME_DIR: ../.runtime-ci
         run: npm run build

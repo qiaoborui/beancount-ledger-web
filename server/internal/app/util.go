@@ -17,6 +17,12 @@ func bindJSON(c *gin.Context, out any) bool {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return false
 	}
+	if v, ok := out.(validator); ok {
+		if err := v.Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return false
+		}
+	}
 	return true
 }
 
