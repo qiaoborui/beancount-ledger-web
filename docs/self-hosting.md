@@ -1,7 +1,8 @@
 # Self-hosting
 
-The recommended production setup runs the Go API and the Vite frontend as
-separate deployable components behind an HTTPS reverse proxy.
+The recommended production setup builds the Go API and the Vite frontend as
+separate deployable artifacts while keeping one public app port. The Go service
+serves `/api/*` and the latest frontend `dist/` symlink from the same port.
 
 ## Directory layout
 
@@ -17,8 +18,9 @@ Recommended production layout:
 Environment for the backend service:
 
 ```bash
-PORT=3101
-SERVE_STATIC=false
+PORT=3001
+STATIC_DIR=/opt/beancount-ledger-web/frontend/current/dist
+SERVE_STATIC=true
 LEDGER_ROOT=/srv/beancount-ledger
 RUNTIME_DIR=/srv/beancount-ledger-runtime
 AUTH_SECRET=...
@@ -26,9 +28,9 @@ APP_PASSWORD=...
 BEAN_CHECK_BIN=/path/to/bean-check
 ```
 
-`SERVE_STATIC=false` makes the Go server return JSON 404 responses outside
-`/api/*`. Keep the default static fallback only for local single-process runs,
-Docker, or simple development deployments.
+Use the same port your public reverse proxy or router already exposes. The
+frontend can still be deployed independently by updating `frontend/current`; the
+Go process reads that stable symlink when serving static files.
 
 ## Install Beancount
 
@@ -46,7 +48,7 @@ If the service cannot find it, set `BEAN_CHECK_BIN` explicitly.
 cd /opt/beancount-ledger-web/source/server
 go test ./...
 go build -o /opt/beancount-ledger-web/backend/ledger-web ./cmd/ledger-web
-PORT=3101 SERVE_STATIC=false /opt/beancount-ledger-web/backend/ledger-web
+PORT=3001 STATIC_DIR=/opt/beancount-ledger-web/frontend/current/dist SERVE_STATIC=true /opt/beancount-ledger-web/backend/ledger-web
 ```
 
 For systemd, point `ExecStart` to the built binary and put the environment above
@@ -62,25 +64,19 @@ npm run test
 npm run build
 ```
 
-Serve the generated `web/dist` directory with Nginx, Caddy, or another static
-file server.
+Publish the generated `web/dist` directory to the stable frontend release path,
+for example `/opt/beancount-ledger-web/frontend/current/dist`.
 
-## Reverse proxy
+## Public routing
 
-Route API requests to the Go service and all other paths to the frontend SPA:
+Route public traffic to the Go service on the existing app port:
 
 ```nginx
-root /opt/beancount-ledger-web/frontend/current/dist;
-
-location /api/ {
-  proxy_pass http://127.0.0.1:3101;
+location / {
+  proxy_pass http://127.0.0.1:3001;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
-
-location / {
-  try_files $uri $uri/ /index.html;
 }
 ```
 

@@ -98,11 +98,11 @@ Configure these Actions secrets:
 RASPI_DEPLOY_BASE=/home/pi/beancount-ledger-web-deploy
 RASPI_PROD_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/prod.env
 RASPI_PREVIEW_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/preview.env
-RASPI_FRONTEND_RELOAD_COMMAND=sudo systemctl reload nginx
+RASPI_FRONTEND_RELOAD_COMMAND=
 ```
 
-`RASPI_FRONTEND_RELOAD_COMMAND` is optional. It is useful when your reverse proxy
-needs a reload after the frontend symlink changes.
+`RASPI_FRONTEND_RELOAD_COMMAND` is optional. It can stay empty when the Go
+service owns the public port and serves the frontend symlink directly.
 
 ## GitHub variables
 
@@ -111,14 +111,14 @@ Configure Actions variables:
 ```text
 PRODUCTION_URL=https://your-production-domain.example
 PREVIEW_URL=https://your-preview-domain.example
-RASPI_PROD_BACKEND_PORT=3101
-RASPI_PREVIEW_BACKEND_PORT=3102
+RASPI_PROD_PORT=3001
+RASPI_PREVIEW_PORT=3002
 ```
 
-If the backend port variables are omitted, production uses `3101` and preview
-uses `3102`. The older `RASPI_PROD_PORT` and `RASPI_PREVIEW_PORT` variables are
-intentionally ignored by the split deployment because those ports may still be
-used by the legacy combined service or frontend preview.
+These ports are the public app ports already routed from the outside world. The
+split deployment keeps using them; the backend deploy script stops the legacy
+`beancount-web-*` service before starting the new `beancount-ledger-api-*`
+service on the same port.
 
 ## Backend systemd services
 
@@ -129,14 +129,15 @@ beancount-ledger-api-prod.service
 beancount-ledger-api-preview.service
 ```
 
-The generated service runs the Go binary with `SERVE_STATIC=false`, so it only
-serves API responses. Static HTML/CSS/JS comes from the frontend release through
-your reverse proxy.
+The generated service runs the Go binary on the existing public app port with
+`STATIC_DIR=<deploy-base>/<env>/frontend/current/dist` and `SERVE_STATIC=true`.
+The frontend artifact is still deployed independently; the backend reads the
+stable frontend symlink at request time.
 
-## Reverse proxy
+## Public routing
 
-Use Nginx, Caddy, or another HTTPS reverse proxy. Route `/api/` to the local Go
-backend and everything else to the frontend release.
+Keep your existing public routing pointed at `RASPI_PROD_PORT` and
+`RASPI_PREVIEW_PORT`. You do not need to expose a new backend-only port.
 
 Example Nginx production server:
 
@@ -145,22 +146,16 @@ server {
   listen 443 ssl http2;
   server_name ledger.example.com;
 
-  root /home/pi/beancount-ledger-web-deploy/prod/frontend/current/dist;
-
-  location /api/ {
-    proxy_pass http://127.0.0.1:3101;
+  location / {
+    proxy_pass http://127.0.0.1:3001;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   }
-
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
 }
 ```
 
-Preview should use the preview frontend path and preview backend port.
+Preview should proxy to the preview app port.
 
 ## Workflow behavior
 

@@ -70,13 +70,13 @@ jobs:
           if [[ "$target" == "production" ]]; then
             echo "target=production" >> "$GITHUB_OUTPUT"
             echo "short_target=prod" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PROD_BACKEND_PORT || '3101' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PROD_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
           else
             echo "target=preview" >> "$GITHUB_OUTPUT"
             echo "short_target=preview" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PREVIEW_BACKEND_PORT || '3102' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PREVIEW_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
           fi
@@ -243,11 +243,58 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  deploy_frontend:
+    name: Deploy frontend to Raspberry Pi
+    needs: [plan, build_frontend]
+    runs-on: [self-hosted, raspberry-pi]
+    if: ${{ needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    environment:
+      name: ${{ needs.plan.outputs.target }}
+      url: ${{ needs.plan.outputs.environment_url }}
+    steps:
+      - name: Checkout deployment scripts
+        uses: actions/checkout@v4
+
+      - name: Clean old frontend artifacts
+        run: rm -rf /tmp/beancount-ledger-web-frontend-*
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-web-frontend-${{ github.sha }}
+          path: /tmp/beancount-ledger-web-frontend-download-${{ github.sha }}
+
+      - name: Extract frontend artifact
+        run: |
+          mkdir -p /tmp/beancount-ledger-web-frontend-${{ github.sha }}
+          tar -xzf "/tmp/beancount-ledger-web-frontend-download-${{ github.sha }}/ledger-web-frontend-${{ github.sha }}.tar.gz" \
+            -C "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+
+      - name: Deploy frontend artifact
+        env:
+          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
+          FRONTEND_RELOAD_COMMAND: ${{ secrets.RASPI_FRONTEND_RELOAD_COMMAND }}
+        run: |
+          chmod +x scripts/deploy-frontend-artifact.sh
+          scripts/deploy-frontend-artifact.sh \
+            "${{ needs.plan.outputs.short_target }}" \
+            "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+
+      - name: Frontend deployment summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Frontend deployment complete
+
+          - Environment: `${{ needs.plan.outputs.target }}`
+          - Commit: `${{ github.sha }}`
+          - URL: ${{ needs.plan.outputs.environment_url }}
+          EOF
+
   deploy_backend:
     name: Deploy backend to Raspberry Pi
-    needs: [plan, build_backend]
+    needs: [plan, build_backend, deploy_frontend]
     runs-on: [self-hosted, raspberry-pi]
-    if: ${{ needs.plan.outputs.deploy_backend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ always() && needs.plan.outputs.deploy_backend == 'true' && needs.build_backend.result == 'success' && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success' || needs.deploy_frontend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
       url: ${{ needs.plan.outputs.environment_url }}
@@ -288,53 +335,6 @@ jobs:
 
           - Environment: `${{ needs.plan.outputs.target }}`
           - Port: `${{ needs.plan.outputs.backend_port }}`
-          - Commit: `${{ github.sha }}`
-          - URL: ${{ needs.plan.outputs.environment_url }}
-          EOF
-
-  deploy-frontend:
-    name: Deploy frontend to Raspberry Pi
-    needs: [plan, build_frontend, deploy_backend]
-    runs-on: [self-hosted, raspberry-pi]
-    if: ${{ always() && needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (needs.plan.outputs.deploy_backend != 'true' || needs.deploy_backend.result == 'success' || needs.deploy_backend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
-    environment:
-      name: ${{ needs.plan.outputs.target }}
-      url: ${{ needs.plan.outputs.environment_url }}
-    steps:
-      - name: Checkout deployment scripts
-        uses: actions/checkout@v4
-
-      - name: Clean old frontend artifacts
-        run: rm -rf /tmp/beancount-ledger-web-frontend-*
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ledger-web-frontend-${{ github.sha }}
-          path: /tmp/beancount-ledger-web-frontend-download-${{ github.sha }}
-
-      - name: Extract frontend artifact
-        run: |
-          mkdir -p /tmp/beancount-ledger-web-frontend-${{ github.sha }}
-          tar -xzf "/tmp/beancount-ledger-web-frontend-download-${{ github.sha }}/ledger-web-frontend-${{ github.sha }}.tar.gz" \
-            -C "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
-
-      - name: Deploy frontend artifact
-        env:
-          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
-          FRONTEND_RELOAD_COMMAND: ${{ secrets.RASPI_FRONTEND_RELOAD_COMMAND }}
-        run: |
-          chmod +x scripts/deploy-frontend-artifact.sh
-          scripts/deploy-frontend-artifact.sh \
-            "${{ needs.plan.outputs.short_target }}" \
-            "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
-
-      - name: Frontend deployment summary
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## Frontend deployment complete
-
-          - Environment: `${{ needs.plan.outputs.target }}`
           - Commit: `${{ github.sha }}`
           - URL: ${{ needs.plan.outputs.environment_url }}
           EOF
