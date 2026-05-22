@@ -82,15 +82,8 @@ async function staleWhileRevalidate(request) {
   }));
 }
 
-function isRscRequest(request, url) {
-  return url.searchParams.has("_rsc")
-    || request.headers.get("RSC") === "1"
-    || request.headers.get("Accept")?.includes("text/x-component");
-}
-
 function cacheableStaticRequest(request, url) {
-  if (isRscRequest(request, url)) return false;
-  if (url.pathname.startsWith("/_next/static/")) return true;
+  if (url.pathname.startsWith("/assets/")) return true;
   if (url.pathname.startsWith("/icons/")) return true;
   return APP_STATIC_ASSETS.includes(url.pathname);
 }

@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { formatCny } from "@/lib/money";
 import { formatTimeRangeLabel, makeTimeRange, navigateTimeRange, type TimePreset, type TimeRange } from "@/lib/timeRange";
-import type { AccountDetailRow } from "@/lib/beancountParser";
+import type { AccountDetailRow } from "./types";
 
 type AccountDetail = {
   account: string;

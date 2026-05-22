@@ -31,7 +31,7 @@ function writeSidebarCollapsed(collapsed: boolean) {
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
 }
 
-export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onActiveRouteTap?: () => void }) {
+export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onLockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,14 +131,14 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
             {passkeyEnabled && (
               <button
                 type="button"
-                onClick={sensitiveUnlocked ? undefined : onUnlockSensitive}
-                disabled={sensitiveUnlocked || !onUnlockSensitive}
-                className={`rounded-xl border border-line bg-paper px-3 py-2 text-sm ${sensitiveUnlocked ? "cursor-default text-olive" : "text-warm hover:bg-tag"}`}
-                aria-label={sensitiveUnlocked ? "敏感数据已解锁" : "解锁敏感数据"}
+                onClick={sensitiveUnlocked ? onLockSensitive : onUnlockSensitive}
+                disabled={sensitiveUnlocked ? !onLockSensitive : !onUnlockSensitive}
+                className={`rounded-xl border border-line bg-paper px-3 py-2 text-sm ${sensitiveUnlocked ? "text-olive hover:bg-tag" : "text-warm hover:bg-tag"}`}
+                aria-label={sensitiveUnlocked ? "锁定敏感数据" : "解锁敏感数据"}
                 aria-pressed={sensitiveUnlocked}
-                title={sensitiveUnlocked ? "敏感数据已解锁" : "使用 Face ID / Passkey 解锁敏感数据"}
+                title={sensitiveUnlocked ? "重新隐藏敏感数据" : "使用 Face ID / Passkey 解锁敏感数据"}
               >
-                {sensitiveUnlocked ? <UnlockKeyhole className="inline h-4 w-4 text-brand" /> : <LockKeyhole className="inline h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "已解锁" : "解锁"}</span>
+                {sensitiveUnlocked ? <UnlockKeyhole className="inline h-4 w-4 text-brand" /> : <LockKeyhole className="inline h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "重新隐藏" : "解锁"}</span>
               </button>
             )}
             <button onClick={onGit} className="relative rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag">

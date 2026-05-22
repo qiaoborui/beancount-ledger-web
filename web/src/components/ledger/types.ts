@@ -3,6 +3,7 @@ export type TimeRange = { start: string; end: string; preset: TimePreset };
 export type Summary = { income: number; expense: number; net: number; days: Record<string, { income: number; expense: number }>; categories: Record<string, number> };
 export type MetadataValue = string | number | boolean;
 export type Txn = { date: string; payee: string; narration: string; metadata?: Record<string, MetadataValue>; tags?: string[]; postings: { account: string; amount: number; currency?: "CNY" }[]; source: { file: string; line: number; hash?: string }; pending?: { kind: "update-transaction"; operationId: string } };
+export type AccountDetailRow = { date: string; payee: string; narration: string; change: number; balance: number; txn: Txn };
 export type BudgetRow = { account: string; budget: number; spent: number; remaining: number; ratio: number | null };
 export type ReconcileRow = { account: string; label: string; ledgerBalance: number; status: "asserted" | "pending"; lastAssertion: { date: string; amount: number; currency: "CNY" } | null };
 export type AccountGroup = "cash" | "credit" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";

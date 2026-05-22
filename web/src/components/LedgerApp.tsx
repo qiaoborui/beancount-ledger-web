@@ -1,10 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useTransition, type ComponentProps } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell, ledgerNavItems } from "./AppShell";
+import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
@@ -42,13 +41,17 @@ import { TransactionList } from "./ledger/TransactionList";
 import { haptic } from "./ledger/haptics";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 
-const NetWorthPage = dynamic(() => import("./ledger/NetWorthPage").then((mod) => mod.NetWorthPage), {
-  loading: () => <section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>,
-});
+const LazyNetWorthPage = lazy(() => import("./ledger/NetWorthPage").then((mod) => ({ default: mod.NetWorthPage })));
 
-const IncomeStatementPage = dynamic(() => import("./ledger/IncomeStatementPage").then((mod) => mod.IncomeStatementPage), {
-  loading: () => <section className="card p-6 text-sm text-stone">正在准备损益分析…</section>,
-});
+const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage").then((mod) => ({ default: mod.IncomeStatementPage })));
+
+function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
+}
+
+function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
+}
 
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
@@ -100,9 +103,9 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const router = useBrowserRouter();
+  const { pathname, search } = useBrowserLocation();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());
@@ -156,6 +159,15 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     sessionStorage.setItem("ledger_locked_at", String(Date.now()));
     setUnlocked(false);
   }, [setUnlocked]);
+
+  const lockSensitive = useCallback(async () => {
+    handleSensitiveLocked();
+    try {
+      await fetch("/api/auth/lock", { method: "POST" });
+    } catch {
+      showToast("error", "已在本机隐藏敏感数据，但服务端锁定请求失败；请刷新后确认。");
+    }
+  }, [handleSensitiveLocked, showToast]);
   const {
     summary,
     balances,
@@ -278,8 +290,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }, [authed, pathname, router, searchParams, shortcutAction, syncPendingWrites]);
 
   function openCategoryTransactions(account: string, mode: "exact" | "prefix" = "prefix") {
-    setTxnCategoryQuery(account);
-    setCategoryMatchMode(mode);
     const params = new URLSearchParams();
     params.set("category", account);
     if (mode === "exact") params.set("mode", "exact");
@@ -430,6 +440,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       onUnlockSensitive={loginWithPasskey}
+      onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
     >
       <Toast toast={toast} />
@@ -468,7 +479,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={syncPendingWrites} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
               <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
-              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={handleSensitiveLocked}>敏感数据已解锁 · 重新隐藏</button>}
+              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -541,14 +552,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           txns={projectedTxns}
           accounts={accounts}
           searchable={page === "transactions"}
-          categoryQuery={txnCategoryQuery}
-          setCategoryQuery={setTxnCategoryQuery}
-          metadataQuery={txnMetadataQuery}
-          setMetadataQuery={setTxnMetadataQuery}
-          searchQuery={txnSearchQuery}
-          setSearchQuery={setTxnSearchQuery}
-          matchMode={categoryMatchMode}
-          setMatchMode={setCategoryMatchMode}
+          categoryQuery={page === "transactions" ? txnCategoryQuery : ""}
+          setCategoryQuery={page === "transactions" ? setTxnCategoryQuery : undefined}
+          metadataQuery={page === "transactions" ? txnMetadataQuery : ""}
+          setMetadataQuery={page === "transactions" ? setTxnMetadataQuery : undefined}
+          searchQuery={page === "transactions" ? txnSearchQuery : ""}
+          setSearchQuery={page === "transactions" ? setTxnSearchQuery : undefined}
+          matchMode={page === "transactions" ? categoryMatchMode : "prefix"}
+          setMatchMode={page === "transactions" ? setCategoryMatchMode : undefined}
           viewMode={txnViewMode}
           setViewMode={setTxnViewMode}
           onUpdate={guardedUpdateTransaction}

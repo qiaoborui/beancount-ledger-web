@@ -29,7 +29,7 @@ This project is designed for a **two-repository setup**:
 
 ```mermaid
 graph LR
-    A[Public app repo] --> B[Next.js Web App]
+    A[Public app repo] --> B[Go API + Vite Web App]
     B -->|LEDGER_ROOT| C[Private Beancount ledger repo]
     B -->|RUNTIME_DIR| D[Runtime state]
     D --> E[passkeys]

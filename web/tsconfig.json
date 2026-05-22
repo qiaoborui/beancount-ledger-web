@@ -11,11 +11,22 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
-    "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "vite.config.ts",
+    "src/main.tsx",
+    "src/components/**/*.ts",
+    "src/components/**/*.tsx",
+    "src/lib/browserRouter.ts",
+    "src/lib/clientFetch.ts",
+    "src/lib/indexedLedgerCache.ts",
+    "src/lib/money.ts",
+    "src/lib/schemas.ts",
+    "src/lib/timeRange.ts",
+    "src/app/globals.css"
+  ],
   "exclude": ["node_modules"]
 }

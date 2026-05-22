@@ -18,14 +18,15 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
       setGitChanges(changes);
       setChangedFileCount(count);
       setGitDirty(Boolean(data.dirty ?? data.status?.trim() ?? count));
-    } catch {
+    } catch (error) {
       setGitChanges([]);
       setChangedFileCount(0);
       setGitDirty(false);
+      showToast("error", error instanceof Error ? `读取 Git 状态失败：${error.message}` : "读取 Git 状态失败");
     } finally {
       setGitStatusLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   async function gitCommit(message = "chore: update ledger") {
     if (!changedFileCount) {

@@ -57,7 +57,6 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 
 WEB_PUSH_VAPID_PUBLIC_KEY=
-NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=
 WEB_PUSH_VAPID_PRIVATE_KEY=
 WEB_PUSH_SUBJECT=mailto:you@example.com
 
@@ -85,7 +84,6 @@ In the new application repository, configure Actions secrets:
 RASPI_DEPLOY_BASE=/home/pi/beancount-ledger-web-deploy
 RASPI_PROD_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/prod.env
 RASPI_PREVIEW_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/preview.env
-NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=<your public VAPID key, optional>
 ```
 
 ## GitHub Variables

@@ -8,6 +8,7 @@ on:
       - ".agents/**"
       - "scripts/deploy-web-artifact.sh"
       - "scripts/install-agent-skills.sh"
+      - "server/**"
       - "web/**"
       - "examples/**"
       - "package*.json"
@@ -18,6 +19,7 @@ on:
       - ".agents/**"
       - "scripts/deploy-web-artifact.sh"
       - "scripts/install-agent-skills.sh"
+      - "server/**"
       - "web/**"
       - "examples/**"
       - "package*.json"
@@ -33,9 +35,12 @@ concurrency:
   group: deploy-${{ github.event_name == 'pull_request' && 'preview' || github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
-    name: Build Next.js artifact
+    name: Build Go/Vite artifact
     # ARM64 artifact matches Raspberry Pi native dependencies.
     runs-on: ubuntu-24.04-arm
     # Avoid deploying draft PRs until they are marked ready for review.
@@ -78,41 +83,36 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
       - name: Install dependencies
         working-directory: web
         run: npm ci
 
-      - name: Cache Next.js build cache
-        uses: actions/cache@v4
-        with:
-          path: web/.next/cache
-          key: ${{ runner.os }}-${{ runner.arch }}-nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-nextjs-${{ hashFiles('web/package-lock.json') }}-
-
-      - name: Build
+      - name: Build frontend
         working-directory: web
-        env:
-          NEXT_TELEMETRY_DISABLED: 1
-          LEDGER_ROOT: ../examples/minimal-ledger
-          RUNTIME_DIR: ../.runtime-build
-          NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY }}
         run: npm run build
 
-      - name: Pack standalone artifact
-        working-directory: web
+      - name: Build Go backend
+        working-directory: server
+        run: go build -o ../ledger-web ./cmd/ledger-web
+
+      - name: Pack artifact
         run: |
-          mkdir -p ../artifact
-          cp -a .next/standalone ../artifact/standalone
-          cp -a .next/static ../artifact/static
-          if [[ -d public ]]; then cp -a public ../artifact/public; fi
-          if [[ -d ../examples ]]; then cp -a ../examples ../artifact/examples; fi
-          if [[ -d ../.agents ]]; then cp -a ../.agents ../artifact/.agents; fi
-          cat > ../artifact/DEPLOYMENT.txt <<EOF
+          mkdir -p artifact/web
+          cp ledger-web artifact/ledger-web
+          cp -a web/dist artifact/web/dist
+          if [[ -d examples ]]; then cp -a examples artifact/examples; fi
+          if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
+          cat > artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
           sha=${{ github.sha }}
           ref=${{ github.ref }}
@@ -121,13 +121,13 @@ jobs:
           EOF
 
       - name: Compress artifact
-        run: tar -czf web-standalone-${{ github.sha }}.tar.gz -C artifact .
+        run: tar -czf ledger-web-${{ github.sha }}.tar.gz -C artifact .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: web-standalone-${{ github.sha }}
-          path: web-standalone-${{ github.sha }}.tar.gz
+          name: ledger-web-${{ github.sha }}
+          path: ledger-web-${{ github.sha }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -148,13 +148,13 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: web-standalone-${{ github.sha }}
+          name: ledger-web-${{ github.sha }}
           path: /tmp/beancount-ledger-web-artifact-download-${{ github.sha }}
 
       - name: Extract artifact
         run: |
           mkdir -p /tmp/beancount-ledger-web-artifact-${{ github.sha }}
-          tar -xzf "/tmp/beancount-ledger-web-artifact-download-${{ github.sha }}/web-standalone-${{ github.sha }}.tar.gz" \
+          tar -xzf "/tmp/beancount-ledger-web-artifact-download-${{ github.sha }}/ledger-web-${{ github.sha }}.tar.gz" \
             -C "/tmp/beancount-ledger-web-artifact-${{ github.sha }}"
 
       - name: Deploy artifact

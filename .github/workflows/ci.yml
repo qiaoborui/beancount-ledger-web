@@ -5,14 +5,32 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Test
+        working-directory: server
+        run: go test ./...
+      - name: Build
+        working-directory: server
+        run: go build ./cmd/ledger-web
+
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install dependencies
@@ -30,7 +48,6 @@ jobs:
       - name: Build
         working-directory: web
         env:
-          NEXT_TELEMETRY_DISABLED: 1
           LEDGER_ROOT: ../examples/minimal-ledger
           RUNTIME_DIR: ../.runtime-ci
         run: npm run build
