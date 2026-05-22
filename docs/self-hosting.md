@@ -25,6 +25,8 @@ LEDGER_ROOT=/srv/beancount-ledger
 RUNTIME_DIR=/srv/beancount-ledger-runtime
 AUTH_SECRET=...
 APP_PASSWORD=...
+PUBLIC_ORIGIN=https://ledger.example.com
+WEBAUTHN_RP_ID=ledger.example.com
 BEAN_CHECK_BIN=/path/to/bean-check
 ```
 

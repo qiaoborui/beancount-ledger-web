@@ -19,7 +19,7 @@ func NewRouter(cfg Config) *gin.Engine {
 	cache := NewLedgerCache(cfg)
 	server := &Server{cfg: cfg, cache: cache, writer: NewLedgerWriter(cfg, cache), limiter: NewRateLimiter()}
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {
 		router.NoRoute(server.staticFallback)

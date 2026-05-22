@@ -108,6 +108,48 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	if !meBody.Authenticated || meBody.SensitiveUnlocked {
 		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
 	}
+
+	forgedSensitive := []*http.Cookie{}
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			forgedSensitive = append(forgedSensitive, cookie)
+		}
+	}
+	forgedSensitive = append(forgedSensitive, &http.Cookie{Name: sensitiveCookieName, Value: "9999999999999"})
+	balances := requestWithCookies(router, http.MethodGet, "/api/ledger/balances", "", forgedSensitive)
+	if balances.Code != 423 {
+		t.Fatalf("forged sensitive cookie status=%d body=%s", balances.Code, balances.Body.String())
+	}
+}
+
+func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("cross-site POST status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Host = "example.com"
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	res = httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("same-origin POST status=%d body=%s", res.Code, res.Body.String())
+	}
 }
 
 func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
