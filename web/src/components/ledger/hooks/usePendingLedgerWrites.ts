@@ -70,7 +70,7 @@ function deleteOperation(source: Txn["source"], reason: string): PendingLedgerOp
   return { id: makeId(), createdAt: Date.now(), kind: "delete-transaction", source, reason };
 }
 
-async function syncOperation(operation: PendingLedgerOperation) {
+export async function syncOperation(operation: PendingLedgerOperation) {
   if (operation.kind === "append") {
     const res = await fetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) });
     const data = await readJson<{ error?: string }>(res);
@@ -79,14 +79,24 @@ async function syncOperation(operation: PendingLedgerOperation) {
   }
 
   if (operation.kind === "update-transaction") {
-    const res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
-    const data = await readJson<{ error?: string }>(res);
+    let res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
+    let data = await readJson<{ error?: string }>(res);
+    if (!res.ok && operation.source.hash && data.error?.includes("找不到原交易")) {
+      const source = { file: operation.source.file, line: operation.source.line };
+      res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry: operation.entry }) });
+      data = await readJson<{ error?: string }>(res);
+    }
     if (!res.ok) throw new Error(data.error || "修改同步失败");
     return;
   }
 
-  const res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) });
-  const data = await readJson<{ error?: string }>(res);
+  let res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) });
+  let data = await readJson<{ error?: string }>(res);
+  if (!res.ok && operation.source.hash && data.error?.includes("找不到原交易")) {
+    const source = { file: operation.source.file, line: operation.source.line };
+    res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, reason: operation.reason }) });
+    data = await readJson<{ error?: string }>(res);
+  }
   if (!res.ok) throw new Error(data.error || "删除同步失败");
 }
 
