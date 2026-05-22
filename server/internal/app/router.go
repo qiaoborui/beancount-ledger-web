@@ -171,7 +171,26 @@ func (s *Server) dashboard(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	c.JSON(http.StatusOK, BuildDashboardSummary(snapshot, start, end))
+	c.JSON(http.StatusOK, BuildDashboardSummaryWithFilters(snapshot, start, end, parseDashboardFilters(c)))
+}
+
+func parseDashboardFilters(c *gin.Context) DashboardFilters {
+	filters := DashboardFilters{
+		Category: strings.TrimSpace(c.Query("category")),
+		Account:  strings.TrimSpace(c.Query("account")),
+		Payee:    strings.TrimSpace(c.Query("payee")),
+		Tag:      strings.TrimSpace(c.Query("tag")),
+		Type:     strings.TrimSpace(c.Query("type")),
+	}
+	if raw := strings.TrimSpace(c.Query("minAmount")); raw != "" {
+		value := cents(raw)
+		filters.MinAmount = &value
+	}
+	if raw := strings.TrimSpace(c.Query("maxAmount")); raw != "" {
+		value := cents(raw)
+		filters.MaxAmount = &value
+	}
+	return filters
 }
 
 func (s *Server) accounts(c *gin.Context) {

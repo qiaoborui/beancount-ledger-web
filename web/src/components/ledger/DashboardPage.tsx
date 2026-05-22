@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { timeRangeToParams } from "@/lib/timeRange";
 import type { TimeRange } from "@/lib/timeRange";
-import type { DashboardSummary } from "./types";
+import type { DashboardFilterOption, DashboardSummary } from "./types";
 
 const COLORS = [
   "var(--chart-palette-1)",
@@ -18,10 +18,34 @@ const COLORS = [
   "var(--chart-secondary)",
 ];
 
-export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onSelectCategory }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
-  const { data, loading, error } = useDashboardSummary(timeRange, onSensitiveLocked);
+type DashboardFilterState = {
+  category: string;
+  account: string;
+  payee: string;
+  tag: string;
+  type: string;
+  minAmount: string;
+  maxAmount: string;
+};
+
+const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
+  category: "",
+  account: "",
+  payee: "",
+  tag: "",
+  type: "",
+  minAmount: "",
+  maxAmount: "",
+};
+
+export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
+  const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
+  const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const mask = (value: string) => visible ? value : "••••••";
+  const setFilter = (key: keyof DashboardFilterState, value: string) => setFilters((current) => ({ ...current, [key]: value }));
+  const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: "" }));
+  const clearFilters = () => setFilters(DEFAULT_DASHBOARD_FILTERS);
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
   if (error && !data) return <section className="card p-6 text-sm text-stone">{error}</section>;
@@ -33,6 +57,8 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(formatCompactCny(topCategory.total / 100))}` : "暂无";
 
   return <div className="space-y-5">
+    <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
+
     <DashboardRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
     <section className="card p-3 md:p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -60,13 +86,13 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
         {visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />}
       </Panel>
       <Panel className="xl:col-span-4" title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
-        <CategoryRank rows={data.categorySeries} visible={visible} onSelectCategory={onSelectCategory} />
+        <CategoryRank rows={data.categorySeries} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
       </Panel>
       <Panel className="xl:col-span-4" title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
-        <PayeeList data={data} visible={visible} />
+        <PayeeList data={data} visible={visible} onSelectPayee={(payee) => setFilter("payee", payee)} />
       </Panel>
       <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
-        <PaymentAccounts data={data} visible={visible} />
+        <PaymentAccounts data={data} visible={visible} onSelectAccount={(account) => setFilter("account", account)} />
       </Panel>
     </div>
     </DashboardRow>
@@ -74,10 +100,10 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
-        <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={onSelectCategory} />
+        <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
       </Panel>
       <Panel className="xl:col-span-6" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
-        <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={onSelectCategory} />
+        <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
       </Panel>
       <Panel className="xl:col-span-12" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
         {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
@@ -142,11 +168,11 @@ function useDashboardRowCollapse() {
   return { collapsedRows, toggleRow };
 }
 
-function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void) {
+function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState, onSensitiveLocked: () => void) {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const params = timeRangeToParams(timeRange);
+  const params = dashboardQueryParams(timeRange, filters);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -175,6 +201,86 @@ function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void
   }, [onSensitiveLocked, params]);
 
   return { data, loading, error };
+}
+
+function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterState) {
+  const params = new URLSearchParams(timeRangeToParams(timeRange));
+  for (const [key, value] of Object.entries(filters)) {
+    const trimmed = value.trim();
+    if (trimmed) params.set(key, trimmed);
+  }
+  return params.toString();
+}
+
+function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+  const chips = activeFilterChips(data, filters);
+  return <section className="card p-3 md:p-4">
+    <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
+      <div className="flex items-center gap-2 text-sm font-medium text-warm xl:w-28">
+        <SlidersHorizontal className="h-4 w-4 text-brand" />
+        筛选
+      </div>
+      <div className="grid flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-7">
+        <FilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
+        <FilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
+        <FilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
+        <FilterSelect label="商户" value={filters.payee} onChange={(value) => onChange("payee", value)} options={data.filterOptions.payees} />
+        <FilterSelect label="标签" value={filters.tag} onChange={(value) => onChange("tag", value)} options={data.filterOptions.tags} />
+        <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
+        <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
+      </div>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {chips.length ? chips.map((chip) => <button key={chip.key} type="button" className="inline-flex items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
+        <span>{chip.label}</span>
+        <X className="h-3 w-3" />
+      </button>) : <span className="text-xs text-stone">未添加变量筛选</span>}
+      {chips.length > 0 && <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>}
+    </div>
+  </section>;
+}
+
+function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: DashboardFilterOption[]; onChange: (value: string) => void }) {
+  return <label className="min-w-0">
+    <span className="mb-1 block text-[11px] text-stone">{label}</span>
+    <select className="w-full min-w-0 rounded-lg border border-line bg-panel px-2 py-2 text-sm text-olive outline-none focus:border-brand" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">全部</option>
+      {options.map((option) => <option key={option.value} value={option.value}>{option.count > 0 ? `${option.label} (${option.count})` : option.label}</option>)}
+    </select>
+  </label>;
+}
+
+function MoneyFilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="min-w-0">
+    <span className="mb-1 block text-[11px] text-stone">{label}</span>
+    <input className="w-full min-w-0 rounded-lg border border-line bg-panel px-2 py-2 text-sm text-olive outline-none focus:border-brand" inputMode="decimal" placeholder="全部" value={value} onChange={(event) => onChange(event.target.value)} />
+  </label>;
+}
+
+function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState) {
+  const chips: { key: keyof DashboardFilterState; label: string }[] = [];
+  const add = (key: keyof DashboardFilterState, label: string, value: string) => {
+    if (value.trim()) chips.push({ key, label: `${label}: ${value}` });
+  };
+  if (filters.type) chips.push({ key: "type", label: `类型: ${typeLabel(filters.type)}` });
+  if (filters.category) chips.push({ key: "category", label: `分类: ${optionLabel(data.filterOptions.categories, filters.category)}` });
+  if (filters.account) chips.push({ key: "account", label: `账户: ${optionLabel(data.filterOptions.accounts, filters.account)}` });
+  if (filters.payee) chips.push({ key: "payee", label: `商户: ${filters.payee}` });
+  if (filters.tag) chips.push({ key: "tag", label: `标签: ${filters.tag}` });
+  add("minAmount", "最小", filters.minAmount);
+  add("maxAmount", "最大", filters.maxAmount);
+  return chips;
+}
+
+function optionLabel(options: DashboardFilterOption[], value: string) {
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function typeLabel(value: string) {
+  if (value === "expense") return "支出";
+  if (value === "income") return "收入";
+  if (value === "transfer") return "转账";
+  return value;
 }
 
 function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
@@ -328,11 +434,11 @@ function CategoryRank({ rows, visible, onSelectCategory }: { rows: DashboardSumm
   </div>;
 }
 
-function PayeeList({ data, visible }: { data: DashboardSummary; visible: boolean }) {
+function PayeeList({ data, visible, onSelectPayee }: { data: DashboardSummary; visible: boolean; onSelectPayee: (payee: string) => void }) {
   if (!data.topPayees.length) return <EmptyPanel text="暂无商户数据" />;
   const maxValue = Math.max(1, ...data.topPayees.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
-    {data.topPayees.slice(0, 8).map((row) => <div key={row.payee}>
+    {data.topPayees.slice(0, 8).map((row) => <button key={row.payee} className="w-full text-left" onClick={() => onSelectPayee(row.payee)}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate text-olive">{row.payee}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
@@ -341,7 +447,7 @@ function PayeeList({ data, visible }: { data: DashboardSummary; visible: boolean
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-line"><div className="h-full bg-[rgb(var(--color-expense))]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
         <span className="w-10 text-right text-xs text-stone">{row.txCount} 笔</span>
       </div>
-    </div>)}
+    </button>)}
   </div>;
 }
 
@@ -375,18 +481,18 @@ function AnomalyList({ rows, visible, onSelectCategory }: { rows: DashboardSumma
   </div>;
 }
 
-function PaymentAccounts({ data, visible }: { data: DashboardSummary; visible: boolean }) {
+function PaymentAccounts({ data, visible, onSelectAccount }: { data: DashboardSummary; visible: boolean; onSelectAccount: (account: string) => void }) {
   if (!data.topPaymentAccounts.length) return <EmptyPanel text="暂无消费账户" />;
   const rows = data.topPaymentAccounts.slice(0, 7);
   const maxValue = Math.max(1, ...rows.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
-    {rows.map((row) => <div key={row.account}>
+    {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onSelectAccount(row.account)}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate text-olive">{row.account.replace(/^(Assets|Liabilities):/, "")}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
       </div>
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full bg-[var(--chart-tertiary)]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
-    </div>)}
+    </button>)}
   </div>;
 }
 
