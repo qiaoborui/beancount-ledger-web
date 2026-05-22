@@ -76,7 +76,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="mt-4 min-h-[260px] min-w-0 flex-1 xl:min-h-0">
+    {rows.length ? showAmounts ? <div className="ledger-chart mt-4 min-h-[260px] min-w-0 flex-1 xl:min-h-0">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
