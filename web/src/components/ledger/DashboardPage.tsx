@@ -19,8 +19,7 @@ const COLORS = [
 ];
 
 export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onSelectCategory }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
-  const dashboardRange = useMemo(() => dashboardTimeRange(timeRange), [timeRange]);
-  const { data, loading, error } = useDashboardSummary(dashboardRange, onSensitiveLocked);
+  const { data, loading, error } = useDashboardSummary(timeRange, onSensitiveLocked);
   const mask = (value: string) => visible ? value : "••••••";
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
@@ -133,16 +132,6 @@ function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void
   }, [onSensitiveLocked, params]);
 
   return { data, loading, error };
-}
-
-function dashboardTimeRange(range: TimeRange): TimeRange {
-  if (range.preset === "all" || range.preset === "custom") return range;
-  const start = new Date(`${range.start}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return range;
-  const months = range.preset === "week" ? 2 : range.preset === "year" ? 0 : 5;
-  start.setMonth(start.getMonth() - months);
-  const widenedStart = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
-  return { ...range, start: widenedStart };
 }
 
 function RowHeader({ title, subtitle }: { title: string; subtitle: string }) {
