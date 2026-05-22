@@ -396,10 +396,7 @@ func configuredPublicOrigin() string {
 }
 
 func requestOrigin(c *gin.Context) string {
-	proto := c.GetHeader("X-Forwarded-Proto")
-	if proto != "" && !truthyEnv("TRUST_PROXY_HEADERS") {
-		proto = ""
-	}
+	proto := forwardedProto(c)
 	if proto == "" {
 		if c.Request.TLS != nil {
 			proto = "https"
@@ -418,6 +415,16 @@ func requestOrigin(c *gin.Context) string {
 		host = c.Request.URL.Host
 	}
 	return proto + "://" + host
+}
+
+func forwardedProto(c *gin.Context) string {
+	proto := strings.ToLower(strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0]))
+	switch proto {
+	case "http", "https":
+		return proto
+	default:
+		return ""
+	}
 }
 
 func rpIDFromOrigin(origin string) string {

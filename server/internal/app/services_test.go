@@ -113,6 +113,21 @@ func TestPasskeyStatusAndOptionsPersistSession(t *testing.T) {
 	}
 }
 
+func TestRequestOriginUsesForwardedProtoButNotForwardedHostByDefault(t *testing.T) {
+	t.Setenv("TRUST_PROXY_HEADERS", "false")
+	res := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(res)
+	req := httptest.NewRequest(http.MethodPost, "/api/passkey/login/options", nil)
+	req.Host = "ledger.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	c.Request = req
+
+	if got := requestOrigin(c); got != "https://ledger.example" {
+		t.Fatalf("request origin = %q, want https://ledger.example", got)
+	}
+}
+
 func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
