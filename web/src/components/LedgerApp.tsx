@@ -45,6 +45,8 @@ const LazyNetWorthPage = lazy(() => import("./ledger/NetWorthPage").then((mod) =
 
 const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage").then((mod) => ({ default: mod.IncomeStatementPage })));
 
+const LazyDashboardPage = lazy(() => import("./ledger/DashboardPage").then((mod) => ({ default: mod.DashboardPage })));
+
 function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
 }
@@ -53,7 +55,12 @@ function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPag
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
 }
 
+function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备看板…</section>}><LazyDashboardPage {...props} /></Suspense>;
+}
+
 function pageFromPathname(pathname: string): LedgerPage {
+  if (pathname.startsWith("/dashboard")) return "dashboard";
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
@@ -539,6 +546,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "home" && <HomePage summary={summary} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
+      {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} creditCards={creditCards} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} /></>; })()}
@@ -606,6 +614,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
   const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
+    dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
     budgets: { eyebrow: "budget period", title: `${label} 预算` },
     imports: { eyebrow: "statement import", title: "账单导入" },

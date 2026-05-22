@@ -78,6 +78,40 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 	}
 }
 
+func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	var body DashboardSummary
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 || body.KPIs.Net != 98800 || body.KPIs.NetWorth != 98800 {
+		t.Fatalf("unexpected dashboard kpis: %#v", body.KPIs)
+	}
+	if len(body.CashflowSeries) != 1 || body.CashflowSeries[0].Month != "2026-05" || body.CashflowSeries[0].Net != 98800 {
+		t.Fatalf("unexpected cashflow series: %#v", body.CashflowSeries)
+	}
+	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 {
+		t.Fatalf("unexpected category series: %#v", body.CategorySeries)
+	}
+	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || body.AccountBalanceSeries[0].Values[0].Value != 98800 {
+		t.Fatalf("unexpected account balance series: %#v", body.AccountBalanceSeries)
+	}
+	if len(body.BudgetPressure) != 1 || body.BudgetPressure[0].Remaining != 98800 {
+		t.Fatalf("unexpected budget pressure: %#v", body.BudgetPressure)
+	}
+	if len(body.Anomalies) != 1 || body.Anomalies[0].Amount != 1200 || body.Anomalies[0].Account != "Expenses:Food" {
+		t.Fatalf("unexpected anomalies: %#v", body.Anomalies)
+	}
+}
+
 func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
