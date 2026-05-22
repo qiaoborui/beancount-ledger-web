@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, SlidersHorizontal, X } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { timeRangeToParams } from "@/lib/timeRange";
@@ -19,32 +19,32 @@ const COLORS = [
 ];
 
 type DashboardFilterState = {
-  category: string;
-  account: string;
-  payee: string;
-  tag: string;
-  type: string;
+  category: string[];
+  account: string[];
+  payee: string[];
+  tag: string[];
+  type: string[];
   minAmount: string;
   maxAmount: string;
 };
 
 const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
-  category: "",
-  account: "",
-  payee: "",
-  tag: "",
-  type: "",
+  category: [],
+  account: [],
+  payee: [],
+  tag: [],
+  type: [],
   minAmount: "",
   maxAmount: "",
 };
 
-export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
+export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onOpenTransactions }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void; onOpenTransactions: (href: string) => void }) {
   const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
   const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const mask = (value: string) => visible ? value : "••••••";
-  const setFilter = (key: keyof DashboardFilterState, value: string) => setFilters((current) => ({ ...current, [key]: value }));
-  const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: "" }));
+  const setFilter = (key: keyof DashboardFilterState, value: string | string[]) => setFilters((current) => ({ ...current, [key]: value }));
+  const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: Array.isArray(current[key]) ? [] : "" }));
   const clearFilters = () => setFilters(DEFAULT_DASHBOARD_FILTERS);
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
@@ -80,19 +80,19 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-7" title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
-        {visible ? <DailyExpenseChart data={data} /> : <HiddenChart />}
+        {visible ? <DailyExpenseChart data={data} onOpenTransactions={onOpenTransactions} /> : <HiddenChart />}
       </Panel>
       <Panel className="xl:col-span-5" title="星期分布" subtitle="消费节律">
         {visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />}
       </Panel>
       <Panel className="xl:col-span-4" title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
-        <CategoryRank rows={data.categorySeries} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
+        <CategoryRank rows={data.categorySeries} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
       <Panel className="xl:col-span-4" title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
-        <PayeeList data={data} visible={visible} onSelectPayee={(payee) => setFilter("payee", payee)} />
+        <PayeeList data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
       <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
-        <PaymentAccounts data={data} visible={visible} onSelectAccount={(account) => setFilter("account", account)} />
+        <PaymentAccounts data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
     </div>
     </DashboardRow>
@@ -100,10 +100,10 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
-        <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
+        <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
       </Panel>
       <Panel className="xl:col-span-6" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
-        <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => setFilter("category", account)} />
+        <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
       </Panel>
       <Panel className="xl:col-span-12" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
         {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
@@ -206,13 +206,13 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
 function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterState) {
   const params = new URLSearchParams(timeRangeToParams(timeRange));
   for (const [key, value] of Object.entries(filters)) {
-    const trimmed = value.trim();
+    const trimmed = Array.isArray(value) ? value.join(",") : value.trim();
     if (trimmed) params.set(key, trimmed);
   }
   return params.toString();
 }
 
-function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
   const chips = activeFilterChips(data, filters);
   return <section className="card p-3 md:p-4">
     <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
@@ -221,11 +221,11 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
         筛选
       </div>
       <div className="grid flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-7">
-        <FilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
-        <FilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
-        <FilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
-        <FilterSelect label="商户" value={filters.payee} onChange={(value) => onChange("payee", value)} options={data.filterOptions.payees} />
-        <FilterSelect label="标签" value={filters.tag} onChange={(value) => onChange("tag", value)} options={data.filterOptions.tags} />
+        <MultiFilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
+        <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
+        <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
+        <MultiFilterSelect label="商户" value={filters.payee} onChange={(value) => onChange("payee", value)} options={data.filterOptions.payees} />
+        <MultiFilterSelect label="标签" value={filters.tag} onChange={(value) => onChange("tag", value)} options={data.filterOptions.tags} />
         <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
         <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
       </div>
@@ -240,14 +240,25 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
   </section>;
 }
 
-function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: DashboardFilterOption[]; onChange: (value: string) => void }) {
-  return <label className="min-w-0">
+function MultiFilterSelect({ label, value, options, onChange }: { label: string; value: string[]; options: DashboardFilterOption[]; onChange: (value: string[]) => void }) {
+  const selected = new Set(value);
+  const toggle = (option: string) => onChange(selected.has(option) ? value.filter((item) => item !== option) : [...value, option]);
+  return <div className="min-w-0">
     <span className="mb-1 block text-[11px] text-stone">{label}</span>
-    <select className="w-full min-w-0 rounded-lg border border-line bg-panel px-2 py-2 text-sm text-olive outline-none focus:border-brand" value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="">全部</option>
-      {options.map((option) => <option key={option.value} value={option.value}>{option.count > 0 ? `${option.label} (${option.count})` : option.label}</option>)}
-    </select>
-  </label>;
+    <details className="group relative">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 rounded-lg border border-line bg-panel px-2 py-2 text-sm text-olive outline-none group-open:border-brand">
+        <span className="min-w-0 truncate">{value.length ? `${value.length} 项` : "全部"}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />
+      </summary>
+      <div className="absolute z-30 mt-1 max-h-72 w-72 overflow-auto rounded-xl border border-line bg-paper p-2 shadow-xl">
+        {options.length ? options.map((option) => <label key={option.value} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-tag">
+          <input type="checkbox" checked={selected.has(option.value)} onChange={() => toggle(option.value)} />
+          <span className="min-w-0 flex-1 truncate text-olive">{option.label}</span>
+          {option.count > 0 && <span className="shrink-0 text-xs text-stone">{option.count}</span>}
+        </label>) : <div className="px-2 py-3 text-sm text-stone">暂无可选项</div>}
+      </div>
+    </details>
+  </div>;
 }
 
 function MoneyFilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -262,11 +273,11 @@ function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState
   const add = (key: keyof DashboardFilterState, label: string, value: string) => {
     if (value.trim()) chips.push({ key, label: `${label}: ${value}` });
   };
-  if (filters.type) chips.push({ key: "type", label: `类型: ${typeLabel(filters.type)}` });
-  if (filters.category) chips.push({ key: "category", label: `分类: ${optionLabel(data.filterOptions.categories, filters.category)}` });
-  if (filters.account) chips.push({ key: "account", label: `账户: ${optionLabel(data.filterOptions.accounts, filters.account)}` });
-  if (filters.payee) chips.push({ key: "payee", label: `商户: ${filters.payee}` });
-  if (filters.tag) chips.push({ key: "tag", label: `标签: ${filters.tag}` });
+  if (filters.type.length) chips.push({ key: "type", label: `类型: ${filters.type.map(typeLabel).join(" / ")}` });
+  if (filters.category.length) chips.push({ key: "category", label: `分类: ${filters.category.map((value) => optionLabel(data.filterOptions.categories, value)).join(" / ")}` });
+  if (filters.account.length) chips.push({ key: "account", label: `账户: ${filters.account.map((value) => optionLabel(data.filterOptions.accounts, value)).join(" / ")}` });
+  if (filters.payee.length) chips.push({ key: "payee", label: `商户: ${filters.payee.join(" / ")}` });
+  if (filters.tag.length) chips.push({ key: "tag", label: `标签: ${filters.tag.join(" / ")}` });
   add("minAmount", "最小", filters.minAmount);
   add("maxAmount", "最大", filters.maxAmount);
   return chips;
@@ -320,21 +331,29 @@ function Panel({ title, subtitle, className, children }: { title: string; subtit
   </section>;
 }
 
-function DailyExpenseChart({ data }: { data: DashboardSummary }) {
-  const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), 支出: row.amount / 100, 笔数: row.txCount }));
-  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={42}>
-    <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%">
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-        <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={10} />
-        <YAxis yAxisId="money" width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
-        <YAxis yAxisId="count" orientation="right" width={36} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatCny(Number(value)), name]} />
-        <Bar yAxisId="money" dataKey="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
-        <Line yAxisId="count" type="monotone" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  </ChartBox>;
+function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummary; onOpenTransactions: (href: string) => void }) {
+  const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), fullDate: row.date, 支出: row.amount / 100, 笔数: row.txCount }));
+  const annotations = data.annotations.filter((annotation) => annotation.date >= data.start && annotation.date < data.end);
+  return <>
+    <ChartBox empty={!rows.length} points={rows.length} minPointWidth={42}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%" onClick={(state) => {
+          const payload = state?.activePayload?.[0]?.payload as { fullDate?: string } | undefined;
+          if (payload?.fullDate) onOpenTransactions(transactionHref({ q: payload.fullDate }));
+        }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={10} />
+          <YAxis yAxisId="money" width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
+          <YAxis yAxisId="count" orientation="right" width={36} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatCny(Number(value)), name]} />
+          {annotations.slice(0, 8).map((annotation) => <ReferenceLine key={`${annotation.date}-${annotation.kind}-${annotation.payee}`} x={annotation.date.slice(5)} stroke={annotation.severity === "warning" ? "rgb(var(--color-expense))" : "var(--chart-primary)"} strokeDasharray="3 3" label={{ value: annotation.label, fill: "var(--stone)", fontSize: 10, position: "top" }} />)}
+          <Bar yAxisId="money" dataKey="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
+          <Line yAxisId="count" type="monotone" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartBox>
+    <AnnotationStrip annotations={annotations} onOpenTransactions={onOpenTransactions} />
+  </>;
 }
 
 function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
@@ -420,11 +439,11 @@ function AccountTrendChart({ data }: { data: DashboardSummary }) {
   </ChartBox>;
 }
 
-function CategoryRank({ rows, visible, onSelectCategory }: { rows: DashboardSummary["categorySeries"]; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
+function CategoryRank({ rows, visible, onOpenTransactions }: { rows: DashboardSummary["categorySeries"]; visible: boolean; onOpenTransactions: (href: string) => void }) {
   if (!rows.length) return <EmptyPanel text="暂无分类支出" />;
   const maxValue = Math.max(1, ...rows.map((row) => row.total));
   return <div className="mt-4 space-y-3">
-    {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onSelectCategory(row.account, "prefix")}>
+    {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ category: row.account }))}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate text-olive">{row.label}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.total / 100) : "••••••"}</strong>
@@ -434,11 +453,11 @@ function CategoryRank({ rows, visible, onSelectCategory }: { rows: DashboardSumm
   </div>;
 }
 
-function PayeeList({ data, visible, onSelectPayee }: { data: DashboardSummary; visible: boolean; onSelectPayee: (payee: string) => void }) {
+function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSummary; visible: boolean; onOpenTransactions: (href: string) => void }) {
   if (!data.topPayees.length) return <EmptyPanel text="暂无商户数据" />;
   const maxValue = Math.max(1, ...data.topPayees.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
-    {data.topPayees.slice(0, 8).map((row) => <button key={row.payee} className="w-full text-left" onClick={() => onSelectPayee(row.payee)}>
+    {data.topPayees.slice(0, 8).map((row) => <button key={row.payee} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.payee }))}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate text-olive">{row.payee}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
@@ -481,12 +500,12 @@ function AnomalyList({ rows, visible, onSelectCategory }: { rows: DashboardSumma
   </div>;
 }
 
-function PaymentAccounts({ data, visible, onSelectAccount }: { data: DashboardSummary; visible: boolean; onSelectAccount: (account: string) => void }) {
+function PaymentAccounts({ data, visible, onOpenTransactions }: { data: DashboardSummary; visible: boolean; onOpenTransactions: (href: string) => void }) {
   if (!data.topPaymentAccounts.length) return <EmptyPanel text="暂无消费账户" />;
   const rows = data.topPaymentAccounts.slice(0, 7);
   const maxValue = Math.max(1, ...rows.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
-    {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onSelectAccount(row.account)}>
+    {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.account }))}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate text-olive">{row.account.replace(/^(Assets|Liabilities):/, "")}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
@@ -528,6 +547,29 @@ function HiddenChart({ compact = false }: { compact?: boolean }) {
 
 function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean }) {
   return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone ${compact ? "min-h-32" : "min-h-40"}`}>{text}</div>;
+}
+
+function AnnotationStrip({ annotations, onOpenTransactions }: { annotations: DashboardSummary["annotations"]; onOpenTransactions: (href: string) => void }) {
+  if (!annotations.length) return null;
+  return <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+    {annotations.slice(0, 8).map((annotation) => <button key={`${annotation.date}-${annotation.kind}-${annotation.payee}`} className="shrink-0 rounded-full border border-line bg-panel px-3 py-1.5 text-left text-xs text-stone hover:bg-tag" onClick={() => onOpenTransactions(annotation.drilldown)}>
+      <span className={annotation.severity === "warning" ? "amount-expense" : "text-brand"}>{annotation.date.slice(5)} {annotation.label}</span>
+      {annotation.payee && <span className="ml-1 text-olive">{annotation.payee}</span>}
+      {annotation.amount ? <span className="ml-1 tabular-nums">{formatCompactCny(annotation.amount / 100)}</span> : null}
+    </button>)}
+  </div>;
+}
+
+function transactionHref({ category, q, metadata }: { category?: string; q?: string; metadata?: string }) {
+  const params = new URLSearchParams();
+  if (category) {
+    params.set("category", category);
+    params.set("mode", "prefix");
+  }
+  if (q) params.set("q", q);
+  if (metadata) params.set("metadata", metadata);
+  const query = params.toString();
+  return query ? `/transactions?${query}` : "/transactions";
 }
 
 function seriesRows(series: { account: string; values: { month: string; value: number }[] }[]) {
