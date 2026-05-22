@@ -115,8 +115,10 @@ RASPI_PROD_BACKEND_PORT=3101
 RASPI_PREVIEW_BACKEND_PORT=3102
 ```
 
-The backend port variables fall back to the older `RASPI_PROD_PORT` and
-`RASPI_PREVIEW_PORT` names, then to `3101` and `3102`.
+If the backend port variables are omitted, production uses `3101` and preview
+uses `3102`. The older `RASPI_PROD_PORT` and `RASPI_PREVIEW_PORT` variables are
+intentionally ignored by the split deployment because those ports may still be
+used by the legacy combined service or frontend preview.
 
 ## Backend systemd services
 

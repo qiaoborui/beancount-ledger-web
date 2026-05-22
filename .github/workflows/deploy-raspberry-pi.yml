@@ -70,13 +70,13 @@ jobs:
           if [[ "$target" == "production" ]]; then
             echo "target=production" >> "$GITHUB_OUTPUT"
             echo "short_target=prod" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PROD_BACKEND_PORT || vars.RASPI_PROD_PORT || '3101' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PROD_BACKEND_PORT || '3101' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PROD_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
           else
             echo "target=preview" >> "$GITHUB_OUTPUT"
             echo "short_target=preview" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PREVIEW_BACKEND_PORT || vars.RASPI_PREVIEW_PORT || '3102' }}" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.RASPI_PREVIEW_BACKEND_PORT || '3102' }}" >> "$GITHUB_OUTPUT"
             echo "env_file_secret=RASPI_PREVIEW_ENV_FILE" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
           fi
