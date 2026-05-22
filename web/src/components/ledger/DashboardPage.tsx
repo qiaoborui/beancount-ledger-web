@@ -89,7 +89,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
       <Panel className="xl:col-span-4" title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
         {visible ? <CashflowChart data={data} /> : <HiddenChart compact />}
       </Panel>
-      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date.slice(0, 7)} ~ ${data.netWorthSeries.at(-1)?.date.slice(0, 7)}` : "暂无"}>
+      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无"}>
         {visible ? <NetWorthChart data={data} /> : <HiddenChart compact />}
       </Panel>
       <Panel className="xl:col-span-12" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
@@ -188,7 +188,7 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
 }
 
 function NetWorthChart({ data }: { data: DashboardSummary }) {
-  const rows = data.netWorthSeries.map((row) => ({ month: row.date.slice(0, 7), 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
+  const rows = data.netWorthSeries.map((row) => ({ month: row.date, 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
   return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
