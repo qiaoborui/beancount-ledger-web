@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -335,6 +336,70 @@ func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	text = string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")))
 	if !strings.Contains(text, "balance Assets:Cash 980.00 CNY") {
 		t.Fatalf("balance assertion was not appended:\n%s", text)
+	}
+}
+
+func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	runGit(t, cfg, "init")
+	runGit(t, cfg, "config", "user.email", "ledger@example.test")
+	runGit(t, cfg, "config", "user.name", "Ledger Test")
+	runGit(t, cfg, "add", ".")
+	runGit(t, cfg, "commit", "-m", "initial ledger")
+
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+	appendBody := `{"kind":"transaction","date":"2026-06-02","payee":"Bakery","narration":"Breakfast","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"15.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-15.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}`
+	res := requestWithCookies(router, http.MethodPost, "/api/ledger/append", appendBody, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("append status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/git/status", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("git status=%d body=%s", res.Code, res.Body.String())
+	}
+	var statusBody struct {
+		Dirty            bool        `json:"dirty"`
+		ChangedFileCount int         `json:"changedFileCount"`
+		Changes          []GitChange `json:"changes"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &statusBody); err != nil {
+		t.Fatal(err)
+	}
+	if !statusBody.Dirty || statusBody.ChangedFileCount != 2 || !hasGitChange(statusBody.Changes, "main.bean") || !hasGitChange(statusBody.Changes, "transactions/2026/06.bean") {
+		t.Fatalf("git status should include main include and new monthly file: %#v", statusBody)
+	}
+
+	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
+	}
+	var commitBody struct {
+		ChangedFileCount          int    `json:"changedFileCount"`
+		RemainingChangedFileCount int    `json:"remainingChangedFileCount"`
+		Output                    string `json:"output"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
+		t.Fatal(err)
+	}
+	if commitBody.ChangedFileCount != 2 || commitBody.RemainingChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Git remote sync disabled") {
+		t.Fatalf("unexpected git commit response: %#v", commitBody)
+	}
+	if status := runGit(t, cfg, "status", "--short", "--", "main.bean", "transactions"); strings.TrimSpace(status) != "" {
+		t.Fatalf("ledger files should be clean after commit:\n%s", status)
+	}
+	lastCommitFiles := runGit(t, cfg, "show", "--name-only", "--pretty=format:", "HEAD")
+	if !strings.Contains(lastCommitFiles, "main.bean") || !strings.Contains(lastCommitFiles, "transactions/2026/06.bean") {
+		t.Fatalf("commit should include ledger write files:\n%s", lastCommitFiles)
 	}
 }
 
@@ -846,4 +911,22 @@ func mustRead(t *testing.T, file string) []byte {
 		t.Fatal(err)
 	}
 	return content
+}
+
+func runGit(t *testing.T, cfg Config, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func hasGitChange(changes []GitChange, path string) bool {
+	for _, change := range changes {
+		if change.Path == path || change.OriginalPath == path {
+			return true
+		}
+	}
+	return false
 }

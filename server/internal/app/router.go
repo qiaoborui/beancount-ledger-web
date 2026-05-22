@@ -570,20 +570,30 @@ func (s *Server) gitStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	output, _ := exec.Command("git", "-C", s.cfg.LedgerRoot, "status", "--short").Output()
-	c.JSON(http.StatusOK, gin.H{"status": string(output), "dirty": strings.TrimSpace(string(output)) != "", "changedFileCount": changedFileCount(string(output)), "changes": []gin.H{}})
+	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
+	output, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	changes := parseGitChanges(output)
+	c.JSON(http.StatusOK, gin.H{"status": output, "dirty": len(changes) > 0, "changedFileCount": len(changes), "changes": changes})
 }
 
 func (s *Server) gitPull(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	out, err := exec.Command("git", "-C", s.cfg.LedgerRoot, "pull", "--rebase").CombinedOutput()
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, errors.New(strings.TrimSpace(string(out))))
+	if gitRemoteDisabled() {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "output": "Git remote sync disabled\n"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "output": string(out)})
+	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
 }
 
 func (s *Server) gitCommit(c *gin.Context) {
@@ -597,28 +607,48 @@ func (s *Server) gitCommit(c *gin.Context) {
 	if strings.TrimSpace(input.Message) == "" {
 		input.Message = "chore: update ledger"
 	}
-	before, _ := exec.Command("git", "-C", s.cfg.LedgerRoot, "status", "--short").Output()
-	if strings.TrimSpace(string(before)) == "" {
+	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
+	before, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	beforeChanges := parseGitChanges(before)
+	if len(beforeChanges) == 0 {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "output": "No ledger changes to commit."})
 		return
 	}
-	if out, err := exec.Command("git", "-C", s.cfg.LedgerRoot, "add", "-A").CombinedOutput(); err != nil {
-		errorJSON(c, http.StatusBadRequest, errors.New(strings.TrimSpace(string(out))))
+	if _, err := gitLedgerOutput(s.cfg, append([]string{"add", "--"}, trackedPaths...)...); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if out, err := exec.Command("git", "-C", s.cfg.LedgerRoot, "commit", "-m", input.Message).CombinedOutput(); err != nil {
-		errorJSON(c, http.StatusBadRequest, errors.New(strings.TrimSpace(string(out))))
+	commitOut, err := gitLedgerOutput(s.cfg, append([]string{"commit", "-m", input.Message, "--"}, trackedPaths...)...)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	pullOut, pullErr := exec.Command("git", "-C", s.cfg.LedgerRoot, "pull", "--rebase", "--autostash").CombinedOutput()
-	pushOut, pushErr := exec.Command("git", "-C", s.cfg.LedgerRoot, "push").CombinedOutput()
-	output := string(pullOut) + string(pushOut)
-	if pullErr != nil || pushErr != nil {
-		errorJSON(c, http.StatusBadRequest, errors.New(strings.TrimSpace(output)))
+	output := commitOut
+	if gitRemoteDisabled() {
+		output += "\nGit remote sync disabled\n"
+	} else {
+		pullOut, pullErr := gitLedgerOutput(s.cfg, "pull", "--rebase", "--autostash")
+		pushOut, pushErr := gitLedgerOutput(s.cfg, "push")
+		output += pullOut + pushOut
+		if pullErr != nil || pushErr != nil {
+			if pullErr != nil {
+				errorJSON(c, http.StatusBadRequest, pullErr)
+				return
+			}
+			errorJSON(c, http.StatusBadRequest, pushErr)
+			return
+		}
+	}
+	after, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	after, _ := exec.Command("git", "-C", s.cfg.LedgerRoot, "status", "--short").Output()
-	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": changedFileCount(string(before)), "remainingChangedFileCount": changedFileCount(string(after)), "output": output})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": len(beforeChanges), "remainingChangedFileCount": len(parseGitChanges(after)), "output": output})
 }
 
 func (s *Server) aiParse(c *gin.Context) {
@@ -790,12 +820,107 @@ func status(ok bool, yes, no int) int {
 	}
 	return no
 }
-func changedFileCount(status string) int {
-	n := 0
-	for _, line := range strings.Split(strings.TrimSpace(status), "\n") {
-		if strings.TrimSpace(line) != "" {
-			n++
+
+var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"}
+
+type GitChange struct {
+	Path           string `json:"path"`
+	OriginalPath   string `json:"originalPath,omitempty"`
+	IndexStatus    string `json:"indexStatus"`
+	WorkTreeStatus string `json:"workTreeStatus"`
+	Status         string `json:"status"`
+	Label          string `json:"label"`
+}
+
+func gitLedger(cfg Config, args ...string) (string, error) {
+	return gitLedgerOutput(cfg, args...)
+}
+
+func gitLedgerOutput(cfg Config, args ...string) (string, error) {
+	out, err := exec.Command("git", append([]string{"-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
+	text := string(out)
+	if err != nil {
+		message := strings.TrimSpace(text)
+		if message == "" {
+			message = err.Error()
+		}
+		return text, errors.New(message)
+	}
+	return text, nil
+}
+
+func gitRemoteDisabled() bool {
+	return truthyEnv("LEDGER_GIT_REMOTE_DISABLED")
+}
+
+func ledgerGitTrackedPathspecs(cfg Config) []string {
+	paths := []string{}
+	for _, path := range ledgerGitCandidatePaths {
+		if _, err := os.Stat(filepath.Join(cfg.LedgerRoot, path)); err == nil {
+			paths = append(paths, path)
+			continue
+		}
+		output, err := gitLedgerOutput(cfg, "ls-files", "--", path)
+		if err == nil && strings.TrimSpace(output) != "" {
+			paths = append(paths, path)
 		}
 	}
-	return n
+	return paths
+}
+
+func parseGitChanges(status string) []GitChange {
+	changes := []GitChange{}
+	for _, line := range strings.Split(status, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		for len(line) < 3 {
+			line += " "
+		}
+		indexStatus := string(line[0])
+		workTreeStatus := string(line[1])
+		rawPath := strings.TrimSpace(line[3:])
+		originalPath := ""
+		path := rawPath
+		if before, after, ok := strings.Cut(rawPath, " -> "); ok {
+			originalPath = before
+			path = after
+		}
+		combined := strings.TrimSpace(indexStatus + workTreeStatus)
+		if combined == "" {
+			combined = "changed"
+		}
+		changes = append(changes, GitChange{
+			Path:           path,
+			OriginalPath:   originalPath,
+			IndexStatus:    indexStatus,
+			WorkTreeStatus: workTreeStatus,
+			Status:         combined,
+			Label:          gitStatusLabel(indexStatus, workTreeStatus),
+		})
+	}
+	return changes
+}
+
+func gitStatusLabel(indexStatus, workTreeStatus string) string {
+	combined := indexStatus + workTreeStatus
+	switch {
+	case combined == "??":
+		return "未跟踪"
+	case indexStatus == "R" || workTreeStatus == "R":
+		return "重命名"
+	case indexStatus == "C" || workTreeStatus == "C":
+		return "复制"
+	case indexStatus == "A" || workTreeStatus == "A":
+		return "新增"
+	case indexStatus == "D" || workTreeStatus == "D":
+		return "删除"
+	case indexStatus == "M" || workTreeStatus == "M":
+		return "修改"
+	case indexStatus == "U" || workTreeStatus == "U":
+		return "冲突"
+	default:
+		return "变更"
+	}
 }

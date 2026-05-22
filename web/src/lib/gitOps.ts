@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { ledgerRoot } from "./ledgerPaths";
 
-const TRACKED_PATHS = ["transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"];
+const TRACKED_PATHS = ["main.bean", "transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"];
 
 function isTrackedPath(filePath: string) {
   return TRACKED_PATHS.some((trackedPath) => filePath === trackedPath || filePath.startsWith(`${trackedPath}/`));
@@ -31,6 +33,13 @@ function git(args: string[], options: { cwd?: string; encoding?: BufferEncoding 
 function remoteDisabled() {
   const raw = process.env.LEDGER_GIT_REMOTE_DISABLED?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function trackedPathspecs(cwd = ledgerRoot()) {
+  return TRACKED_PATHS.filter((trackedPath) => {
+    if (fs.existsSync(path.join(cwd, trackedPath))) return true;
+    return git(["ls-files", "--", trackedPath], { cwd }).trim() !== "";
+  });
 }
 
 function statusLabel(indexStatus: string, workTreeStatus: string) {
@@ -70,7 +79,8 @@ export function parseGitStatus(status: string): GitChange[] {
 
 export function gitStatus() {
   const cwd = ledgerRoot();
-  const status = git(["status", "--short", "--", ...TRACKED_PATHS], { cwd });
+  const trackedPaths = trackedPathspecs(cwd);
+  const status = git(["status", "--short", "--", ...trackedPaths], { cwd });
   const branch = git(["status", "--short", "--branch"], { cwd });
   const changes = parseGitStatus(status).filter(isTrackedChange);
   return { status, branch, dirty: changes.length > 0, changedFileCount: changes.length, changes };
@@ -83,11 +93,12 @@ export function gitPullRebase() {
 
 export function gitCommitPullPush(message = "chore: update ledger") {
   const cwd = ledgerRoot();
-  git(["add", "--", ...TRACKED_PATHS], { cwd });
-  const before = git(["status", "--short", "--", ...TRACKED_PATHS], { cwd });
+  const trackedPaths = trackedPathspecs(cwd);
+  git(["add", "--", ...trackedPaths], { cwd });
+  const before = git(["status", "--short", "--", ...trackedPaths], { cwd });
   const changedFileCount = parseGitStatus(before).filter(isTrackedChange).length;
   let commit = "No changes to commit\n";
-  if (before.trim()) commit = git(["commit", "-m", message, "--", ...TRACKED_PATHS], { cwd });
+  if (before.trim()) commit = git(["commit", "-m", message, "--", ...trackedPaths], { cwd });
   if (remoteDisabled()) return { output: `${commit}\nGit remote sync disabled\n`, changedFileCount };
   const pull = git(["pull", "--rebase", "--autostash"], { cwd });
   const push = git(["push"], { cwd });
