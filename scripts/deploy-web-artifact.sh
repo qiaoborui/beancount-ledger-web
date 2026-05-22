@@ -181,7 +181,7 @@ LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=${LEDGER_GIT_COMMIT_INTERVAL_MINUTES:-60}
 SYSEOF
 
-# Install/update the systemd service so older Node/Next units are replaced by the Go binary.
+# Install/update the systemd service so older Node units are replaced by the Go binary.
 sudo tee "/etc/systemd/system/$APP_NAME.service" >/dev/null << SERVICEEOF
 [Unit]
 Description=Beancount Ledger Web ($ENVIRONMENT)

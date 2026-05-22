@@ -1,14 +1,14 @@
 # Agent Instructions
 
 This repository is the public application repository for a self-hosted
-Beancount Ledger Web app. It contains the Next.js web app, safe example
+Beancount Ledger Web app. It contains the Go API, Vite web app, safe example
 ledgers, docs, deployment scripts, and project agent skills. Real financial
 data belongs in a separate private ledger repository configured with
 `LEDGER_ROOT`.
 
 ## Repository Model
 
-- This repo is public application code: Web UI, API routes, examples, docs,
+- This repo is public application code: Web UI, Go API routes, examples, docs,
   Docker/deployment assets, helper scripts, and `.agents/` memory.
 - A private ledger repo stores `main.bean`, account files, transaction files,
   imports, prices, budgets, runtime state, and any real financial data.
@@ -20,28 +20,18 @@ data belongs in a separate private ledger repository configured with
 
 ## Project Shape
 
-- `web/` is the Next.js 15 / React 19 application.
-- `web/src/app/(ledger)/` contains the ledger pages: home, transactions,
-  accounts, account detail, budgets, imports, income statement, net worth,
-  reconcile, and settings.
-- `web/src/app/api/ledger/` contains ledger-facing APIs for summaries,
-  transactions, balances, accounts, append and append-batch writes, imports,
-  budgets, insights, notifications, reconciliation, and version data.
-- `web/src/app/api/auth/`, `web/src/app/api/passkey/`, and
-  `web/src/app/api/push/` contain password auth, WebAuthn/passkey, and web push
-  endpoints.
-- `web/src/app/api/ai/` contains AI parse/chat endpoints for bookkeeping
-  assistance.
-- `web/src/app/api/git/` contains optional private-ledger Git status, pull, and
-  commit routes.
+- `web/` is the Vite / React 19 application.
+- `server/` is the Go API and static-file server.
+- `server/internal/app/` contains ledger APIs, auth, WebAuthn/passkey, web push,
+  AI parse/chat, imports, notifications, Git operations, cache, scheduler, and
+  Beancount parsing/writing helpers.
 - `web/src/components/ledger/` contains the main product UI, mobile sheets,
   pages, modals, notification center, transaction list, and shared ledger UI.
 - `web/src/components/ledger/hooks/` contains client-side ledger data,
   mutation, auth, git status, privacy, network, route memory, pull-to-refresh,
   swipe, theme, toast, and web push hooks.
-- `web/src/lib/` contains Beancount parsing, ledger writing, analytics, imports,
-  auth, passkeys, git operations, cache, scheduler, notifications, AI provider,
-  schemas, money, and path/runtime helpers.
+- `web/src/lib/` contains browser/client helpers such as schemas, money,
+  time ranges, routing, fetch, and IndexedDB cache.
 - `scripts/` contains generic ledger helper scripts and deployment/install
   scripts.
 - `docs/` contains privacy, ledger layout, self-hosting, and Raspberry Pi
@@ -94,16 +84,15 @@ npm run typecheck
 npm run test
 ```
 
-For build, deployment, Next.js config, dependency, or workflow-sensitive changes,
+For build, deployment, dependency, or workflow-sensitive changes,
 also run:
 
 ```bash
 npm run build
 ```
 
-CI uses Node.js 22, installs with `npm ci`, then runs typecheck, tests,
-`npm audit --audit-level=high`, and build with `LEDGER_ROOT` pointed at
-`examples/minimal-ledger`.
+CI uses Node.js 24 for the web job and Go from `server/go.mod` for the Go job.
+The jobs run typecheck, tests, audit/build, and `go test ./...` in parallel.
 
 ## Agent4MD Memory and Skills
 
@@ -121,4 +110,3 @@ The project-level Agent4MD entrypoint is this file. Supporting memory lives unde
   drafts and appends.
 - `.agents/skills/beancount-insights/` supports read-only ledger analysis.
 - `.agents/skills/telegram-ledger-agent/` supports Telegram-facing ledger flows.
-

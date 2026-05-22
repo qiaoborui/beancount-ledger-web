@@ -99,10 +99,6 @@ jobs:
 
       - name: Build frontend
         working-directory: web
-        env:
-          LEDGER_ROOT: ../examples/minimal-ledger
-          RUNTIME_DIR: ../.runtime-build
-          VITE_WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY }}
         run: npm run build
 
       - name: Build Go backend

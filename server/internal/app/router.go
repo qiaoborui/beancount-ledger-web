@@ -618,30 +618,10 @@ func (s *Server) gitCommit(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "output": "No ledger changes to commit."})
 		return
 	}
-	if _, err := gitLedgerOutput(s.cfg, append([]string{"add", "--"}, trackedPaths...)...); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	commitOut, err := gitLedgerOutput(s.cfg, append([]string{"commit", "-m", input.Message, "--"}, trackedPaths...)...)
+	output, err := ledgerGitCommitPullPush(s.cfg, input.Message)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
-	}
-	output := commitOut
-	if gitRemoteDisabled() {
-		output += "\nGit remote sync disabled\n"
-	} else {
-		pullOut, pullErr := gitLedgerOutput(s.cfg, "pull", "--rebase", "--autostash")
-		pushOut, pushErr := gitLedgerOutput(s.cfg, "push")
-		output += pullOut + pushOut
-		if pullErr != nil || pushErr != nil {
-			if pullErr != nil {
-				errorJSON(c, http.StatusBadRequest, pullErr)
-				return
-			}
-			errorJSON(c, http.StatusBadRequest, pushErr)
-			return
-		}
 	}
 	after, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
 	if err != nil {

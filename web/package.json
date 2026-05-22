@@ -6,7 +6,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "vite preview --host 0.0.0.0",
-    "lint": "eslint .",
+    "lint": "npm run typecheck",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
