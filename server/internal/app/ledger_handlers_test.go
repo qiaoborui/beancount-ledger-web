@@ -96,21 +96,21 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 || body.KPIs.Net != 98800 || body.KPIs.NetWorth != 98800 {
 		t.Fatalf("unexpected dashboard kpis: %#v", body.KPIs)
 	}
-	wantWeekLabels := []string{"05-01~05-07", "05-08~05-14", "05-15~05-21", "05-22~05-28", "05-29~05-31"}
-	gotWeekLabels := make([]string, 0, len(body.CashflowSeries))
+	wantMonthLabels := []string{"05-01", "05-02", "05-03", "05-04", "05-05", "05-06", "05-07", "05-08", "05-09", "05-10", "05-11", "05-12", "05-13", "05-14", "05-15", "05-16", "05-17", "05-18", "05-19", "05-20", "05-21", "05-22", "05-23", "05-24", "05-25", "05-26", "05-27", "05-28", "05-29", "05-30", "05-31"}
+	gotMonthLabels := make([]string, 0, len(body.CashflowSeries))
 	for _, point := range body.CashflowSeries {
-		gotWeekLabels = append(gotWeekLabels, point.Month)
+		gotMonthLabels = append(gotMonthLabels, point.Month)
 	}
-	if !reflect.DeepEqual(gotWeekLabels, wantWeekLabels) || body.CashflowSeries[0].Net != -1200 || body.CashflowSeries[4].Net != 100000 {
+	if !reflect.DeepEqual(gotMonthLabels, wantMonthLabels) || body.CashflowSeries[0].Net != -1200 || body.CashflowSeries[30].Net != 100000 {
 		t.Fatalf("unexpected cashflow series: %#v", body.CashflowSeries)
 	}
-	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 || len(body.CategorySeries[0].Values) != 5 || body.CategorySeries[0].Values[0].Value != 1200 {
+	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Value != 1200 {
 		t.Fatalf("unexpected category series: %#v", body.CategorySeries)
 	}
-	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || len(body.AccountBalanceSeries[0].Values) != 5 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[4].Value != 98800 {
+	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[30].Value != 98800 {
 		t.Fatalf("unexpected account balance series: %#v", body.AccountBalanceSeries)
 	}
-	if len(body.NetWorthSeries) != 5 || body.NetWorthSeries[0].Date != "05-01~05-07" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[4].NetWorth != 98800 {
+	if len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[30].NetWorth != 98800 {
 		t.Fatalf("unexpected net worth series: %#v", body.NetWorthSeries)
 	}
 	if len(body.BudgetPressure) != 1 || body.BudgetPressure[0].Remaining != 98800 {
@@ -140,6 +140,17 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	}
 	if len(body.AccountBalanceSeries) != 1 || len(body.AccountBalanceSeries[0].Values) != 7 || body.AccountBalanceSeries[0].Values[0].Month != "05-01" || body.AccountBalanceSeries[0].Values[0].Value != -1200 {
 		t.Fatalf("unexpected daily account balance series: %#v", body.AccountBalanceSeries)
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-08-01", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quarter dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.CashflowSeries) != 14 || body.CashflowSeries[0].Month != "05-01~05-07" || body.CashflowSeries[13].Month != "07-31~07-31" {
+		t.Fatalf("unexpected weekly dashboard buckets: %#v", body.CashflowSeries)
 	}
 }
 
