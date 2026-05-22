@@ -175,9 +175,12 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     onAuthChange(authenticated);
     if (authenticated) {
       sessionStorage.setItem("ledger_authed", "1");
-      if (me.sensitiveUnlocked) {
+      if (me.sensitiveUnlocked && !sessionStorage.getItem("ledger_locked_at")) {
         sessionStorage.setItem("ledger_unlocked", "1");
         onSensitiveUnlockChange(true);
+      } else {
+        sessionStorage.removeItem("ledger_unlocked");
+        onSensitiveUnlockChange(false);
       }
     }
     else {
