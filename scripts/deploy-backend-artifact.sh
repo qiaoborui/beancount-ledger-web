@@ -9,7 +9,7 @@ Deploy the Go API artifact on a Raspberry Pi/self-hosted runner.
 
 Arguments:
   environment   prod | preview
-  port          Backend API port to bind, e.g. 3101 or 3102
+  port          Public app port to bind, e.g. 3001 or 3002
   artifact-dir  Directory containing ledger-web and optional examples/.agents
 
 Environment:
@@ -29,6 +29,7 @@ fi
 ENVIRONMENT="${1:?environment is required}"
 PORT="${2:?port is required}"
 ARTIFACT_DIR="${3:?artifact directory is required}"
+REQUESTED_PORT="$PORT"
 
 case "$ENVIRONMENT" in
   prod|preview) ;;
@@ -54,6 +55,7 @@ CURRENT_LINK="$BACKEND_DIR/current"
 DEFAULT_LEDGER_ROOT="$ENV_DIR/ledger-root"
 DEFAULT_RUNTIME_DIR="$ENV_DIR/runtime"
 APP_NAME="beancount-ledger-api-$ENVIRONMENT"
+LEGACY_APP_NAME="beancount-web-$ENVIRONMENT"
 DEFAULT_AUTH_DISABLED=false
 if [[ "$ENVIRONMENT" == "preview" ]]; then
   DEFAULT_AUTH_DISABLED=true
@@ -96,6 +98,11 @@ if [[ -f .env.local ]]; then
 fi
 set +a
 
+# The deploy workflow owns the public port. Pi-side env files may still contain
+# PORT from the legacy combined service; ignore that value so the app keeps the
+# externally routed port selected by GitHub Actions variables.
+PORT_EFFECTIVE="$REQUESTED_PORT"
+
 LEDGER_ROOT_EFFECTIVE="${LEDGER_ROOT:-$DEFAULT_LEDGER_ROOT}"
 LEDGER_GIT_SCHEDULER_EFFECTIVE="${LEDGER_GIT_SCHEDULER:-false}"
 LEDGER_AUTH_DISABLED_EFFECTIVE="${LEDGER_AUTH_DISABLED:-$DEFAULT_AUTH_DISABLED}"
@@ -107,6 +114,7 @@ if [[ "$ENVIRONMENT" == "preview" ]]; then
   LEDGER_GIT_REMOTE_DISABLED_EFFECTIVE=true
 fi
 RUNTIME_DIR_EFFECTIVE="${RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
+STATIC_DIR_EFFECTIVE="$ENV_DIR/frontend/current/dist"
 DEFAULT_SERVICE_PATH="/home/pi/.local/share/uv/tools/beancount/bin:/home/pi/go/bin:/home/pi/.local/bin:/home/pi/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin"
 PATH_EFFECTIVE="$DEFAULT_SERVICE_PATH"
 if [[ -n "${PATH:-}" ]]; then
@@ -149,12 +157,13 @@ fi
 mkdir -p "$RUNTIME_DIR_EFFECTIVE"
 
 cat > "$BACKEND_DIR/systemd.env" << SYSEOF
-PORT=$PORT
+PORT=$PORT_EFFECTIVE
 GIN_MODE=release
 PATH=$PATH_EFFECTIVE
 LEDGER_ROOT=$LEDGER_ROOT_EFFECTIVE
 RUNTIME_DIR=$RUNTIME_DIR_EFFECTIVE
-SERVE_STATIC=false
+STATIC_DIR=$STATIC_DIR_EFFECTIVE
+SERVE_STATIC=true
 AUTH_SECRET=${AUTH_SECRET:-}
 APP_PASSWORD=${APP_PASSWORD:-}
 LEDGER_AUTH_DISABLED=$LEDGER_AUTH_DISABLED_EFFECTIVE
@@ -197,6 +206,9 @@ WantedBy=multi-user.target
 SERVICEEOF
 sudo systemctl daemon-reload
 sudo systemctl enable "$APP_NAME" >/dev/null
+if systemctl list-unit-files "$LEGACY_APP_NAME.service" >/dev/null 2>&1; then
+  sudo systemctl disable --now "$LEGACY_APP_NAME" >/dev/null 2>&1 || true
+fi
 sudo systemctl restart "$APP_NAME"
 if systemctl is-active --quiet "$APP_NAME"; then
   echo "==> $APP_NAME restarted successfully"
@@ -211,7 +223,8 @@ find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 \
   | tail -n +6 \
   | xargs -r rm -rf
 
-echo "==> Deployed $APP_NAME at http://127.0.0.1:$PORT"
+echo "==> Deployed $APP_NAME at http://127.0.0.1:$PORT_EFFECTIVE"
 echo "    Release: $RELEASE_DIR"
 echo "    LEDGER_ROOT: $LEDGER_ROOT_EFFECTIVE"
 echo "    RUNTIME_DIR: $RUNTIME_DIR_EFFECTIVE"
+echo "    STATIC_DIR: $STATIC_DIR_EFFECTIVE"
