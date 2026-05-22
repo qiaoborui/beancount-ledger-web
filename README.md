@@ -98,6 +98,8 @@ APP_PASSWORD=replace-with-a-long-password
 PUBLIC_ORIGIN=http://localhost:3000
 LEDGER_AI_PROVIDER=deepseek
 DEEPSEEK_API_KEY=
+LEDGER_GIT_AUTHOR_NAME=Your Name
+LEDGER_GIT_AUTHOR_EMAIL=you@example.com
 LEDGER_GIT_SCHEDULER=false
 EOF
 npm run dev
@@ -121,6 +123,7 @@ Important variables:
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID when served behind a proxy or custom domain.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if it is not on `PATH`.
+- `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — optional Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
 
 ## Ledger layout

@@ -230,3 +230,37 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 		t.Fatalf("commit should include ledger write files:\n%s", lastCommitFiles)
 	}
 }
+
+func TestLedgerGitCommitUsesEnvAuthor(t *testing.T) {
+	cfg := testLedger(t)
+	isolateGitIdentity(t)
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	t.Setenv("LEDGER_GIT_AUTHOR_NAME", "Ledger Bot")
+	t.Setenv("LEDGER_GIT_AUTHOR_EMAIL", "ledger-bot@example.test")
+	runGit(t, cfg, "init")
+
+	output, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
+	if err != nil {
+		t.Fatalf("ledger git commit failed: %v\n%s", err, output)
+	}
+	identity := strings.TrimSpace(runGit(t, cfg, "log", "-1", "--format=%an <%ae>"))
+	if identity != "Ledger Bot <ledger-bot@example.test>" {
+		t.Fatalf("commit should use env author, got %q", identity)
+	}
+}
+
+func TestLedgerGitCommitExplainsMissingAuthor(t *testing.T) {
+	cfg := testLedger(t)
+	isolateGitIdentity(t)
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	runGit(t, cfg, "init")
+
+	_, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
+	if err == nil {
+		t.Fatal("ledger git commit should fail without an author identity")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "Git 提交缺少作者身份") || !strings.Contains(message, "LEDGER_GIT_AUTHOR_NAME") || !strings.Contains(message, cfg.LedgerRoot) {
+		t.Fatalf("missing-author error should be actionable, got:\n%s", message)
+	}
+}
