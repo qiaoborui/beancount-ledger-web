@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import type { GitChange } from "../GitSaveModal";
 
+type GitStatusPayload = { changes?: GitChange[]; changedFileCount?: number; dirty?: boolean; status?: string };
+
 export function useGitStatus(showToast: (kind: "info" | "success" | "error", text: string) => void) {
   const [gitDirty, setGitDirty] = useState(false);
   const [changedFileCount, setChangedFileCount] = useState(0);
@@ -9,15 +11,19 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
   const [gitStatusLoading, setGitStatusLoading] = useState(false);
   const [gitCommitting, setGitCommitting] = useState(false);
 
+  const applyGitStatus = useCallback((data: GitStatusPayload) => {
+    const changes = Array.isArray(data.changes) ? data.changes as GitChange[] : [];
+    const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changes.length;
+    setGitChanges(changes);
+    setChangedFileCount(count);
+    setGitDirty(Boolean(data.dirty ?? data.status?.trim() ?? count));
+  }, []);
+
   const refreshGitStatus = useCallback(async () => {
     setGitStatusLoading(true);
     try {
-      const data = await fetchJson<{ changes?: GitChange[]; changedFileCount?: number; dirty?: boolean; status?: string }>("/api/git/status", undefined, { changes: [], changedFileCount: 0, dirty: false });
-      const changes = Array.isArray(data.changes) ? data.changes as GitChange[] : [];
-      const count = typeof data.changedFileCount === "number" ? data.changedFileCount : changes.length;
-      setGitChanges(changes);
-      setChangedFileCount(count);
-      setGitDirty(Boolean(data.dirty ?? data.status?.trim() ?? count));
+      const data = await fetchJson<GitStatusPayload>("/api/git/status", undefined, { changes: [], changedFileCount: 0, dirty: false });
+      applyGitStatus(data);
     } catch (error) {
       setGitChanges([]);
       setChangedFileCount(0);
@@ -26,7 +32,7 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
     } finally {
       setGitStatusLoading(false);
     }
-  }, [showToast]);
+  }, [applyGitStatus, showToast]);
 
   async function gitCommit(message = "chore: update ledger") {
     if (!changedFileCount) {
@@ -49,5 +55,5 @@ export function useGitStatus(showToast: (kind: "info" | "success" | "error", tex
     }
   }
 
-  return { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, gitCommit };
+  return { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, applyGitStatus, gitCommit };
 }

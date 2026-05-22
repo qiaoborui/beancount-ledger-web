@@ -23,36 +23,41 @@ func StartLedgerScheduler(cfg Config) {
 				return "Git remote sync disabled\n", nil
 			}
 			return gitLedgerOutput(cfg, "pull", "--rebase")
-		})
+		}, cfg)
 	}
 	if commitInterval > 0 {
 		go runSchedulerLoop("commit-push", commitInterval, commitInterval, func() (string, error) {
 			return ledgerGitCommitPullPush(cfg, "chore: autosave ledger")
-		})
+		}, cfg)
 	}
 	log.Printf("[ledger-scheduler] started pull=%sm commit=%sm", minutesForLog(pullInterval), minutesForLog(commitInterval))
 }
 
-func runSchedulerLoop(name string, interval time.Duration, initialDelay time.Duration, job func() (string, error)) {
+func runSchedulerLoop(name string, interval time.Duration, initialDelay time.Duration, job func() (string, error), cfg Config) {
 	if initialDelay > 0 {
 		timer := time.NewTimer(initialDelay)
 		<-timer.C
-		runSchedulerJob(name, job)
+		runSchedulerJob(name, job, cfg)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		runSchedulerJob(name, job)
+		runSchedulerJob(name, job, cfg)
 	}
 }
 
-func runSchedulerJob(name string, job func() (string, error)) {
+func runSchedulerJob(name string, job func() (string, error), cfg Config) {
+	publishJobStatus("git."+name, "running", "")
 	output, err := job()
 	if err != nil {
 		log.Printf("[ledger-scheduler] %s failed: %v", name, err)
+		publishJobStatus("git."+name, "error", err.Error())
 		return
 	}
 	log.Printf("[ledger-scheduler] %s ok\n%s", name, output)
+	publishJobStatus("git."+name, "ok", output)
+	publishLedgerUpdated(cfg, "scheduler-"+name)
+	publishGitStatus(cfg, "scheduler-"+name)
 }
 
 func ledgerGitCommitPullPush(cfg Config, message string) (string, error) {

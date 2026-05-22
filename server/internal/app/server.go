@@ -13,11 +13,12 @@ type Server struct {
 	cache   *LedgerCache
 	writer  *LedgerWriter
 	limiter *RateLimiter
+	events  *EventHub
 }
 
 func NewRouter(cfg Config) *gin.Engine {
 	cache := NewLedgerCache(cfg)
-	server := &Server{cfg: cfg, cache: cache, writer: NewLedgerWriter(cfg, cache), limiter: NewRateLimiter()}
+	server := &Server{cfg: cfg, cache: cache, writer: NewLedgerWriter(cfg, cache), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
 	server.registerAPI(router.Group("/api"))
@@ -33,6 +34,7 @@ func NewRouter(cfg Config) *gin.Engine {
 
 func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.GET("/health", s.health)
+	api.GET("/events/ws", s.eventsWS)
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)

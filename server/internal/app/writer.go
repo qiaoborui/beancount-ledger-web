@@ -285,6 +285,7 @@ func (w *LedgerWriter) validateAndClear() error {
 	logDuration("bean-check", start, map[string]any{"ok": err == nil})
 	if err == nil {
 		w.cache.Clear()
+		publishLedgerUpdated(w.cfg, "ledger-write")
 	}
 	return err
 }
