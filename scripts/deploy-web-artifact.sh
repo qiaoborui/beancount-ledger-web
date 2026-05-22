@@ -132,14 +132,17 @@ if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1; th
   sudo apt-get install -y poppler-utils
   PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
 fi
+git_ledger() {
+  git -c "safe.directory=$LEDGER_ROOT_EFFECTIVE" -C "$LEDGER_ROOT_EFFECTIVE" "$@"
+}
 if [[ "$ENVIRONMENT" == "preview" ]]; then
   test -f "$LEDGER_ROOT_EFFECTIVE/main.bean"
-  if ! git -C "$LEDGER_ROOT_EFFECTIVE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$LEDGER_ROOT_EFFECTIVE" init
-    git -C "$LEDGER_ROOT_EFFECTIVE" config user.name "Preview Ledger"
-    git -C "$LEDGER_ROOT_EFFECTIVE" config user.email "preview@example.invalid"
-    git -C "$LEDGER_ROOT_EFFECTIVE" add .
-    git -C "$LEDGER_ROOT_EFFECTIVE" commit -m "Initialize preview ledger"
+  if ! git_ledger rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git_ledger init
+    git_ledger config user.name "Preview Ledger"
+    git_ledger config user.email "preview@example.invalid"
+    git_ledger add .
+    git_ledger commit -m "Initialize preview ledger"
   fi
 else
   mkdir -p "$LEDGER_ROOT_EFFECTIVE"

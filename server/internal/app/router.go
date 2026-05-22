@@ -837,7 +837,7 @@ func gitLedger(cfg Config, args ...string) (string, error) {
 }
 
 func gitLedgerOutput(cfg Config, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
+	out, err := exec.Command("git", append([]string{"-c", "safe.directory=" + cfg.LedgerRoot, "-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
 	text := string(out)
 	if err != nil {
 		message := strings.TrimSpace(text)

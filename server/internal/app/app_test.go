@@ -354,6 +354,7 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	runGit(t, cfg, "config", "user.name", "Ledger Test")
 	runGit(t, cfg, "add", ".")
 	runGit(t, cfg, "commit", "-m", "initial ledger")
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "true")
 
 	router := NewRouter(cfg)
 	cookies := loginCookies(t, router)
@@ -915,7 +916,7 @@ func mustRead(t *testing.T, file string) []byte {
 
 func runGit(t *testing.T, cfg Config, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
+	out, err := exec.Command("git", append([]string{"-c", "safe.directory=" + cfg.LedgerRoot, "-C", cfg.LedgerRoot}, args...)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}

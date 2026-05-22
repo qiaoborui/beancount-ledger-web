@@ -23,8 +23,9 @@ export type GitChange = {
 };
 
 function git(args: string[], options: { cwd?: string; encoding?: BufferEncoding } = {}) {
-  return execFileSync("git", args, {
-    cwd: options.cwd ?? ledgerRoot(),
+  const cwd = options.cwd ?? ledgerRoot();
+  return execFileSync("git", ["-c", `safe.directory=${cwd}`, ...args], {
+    cwd,
     encoding: options.encoding ?? "utf8",
     stdio: "pipe",
   }) as string;
