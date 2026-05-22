@@ -106,6 +106,7 @@ func (s *Server) updateNotifications(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	s.publishNotificationUpdate("status", s.unreadNotificationCount(), 0)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "notifications": notifications})
 }
 
@@ -277,6 +278,7 @@ func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight
 		}
 		_, _ = s.sendWebPushToAll(map[string]string{"title": title, "body": created[0].Detail, "url": "/", "tag": "ledger-notifications-" + month})
 	}
+	s.publishNotificationUpdate("insights", countUnreadNotifications(store.Notifications), len(created))
 	return s.notificationsForMonth(store.Notifications, month), nil
 }
 
@@ -312,6 +314,26 @@ func (s *Server) updateNotificationStatus(ids []string, status string) ([]Stored
 		updated = append(updated, *notification)
 	}
 	return updated, s.writeNotificationStore(store)
+}
+
+func (s *Server) publishNotificationUpdate(source string, unreadCount int, createdCount int) {
+	s.events.Publish("notifications.updated", gin.H{"source": source, "unreadCount": unreadCount, "createdCount": createdCount})
+}
+
+func countUnreadNotifications(notifications []StoredNotification) int {
+	count := 0
+	for _, notification := range notifications {
+		if notification.Status == "unread" {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Server) unreadNotificationCount() int {
+	notificationMu.Lock()
+	defer notificationMu.Unlock()
+	return countUnreadNotifications(s.readNotificationStore().Notifications)
 }
 
 func (s *Server) notificationsPath() string {

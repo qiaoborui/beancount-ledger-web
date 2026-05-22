@@ -29,11 +29,16 @@ func (s *Server) gitPull(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "output": "Git remote sync disabled\n"})
 		return
 	}
+	publishJobStatus("git.pull", "running", "")
 	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
 	if err != nil {
+		publishJobStatus("git.pull", "error", err.Error())
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	publishJobStatus("git.pull", "ok", out)
+	publishLedgerUpdated(s.cfg, "git-pull")
+	publishGitStatus(s.cfg, "git-pull")
 	c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
 }
 
@@ -57,8 +62,10 @@ func (s *Server) gitCommit(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "output": "No ledger changes to commit."})
 		return
 	}
+	publishJobStatus("git.commit", "running", "")
 	output, err := ledgerGitCommitPullPush(s.cfg, input.Message)
 	if err != nil {
+		publishJobStatus("git.commit", "error", err.Error())
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -67,5 +74,8 @@ func (s *Server) gitCommit(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	publishJobStatus("git.commit", "ok", output)
+	publishGitStatus(s.cfg, "git-commit")
+	publishLedgerUpdated(s.cfg, "git-commit")
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": len(beforeChanges), "remainingChangedFileCount": len(parseGitChanges(after)), "output": output})
 }

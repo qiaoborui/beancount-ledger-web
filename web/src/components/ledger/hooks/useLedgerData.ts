@@ -5,7 +5,6 @@ import { timeRangeToParams } from "@/lib/timeRange";
 import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
-const LEDGER_VERSION_POLL_MS = 45_000;
 
 let runtimeLedgerCache: { key: string; cache: LedgerCache } | null = null;
 
@@ -215,42 +214,6 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     await fetchFreshLedger(timeRange);
   }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onSensitiveUnlockChange, unlocked]);
 
-  useEffect(() => {
-    if (authedPollDisabled()) return;
-    let cancelled = false;
-    let timer: number | null = null;
-
-    async function checkVersion() {
-      if (cancelled || refreshing || loadingFresh) return;
-      try {
-        const latest = await fetchLedgerVersion();
-        if (cancelled || !latest) return;
-        if (!ledgerVersion) {
-          setLedgerVersion(latest);
-          return;
-        }
-        if ((latest.version ?? latest.signature) !== (ledgerVersion.version ?? ledgerVersion.signature)) {
-          showToast("info", "账本已更新，正在刷新数据");
-          await load(true);
-        }
-      } catch {
-        // Version polling is best-effort; keep the current data if the lightweight check fails.
-      }
-    }
-
-    timer = window.setInterval(checkVersion, LEDGER_VERSION_POLL_MS);
-    document.addEventListener("visibilitychange", checkVersion);
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", checkVersion);
-    };
-  }, [ledgerVersion, load, loadingFresh, refreshing, showToast]);
-
-  function authedPollDisabled() {
-    return typeof window === "undefined" || !summary;
-  }
-
   async function refreshLedger() {
     if (refreshing || loadingFresh) return;
     setRefreshing(true);
@@ -285,6 +248,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     loadingFresh,
     refreshing,
     lastSyncedAt,
+    ledgerVersion,
     load,
     accountStatuses,
     refreshLedger,
