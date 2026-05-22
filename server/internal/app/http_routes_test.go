@@ -140,7 +140,8 @@ func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
-	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Host = "example.com"
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
