@@ -237,7 +237,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                 {filteredRows.length} 笔变动 ·{" "}
                 {chartData[0].date} ~ {chartData.at(-1)!.date}
               </p>
-              <div className="account-balance-chart mt-4 h-64 min-w-0 max-w-full overflow-hidden sm:h-80">
+              <div className="account-balance-chart ledger-chart mt-4 h-64 min-w-0 max-w-full overflow-hidden sm:h-80">
                 <ResponsiveContainer width="100%" height="100%" debounce={80}>
                   <AreaChart
                     data={chartData}

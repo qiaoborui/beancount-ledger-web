@@ -204,7 +204,33 @@ button.card:active, a.card:active { transform: scale(0.992); }
   max-width: calc(100vw - 3rem);
   white-space: normal !important;
 }
-
+.ledger-chart,
+.cash-flow-chart,
+.ledger-chart .recharts-wrapper,
+.cash-flow-chart .recharts-wrapper,
+.ledger-chart .recharts-surface,
+.cash-flow-chart .recharts-surface,
+.ledger-chart .recharts-layer,
+.cash-flow-chart .recharts-layer,
+.ledger-chart .recharts-text,
+.cash-flow-chart .recharts-text,
+.ledger-chart .recharts-cartesian-axis-tick-value,
+.cash-flow-chart .recharts-cartesian-axis-tick-value,
+.ledger-chart .recharts-legend-wrapper,
+.cash-flow-chart .recharts-legend-wrapper,
+.ledger-chart .recharts-tooltip-wrapper,
+.cash-flow-chart .recharts-tooltip-wrapper {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ledger-chart,
+.ledger-chart .recharts-wrapper,
+.ledger-chart .recharts-surface {
+  overscroll-behavior: contain;
+  touch-action: none;
+}
 .kami-float { box-shadow: var(--float-shadow); }
 .kami-overlay { background: var(--overlay); }
 .kami-status-ok { color: var(--success); }

@@ -45,7 +45,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = 
       </div>
     </div>
 
-    <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin] md:-mx-2 md:px-2">
+    <div className="cash-flow-chart -mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin] md:-mx-2 md:px-2">
       <div className="h-[390px] min-w-[560px] md:h-[380px] md:min-w-0 xl:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
           <Sankey
