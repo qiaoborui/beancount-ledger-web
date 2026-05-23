@@ -27,6 +27,29 @@ type DashboardCashflowPoint struct {
 	Net     int    `json:"net"`
 }
 
+type DashboardFilters struct {
+	Category  string `json:"category,omitempty"`
+	Account   string `json:"account,omitempty"`
+	Payee     string `json:"payee,omitempty"`
+	Tag       string `json:"tag,omitempty"`
+	Type      string `json:"type,omitempty"`
+	MinAmount *int   `json:"minAmount,omitempty"`
+	MaxAmount *int   `json:"maxAmount,omitempty"`
+}
+
+type DashboardFilterOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+type DashboardFilterOptions struct {
+	Categories []DashboardFilterOption `json:"categories"`
+	Accounts   []DashboardFilterOption `json:"accounts"`
+	Payees     []DashboardFilterOption `json:"payees"`
+	Tags       []DashboardFilterOption `json:"tags"`
+}
+
 type DashboardSeriesPoint struct {
 	Month string `json:"month"`
 	Value int    `json:"value"`
@@ -92,13 +115,24 @@ type DashboardSummary struct {
 	Anomalies            []DashboardAnomaly        `json:"anomalies"`
 	TopPayees            []PayeeAnalytics          `json:"topPayees"`
 	TopPaymentAccounts   []AccountAnalytics        `json:"topPaymentAccounts"`
+	Filters              DashboardFilters          `json:"filters"`
+	FilterOptions        DashboardFilterOptions    `json:"filterOptions"`
 	GeneratedAt          string                    `json:"generatedAt"`
 }
 
 func BuildDashboardSummary(snapshot *LedgerSnapshot, start, end string) DashboardSummary {
-	summary := MonthSummary(start, end, snapshot.Transactions)
+	return BuildDashboardSummaryWithFilters(snapshot, start, end, DashboardFilters{})
+}
+
+func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end string, filters DashboardFilters) DashboardSummary {
+	txns := dashboardFilterTransactions(snapshot.Transactions, filters)
+	balances := snapshot.Balances
+	if !filters.Empty() {
+		balances = CurrentBalances(txns)
+	}
+	summary := MonthSummary(start, end, txns)
 	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, end)
-	assets, liabilities := balanceTotals(snapshot.Balances)
+	assets, liabilities := balanceTotals(balances)
 	var savingsRate *float64
 	if summary.Income > 0 {
 		value := float64(summary.Net) / float64(summary.Income)
@@ -109,25 +143,195 @@ func BuildDashboardSummary(snapshot *LedgerSnapshot, start, end string) Dashboar
 		value := float64(budgetSpent) / float64(budget)
 		budgetUsage = &value
 	}
-	_, topPayees, topPaymentAccounts := ExpenseAnalytics(snapshot.Transactions, start, end)
+	_, topPayees, topPaymentAccounts := ExpenseAnalytics(txns, start, end)
 
 	return DashboardSummary{
 		Start:                start,
 		End:                  end,
 		Currency:             "CNY",
 		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
-		NetWorthSeries:       dashboardNetWorthSeries(snapshot.Transactions, start, end),
-		CashflowSeries:       dashboardCashflowSeries(snapshot.Transactions, start, end),
-		DailyExpenseSeries:   dashboardDailyExpenseSeries(snapshot.Transactions, start, end),
-		WeekdayExpense:       dashboardWeekdayExpense(snapshot.Transactions, start, end),
-		CategorySeries:       dashboardCategorySeries(snapshot.Transactions, start, end, 8),
-		AccountBalanceSeries: dashboardAccountBalanceSeries(snapshot.Transactions, snapshot.Accounts, snapshot.Balances, start, end, 6),
+		NetWorthSeries:       dashboardNetWorthSeries(txns, start, end),
+		CashflowSeries:       dashboardCashflowSeries(txns, start, end),
+		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, start, end),
+		WeekdayExpense:       dashboardWeekdayExpense(txns, start, end),
+		CategorySeries:       dashboardCategorySeries(txns, start, end, 8),
+		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balances, start, end, 6),
 		BudgetPressure:       budgetPressure,
-		Anomalies:            dashboardAnomalies(snapshot.Transactions, start, end, 10),
+		Anomalies:            dashboardAnomalies(txns, start, end, 10),
 		TopPayees:            topPayees,
 		TopPaymentAccounts:   topPaymentAccounts,
+		Filters:              filters,
+		FilterOptions:        dashboardFilterOptions(snapshot.Transactions, snapshot.Accounts, start, end),
 		GeneratedAt:          time.Now().Format(time.RFC3339),
 	}
+}
+
+func (f DashboardFilters) Empty() bool {
+	return f.Category == "" && f.Account == "" && f.Payee == "" && f.Tag == "" && f.Type == "" && f.MinAmount == nil && f.MaxAmount == nil
+}
+
+func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters) []Transaction {
+	if filters.Empty() {
+		return txns
+	}
+	out := []Transaction{}
+	for _, txn := range txns {
+		if dashboardTransactionMatches(txn, filters) {
+			out = append(out, txn)
+		}
+	}
+	return out
+}
+
+func dashboardTransactionMatches(txn Transaction, filters DashboardFilters) bool {
+	if filters.Payee != "" && txn.Payee != filters.Payee {
+		return false
+	}
+	if filters.Tag != "" && !hasString(txn.Tags, filters.Tag) {
+		return false
+	}
+	if filters.Type != "" && dashboardTransactionType(txn) != filters.Type {
+		return false
+	}
+	if filters.Category != "" && !transactionHasAccountPrefix(txn, filters.Category) {
+		return false
+	}
+	if filters.Account != "" && !transactionHasAccountPrefix(txn, filters.Account) {
+		return false
+	}
+	amount := dashboardTransactionAmount(txn)
+	if filters.MinAmount != nil && amount < *filters.MinAmount {
+		return false
+	}
+	if filters.MaxAmount != nil && amount > *filters.MaxAmount {
+		return false
+	}
+	return true
+}
+
+func dashboardTransactionType(txn Transaction) string {
+	hasExpense, hasIncome := false, false
+	for _, posting := range txn.Postings {
+		if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+			hasExpense = true
+		}
+		if strings.HasPrefix(posting.Account, "Income:") {
+			hasIncome = true
+		}
+	}
+	if hasExpense {
+		return "expense"
+	}
+	if hasIncome {
+		return "income"
+	}
+	return "transfer"
+}
+
+func dashboardTransactionAmount(txn Transaction) int {
+	var expense, income, movement int
+	for _, posting := range txn.Postings {
+		if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+			expense += posting.Amount
+		}
+		if strings.HasPrefix(posting.Account, "Income:") {
+			income += abs(posting.Amount)
+		}
+		if strings.HasPrefix(posting.Account, "Assets:") || strings.HasPrefix(posting.Account, "Liabilities:") {
+			movement += abs(posting.Amount)
+		}
+	}
+	if expense > 0 {
+		return expense
+	}
+	if income > 0 {
+		return income
+	}
+	return movement
+}
+
+func transactionHasAccountPrefix(txn Transaction, account string) bool {
+	for _, posting := range txn.Postings {
+		if posting.Account == account || strings.HasPrefix(posting.Account, account+":") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func dashboardFilterOptions(txns []Transaction, accounts []Account, start, end string) DashboardFilterOptions {
+	accountLabels := map[string]string{}
+	for _, account := range accounts {
+		accountLabels[account.Account] = account.Label
+	}
+	categoryCounts, accountCounts, payeeCounts, tagCounts := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		seenCategories, seenAccounts, seenTags := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") || strings.HasPrefix(posting.Account, "Income:") {
+				seenCategories[posting.Account] = true
+			}
+			if strings.HasPrefix(posting.Account, "Assets:") || strings.HasPrefix(posting.Account, "Liabilities:") {
+				seenAccounts[posting.Account] = true
+			}
+		}
+		for _, tag := range txn.Tags {
+			seenTags[tag] = true
+		}
+		for account := range seenCategories {
+			categoryCounts[account]++
+		}
+		for account := range seenAccounts {
+			accountCounts[account]++
+		}
+		for tag := range seenTags {
+			tagCounts[tag]++
+		}
+		payee := txn.Payee
+		if payee == "" {
+			payee = "（无商户）"
+		}
+		payeeCounts[payee]++
+	}
+	return DashboardFilterOptions{
+		Categories: dashboardOptionRows(categoryCounts, accountLabels),
+		Accounts:   dashboardOptionRows(accountCounts, accountLabels),
+		Payees:     dashboardOptionRows(payeeCounts, nil),
+		Tags:       dashboardOptionRows(tagCounts, nil),
+	}
+}
+
+func dashboardOptionRows(counts map[string]int, labels map[string]string) []DashboardFilterOption {
+	rows := make([]DashboardFilterOption, 0, len(counts))
+	for value, count := range counts {
+		label := value
+		if labels != nil && labels[value] != "" {
+			label = labels[value]
+		}
+		rows = append(rows, DashboardFilterOption{Value: value, Label: label, Count: count})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count == rows[j].Count {
+			return rows[i].Value < rows[j].Value
+		}
+		return rows[i].Count > rows[j].Count
+	})
+	if len(rows) > 30 {
+		rows = rows[:30]
+	}
+	return rows
 }
 
 func balanceTotals(balances map[string]int) (int, int) {

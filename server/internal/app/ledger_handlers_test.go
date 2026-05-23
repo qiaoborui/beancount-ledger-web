@@ -152,6 +152,34 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if len(body.CashflowSeries) != 14 || body.CashflowSeries[0].Month != "05-01~05-07" || body.CashflowSeries[13].Month != "07-31~07-31" {
 		t.Fatalf("unexpected weekly dashboard buckets: %#v", body.CashflowSeries)
 	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=expense&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("filtered dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Filters.Type != "expense" || body.Filters.Category != "Expenses:Food" || body.Filters.Payee != "Cafe" || body.Filters.Tag != "work" || body.Filters.MinAmount == nil || *body.Filters.MinAmount != 1000 || body.Filters.MaxAmount == nil || *body.Filters.MaxAmount != 2000 {
+		t.Fatalf("unexpected filters echo: %#v", body.Filters)
+	}
+	if body.KPIs.Income != 0 || body.KPIs.Expense != 1200 || body.KPIs.Net != -1200 || len(body.Anomalies) != 1 {
+		t.Fatalf("unexpected filtered dashboard data: %#v", body)
+	}
+	if len(body.FilterOptions.Categories) == 0 || body.FilterOptions.Categories[0].Value != "Expenses:Food" {
+		t.Fatalf("expected unfiltered category options, got %#v", body.FilterOptions.Categories)
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=income&payee=Employer", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("income filtered dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.KPIs.Income != 100000 || body.KPIs.Expense != 0 || body.KPIs.Net != 100000 || len(body.CategorySeries) != 0 {
+		t.Fatalf("unexpected income filtered dashboard data: %#v", body)
+	}
 }
 
 func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
