@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, SlidersHorizontal, X } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { timeRangeToParams } from "@/lib/timeRange";
@@ -346,7 +346,6 @@ function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummar
           <YAxis yAxisId="money" width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
           <YAxis yAxisId="count" orientation="right" width={36} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} />
           <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatCny(Number(value)), name]} />
-          {annotations.slice(0, 8).map((annotation) => <ReferenceLine key={`${annotation.date}-${annotation.kind}-${annotation.payee}`} x={annotation.date.slice(5)} stroke={annotation.severity === "warning" ? "rgb(var(--color-expense))" : "var(--chart-primary)"} strokeDasharray="3 3" label={{ value: annotation.label, fill: "var(--stone)", fontSize: 10, position: "top" }} />)}
           <Bar yAxisId="money" dataKey="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
           <Line yAxisId="count" type="monotone" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2 }} />
         </ComposedChart>
