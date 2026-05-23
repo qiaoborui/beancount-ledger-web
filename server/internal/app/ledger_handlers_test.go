@@ -153,14 +153,14 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 		t.Fatalf("unexpected weekly dashboard buckets: %#v", body.CashflowSeries)
 	}
 
-	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=expense&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20", "", cookies)
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=expense,income&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20", "", cookies)
 	if res.Code != http.StatusOK {
 		t.Fatalf("filtered dashboard status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Filters.Type != "expense" || body.Filters.Category != "Expenses:Food" || body.Filters.Payee != "Cafe" || body.Filters.Tag != "work" || body.Filters.MinAmount == nil || *body.Filters.MinAmount != 1000 || body.Filters.MaxAmount == nil || *body.Filters.MaxAmount != 2000 {
+	if !reflect.DeepEqual(body.Filters.Types, []string{"expense", "income"}) || !reflect.DeepEqual(body.Filters.Categories, []string{"Expenses:Food"}) || !reflect.DeepEqual(body.Filters.Payees, []string{"Cafe"}) || !reflect.DeepEqual(body.Filters.Tags, []string{"work"}) || body.Filters.MinAmount == nil || *body.Filters.MinAmount != 1000 || body.Filters.MaxAmount == nil || *body.Filters.MaxAmount != 2000 {
 		t.Fatalf("unexpected filters echo: %#v", body.Filters)
 	}
 	if body.KPIs.Income != 0 || body.KPIs.Expense != 1200 || body.KPIs.Net != -1200 || len(body.Anomalies) != 1 {
@@ -168,6 +168,9 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	}
 	if len(body.FilterOptions.Categories) == 0 || body.FilterOptions.Categories[0].Value != "Expenses:Food" {
 		t.Fatalf("expected unfiltered category options, got %#v", body.FilterOptions.Categories)
+	}
+	if len(body.Annotations) == 0 || body.Annotations[0].Kind != "tag" || !strings.Contains(body.Annotations[0].Drilldown, "%23work") {
+		t.Fatalf("expected dashboard annotation drilldown, got %#v", body.Annotations)
 	}
 
 	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=income&payee=Employer", "", cookies)

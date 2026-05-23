@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -28,13 +29,25 @@ type DashboardCashflowPoint struct {
 }
 
 type DashboardFilters struct {
-	Category  string `json:"category,omitempty"`
-	Account   string `json:"account,omitempty"`
+	Categories []string `json:"categories,omitempty"`
+	Accounts   []string `json:"accounts,omitempty"`
+	Payees     []string `json:"payees,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Types      []string `json:"types,omitempty"`
+	MinAmount  *int     `json:"minAmount,omitempty"`
+	MaxAmount  *int     `json:"maxAmount,omitempty"`
+}
+
+type DashboardAnnotation struct {
+	Date      string `json:"date"`
+	Kind      string `json:"kind"`
+	Label     string `json:"label"`
 	Payee     string `json:"payee,omitempty"`
-	Tag       string `json:"tag,omitempty"`
-	Type      string `json:"type,omitempty"`
-	MinAmount *int   `json:"minAmount,omitempty"`
-	MaxAmount *int   `json:"maxAmount,omitempty"`
+	Account   string `json:"account,omitempty"`
+	Amount    int    `json:"amount,omitempty"`
+	Bucket    string `json:"bucket,omitempty"`
+	Severity  string `json:"severity"`
+	Drilldown string `json:"drilldown"`
 }
 
 type DashboardFilterOption struct {
@@ -117,6 +130,7 @@ type DashboardSummary struct {
 	TopPaymentAccounts   []AccountAnalytics        `json:"topPaymentAccounts"`
 	Filters              DashboardFilters          `json:"filters"`
 	FilterOptions        DashboardFilterOptions    `json:"filterOptions"`
+	Annotations          []DashboardAnnotation     `json:"annotations"`
 	GeneratedAt          string                    `json:"generatedAt"`
 }
 
@@ -162,12 +176,13 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 		TopPaymentAccounts:   topPaymentAccounts,
 		Filters:              filters,
 		FilterOptions:        dashboardFilterOptions(snapshot.Transactions, snapshot.Accounts, start, end),
+		Annotations:          dashboardAnnotations(txns, start, end, 12),
 		GeneratedAt:          time.Now().Format(time.RFC3339),
 	}
 }
 
 func (f DashboardFilters) Empty() bool {
-	return f.Category == "" && f.Account == "" && f.Payee == "" && f.Tag == "" && f.Type == "" && f.MinAmount == nil && f.MaxAmount == nil
+	return len(f.Categories) == 0 && len(f.Accounts) == 0 && len(f.Payees) == 0 && len(f.Tags) == 0 && len(f.Types) == 0 && f.MinAmount == nil && f.MaxAmount == nil
 }
 
 func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters) []Transaction {
@@ -184,19 +199,19 @@ func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters) [
 }
 
 func dashboardTransactionMatches(txn Transaction, filters DashboardFilters) bool {
-	if filters.Payee != "" && txn.Payee != filters.Payee {
+	if len(filters.Payees) > 0 && !containsString(filters.Payees, txn.Payee) {
 		return false
 	}
-	if filters.Tag != "" && !hasString(txn.Tags, filters.Tag) {
+	if len(filters.Tags) > 0 && !intersectsString(txn.Tags, filters.Tags) {
 		return false
 	}
-	if filters.Type != "" && dashboardTransactionType(txn) != filters.Type {
+	if len(filters.Types) > 0 && !containsString(filters.Types, dashboardTransactionType(txn)) {
 		return false
 	}
-	if filters.Category != "" && !transactionHasAccountPrefix(txn, filters.Category) {
+	if len(filters.Categories) > 0 && !transactionHasAnyAccountPrefix(txn, filters.Categories) {
 		return false
 	}
-	if filters.Account != "" && !transactionHasAccountPrefix(txn, filters.Account) {
+	if len(filters.Accounts) > 0 && !transactionHasAnyAccountPrefix(txn, filters.Accounts) {
 		return false
 	}
 	amount := dashboardTransactionAmount(txn)
@@ -250,6 +265,15 @@ func dashboardTransactionAmount(txn Transaction) int {
 	return movement
 }
 
+func transactionHasAnyAccountPrefix(txn Transaction, accounts []string) bool {
+	for _, account := range accounts {
+		if transactionHasAccountPrefix(txn, account) {
+			return true
+		}
+	}
+	return false
+}
+
 func transactionHasAccountPrefix(txn Transaction, account string) bool {
 	for _, posting := range txn.Postings {
 		if posting.Account == account || strings.HasPrefix(posting.Account, account+":") {
@@ -259,9 +283,18 @@ func transactionHasAccountPrefix(txn Transaction, account string) bool {
 	return false
 }
 
-func hasString(values []string, needle string) bool {
+func containsString(values []string, needle string) bool {
 	for _, value := range values {
 		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func intersectsString(left []string, right []string) bool {
+	for _, value := range left {
+		if containsString(right, value) {
 			return true
 		}
 	}
@@ -651,6 +684,93 @@ func dashboardAnomalies(txns []Transaction, start, end string, limit int) []Dash
 		rows = rows[:limit]
 	}
 	return rows
+}
+
+func dashboardAnnotations(txns []Transaction, start, end string, limit int) []DashboardAnnotation {
+	rows := []DashboardAnnotation{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		income := 0
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Income:") {
+				income += abs(posting.Amount)
+			}
+			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount >= 50000 {
+				rows = append(rows, DashboardAnnotation{
+					Date:      txn.Date,
+					Kind:      "large-expense",
+					Label:     "大额支出",
+					Payee:     txn.Payee,
+					Account:   posting.Account,
+					Amount:    posting.Amount,
+					Severity:  "warning",
+					Drilldown: dashboardTransactionURL(txn.Date, posting.Account, txn.Payee, ""),
+				})
+			}
+		}
+		if income > 0 {
+			rows = append(rows, DashboardAnnotation{
+				Date:      txn.Date,
+				Kind:      "income",
+				Label:     "收入",
+				Payee:     txn.Payee,
+				Amount:    income,
+				Severity:  "info",
+				Drilldown: dashboardTransactionURL(txn.Date, "", txn.Payee, ""),
+			})
+		}
+		for _, tag := range txn.Tags {
+			if tag == "work" || tag == "reimburse" || tag == "报销" {
+				rows = append(rows, DashboardAnnotation{
+					Date:      txn.Date,
+					Kind:      "tag",
+					Label:     "#" + tag,
+					Payee:     txn.Payee,
+					Severity:  "info",
+					Drilldown: dashboardTransactionURL(txn.Date, "", txn.Payee, tag),
+				})
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Date == rows[j].Date {
+			return rows[i].Kind < rows[j].Kind
+		}
+		return rows[i].Date > rows[j].Date
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Date == rows[j].Date {
+			return rows[i].Kind < rows[j].Kind
+		}
+		return rows[i].Date < rows[j].Date
+	})
+	return rows
+}
+
+func dashboardTransactionURL(date, category, payee, tag string) string {
+	params := []string{}
+	if category != "" {
+		params = append(params, "category="+url.QueryEscape(category))
+	}
+	if payee != "" || date != "" {
+		query := strings.TrimSpace(payee + " " + date)
+		params = append(params, "q="+url.QueryEscape(query))
+	}
+	if tag != "" {
+		params = append(params, "metadata="+url.QueryEscape("#"+tag))
+	}
+	if category != "" {
+		params = append(params, "mode=prefix")
+	}
+	if len(params) == 0 {
+		return "/transactions"
+	}
+	return "/transactions?" + strings.Join(params, "&")
 }
 
 type dashboardBucket struct {
