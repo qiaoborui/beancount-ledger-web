@@ -102,6 +102,32 @@ func runGit(t *testing.T, cfg Config, args ...string) string {
 	return string(out)
 }
 
+func isolateGitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "missing-gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	unsetEnvForTest(t, "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+}
+
+func unsetEnvForTest(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if ok {
+				_ = os.Setenv(key, value)
+				return
+			}
+			_ = os.Unsetenv(key)
+		})
+	}
+}
+
 func hasGitChange(changes []GitChange, path string) bool {
 	for _, change := range changes {
 		if change.Path == path || change.OriginalPath == path {

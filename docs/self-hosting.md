@@ -100,7 +100,13 @@ through the Git API and optional scheduler. The application repository is not
 modified by ledger Git operations.
 
 ```bash
+LEDGER_GIT_AUTHOR_NAME=Your Name
+LEDGER_GIT_AUTHOR_EMAIL=you@example.com
 LEDGER_GIT_SCHEDULER=true
 LEDGER_GIT_PULL_INTERVAL_MINUTES=15
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=60
 ```
+
+Alternatively, set `user.name` and `user.email` in the private ledger
+repository itself with `git config user.name "Your Name"` and
+`git config user.email "you@example.com"`.
