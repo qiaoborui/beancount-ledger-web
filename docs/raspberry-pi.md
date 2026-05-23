@@ -80,6 +80,8 @@ WEB_PUSH_VAPID_PRIVATE_KEY=
 WEB_PUSH_SUBJECT=mailto:you@example.com
 
 BEAN_CHECK_BIN=/home/pi/.local/bin/bean-check
+LEDGER_GIT_AUTHOR_NAME=Your Name
+LEDGER_GIT_AUTHOR_EMAIL=you@example.com
 LEDGER_GIT_SCHEDULER=true
 LEDGER_GIT_PULL_INTERVAL_MINUTES=15
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=60
@@ -133,6 +135,20 @@ The generated service runs the Go binary on the existing public app port with
 `STATIC_DIR=<deploy-base>/<env>/frontend/current/dist` and `SERVE_STATIC=true`.
 The frontend artifact is still deployed independently; the backend reads the
 stable frontend symlink at request time.
+By default, the service runs as the user executing the deploy script, with
+`HOME` set to that user's home directory so Git can read the user's GitHub
+credential helper configuration. Override with `SERVICE_USER` and
+`SERVICE_GROUP` if your runner uses a different deployment user.
+
+For production ledger commits, configure a Git author either in `prod.env` with
+`LEDGER_GIT_AUTHOR_NAME` and `LEDGER_GIT_AUTHOR_EMAIL`, or directly in the
+private ledger repository:
+
+```bash
+cd /home/pi/beancount-ledger
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
 
 ## Public routing
 

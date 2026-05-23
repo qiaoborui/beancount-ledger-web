@@ -96,21 +96,21 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 || body.KPIs.Net != 98800 || body.KPIs.NetWorth != 98800 {
 		t.Fatalf("unexpected dashboard kpis: %#v", body.KPIs)
 	}
-	wantWeekLabels := []string{"05-01~05-07", "05-08~05-14", "05-15~05-21", "05-22~05-28", "05-29~05-31"}
-	gotWeekLabels := make([]string, 0, len(body.CashflowSeries))
+	wantMonthLabels := []string{"05-01", "05-02", "05-03", "05-04", "05-05", "05-06", "05-07", "05-08", "05-09", "05-10", "05-11", "05-12", "05-13", "05-14", "05-15", "05-16", "05-17", "05-18", "05-19", "05-20", "05-21", "05-22", "05-23", "05-24", "05-25", "05-26", "05-27", "05-28", "05-29", "05-30", "05-31"}
+	gotMonthLabels := make([]string, 0, len(body.CashflowSeries))
 	for _, point := range body.CashflowSeries {
-		gotWeekLabels = append(gotWeekLabels, point.Month)
+		gotMonthLabels = append(gotMonthLabels, point.Month)
 	}
-	if !reflect.DeepEqual(gotWeekLabels, wantWeekLabels) || body.CashflowSeries[0].Net != -1200 || body.CashflowSeries[4].Net != 100000 {
+	if !reflect.DeepEqual(gotMonthLabels, wantMonthLabels) || body.CashflowSeries[0].Net != -1200 || body.CashflowSeries[30].Net != 100000 {
 		t.Fatalf("unexpected cashflow series: %#v", body.CashflowSeries)
 	}
-	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 || len(body.CategorySeries[0].Values) != 5 || body.CategorySeries[0].Values[0].Value != 1200 {
+	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Value != 1200 {
 		t.Fatalf("unexpected category series: %#v", body.CategorySeries)
 	}
-	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || len(body.AccountBalanceSeries[0].Values) != 5 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[4].Value != 98800 {
+	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[30].Value != 98800 {
 		t.Fatalf("unexpected account balance series: %#v", body.AccountBalanceSeries)
 	}
-	if len(body.NetWorthSeries) != 5 || body.NetWorthSeries[0].Date != "05-01~05-07" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[4].NetWorth != 98800 {
+	if len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[30].NetWorth != 98800 {
 		t.Fatalf("unexpected net worth series: %#v", body.NetWorthSeries)
 	}
 	if len(body.BudgetPressure) != 1 || body.BudgetPressure[0].Remaining != 98800 {
@@ -140,6 +140,48 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	}
 	if len(body.AccountBalanceSeries) != 1 || len(body.AccountBalanceSeries[0].Values) != 7 || body.AccountBalanceSeries[0].Values[0].Month != "05-01" || body.AccountBalanceSeries[0].Values[0].Value != -1200 {
 		t.Fatalf("unexpected daily account balance series: %#v", body.AccountBalanceSeries)
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-08-01", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quarter dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.CashflowSeries) != 14 || body.CashflowSeries[0].Month != "05-01~05-07" || body.CashflowSeries[13].Month != "07-31~07-31" {
+		t.Fatalf("unexpected weekly dashboard buckets: %#v", body.CashflowSeries)
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=expense,income&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("filtered dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(body.Filters.Types, []string{"expense", "income"}) || !reflect.DeepEqual(body.Filters.Categories, []string{"Expenses:Food"}) || !reflect.DeepEqual(body.Filters.Payees, []string{"Cafe"}) || !reflect.DeepEqual(body.Filters.Tags, []string{"work"}) || body.Filters.MinAmount == nil || *body.Filters.MinAmount != 1000 || body.Filters.MaxAmount == nil || *body.Filters.MaxAmount != 2000 {
+		t.Fatalf("unexpected filters echo: %#v", body.Filters)
+	}
+	if body.KPIs.Income != 0 || body.KPIs.Expense != 1200 || body.KPIs.Net != -1200 || len(body.Anomalies) != 1 {
+		t.Fatalf("unexpected filtered dashboard data: %#v", body)
+	}
+	if len(body.FilterOptions.Categories) == 0 || body.FilterOptions.Categories[0].Value != "Expenses:Food" {
+		t.Fatalf("expected unfiltered category options, got %#v", body.FilterOptions.Categories)
+	}
+	if len(body.Annotations) == 0 || body.Annotations[0].Kind != "tag" || !strings.Contains(body.Annotations[0].Drilldown, "%23work") {
+		t.Fatalf("expected dashboard annotation drilldown, got %#v", body.Annotations)
+	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01&type=income&payee=Employer", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("income filtered dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.KPIs.Income != 100000 || body.KPIs.Expense != 0 || body.KPIs.Net != 100000 || len(body.CategorySeries) != 0 {
+		t.Fatalf("unexpected income filtered dashboard data: %#v", body)
 	}
 }
 
@@ -259,5 +301,39 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	lastCommitFiles := runGit(t, cfg, "show", "--name-only", "--pretty=format:", "HEAD")
 	if !strings.Contains(lastCommitFiles, "main.bean") || !strings.Contains(lastCommitFiles, "transactions/2026/06.bean") {
 		t.Fatalf("commit should include ledger write files:\n%s", lastCommitFiles)
+	}
+}
+
+func TestLedgerGitCommitUsesEnvAuthor(t *testing.T) {
+	cfg := testLedger(t)
+	isolateGitIdentity(t)
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	t.Setenv("LEDGER_GIT_AUTHOR_NAME", "Ledger Bot")
+	t.Setenv("LEDGER_GIT_AUTHOR_EMAIL", "ledger-bot@example.test")
+	runGit(t, cfg, "init")
+
+	output, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
+	if err != nil {
+		t.Fatalf("ledger git commit failed: %v\n%s", err, output)
+	}
+	identity := strings.TrimSpace(runGit(t, cfg, "log", "-1", "--format=%an <%ae>"))
+	if identity != "Ledger Bot <ledger-bot@example.test>" {
+		t.Fatalf("commit should use env author, got %q", identity)
+	}
+}
+
+func TestLedgerGitCommitExplainsMissingAuthor(t *testing.T) {
+	cfg := testLedger(t)
+	isolateGitIdentity(t)
+	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
+	runGit(t, cfg, "init")
+
+	_, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
+	if err == nil {
+		t.Fatal("ledger git commit should fail without an author identity")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "Git 提交缺少作者身份") || !strings.Contains(message, "LEDGER_GIT_AUTHOR_NAME") || !strings.Contains(message, cfg.LedgerRoot) {
+		t.Fatalf("missing-author error should be actionable, got:\n%s", message)
 	}
 }

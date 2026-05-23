@@ -238,6 +238,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         searchWords.every((word) =>
           t.payee.toLowerCase().includes(word) ||
           t.narration.toLowerCase().includes(word) ||
+          t.date.includes(word) ||
           t.postings.some((p) => p.account.toLowerCase().includes(word)) ||
           metadataText(t).toLowerCase().includes(word)
         )
