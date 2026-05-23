@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
@@ -20,6 +20,7 @@ const COLORS = [
 
 export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onSelectCategory }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   const { data, loading, error } = useDashboardSummary(timeRange, onSensitiveLocked);
+  const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const mask = (value: string) => visible ? value : "••••••";
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
@@ -31,8 +32,8 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(formatCompactCny(topCategory.total / 100))}` : "暂无";
 
-  return <div className="space-y-7">
-    <RowHeader title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" />
+  return <div className="space-y-5">
+    <DashboardRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
     <section className="card p-3 md:p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-xl border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
@@ -48,8 +49,9 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
         </button>
       </div>
     </section>
+    </DashboardRow>
 
-    <RowHeader title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" />
+    <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-7" title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
         {visible ? <DailyExpenseChart data={data} /> : <HiddenChart />}
@@ -67,8 +69,9 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
         <PaymentAccounts data={data} visible={visible} />
       </Panel>
     </div>
+    </DashboardRow>
 
-    <RowHeader title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" />
+    <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
         <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={onSelectCategory} />
@@ -80,8 +83,9 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
         {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
+    </DashboardRow>
 
-    <RowHeader title="资产与收入" subtitle="更敏感的资产、收入和账户趋势放在底部" />
+    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
     <div className="grid gap-4 xl:grid-cols-12">
       <Panel className="xl:col-span-4" title="资产 KPI" subtitle="敏感">
         <PrivateKpis data={data} visible={visible} />
@@ -96,7 +100,46 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
         {visible ? <AccountTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
+    </DashboardRow>
   </div>;
+}
+
+const DEFAULT_COLLAPSED_ROWS: Record<DashboardRowId, boolean> = {
+  monitor: false,
+  spending: false,
+  risk: false,
+  private: true,
+};
+
+type DashboardRowId = "monitor" | "spending" | "risk" | "private";
+
+function useDashboardRowCollapse() {
+  const [collapsedRows, setCollapsedRows] = useState(DEFAULT_COLLAPSED_ROWS);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("ledger.dashboard.collapsedRows");
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<Record<DashboardRowId, boolean>>;
+      setCollapsedRows((current) => ({ ...current, ...saved }));
+    } catch {
+      setCollapsedRows(DEFAULT_COLLAPSED_ROWS);
+    }
+  }, []);
+
+  function toggleRow(rowId: DashboardRowId) {
+    setCollapsedRows((current) => {
+      const next = { ...current, [rowId]: !current[rowId] };
+      try {
+        window.localStorage.setItem("ledger.dashboard.collapsedRows", JSON.stringify(next));
+      } catch {
+        // Ignore storage failures; the row still toggles for this session.
+      }
+      return next;
+    });
+  }
+
+  return { collapsedRows, toggleRow };
 }
 
 function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void) {
@@ -134,11 +177,27 @@ function useDashboardSummary(timeRange: TimeRange, onSensitiveLocked: () => void
   return { data, loading, error };
 }
 
-function RowHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  return <div className="flex flex-col gap-1 border-b border-line pb-2 sm:flex-row sm:items-end sm:justify-between">
-    <h2 className="font-serif text-2xl font-medium">{title}</h2>
-    <span className="text-xs text-stone">{subtitle}</span>
-  </div>;
+function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
+  const Icon = collapsed ? ChevronRight : ChevronDown;
+  return <section className="space-y-3">
+    <button type="button" className={`group flex w-full flex-col gap-3 rounded-lg border border-line px-3 py-3 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between ${collapsed ? "bg-panel" : "bg-transparent"}`} onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
+      <span className="flex min-w-0 items-start gap-3">
+        <span className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-panel text-olive group-hover:text-brand">
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block font-serif text-2xl font-medium">{title}</span>
+          {subtitle && <span className="mt-1 block text-xs text-stone">{subtitle}</span>}
+        </span>
+      </span>
+      {summary}
+    </button>
+    {!collapsed && children}
+  </section>;
+}
+
+function RowSummary({ children }: { children: ReactNode }) {
+  return <span className="inline-flex max-w-full items-center rounded-full bg-tag px-3 py-1 text-xs text-stone sm:shrink-0">{children}</span>;
 }
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
@@ -157,7 +216,7 @@ function Panel({ title, subtitle, className, children }: { title: string; subtit
 
 function DailyExpenseChart({ data }: { data: DashboardSummary }) {
   const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), 支出: row.amount / 100, 笔数: row.txCount }));
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={42}>
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%">
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -189,7 +248,7 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
 
 function NetWorthChart({ data }: { data: DashboardSummary }) {
   const rows = data.netWorthSeries.map((row) => ({ month: row.date, 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
-  return <ChartBox empty={!rows.length} compact>
+  return <ChartBox empty={!rows.length} compact points={rows.length} minPointWidth={40}>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -207,7 +266,7 @@ function NetWorthChart({ data }: { data: DashboardSummary }) {
 
 function CashflowChart({ data }: { data: DashboardSummary }) {
   const rows = data.cashflowSeries.map((row) => ({ month: row.month, 收入: row.income / 100, 支出: row.expense / 100, 结余: row.net / 100 }));
-  return <ChartBox empty={!rows.length} compact>
+  return <ChartBox empty={!rows.length} compact points={rows.length} minPointWidth={42}>
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="28%">
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -225,7 +284,7 @@ function CashflowChart({ data }: { data: DashboardSummary }) {
 
 function CategoryTrendChart({ data }: { data: DashboardSummary }) {
   const rows = useMemo(() => seriesRows(data.categorySeries), [data.categorySeries]);
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={46}>
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -241,7 +300,7 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
 
 function AccountTrendChart({ data }: { data: DashboardSummary }) {
   const rows = useMemo(() => seriesRows(data.accountBalanceSeries), [data.accountBalanceSeries]);
-  return <ChartBox empty={!rows.length}>
+  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={44}>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -347,9 +406,14 @@ function SmallMetric({ label, value, tone }: { label: string; value: string; ton
   return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
 }
 
-function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
+function ChartBox({ empty, compact = false, points = 0, minPointWidth = 40, children }: { empty: boolean; compact?: boolean; points?: number; minPointWidth?: number; children: ReactNode }) {
   if (empty) return <EmptyPanel text="暂无趋势数据" compact={compact} />;
-  return <div className={`ledger-chart mt-4 min-w-0 ${compact ? "h-64" : "h-80"}`}>{children}</div>;
+  const minWidth = points > 18 ? Math.max(720, points * minPointWidth) : undefined;
+  return <div className="mt-4 min-w-0 overflow-x-auto pb-2">
+    <div className={`ledger-chart min-w-0 ${compact ? "h-64" : "h-80"}`} style={{ minWidth }}>
+      {children}
+    </div>
+  </div>;
 }
 
 function HiddenChart({ compact = false }: { compact?: boolean }) {
@@ -361,7 +425,7 @@ function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean
 }
 
 function seriesRows(series: { account: string; values: { month: string; value: number }[] }[]) {
-  const months = Array.from(new Set(series.flatMap((row) => row.values.map((value) => value.month)))).sort();
+  const months = bucketLabels(series);
   return months.map((month) => {
     const row: Record<string, string | number> = { month };
     for (const item of series) {
@@ -369,6 +433,23 @@ function seriesRows(series: { account: string; values: { month: string; value: n
     }
     return row;
   });
+}
+
+function bucketLabels(series: { values: { month: string }[] }[]) {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  for (const item of series) {
+    for (const value of item.values) {
+      if (seen.has(value.month)) continue;
+      seen.add(value.month);
+      labels.push(value.month);
+    }
+  }
+  return labels;
+}
+
+function trendPointCount(series: { values: { month: string }[] }[]) {
+  return bucketLabels(series).length;
 }
 
 function labelForSeries(series: { account: string; label: string }[], account: string) {

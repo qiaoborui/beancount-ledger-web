@@ -462,13 +462,16 @@ func dashboardBuckets(start, end string) []dashboardBucket {
 		return nil
 	}
 	days := int(endDate.Sub(startDate).Hours() / 24)
-	if days <= 10 {
+	if days <= 45 {
 		return dayBuckets(startDate, endDate)
 	}
-	if days <= 45 {
+	if days <= 180 {
 		return weekBuckets(startDate, endDate)
 	}
-	return monthBuckets(startDate, endDate)
+	if days <= 730 {
+		return monthBuckets(startDate, endDate)
+	}
+	return quarterBuckets(startDate, endDate)
 }
 
 func dayBuckets(startDate, endDate time.Time) []dashboardBucket {
@@ -512,6 +515,32 @@ func monthBuckets(startDate, endDate time.Time) []dashboardBucket {
 			bucketEnd = endDate
 		}
 		out = append(out, dashboardBucket{Label: current.Format("2006-01"), Start: bucketStart.Format("2006-01-02"), End: bucketEnd.Format("2006-01-02")})
+		current = next
+	}
+	return out
+}
+
+func quarterBuckets(startDate, endDate time.Time) []dashboardBucket {
+	quarterMonth := time.Month(((int(startDate.Month()) - 1) / 3 * 3) + 1)
+	current := time.Date(startDate.Year(), quarterMonth, 1, 0, 0, 0, 0, time.UTC)
+	lastQuarterMonth := time.Month(((int(endDate.Month()) - 1) / 3 * 3) + 1)
+	last := time.Date(endDate.Year(), lastQuarterMonth, 1, 0, 0, 0, 0, time.UTC)
+	if endDate.After(last) {
+		last = last.AddDate(0, 3, 0)
+	}
+	out := []dashboardBucket{}
+	for current.Before(last) {
+		next := current.AddDate(0, 3, 0)
+		bucketStart := current
+		if bucketStart.Before(startDate) {
+			bucketStart = startDate
+		}
+		bucketEnd := next
+		if bucketEnd.After(endDate) {
+			bucketEnd = endDate
+		}
+		quarter := ((int(current.Month()) - 1) / 3) + 1
+		out = append(out, dashboardBucket{Label: current.Format("2006") + "-Q" + formatInt(quarter), Start: bucketStart.Format("2006-01-02"), End: bucketEnd.Format("2006-01-02")})
 		current = next
 	}
 	return out
