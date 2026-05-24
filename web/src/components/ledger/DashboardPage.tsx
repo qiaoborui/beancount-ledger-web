@@ -407,35 +407,88 @@ function CashflowChart({ data }: { data: DashboardSummary }) {
 }
 
 function CategoryTrendChart({ data }: { data: DashboardSummary }) {
-  const rows = useMemo(() => seriesRows(data.categorySeries), [data.categorySeries]);
+  const chartSeries = useMemo(() => data.categorySeries.slice(0, 8), [data.categorySeries]);
+  const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
+  const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
   return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={46}>
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-        <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
-        <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(data.categorySeries, String(name))]} />
-        <Legend formatter={(value) => labelForSeries(data.categorySeries, String(value))} />
-        {data.categorySeries.slice(0, 8).map((series, index) => <Area key={series.account} type="monotone" dataKey={series.account} stackId="expense" stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />)}
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
+            <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(chartSeries, String(name))]} />
+            {visibleSeries.map((series) => {
+              const index = chartSeries.findIndex((item) => item.account === series.account);
+              return <Area key={series.account} type="monotone" dataKey={series.account} stackId={focusedAccount ? undefined : "expense"} stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />;
+            })}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} />
+    </div>
   </ChartBox>;
 }
 
 function AccountTrendChart({ data }: { data: DashboardSummary }) {
-  const rows = useMemo(() => seriesRows(data.accountBalanceSeries), [data.accountBalanceSeries]);
+  const chartSeries = data.accountBalanceSeries;
+  const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
+  const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
   return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={44}>
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-        <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
-        <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(data.accountBalanceSeries, String(name))]} />
-        <Legend formatter={(value) => labelForSeries(data.accountBalanceSeries, String(value))} />
-        {data.accountBalanceSeries.map((series, index) => <Line key={series.account} type="monotone" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />)}
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
+            <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatCny(Number(value)), labelForSeries(chartSeries, String(name))]} />
+            {visibleSeries.map((series) => {
+              const index = chartSeries.findIndex((item) => item.account === series.account);
+              return <Line key={series.account} type="monotone" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />;
+            })}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} />
+    </div>
   </ChartBox>;
+}
+
+function useFocusedSeries<T extends { account: string }>(series: T[]) {
+  const [focusedAccount, setFocusedAccount] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusedAccount && !series.some((item) => item.account === focusedAccount)) {
+      setFocusedAccount(null);
+    }
+  }, [focusedAccount, series]);
+
+  const visibleSeries = useMemo(() => {
+    if (!focusedAccount) return series;
+    return series.filter((item) => item.account === focusedAccount);
+  }, [focusedAccount, series]);
+
+  const toggleFocus = (account: string) => {
+    setFocusedAccount((current) => current === account ? null : account);
+  };
+
+  return { focusedAccount, visibleSeries, toggleFocus };
+}
+
+function InteractiveLegend({ series, focusedAccount, onToggle }: { series: { account: string; label: string }[]; focusedAccount: string | null; onToggle: (account: string) => void }) {
+  if (!series.length) return null;
+  return <div className="mt-2 flex max-h-20 flex-wrap items-center justify-center gap-x-3 gap-y-2 overflow-y-auto px-1 text-xs" aria-label="图例">
+    {series.map((item, index) => {
+      const selected = focusedAccount === item.account;
+      const muted = focusedAccount != null && !selected;
+      return <button key={item.account} type="button" className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2 py-1 transition ${selected ? "border-brand bg-tag text-ink" : muted ? "border-transparent text-stone opacity-55 hover:bg-tag hover:opacity-100" : "border-transparent text-stone hover:bg-tag"}`} onClick={() => onToggle(item.account)} aria-pressed={selected} title={selected ? "恢复全部显示" : `只显示 ${item.label}`}>
+        <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: COLORS[index % COLORS.length], opacity: muted ? 0.45 : 1 }} />
+        <span className="max-w-[11rem] truncate">{item.label}</span>
+      </button>;
+    })}
+  </div>;
 }
 
 function CategoryRank({ rows, visible, onOpenTransactions }: { rows: DashboardSummary["categorySeries"]; visible: boolean; onOpenTransactions: (href: string) => void }) {
