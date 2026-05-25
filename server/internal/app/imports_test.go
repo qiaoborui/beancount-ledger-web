@@ -135,6 +135,74 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestPrepareAlipayCSVForDEGPadsHeaderRecord(t *testing.T) {
+	cfg := testLedger(t)
+	input := filepath.Join(t.TempDir(), "alipay.csv")
+	mustWrite(t, input, strings.Join([]string{
+		"------------------------------------------------------------------------------------",
+		"导出信息：",
+		"姓名：测试",
+		"支付宝账户：test@example.com",
+		"起始时间：[2026-05-24 00:00:00]    终止时间：[2026-05-24 23:59:59]",
+		"导出交易类型：[全部]",
+		"导出时间：[2026-05-24 23:24:06]",
+		"共1笔记录",
+		"收入：0笔 0.00元",
+		"支出：1笔 195.22元",
+		"不计收支：0笔 0.00元",
+		"",
+		"特别提示：",
+		"1.提示",
+		"2.提示",
+		"3.提示",
+		"4.提示",
+		"5.提示",
+		"6.提示",
+		"7.提示",
+		"8.提示",
+		"",
+		"------------------------支付宝支付科技有限公司  电子客户回单------------------------",
+		"交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注,",
+		"2026-05-24 17:55:17,日用百货,x***1,157******14,椰客椰子鸡,支出,195.22,网商银行储蓄卡(0691),交易成功,first-order,merchant-1,,",
+	}, "\n"))
+
+	server := &Server{cfg: cfg}
+	originalText := string(mustRead(t, input))
+	originalInfo, err := alipayCSVHeaderInfo(originalText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if originalInfo.RecordIndex != 22 {
+		t.Fatalf("fixture should reproduce DEG header offset, got record %d", originalInfo.RecordIndex)
+	}
+
+	prepared, err := server.prepareAlipayCSVForDEG(input, "alipaytest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.InputFile == input {
+		t.Fatal("expected DEG-compatible copy")
+	}
+	preparedText, err := decodeAlipayCSV(mustRead(t, prepared.InputFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedInfo, err := alipayCSVHeaderInfo(preparedText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preparedInfo.RecordIndex != 23 {
+		t.Fatalf("prepared header record = %d, want 23", preparedInfo.RecordIndex)
+	}
+	rows, err := readAlipaySourceRows(prepared.InputFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].OrderID != "first-order" {
+		t.Fatalf("prepared CSV did not preserve first transaction: %#v", rows)
+	}
+}
+
 func TestCmbImportHelpers(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-credit-card-config.yaml"), strings.Join([]string{
