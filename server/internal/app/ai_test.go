@@ -83,3 +83,47 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 		t.Fatalf("unexpected chat response: %#v", body)
 	}
 }
+
+func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected AI path: %s", r.URL.Path)
+		}
+		var body struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Messages) == 0 || !strings.Contains(body.Messages[len(body.Messages)-1].Content, "账户操作草稿") {
+			t.Fatalf("account chat payload missing draft context: %#v", body.Messages)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"已准备创建差旅分类。\",\"operations\":[{\"kind\":\"create\",\"date\":\"2026-05-25\",\"account\":\"Expenses:Travel\",\"alias\":\"差旅\",\"currency\":\"CNY\",\"group\":\"expense\"}]}"}}]}`))
+	}))
+	defer fakeAI.Close()
+	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodPost, "/api/ai/accounts-chat", `{"message":"帮我加一个差旅分类","messages":[{"role":"assistant","text":"你好"}],"draftOperations":[]}`, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ai accounts chat=%d body=%s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Message    string             `json:"message"`
+		Operations []AccountOperation `json:"operations"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Message != "已准备创建差旅分类。" || len(body.Operations) != 1 || body.Operations[0].Account != "Expenses:Travel" {
+		t.Fatalf("unexpected account chat response: %#v", body)
+	}
+}

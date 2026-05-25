@@ -41,6 +41,10 @@ type AppendBatchRequest struct {
 	Entries []LedgerEntry `json:"entries"`
 }
 
+type AccountOperationsRequest struct {
+	Operations []AccountOperation `json:"operations"`
+}
+
 type GitCommitRequest struct {
 	Message string `json:"message"`
 }
@@ -53,6 +57,12 @@ type AIChatRequest struct {
 	Message      string        `json:"message"`
 	Messages     []ChatMessage `json:"messages"`
 	DraftEntries []LedgerEntry `json:"draftEntries"`
+}
+
+type AIAccountChatRequest struct {
+	Message         string             `json:"message"`
+	Messages        []ChatMessage      `json:"messages"`
+	DraftOperations []AccountOperation `json:"draftOperations"`
 }
 
 type ImportCommitRequest struct {
@@ -125,6 +135,18 @@ func (r AppendBatchRequest) Validate() error {
 	return nil
 }
 
+func (r AccountOperationsRequest) Validate() error {
+	if len(r.Operations) == 0 {
+		return fmt.Errorf("operations is required")
+	}
+	for i, operation := range r.Operations {
+		if err := operation.Validate(); err != nil {
+			return fmt.Errorf("operations[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (r AIParseRequest) Validate() error {
 	if strings.TrimSpace(r.Input) == "" {
 		return fmt.Errorf("input is required")
@@ -139,6 +161,18 @@ func (r AIChatRequest) Validate() error {
 	for i, entry := range r.DraftEntries {
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("draftEntries[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (r AIAccountChatRequest) Validate() error {
+	if strings.TrimSpace(r.Message) == "" {
+		return fmt.Errorf("message is required")
+	}
+	for i, operation := range r.DraftOperations {
+		if err := operation.Validate(); err != nil {
+			return fmt.Errorf("draftOperations[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -171,6 +205,30 @@ func (i AccountInput) Validate() error {
 	}
 	if i.Currency != "" && i.Currency != "CNY" {
 		return fmt.Errorf("currency must be CNY")
+	}
+	return nil
+}
+
+func (o AccountOperation) Validate() error {
+	switch o.Kind {
+	case "create", "update", "disable":
+	default:
+		return fmt.Errorf("kind must be create, update, or disable")
+	}
+	if err := validateDate("date", o.Date); err != nil {
+		return err
+	}
+	if err := validateAccount("account", o.Account); err != nil {
+		return err
+	}
+	if o.Currency != "" && o.Currency != "CNY" {
+		return fmt.Errorf("currency must be CNY")
+	}
+	if o.Group != "" && normalizeGroup(o.Group) == "" {
+		return fmt.Errorf("group is not supported")
+	}
+	if o.Kind == "update" && strings.TrimSpace(o.Alias) == "" && strings.TrimSpace(o.Group) == "" {
+		return fmt.Errorf("update requires alias or group")
 	}
 	return nil
 }

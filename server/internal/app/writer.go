@@ -27,6 +27,15 @@ type AccountInput struct {
 	Currency string `json:"currency"`
 }
 
+type AccountOperation struct {
+	Kind     string `json:"kind"`
+	Date     string `json:"date"`
+	Account  string `json:"account"`
+	Alias    string `json:"alias,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	Group    string `json:"group,omitempty"`
+}
+
 type LedgerEntry struct {
 	Kind        string                   `json:"kind"`
 	Date        string                   `json:"date"`
@@ -108,6 +117,56 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 		return err
 	}
 	return nil
+}
+
+func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	file := accountsBeanPath(w.cfg)
+	before, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := ParseAccounts(w.cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAccountOperations(operations, accounts); err != nil {
+		return nil, err
+	}
+	next := string(before)
+	texts := []string{}
+	for _, operation := range operations {
+		var text string
+		switch operation.Kind {
+		case "create":
+			if operation.Currency == "" {
+				operation.Currency = "CNY"
+			}
+			text = AccountToBeanWithMetadata(operation.Date, operation.Account, operation.Alias, operation.Currency, accountOperationMetadata(operation))
+			next = appendText(next, text)
+		case "update":
+			var updated string
+			updated, err = updateAccountMetadata(next, operation)
+			if err != nil {
+				return nil, err
+			}
+			next = updated
+			text = operationSummary(operation)
+		case "disable":
+			text = fmt.Sprintf("%s close %s\n", operation.Date, operation.Account)
+			next = appendText(next, text)
+		}
+		texts = append(texts, text)
+	}
+	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
+		return nil, err
+	}
+	if err := w.validateAndClear(); err != nil {
+		_ = os.WriteFile(file, before, 0o644)
+		return nil, err
+	}
+	return texts, nil
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
@@ -419,6 +478,10 @@ func BalanceToBean(entry LedgerEntry) string {
 }
 
 func AccountToBean(date, account, alias, currency string) string {
+	return AccountToBeanWithMetadata(date, account, alias, currency, nil)
+}
+
+func AccountToBeanWithMetadata(date, account, alias, currency string, metadata map[string]MetadataValue) string {
 	if currency == "" {
 		currency = "CNY"
 	}
@@ -426,7 +489,117 @@ func AccountToBean(date, account, alias, currency string) string {
 	if strings.TrimSpace(alias) != "" {
 		lines = append(lines, fmt.Sprintf(`  alias: "%s"`, escapeBean(strings.TrimSpace(alias))))
 	}
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		if key != "alias" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		lines = append(lines, fmt.Sprintf("  %s: %s", key, metadataValueToBean(metadata[key])))
+	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func accountOperationMetadata(operation AccountOperation) map[string]MetadataValue {
+	metadata := map[string]MetadataValue{}
+	if group := normalizeGroup(operation.Group); group != "" {
+		metadata["group"] = group
+	}
+	return metadata
+}
+
+func validateAccountOperations(operations []AccountOperation, accounts []Account) error {
+	known := map[string]Account{}
+	for _, account := range accounts {
+		known[account.Account] = account
+	}
+	for i, operation := range operations {
+		if err := operation.Validate(); err != nil {
+			return fmt.Errorf("operation %d: %w", i+1, err)
+		}
+		switch operation.Kind {
+		case "create":
+			if _, exists := known[operation.Account]; exists {
+				return fmt.Errorf("operation %d: account already exists: %s", i+1, operation.Account)
+			}
+			known[operation.Account] = Account{Account: operation.Account, Active: true}
+		case "update":
+			if _, exists := known[operation.Account]; !exists {
+				return fmt.Errorf("operation %d: account does not exist: %s", i+1, operation.Account)
+			}
+		case "disable":
+			account, exists := known[operation.Account]
+			if !exists {
+				return fmt.Errorf("operation %d: account does not exist: %s", i+1, operation.Account)
+			}
+			if !account.Active {
+				return fmt.Errorf("operation %d: account is already closed: %s", i+1, operation.Account)
+			}
+			account.Active = false
+			known[operation.Account] = account
+		}
+	}
+	return nil
+}
+
+func updateAccountMetadata(text string, operation AccountOperation) (string, error) {
+	lines, start, end, err := accountBlock(text, operation.Account)
+	if err != nil {
+		return "", err
+	}
+	block := append([]string{}, lines[start:end]...)
+	if strings.TrimSpace(operation.Alias) != "" {
+		block = setMetadataLine(block, "alias", metadataValueToBean(strings.TrimSpace(operation.Alias)))
+	}
+	if group := normalizeGroup(operation.Group); group != "" {
+		block = setMetadataLine(block, "group", metadataValueToBean(group))
+	}
+	nextLines := append([]string{}, lines[:start]...)
+	nextLines = append(nextLines, block...)
+	nextLines = append(nextLines, lines[end:]...)
+	return strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n", nil
+}
+
+func accountBlock(text, account string) ([]string, int, int, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	openPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+open\s+` + regexp.QuoteMeta(account) + `\s+\w+\b`)
+	directivePattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
+	for start, line := range lines {
+		if !openPattern.MatchString(line) {
+			continue
+		}
+		end := start + 1
+		for end < len(lines) && strings.TrimSpace(lines[end]) != "" && (strings.HasPrefix(lines[end], " ") || strings.HasPrefix(strings.TrimSpace(lines[end]), ";")) && !directivePattern.MatchString(lines[end]) {
+			end++
+		}
+		return lines, start, end, nil
+	}
+	return nil, 0, 0, fmt.Errorf("找不到账本中的账户定义：%s", account)
+}
+
+func setMetadataLine(block []string, key, value string) []string {
+	pattern := regexp.MustCompile(`^\s+` + regexp.QuoteMeta(key) + `:\s+`)
+	line := fmt.Sprintf("  %s: %s", key, value)
+	for i := range block {
+		if pattern.MatchString(block[i]) {
+			block[i] = line
+			return block
+		}
+	}
+	return append(block, line)
+}
+
+func operationSummary(operation AccountOperation) string {
+	parts := []string{operation.Kind, operation.Account}
+	if strings.TrimSpace(operation.Alias) != "" {
+		parts = append(parts, "alias="+strings.TrimSpace(operation.Alias))
+	}
+	if group := normalizeGroup(operation.Group); group != "" {
+		parts = append(parts, "group="+group)
+	}
+	return strings.Join(parts, " ") + "\n"
 }
 
 func escapeBean(value string) string {
