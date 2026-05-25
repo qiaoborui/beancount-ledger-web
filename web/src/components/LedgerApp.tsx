@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useTransition, type ComponentProps } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useTransition, type ComponentProps, type ReactNode } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
@@ -566,18 +566,24 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         )}
       </div>
 
-      {page === "home" && <HomePage summary={summary} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
+      {page === "home" && <PageSection eyebrow="overview" title="本期概览" description="收支、趋势、预算和账户健康集中在这个模块里。"><HomePage summary={summary} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} /></PageSection>}
 
-      {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
-      {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
-      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} creditCards={creditCards} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
+      {page === "dashboard" && <PageSection eyebrow="analytics" title="趋势看板" description="把净资产、现金流和大额变动放在一个分析模块里。">{unlocked ? <DashboardPage timeRange={timeRange} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。")}</PageSection>}
+      {page === "net-worth" && <PageSection eyebrow="net worth" title="净资产分析" description="资产、负债和配置趋势独立成区，不和其它内容糊在一起。">{unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。")}</PageSection>}
+      {page === "income-statement" && <PageSection eyebrow="income statement" title="损益分析" description="收入、支出、商户和付款账户分组查看。"><IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} creditCards={creditCards} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} /></PageSection>}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></>; })()}
-      {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
-      {page === "budgets" && <BudgetPanel rows={budgetRows} full />}
-      {page === "imports" && <ImportPage onImported={guardedImportRefresh} />}
-      {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "settings" && <PageSection eyebrow="preferences" title="偏好设置" description="显示、隐私和导航习惯都放在这里。"><SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} /></PageSection>}
+      {page === "budgets" && <PageSection eyebrow="budget" title="预算模块" description="预算使用情况和压力项单独呈现。"><BudgetPanel rows={budgetRows} full /></PageSection>}
+      {page === "imports" && <PageSection eyebrow="import" title="账单导入" description="导入、预览和写入流程集中在独立工作区里。"><ImportPage onImported={guardedImportRefresh} /></PageSection>}
+      {page === "reconcile" && <PageSection eyebrow="reconcile" title="账户对账" description="余额断言、差额和调整入口保持在一个清晰模块里。">{unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。")}</PageSection>}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {(page === "home" || page === "transactions") && (
+        <PageSection
+          className={page === "home" ? "mt-10" : "mt-4"}
+          eyebrow={page === "home" ? "recent transactions" : "ledger entries"}
+          title={page === "home" ? "最近流水" : "流水列表"}
+          description={page === "home" ? "和首页概览隔开，专门查看本期交易明细。" : "筛选、搜索和编辑流水都在这个模块里。"}
+        >
         <TransactionList
           txns={projectedTxns}
           accounts={accounts}
@@ -596,6 +602,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           onDelete={guardedDeleteTransaction}
           onReverse={guardedReverseTransaction}
         />
+        </PageSection>
       )}
       </div>
 
@@ -603,6 +610,21 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {entryOpen && <EntryModal onClose={() => setEntryOpen(false)}><EntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></EntryModal>}
     </AppShell>
+  );
+}
+
+function PageSection({ eyebrow, title, description, className = "", children }: { eyebrow: string; title: string; description?: string; className?: string; children: ReactNode }) {
+  return (
+    <section className={`ledger-page-section ${className}`}>
+      <div className="ledger-page-section-header">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-stone">{eyebrow}</div>
+          <h2 className="mt-1 font-serif text-2xl font-medium leading-tight text-ink">{title}</h2>
+          {description && <p className="mt-1 max-w-3xl text-sm leading-6 text-olive">{description}</p>}
+        </div>
+      </div>
+      <div className="ledger-page-section-body">{children}</div>
+    </section>
   );
 }
 

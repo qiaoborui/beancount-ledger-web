@@ -474,3 +474,58 @@ button.card:active, a.card:active { transform: scale(0.992); }
     transition-duration: 0.001ms !important;
   }
 }
+
+
+.ledger-page-section {
+  position: relative;
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ivory) 72%, transparent), color-mix(in srgb, var(--paper) 78%, transparent)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--brand) 7%, transparent), transparent 34%);
+  box-shadow: 0 18px 48px rgba(20, 20, 19, 0.035);
+}
+
+.ledger-page-section + .ledger-page-section {
+  margin-top: 2.25rem;
+}
+
+.ledger-page-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.25rem 0.25rem 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.ledger-page-section-body {
+  min-width: 0;
+}
+
+.ledger-page-section-body > .mt-6:first-child {
+  margin-top: 0;
+}
+
+@media (min-width: 768px) {
+  .ledger-page-section {
+    padding: 1.25rem;
+  }
+
+  .ledger-page-section-header {
+    padding-inline: 0.35rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .ledger-page-section {
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+  }
+}
+
+html[data-theme="dark"] .ledger-page-section {
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
