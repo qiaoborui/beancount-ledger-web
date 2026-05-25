@@ -2,13 +2,14 @@ import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
+import type { NewCategoryAccount } from "../pendingLedgerOperations";
 import type { Txn } from "../types";
 
 function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
+export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
   const [assertion, setAssertion] = useState<BalanceAssertion>({
     kind: "balance",
     date: new Date().toISOString().slice(0, 10),
@@ -41,8 +42,8 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
     }
   }
 
-  async function updateTransaction(source: Txn["source"], entry: ParsedTransaction) {
-    enqueueTransactionUpdate(source, entry);
+  async function updateTransaction(source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]) {
+    enqueueTransactionUpdate(source, entry, newAccounts);
     haptic(8);
     showToast("success", "交易已先保存到本地，稍后同步");
   }

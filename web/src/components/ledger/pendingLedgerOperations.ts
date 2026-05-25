@@ -2,6 +2,7 @@ import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import type { TimeRange, Txn } from "./types";
 
 export type PendingEntry = ParsedTransaction | BalanceAssertion;
+export type NewCategoryAccount = { account: string; alias?: string };
 
 export type PendingAppendOperation = {
   id: string;
@@ -16,6 +17,7 @@ export type PendingUpdateTransactionOperation = {
   kind: "update-transaction";
   source: Txn["source"];
   entry: ParsedTransaction;
+  newAccounts?: NewCategoryAccount[];
 };
 
 export type PendingDeleteTransactionOperation = {

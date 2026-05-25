@@ -110,7 +110,7 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 	return nil
 }
 
-func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
+func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry, newAccounts []ImportNewAccount) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	file, err := editableLedgerFile(w.cfg, source.File)
@@ -121,8 +121,45 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 	if err != nil {
 		return err
 	}
+	accountsFile := accountsBeanPath(w.cfg)
+	var accountsBefore []byte
+	if len(newAccounts) > 0 {
+		accountsBefore, err = os.ReadFile(accountsFile)
+		if err != nil {
+			return err
+		}
+		accounts, err := ParseAccounts(w.cfg)
+		if err != nil {
+			return err
+		}
+		existing := map[string]bool{}
+		for _, account := range accounts {
+			existing[account.Account] = true
+		}
+		newAccounts = usedEntryNewAccounts(entry, newAccounts, existing)
+		if len(newAccounts) > 0 {
+			lines := make([]string, 0, len(newAccounts))
+			for _, account := range newAccounts {
+				alias := account.Alias
+				if alias == "" {
+					alias = importAccountAlias(account.Account)
+				}
+				lines = append(lines, strings.TrimRight(AccountToBean(entry.Date, account.Account, alias, "CNY"), "\n"))
+			}
+			sep := "\n\n"
+			if strings.HasSuffix(string(accountsBefore), "\n") {
+				sep = "\n"
+			}
+			if err := os.WriteFile(accountsFile, []byte(string(accountsBefore)+sep+strings.Join(lines, "\n\n")+"\n"), 0o644); err != nil {
+				return err
+			}
+		}
+	}
 	lines, start, end, err := transactionBlock(string(before), source)
 	if err != nil {
+		if len(accountsBefore) > 0 {
+			_ = os.WriteFile(accountsFile, accountsBefore, 0o644)
+		}
 		return err
 	}
 	replacement := strings.Split(strings.TrimRight(TransactionToBean(entry), "\n"), "\n")
@@ -131,13 +168,41 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 	nextLines = append(nextLines, lines[end:]...)
 	next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
 	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
+		if len(accountsBefore) > 0 {
+			_ = os.WriteFile(accountsFile, accountsBefore, 0o644)
+		}
 		return err
 	}
 	if err := w.validateAndClear(); err != nil {
 		_ = os.WriteFile(file, before, 0o644)
+		if len(accountsBefore) > 0 {
+			_ = os.WriteFile(accountsFile, accountsBefore, 0o644)
+		}
 		return err
 	}
 	return nil
+}
+
+func usedEntryNewAccounts(entry LedgerEntry, newAccounts []ImportNewAccount, existing map[string]bool) []ImportNewAccount {
+	used := map[string]bool{}
+	for _, posting := range entry.Postings {
+		if !existing[posting.Account] {
+			used[posting.Account] = true
+		}
+	}
+	seen := map[string]bool{}
+	out := []ImportNewAccount{}
+	for _, account := range newAccounts {
+		if !used[account.Account] || seen[account.Account] {
+			continue
+		}
+		if !strings.HasPrefix(account.Account, "Expenses:") && !strings.HasPrefix(account.Account, "Income:") {
+			continue
+		}
+		seen[account.Account] = true
+		out = append(out, ImportNewAccount{Account: account.Account, Alias: strings.TrimSpace(account.Alias)})
+	}
+	return out
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {

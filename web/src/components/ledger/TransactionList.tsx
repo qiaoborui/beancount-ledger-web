@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { Loader2, PlusCircle, SlidersHorizontal, Sparkles } from "lucide-react";
+import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 import { MobileSheet } from "./MobileSheet";
 import type { ParsedTransaction } from "@/lib/schemas";
+import type { NewCategoryAccount } from "./pendingLedgerOperations";
 import type { AccountView, MetadataValue, Txn } from "./types";
+
+type EditorAccountOption = Pick<AccountView, "account" | "label" | "group" | "active">;
+type ImportCategorySuggestion = { entryId: string; categoryAccount: string; alias?: string; reason?: string; confidence?: number; isNew: boolean };
+type ImportCategorySuggestionResult = { suggestions?: ImportCategorySuggestion[]; newAccounts?: NewCategoryAccount[]; error?: string };
 
 function transactionKey(txn: Txn): string {
   return `${txn.source.file}:${txn.source.line}:${txn.source.hash ?? ""}`;
@@ -86,6 +92,46 @@ function fmtTxnAmount(amount: number): string {
 function fmtPostingAmount(amount: number): string {
   const sign = amount >= 0 ? "+" : "-";
   return `${sign}${formatCny(Math.abs(amount) / 100)}`;
+}
+
+function mergeNewAccounts(current: NewCategoryAccount[], incoming: NewCategoryAccount[]) {
+  const byAccount = new Map(current.map((account) => [account.account, account]));
+  for (const account of incoming) {
+    if (!account.account) continue;
+    byAccount.set(account.account, { ...byAccount.get(account.account), ...account });
+  }
+  return Array.from(byAccount.values()).sort((a, b) => a.account.localeCompare(b.account));
+}
+
+function categoryPostingIndex(postings: { account: string; amount: string }[]) {
+  const categoryIndex = postings.findIndex((posting) => posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:"));
+  if (categoryIndex >= 0) return categoryIndex;
+  const positiveIndex = postings.findIndex((posting) => Number(posting.amount) > 0);
+  return positiveIndex >= 0 ? positiveIndex : 0;
+}
+
+function replaceCategoryPosting(postings: { account: string; amount: string }[], categoryAccount: string) {
+  const index = categoryPostingIndex(postings);
+  return postings.map((posting, rowIndex) => rowIndex === index ? { ...posting, account: categoryAccount } : posting);
+}
+
+function transactionToCategoryRequest({ txn, date, payee, narration, metadata, postings }: { txn: Txn; date: string; payee: string; narration: string; metadata: Record<string, MetadataValue>; postings: { account: string; amount: string }[] }) {
+  const category = postings.find((posting) => posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:"));
+  const funding = postings.find((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:")) ?? postings.find((posting) => posting.account !== category?.account) ?? postings[0];
+  const amount = Math.max(...postings.map((posting) => Math.abs(Number(posting.amount) || 0)), 0);
+  return {
+    id: `${txn.source.file}:${txn.source.line}`,
+    date,
+    flag: "*",
+    payee,
+    narration,
+    categoryAccount: category?.account ?? "Expenses:Unknown",
+    fundingAccount: funding?.account ?? "Assets:Cash",
+    amount,
+    currency: "CNY",
+    metadata: Object.fromEntries(Object.entries(metadata).map(([key, value]) => [key, String(value)])),
+    postings: postings.map((posting) => ({ account: posting.account, amount: posting.amount, currency: "CNY" })),
+  };
 }
 
 /** 紧凑借贷方流向：贷记(贷方) → 借记(借方) */
@@ -197,7 +243,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
   );
 }
 
-export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void }) {
+export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
@@ -364,7 +410,7 @@ type TransactionDrawerProps = {
   txn: Txn;
   accounts: AccountView[];
   onClose: () => void;
-  onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
+  onUpdate?: (source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]) => void;
   onDelete?: (source: Txn["source"], reason: string) => void;
   onReverse?: (source: Txn["source"], date: string) => void;
 };
@@ -377,8 +423,22 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const [postings, setPostings] = useState(() => txn.postings.map((p) => ({ account: p.account, amount: (p.amount / 100).toFixed(2) })));
   const [metadata, setMetadata] = useState(() => JSON.stringify(txn.metadata ?? {}, null, 2));
   const [tags, setTags] = useState(() => (txn.tags ?? []).join(" "));
-  const accountOptions = useMemo(() => accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account)), [accounts, postings]);
-  const optionLabel = (account: AccountView) => `${account.label} · ${account.account}`;
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionMessage, setSuggestionMessage] = useState("");
+  const [suggestedAccounts, setSuggestedAccounts] = useState<NewCategoryAccount[]>([]);
+  const accountOptions = useMemo<EditorAccountOption[]>(() => {
+    const merged: EditorAccountOption[] = accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account));
+    for (const account of suggestedAccounts) {
+      if (merged.some((item) => item.account === account.account)) continue;
+      merged.push({ account: account.account, label: account.alias || account.account, group: account.account.startsWith("Income:") ? "income" : "expense", active: true });
+    }
+    return merged;
+  }, [accounts, postings, suggestedAccounts]);
+  const usedNewAccounts = useMemo(() => {
+    const used = new Set(postings.map((posting) => posting.account));
+    return suggestedAccounts.filter((account) => used.has(account.account));
+  }, [postings, suggestedAccounts]);
+  const optionLabel = (account: EditorAccountOption) => `${account.label} · ${account.account}`;
   const reverseDate = new Date().toISOString().slice(0, 10);
   const hasUnsavedChanges = editing && (
     date !== txn.date ||
@@ -401,9 +461,33 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       alert("metadata 必须是 JSON 对象");
       return;
     }
-    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: "CNY" })) });
+    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: "CNY" })) }, usedNewAccounts);
     setEditing(false);
     onClose();
+  }
+
+  async function suggestCategory() {
+    setSuggesting(true);
+    setSuggestionMessage("");
+    try {
+      const parsedMetadata = metadata.trim() ? JSON.parse(metadata) : {};
+      const res = await fetch("/api/ai/import-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: [transactionToCategoryRequest({ txn, date, payee, narration, metadata: parsedMetadata, postings })] }),
+      });
+      const data = await readJson<ImportCategorySuggestionResult>(res);
+      if (!res.ok || data.error) throw new Error(data.error || "AI 分类失败");
+      const suggestion = data.suggestions?.[0];
+      if (!suggestion) throw new Error("AI 没有返回分类建议");
+      setPostings((rows) => replaceCategoryPosting(rows, suggestion.categoryAccount));
+      setSuggestedAccounts((current) => mergeNewAccounts(current, data.newAccounts ?? []));
+      setSuggestionMessage(`AI 建议：${suggestion.alias ? `${suggestion.alias} · ` : ""}${suggestion.categoryAccount}`);
+    } catch (err) {
+      setSuggestionMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSuggesting(false);
+    }
   }
 
   const footer = editing ? <div className="grid grid-cols-2 gap-2">
@@ -418,6 +502,11 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const body = <>
     <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
     {editing ? <div className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag disabled:opacity-60" onClick={suggestCategory} disabled={suggesting}>{suggesting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 inline h-4 w-4" />}AI 分类</button>
+            {suggestionMessage && <span className="text-xs text-stone">{suggestionMessage}</span>}
+          </div>
+          {usedNewAccounts.length > 0 && <div className="flex flex-wrap gap-2">{usedNewAccounts.map((account) => <span key={account.account} className="inline-flex items-center gap-1 rounded-xl border border-line bg-panel px-3 py-1 text-xs text-stone"><PlusCircle className="h-3 w-3 text-brand" />{account.alias || account.account} · {account.account}</span>)}</div>}
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           <input className="border border-line bg-panel p-3" value={payee} onChange={(e) => setPayee(e.target.value)} />
           <input className="border border-line bg-panel p-3" value={narration} onChange={(e) => setNarration(e.target.value)} />

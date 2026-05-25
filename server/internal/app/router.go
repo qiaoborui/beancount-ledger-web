@@ -378,7 +378,7 @@ func (s *Server) updateTransaction(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if err := s.writer.ReplaceTransactionBlock(input.Source, input.Entry); err != nil {
+	if err := s.writer.ReplaceTransactionBlock(input.Source, input.Entry, input.NewAccounts); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}

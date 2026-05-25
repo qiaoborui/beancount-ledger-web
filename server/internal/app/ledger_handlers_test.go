@@ -197,7 +197,7 @@ func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	router := NewRouter(cfg)
 	cookies := loginCookies(t, router)
 
-	updateBody := `{"source":{"file":"` + filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean") + `","line":1},"entry":{"kind":"transaction","date":"2026-05-01","payee":"Cafe","narration":"Dinner","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"20.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-20.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}}`
+	updateBody := `{"source":{"file":"` + filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean") + `","line":1},"entry":{"kind":"transaction","date":"2026-05-01","payee":"Cafe","narration":"Dinner","metadata":{},"tags":[],"postings":[{"account":"Expenses:Dining","amount":"20.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-20.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]},"newAccounts":[{"account":"Expenses:Dining","alias":"餐饮"}]}`
 	res := requestWithCookies(router, http.MethodPut, "/api/ledger/transactions", updateBody, cookies)
 	if res.Code != http.StatusOK {
 		t.Fatalf("update status=%d body=%s", res.Code, res.Body.String())
@@ -205,6 +205,10 @@ func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")))
 	if !strings.Contains(text, `"Dinner"`) || strings.Contains(text, `"Lunch"`) {
 		t.Fatalf("transaction was not replaced:\n%s", text)
+	}
+	accountsText := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "accounts.bean")))
+	if !strings.Contains(accountsText, "open Expenses:Dining CNY") || !strings.Contains(accountsText, `alias: "餐饮"`) {
+		t.Fatalf("new transaction category account was not opened:\n%s", accountsText)
 	}
 
 	salaryHash := transactionHash([]string{`2026-05-31 * "Employer" "Salary"`, "  Assets:Cash 1000.00 CNY", "  Income:Salary -1000.00 CNY"})

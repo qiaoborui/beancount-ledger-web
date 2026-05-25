@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -20,6 +21,15 @@ type ChatMessage struct {
 type ChatResult struct {
 	Message string        `json:"message"`
 	Entries []LedgerEntry `json:"entries"`
+}
+
+type ImportCategorySuggestion struct {
+	EntryID         string  `json:"entryId"`
+	CategoryAccount string  `json:"categoryAccount"`
+	Alias           string  `json:"alias,omitempty"`
+	Reason          string  `json:"reason,omitempty"`
+	Confidence      float64 `json:"confidence,omitempty"`
+	IsNew           bool    `json:"isNew"`
 }
 
 func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error) {
@@ -81,6 +91,42 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	return parsed, nil
 }
 
+func (s *Server) suggestImportCategories(entries []ImportEntry) ([]ImportCategorySuggestion, []ImportNewAccount, error) {
+	snapshot, err := s.cache.Snapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	existingCategories := importCategoryAccounts(snapshot.Accounts)
+	entryIDs := map[string]bool{}
+	slimEntries := make([]ginH, 0, len(entries))
+	for _, entry := range entries {
+		entryIDs[entry.ID] = true
+		slimEntries = append(slimEntries, ginH{
+			"id":              entry.ID,
+			"date":            entry.Date,
+			"payee":           entry.Payee,
+			"narration":       entry.Narration,
+			"amount":          entry.Amount,
+			"method":          entry.Method,
+			"txType":          entry.TxType,
+			"type":            entry.Type,
+			"currentCategory": entry.CategoryAccount,
+			"metadata":        entry.Metadata,
+		})
+	}
+	content, err := runAI(importCategoryPrompt(existingCategories), mustJSON(slimEntries), false)
+	if err != nil {
+		return nil, nil, err
+	}
+	var parsed struct {
+		Suggestions []ImportCategorySuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
+		return nil, nil, err
+	}
+	return validateImportCategorySuggestions(parsed.Suggestions, entryIDs, existingCategories)
+}
+
 func parserPrompt(today string, accounts []string) string {
 	return "你是一个 Beancount 记账解析器。只输出 JSON，不要 Markdown。今天日期：" + today + `。
 币种固定 CNY。只能使用这些账户：
@@ -88,6 +134,23 @@ func parserPrompt(today string, accounts []string) string {
 
 输出 {"entries":[{"kind":"transaction","date":"YYYY-MM-DD","payee":"商户/对方","narration":"说明","metadata":{},"tags":[],"postings":[{"account":"账户","amount":"12.00","currency":"CNY"},{"account":"账户","amount":"-12.00","currency":"CNY"}],"confidence":0.9,"needsReview":false,"questions":[]}]}。
 每条交易 postings 金额合计必须为 0；不确定分类用 Expenses:Unknown 并 needsReview=true；没有日期用今天。`
+}
+
+func importCategoryPrompt(existingCategories []string) string {
+	return `你是 Beancount 账单流水分类助手。只输出 JSON，不要 Markdown。
+你会收到一组导入流水。请为每条流水选择最合适的收入或支出分类。
+
+优先复用已有分类：
+- ` + strings.Join(existingCategories, "\n- ") + `
+
+如果现有分类都不合适，可以新建分类，但必须遵守：
+- 只允许 Expenses:* 或 Income:*。
+- 账户名必须是英文/数字/下划线/连字符组成的 Beancount 账户，例如 Expenses:Pets:Food 或 Income:Bonus。
+- 同一类新分类要复用同一个账户。
+- 新分类必须给出简短中文 alias。
+- 只有明显应该新建时才新建；不确定时用 Expenses:Unknown，并说明原因。
+
+输出 {"suggestions":[{"entryId":"输入流水 id","categoryAccount":"Expenses:Food","alias":"新分类中文名，可选","reason":"简短原因","confidence":0.85,"isNew":false}]}。`
 }
 
 func runAI(system, input string, chat bool) (string, error) {
@@ -152,6 +215,62 @@ func activeAccounts(accounts []Account) []string {
 		}
 	}
 	return out
+}
+
+func importCategoryAccounts(accounts []Account) []string {
+	out := []string{}
+	for _, account := range accounts {
+		if account.Active && (strings.HasPrefix(account.Account, "Expenses:") || strings.HasPrefix(account.Account, "Income:")) {
+			out = append(out, account.Account)
+		}
+	}
+	return out
+}
+
+func validateImportCategorySuggestions(suggestions []ImportCategorySuggestion, entryIDs map[string]bool, existingCategories []string) ([]ImportCategorySuggestion, []ImportNewAccount, error) {
+	existingSet := map[string]bool{}
+	for _, account := range existingCategories {
+		existingSet[account] = true
+	}
+	seenEntries := map[string]bool{}
+	newAccountsByName := map[string]ImportNewAccount{}
+	out := []ImportCategorySuggestion{}
+	for _, suggestion := range suggestions {
+		suggestion.EntryID = strings.TrimSpace(suggestion.EntryID)
+		suggestion.CategoryAccount = strings.TrimSpace(suggestion.CategoryAccount)
+		suggestion.Alias = strings.TrimSpace(suggestion.Alias)
+		suggestion.Reason = strings.TrimSpace(suggestion.Reason)
+		if !entryIDs[suggestion.EntryID] || seenEntries[suggestion.EntryID] {
+			continue
+		}
+		if err := validateAccount("categoryAccount", suggestion.CategoryAccount); err != nil {
+			return nil, nil, err
+		}
+		isExisting := existingSet[suggestion.CategoryAccount]
+		if !isExisting {
+			if !strings.HasPrefix(suggestion.CategoryAccount, "Expenses:") && !strings.HasPrefix(suggestion.CategoryAccount, "Income:") {
+				return nil, nil, fmt.Errorf("AI 建议了非法分类账户：%s", suggestion.CategoryAccount)
+			}
+			if suggestion.Alias == "" {
+				suggestion.Alias = importAccountAlias(suggestion.CategoryAccount)
+			}
+			suggestion.IsNew = true
+			if _, ok := newAccountsByName[suggestion.CategoryAccount]; !ok {
+				newAccountsByName[suggestion.CategoryAccount] = ImportNewAccount{Account: suggestion.CategoryAccount, Alias: suggestion.Alias}
+			}
+		} else {
+			suggestion.IsNew = false
+			suggestion.Alias = ""
+		}
+		seenEntries[suggestion.EntryID] = true
+		out = append(out, suggestion)
+	}
+	newAccounts := make([]ImportNewAccount, 0, len(newAccountsByName))
+	for _, account := range newAccountsByName {
+		newAccounts = append(newAccounts, account)
+	}
+	sort.Slice(newAccounts, func(i, j int) bool { return newAccounts[i].Account < newAccounts[j].Account })
+	return out, newAccounts, nil
 }
 
 func validateAIEntries(entries []LedgerEntry, accounts []string) ([]LedgerEntry, error) {

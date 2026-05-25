@@ -72,6 +72,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/chat", s.aiChat)
+	api.POST("/ai/import-categories", s.aiImportCategories)
 	api.GET("/git/status", s.gitStatus)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)

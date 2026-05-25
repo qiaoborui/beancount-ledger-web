@@ -5,6 +5,7 @@ import { haptic } from "../haptics";
 import {
   mergePendingOperation,
   migrateLegacyPendingWrites,
+  type NewCategoryAccount,
   type PendingEntry,
   type PendingLedgerOperation,
 } from "../pendingLedgerOperations";
@@ -62,8 +63,8 @@ function appendOperation(entry: PendingEntry): PendingLedgerOperation {
   return { id: makeId(), createdAt: Date.now(), kind: "append", entry };
 }
 
-function updateOperation(source: Txn["source"], entry: ParsedTransaction): PendingLedgerOperation {
-  return { id: makeId(), createdAt: Date.now(), kind: "update-transaction", source, entry };
+function updateOperation(source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]): PendingLedgerOperation {
+  return { id: makeId(), createdAt: Date.now(), kind: "update-transaction", source, entry, newAccounts };
 }
 
 function deleteOperation(source: Txn["source"], reason: string): PendingLedgerOperation {
@@ -79,11 +80,11 @@ export async function syncOperation(operation: PendingLedgerOperation) {
   }
 
   if (operation.kind === "update-transaction") {
-    let res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
+    let res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry, newAccounts: operation.newAccounts ?? [] }) });
     let data = await readJson<{ error?: string }>(res);
     if (!res.ok && operation.source.hash && data.error?.includes("找不到原交易")) {
       const source = { file: operation.source.file, line: operation.source.line };
-      res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry: operation.entry }) });
+      res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry: operation.entry, newAccounts: operation.newAccounts ?? [] }) });
       data = await readJson<{ error?: string }>(res);
     }
     if (!res.ok) throw new Error(data.error || "修改同步失败");
@@ -140,8 +141,8 @@ export function usePendingLedgerWrites({ load, refreshGitStatus, showToast }: { 
     haptic([8, 30, 8]);
   }, []);
 
-  const enqueueTransactionUpdate = useCallback((source: Txn["source"], entry: ParsedTransaction) => {
-    enqueueOperation(updateOperation(source, entry));
+  const enqueueTransactionUpdate = useCallback((source: Txn["source"], entry: ParsedTransaction, newAccounts?: NewCategoryAccount[]) => {
+    enqueueOperation(updateOperation(source, entry, newAccounts));
   }, [enqueueOperation]);
 
   const enqueueTransactionDelete = useCallback((source: Txn["source"], reason: string) => {

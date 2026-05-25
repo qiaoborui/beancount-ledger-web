@@ -199,6 +199,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ledger/imports/commit":    true,
 		"POST /api/ai/parse":                 true,
 		"POST /api/ai/chat":                  true,
+		"POST /api/ai/import-categories":     true,
 		"GET /api/git/status":                true,
 		"POST /api/git/pull":                 true,
 		"POST /api/git/commit":               true,

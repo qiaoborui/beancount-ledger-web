@@ -62,3 +62,25 @@ func (s *Server) aiChat(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": result.Message, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
+
+func (s *Server) aiImportCategories(c *gin.Context) {
+	if !s.limiter.Check(c, "ai.import-categories", 10, 5*time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input AIImportCategoryRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	start := time.Now()
+	suggestions, newAccounts, err := s.suggestImportCategories(input.Entries)
+	elapsed := time.Since(start).Milliseconds()
+	logDuration("ai.import-categories", start, map[string]any{"entries": len(input.Entries), "suggestions": len(suggestions), "newAccounts": len(newAccounts)})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"suggestions": suggestions, "newAccounts": newAccounts, "meta": gin.H{"elapsedMs": elapsed}})
+}

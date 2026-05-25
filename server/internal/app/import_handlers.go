@@ -39,7 +39,7 @@ func (s *Server) importsCommit(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	result, err := s.commitImport(input.ImportID, input.Provider, input.Entries)
+	result, err := s.commitImport(input.ImportID, input.Provider, input.Entries, input.NewAccounts)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

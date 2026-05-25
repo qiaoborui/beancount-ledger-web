@@ -21,8 +21,9 @@ type ReverseTransactionRequest struct {
 }
 
 type UpdateTransactionRequest struct {
-	Source TransactionSource `json:"source"`
-	Entry  LedgerEntry       `json:"entry"`
+	Source      TransactionSource  `json:"source"`
+	Entry       LedgerEntry        `json:"entry"`
+	NewAccounts []ImportNewAccount `json:"newAccounts"`
 }
 
 type DeleteTransactionRequest struct {
@@ -55,10 +56,15 @@ type AIChatRequest struct {
 	DraftEntries []LedgerEntry `json:"draftEntries"`
 }
 
+type AIImportCategoryRequest struct {
+	Entries []ImportEntry `json:"entries"`
+}
+
 type ImportCommitRequest struct {
-	ImportID string        `json:"importId"`
-	Provider string        `json:"provider"`
-	Entries  []ImportEntry `json:"entries"`
+	ImportID    string             `json:"importId"`
+	Provider    string             `json:"provider"`
+	Entries     []ImportEntry      `json:"entries"`
+	NewAccounts []ImportNewAccount `json:"newAccounts"`
 }
 
 var (
@@ -90,7 +96,15 @@ func (r UpdateTransactionRequest) Validate() error {
 	if err := r.Source.Validate(); err != nil {
 		return err
 	}
-	return r.Entry.Validate()
+	if err := r.Entry.Validate(); err != nil {
+		return err
+	}
+	for i, account := range r.NewAccounts {
+		if err := account.Validate(); err != nil {
+			return fmt.Errorf("newAccounts[%d]: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func (r DeleteTransactionRequest) Validate() error {
@@ -144,6 +158,21 @@ func (r AIChatRequest) Validate() error {
 	return nil
 }
 
+func (r AIImportCategoryRequest) Validate() error {
+	if len(r.Entries) == 0 {
+		return fmt.Errorf("entries is required")
+	}
+	if len(r.Entries) > 200 {
+		return fmt.Errorf("一次最多建议 200 条流水分类")
+	}
+	for i, entry := range r.Entries {
+		if err := entry.Validate(); err != nil {
+			return fmt.Errorf("entries[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (r ImportCommitRequest) Validate() error {
 	if strings.TrimSpace(r.ImportID) == "" {
 		return fmt.Errorf("importId is required")
@@ -157,6 +186,11 @@ func (r ImportCommitRequest) Validate() error {
 	for i, entry := range r.Entries {
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("entries[%d]: %w", i, err)
+		}
+	}
+	for i, account := range r.NewAccounts {
+		if err := account.Validate(); err != nil {
+			return fmt.Errorf("newAccounts[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -259,6 +293,16 @@ func (e ImportEntry) Validate() error {
 	}
 	if e.Currency != "CNY" {
 		return fmt.Errorf("currency must be CNY")
+	}
+	return nil
+}
+
+func (a ImportNewAccount) Validate() error {
+	if err := validateAccount("account", a.Account); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(a.Account, "Expenses:") && !strings.HasPrefix(a.Account, "Income:") {
+		return fmt.Errorf("new category account must start with Expenses: or Income:")
 	}
 	return nil
 }
