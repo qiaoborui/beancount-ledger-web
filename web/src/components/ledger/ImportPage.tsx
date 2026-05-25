@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 
@@ -198,29 +198,23 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
       {error && <div className="rounded-2xl border border-line bg-panel p-4 text-sm text-[var(--danger)]"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
 
-      {commitResult?.ok && resultOpen && <div className="fixed inset-0 z-[120] grid place-items-center bg-ink/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="import-result-title">
-        <section className="w-full max-w-lg rounded-3xl border border-line bg-paper p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 id="import-result-title" className="font-serif text-2xl text-brand"><CheckCircle className="mr-2 inline h-5 w-5" />导入完成</h3>
-              <p className="mt-1 text-sm text-stone">账单已经写入 ledger，可以继续保存到 Git。</p>
-            </div>
-            <button className="rounded-xl border border-line bg-panel p-2 text-olive hover:bg-tag" onClick={() => setResultOpen(false)} aria-label="关闭导入结果"><X className="h-4 w-4" /></button>
-          </div>
-          <CommitResultDetails result={commitResult} />
-          <button className="mt-5 w-full rounded-xl bg-brand px-4 py-3 text-paper" onClick={() => setResultOpen(false)}>知道了</button>
-        </section>
-      </div>}
-
       {preview && <section className="card p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
           <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
         </div>
         {commitResult?.ok && <div className="mt-4 rounded-2xl border border-brand/30 bg-[var(--selected-bg)] p-4 text-sm text-olive">
-          <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
-          <div className="mt-1 text-stone">结果已弹出；关闭后仍可点击此处查看输出文件。</div>
-          <button className="mt-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setResultOpen(true)}>查看写入结果</button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
+              <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+            </div>
+            <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setResultOpen((open) => !open)}>
+              {resultOpen ? <ChevronUp className="mr-1 inline h-4 w-4" /> : <ChevronDown className="mr-1 inline h-4 w-4" />}
+              {resultOpen ? "收起结果" : "查看写入结果"}
+            </button>
+          </div>
+          {resultOpen && <CommitResultDetails result={commitResult} />}
         </div>}
         {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
         {preview.provider === "cmb" && <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-paper p-4 text-sm md:grid-cols-5"><div><div className="text-xs text-stone">PDF/CSV 明细</div><div className="font-medium">{preview.rawRowCount}</div></div><div><div className="text-xs text-stone">Web 前置过滤后</div><div className="font-medium">{preview.filteredRowCount}</div></div><div><div className="text-xs text-stone">DEG 生成</div><div className="font-medium">{preview.generatedCount}</div></div><div><div className="text-xs text-stone">已去重跳过</div><div className="font-medium">{preview.skippedDuplicateCount}</div></div><div><div className="text-xs text-stone">待确认写入</div><div className="font-medium">{entries.length}</div></div></div>}
