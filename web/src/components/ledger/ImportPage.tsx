@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, PlusCircle, Sparkles, UploadCloud } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
 
@@ -54,9 +54,6 @@ type ImportPreview = {
 };
 
 type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
-type NewCategoryAccount = { account: string; alias?: string };
-type ImportCategorySuggestion = { entryId: string; categoryAccount: string; alias?: string; reason?: string; confidence?: number; isNew: boolean };
-type ImportCategorySuggestionResult = { suggestions?: ImportCategorySuggestion[]; newAccounts?: NewCategoryAccount[]; error?: string };
 
 function providerLabel(provider: Provider) {
   if (provider === "alipay") return "支付宝";
@@ -82,26 +79,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestionMessage, setSuggestionMessage] = useState("");
-  const [suggestedAccounts, setSuggestedAccounts] = useState<NewCategoryAccount[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
-    const merged = accounts.filter((account) => account.active);
-    for (const account of suggestedAccounts) {
-      if (merged.some((item) => item.account === account.account)) continue;
-      merged.push({ account: account.account, label: account.alias || account.account, group: account.account.startsWith("Income:") ? "income" : "expense", active: true });
-    }
-    return merged;
-  }, [preview, suggestedAccounts]);
-
-  const usedNewAccounts = useMemo(() => {
-    const used = new Set(entries.map((entry) => entry.categoryAccount));
-    return suggestedAccounts.filter((account) => used.has(account.account));
-  }, [entries, suggestedAccounts]);
+    return accounts.filter((account) => account.active);
+  }, [preview]);
 
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
@@ -114,8 +98,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setEntries([]);
     setCommitResult(null);
     setResultOpen(false);
-    setSuggestionMessage("");
-    setSuggestedAccounts([]);
     setError("");
   }
 
@@ -140,8 +122,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
       setPreview(data);
       setEntries(data.entries);
-      setSuggestedAccounts([]);
-      setSuggestionMessage("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -159,7 +139,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       const res = await fetch("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, newAccounts: usedNewAccounts, alipayFundRounding }),
+        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
       });
       const data = await readJson<CommitResult>(res);
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
@@ -170,35 +150,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCommitting(false);
-    }
-  }
-
-  async function suggestCategories() {
-    if (!entries.length) return;
-    setSuggesting(true);
-    setError("");
-    setSuggestionMessage("");
-    try {
-      const res = await fetch("/api/ai/import-categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries }),
-      });
-      const data = await readJson<ImportCategorySuggestionResult>(res);
-      if (!res.ok || data.error) throw new Error(data.error || "AI 分类失败");
-      const suggestions = data.suggestions ?? [];
-      const suggestionMap = new Map(suggestions.map((item) => [item.entryId, item]));
-      setEntries((current) => current.map((entry) => {
-        const suggestion = suggestionMap.get(entry.id);
-        return suggestion ? { ...entry, categoryAccount: suggestion.categoryAccount } : entry;
-      }));
-      setSuggestedAccounts((current) => mergeNewAccounts(current, data.newAccounts ?? []));
-      const newCount = data.newAccounts?.length ?? 0;
-      setSuggestionMessage(`AI 已更新 ${suggestions.length} 条分类${newCount ? `，建议新建 ${newCount} 个分类` : ""}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSuggesting(false);
     }
   }
 
@@ -250,15 +201,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       {preview && <section className="card p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="rounded-xl border border-line bg-panel px-4 py-3 text-olive hover:bg-tag disabled:opacity-60" onClick={suggestCategories} disabled={suggesting || entries.length === 0 || commitResult?.ok === true}>{suggesting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 inline h-4 w-4" />}AI 分类</button>
-            <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
-          </div>
+          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
         </div>
-        {(suggestionMessage || usedNewAccounts.length > 0) && <div className="mt-4 rounded-2xl border border-line bg-panel p-4 text-sm text-olive">
-          {suggestionMessage && <div><Sparkles className="mr-2 inline h-4 w-4 text-brand" />{suggestionMessage}</div>}
-          {usedNewAccounts.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{usedNewAccounts.map((account) => <span key={account.account} className="inline-flex items-center gap-1 rounded-xl border border-line bg-paper px-3 py-1 text-xs"><PlusCircle className="h-3 w-3 text-brand" />{account.alias || account.account} · {account.account}</span>)}</div>}
-        </div>}
         {commitResult?.ok && <div className="mt-4 rounded-2xl border border-brand/30 bg-[var(--selected-bg)] p-4 text-sm text-olive">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -297,15 +241,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
     </div>
   );
-}
-
-function mergeNewAccounts(current: NewCategoryAccount[], incoming: NewCategoryAccount[]) {
-  const byAccount = new Map(current.map((account) => [account.account, account]));
-  for (const account of incoming) {
-    if (!account.account) continue;
-    byAccount.set(account.account, { ...byAccount.get(account.account), ...account });
-  }
-  return Array.from(byAccount.values()).sort((a, b) => a.account.localeCompare(b.account));
 }
 
 function CommitResultDetails({ result }: { result: CommitResult }) {

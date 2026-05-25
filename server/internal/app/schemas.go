@@ -56,15 +56,15 @@ type AIChatRequest struct {
 	DraftEntries []LedgerEntry `json:"draftEntries"`
 }
 
-type AIImportCategoryRequest struct {
-	Entries []ImportEntry `json:"entries"`
+type AITransactionCategoryRequest struct {
+	Entry       ImportEntry `json:"entry"`
+	Instruction string      `json:"instruction"`
 }
 
 type ImportCommitRequest struct {
-	ImportID    string             `json:"importId"`
-	Provider    string             `json:"provider"`
-	Entries     []ImportEntry      `json:"entries"`
-	NewAccounts []ImportNewAccount `json:"newAccounts"`
+	ImportID string        `json:"importId"`
+	Provider string        `json:"provider"`
+	Entries  []ImportEntry `json:"entries"`
 }
 
 var (
@@ -158,17 +158,12 @@ func (r AIChatRequest) Validate() error {
 	return nil
 }
 
-func (r AIImportCategoryRequest) Validate() error {
-	if len(r.Entries) == 0 {
-		return fmt.Errorf("entries is required")
+func (r AITransactionCategoryRequest) Validate() error {
+	if strings.TrimSpace(r.Instruction) == "" {
+		return fmt.Errorf("instruction is required")
 	}
-	if len(r.Entries) > 200 {
-		return fmt.Errorf("一次最多建议 200 条流水分类")
-	}
-	for i, entry := range r.Entries {
-		if err := entry.Validate(); err != nil {
-			return fmt.Errorf("entries[%d]: %w", i, err)
-		}
+	if err := r.Entry.Validate(); err != nil {
+		return fmt.Errorf("entry: %w", err)
 	}
 	return nil
 }
@@ -186,11 +181,6 @@ func (r ImportCommitRequest) Validate() error {
 	for i, entry := range r.Entries {
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("entries[%d]: %w", i, err)
-		}
-	}
-	for i, account := range r.NewAccounts {
-		if err := account.Validate(); err != nil {
-			return fmt.Errorf("newAccounts[%d]: %w", i, err)
 		}
 	}
 	return nil

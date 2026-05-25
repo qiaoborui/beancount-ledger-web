@@ -8,8 +8,8 @@ import type { NewCategoryAccount } from "./pendingLedgerOperations";
 import type { AccountView, MetadataValue, Txn } from "./types";
 
 type EditorAccountOption = Pick<AccountView, "account" | "label" | "group" | "active">;
-type ImportCategorySuggestion = { entryId: string; categoryAccount: string; alias?: string; reason?: string; confidence?: number; isNew: boolean };
-type ImportCategorySuggestionResult = { suggestions?: ImportCategorySuggestion[]; newAccounts?: NewCategoryAccount[]; error?: string };
+type CategorySuggestion = { entryId: string; categoryAccount: string; alias?: string; reason?: string; confidence?: number; isNew: boolean };
+type CategorySuggestionResult = { suggestion?: CategorySuggestion; newAccounts?: NewCategoryAccount[]; error?: string };
 
 function transactionKey(txn: Txn): string {
   return `${txn.source.file}:${txn.source.line}:${txn.source.hash ?? ""}`;
@@ -424,6 +424,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const [metadata, setMetadata] = useState(() => JSON.stringify(txn.metadata ?? {}, null, 2));
   const [tags, setTags] = useState(() => (txn.tags ?? []).join(" "));
   const [suggesting, setSuggesting] = useState(false);
+  const [categoryInstruction, setCategoryInstruction] = useState("");
   const [suggestionMessage, setSuggestionMessage] = useState("");
   const [suggestedAccounts, setSuggestedAccounts] = useState<NewCategoryAccount[]>([]);
   const accountOptions = useMemo<EditorAccountOption[]>(() => {
@@ -466,23 +467,27 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     onClose();
   }
 
-  async function suggestCategory() {
+  async function applyCategoryInstruction() {
+    if (!categoryInstruction.trim()) {
+      setSuggestionMessage("先告诉 AI 这笔应该是哪一类");
+      return;
+    }
     setSuggesting(true);
     setSuggestionMessage("");
     try {
       const parsedMetadata = metadata.trim() ? JSON.parse(metadata) : {};
-      const res = await fetch("/api/ai/import-categories", {
+      const res = await fetch("/api/ai/transaction-category", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries: [transactionToCategoryRequest({ txn, date, payee, narration, metadata: parsedMetadata, postings })] }),
+        body: JSON.stringify({ entry: transactionToCategoryRequest({ txn, date, payee, narration, metadata: parsedMetadata, postings }), instruction: categoryInstruction }),
       });
-      const data = await readJson<ImportCategorySuggestionResult>(res);
-      if (!res.ok || data.error) throw new Error(data.error || "AI 分类失败");
-      const suggestion = data.suggestions?.[0];
-      if (!suggestion) throw new Error("AI 没有返回分类建议");
+      const data = await readJson<CategorySuggestionResult>(res);
+      if (!res.ok || data.error) throw new Error(data.error || "分类纠正失败");
+      const suggestion = data.suggestion;
+      if (!suggestion) throw new Error("AI 没有返回分类");
       setPostings((rows) => replaceCategoryPosting(rows, suggestion.categoryAccount));
       setSuggestedAccounts((current) => mergeNewAccounts(current, data.newAccounts ?? []));
-      setSuggestionMessage(`AI 建议：${suggestion.alias ? `${suggestion.alias} · ` : ""}${suggestion.categoryAccount}`);
+      setSuggestionMessage(`${suggestion.isNew ? "将新建分类" : "已匹配已有分类"}：${suggestion.alias ? `${suggestion.alias} · ` : ""}${suggestion.categoryAccount}`);
     } catch (err) {
       setSuggestionMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -502,9 +507,12 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const body = <>
     <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
     {editing ? <div className="grid gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag disabled:opacity-60" onClick={suggestCategory} disabled={suggesting}>{suggesting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 inline h-4 w-4" />}AI 分类</button>
-            {suggestionMessage && <span className="text-xs text-stone">{suggestionMessage}</span>}
+          <div className="rounded-2xl border border-line bg-panel p-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input className="min-w-0 flex-1 rounded-xl border border-line bg-paper px-3 py-2 text-sm" value={categoryInstruction} onChange={(e) => setCategoryInstruction(e.target.value)} placeholder="告诉 AI：这笔应该算哪类，例如 宠物用品 / 餐饮 / 差旅" />
+              <button className="shrink-0 rounded-xl border border-line bg-paper px-3 py-2 text-sm text-olive hover:bg-tag disabled:opacity-60" onClick={applyCategoryInstruction} disabled={suggesting || !categoryInstruction.trim()}>{suggesting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 inline h-4 w-4" />}应用分类</button>
+            </div>
+            {suggestionMessage && <div className="mt-2 text-xs text-stone">{suggestionMessage}</div>}
           </div>
           {usedNewAccounts.length > 0 && <div className="flex flex-wrap gap-2">{usedNewAccounts.map((account) => <span key={account.account} className="inline-flex items-center gap-1 rounded-xl border border-line bg-panel px-3 py-1 text-xs text-stone"><PlusCircle className="h-3 w-3 text-brand" />{account.alias || account.account} · {account.account}</span>)}</div>}
           <input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} />

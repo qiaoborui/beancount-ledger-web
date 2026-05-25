@@ -207,7 +207,7 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	}, nil
 }
 
-func (s *Server) commitImport(importID, provider string, entries []ImportEntry, newAccounts []ImportNewAccount) (ginH, error) {
+func (s *Server) commitImport(importID, provider string, entries []ImportEntry) (ginH, error) {
 	if err := s.ensureImportRequirements(provider); err != nil {
 		return nil, err
 	}
@@ -239,10 +239,6 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry, 
 	for _, account := range accounts {
 		accountSet[account.Account] = true
 	}
-	newAccounts = usedImportNewAccounts(entries, newAccounts, accountSet)
-	for _, account := range newAccounts {
-		accountSet[account.Account] = true
-	}
 	beanText, err := s.validateAndRenderImportEntries(entries, accountSet)
 	if err != nil {
 		return nil, err
@@ -250,11 +246,6 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry, 
 	summary := parseBeanSummary(beanText)
 	if summary.CandidateCount == 0 || summary.DateStart == "" || summary.DateEnd == "" {
 		return nil, errors.New("去重后没有可写入的交易")
-	}
-	for i := range newAccounts {
-		if newAccounts[i].Alias == "" {
-			newAccounts[i].Alias = importAccountAlias(newAccounts[i].Account)
-		}
 	}
 	fallbackDocumentAccount := ""
 	if len(entries) > 0 {
@@ -267,10 +258,10 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry, 
 	documentFile := uniquePath(importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)]))
 	monthFile := transactionFileForDate(s.cfg, summary.DateStart)
 	documentAccount := providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
-	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, meta.InputFile, documentFile, documentAccount, newAccounts); err != nil {
+	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, meta.InputFile, documentFile, documentAccount); err != nil {
 		return nil, err
 	}
-	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText, "newAccounts": newAccounts}, nil
+	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText}, nil
 }
 
 func (s *Server) saveImportUpload(header *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
@@ -527,28 +518,6 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry, accountSe
 	return strings.TrimSpace(strings.Join(blocks, "\n\n")), nil
 }
 
-func usedImportNewAccounts(entries []ImportEntry, newAccounts []ImportNewAccount, existing map[string]bool) []ImportNewAccount {
-	used := map[string]bool{}
-	for _, entry := range entries {
-		if !existing[entry.CategoryAccount] {
-			used[entry.CategoryAccount] = true
-		}
-	}
-	seen := map[string]bool{}
-	out := []ImportNewAccount{}
-	for _, account := range newAccounts {
-		if !used[account.Account] || seen[account.Account] {
-			continue
-		}
-		if !strings.HasPrefix(account.Account, "Expenses:") && !strings.HasPrefix(account.Account, "Income:") {
-			continue
-		}
-		seen[account.Account] = true
-		out = append(out, ImportNewAccount{Account: account.Account, Alias: strings.TrimSpace(account.Alias)})
-	}
-	return out
-}
-
 func importAccountAlias(account string) string {
 	parts := strings.Split(account, ":")
 	if len(parts) == 0 {
@@ -557,7 +526,7 @@ func importAccountAlias(account string) string {
 	return parts[len(parts)-1]
 }
 
-func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string, newAccounts []ImportNewAccount) error {
+func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) error {
 	s.writer.mu.Lock()
 	defer s.writer.mu.Unlock()
 	snapshots := map[string]fileSnapshot{}
@@ -584,29 +553,6 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 			} else {
 				_ = os.Remove(file)
 			}
-		}
-	}
-	accountsFile := accountsBeanPath(s.cfg)
-	if len(newAccounts) > 0 {
-		if err := snapshot(accountsFile); err != nil {
-			return err
-		}
-		before, err := os.ReadFile(accountsFile)
-		if err != nil {
-			restore()
-			return err
-		}
-		lines := make([]string, 0, len(newAccounts))
-		for _, account := range newAccounts {
-			lines = append(lines, strings.TrimRight(AccountToBean(start, account.Account, account.Alias, "CNY"), "\n"))
-		}
-		sep := "\n\n"
-		if strings.HasSuffix(string(before), "\n") {
-			sep = "\n"
-		}
-		if err := os.WriteFile(accountsFile, []byte(string(before)+sep+strings.Join(lines, "\n\n")+"\n"), 0o644); err != nil {
-			restore()
-			return err
 		}
 	}
 	if err := s.writer.ensureMonthlyFileAndInclude(monthFile, start, snapshot); err != nil {

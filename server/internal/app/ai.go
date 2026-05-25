@@ -91,17 +91,15 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	return parsed, nil
 }
 
-func (s *Server) suggestImportCategories(entries []ImportEntry) ([]ImportCategorySuggestion, []ImportNewAccount, error) {
+func (s *Server) resolveTransactionCategory(entry ImportEntry, instruction string) (ImportCategorySuggestion, []ImportNewAccount, error) {
 	snapshot, err := s.cache.Snapshot()
 	if err != nil {
-		return nil, nil, err
+		return ImportCategorySuggestion{}, nil, err
 	}
 	existingCategories := importCategoryAccounts(snapshot.Accounts)
-	entryIDs := map[string]bool{}
-	slimEntries := make([]ginH, 0, len(entries))
-	for _, entry := range entries {
-		entryIDs[entry.ID] = true
-		slimEntries = append(slimEntries, ginH{
+	payload := ginH{
+		"instruction": strings.TrimSpace(instruction),
+		"entry": ginH{
 			"id":              entry.ID,
 			"date":            entry.Date,
 			"payee":           entry.Payee,
@@ -112,19 +110,34 @@ func (s *Server) suggestImportCategories(entries []ImportEntry) ([]ImportCategor
 			"type":            entry.Type,
 			"currentCategory": entry.CategoryAccount,
 			"metadata":        entry.Metadata,
-		})
+		},
 	}
-	content, err := runAI(importCategoryPrompt(existingCategories), mustJSON(slimEntries), false)
+	content, err := runAI(transactionCategoryPrompt(categoryAccountLines(snapshot.Accounts)), mustJSON(payload), false)
 	if err != nil {
-		return nil, nil, err
+		return ImportCategorySuggestion{}, nil, err
 	}
 	var parsed struct {
-		Suggestions []ImportCategorySuggestion `json:"suggestions"`
+		Suggestion  ImportCategorySuggestion   `json:"suggestion"`
+		Suggestions []ImportCategorySuggestion `json:"suggestions,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
-		return nil, nil, err
+		return ImportCategorySuggestion{}, nil, err
 	}
-	return validateImportCategorySuggestions(parsed.Suggestions, entryIDs, existingCategories)
+	suggestion := parsed.Suggestion
+	if suggestion.EntryID == "" && len(parsed.Suggestions) > 0 {
+		suggestion = parsed.Suggestions[0]
+	}
+	if suggestion.EntryID == "" {
+		suggestion.EntryID = entry.ID
+	}
+	suggestions, newAccounts, err := validateImportCategorySuggestions([]ImportCategorySuggestion{suggestion}, map[string]bool{entry.ID: true}, existingCategories)
+	if err != nil {
+		return ImportCategorySuggestion{}, nil, err
+	}
+	if len(suggestions) == 0 {
+		return ImportCategorySuggestion{}, nil, errors.New("AI 没有返回分类建议")
+	}
+	return suggestions[0], newAccounts, nil
 }
 
 func parserPrompt(today string, accounts []string) string {
@@ -136,21 +149,23 @@ func parserPrompt(today string, accounts []string) string {
 每条交易 postings 金额合计必须为 0；不确定分类用 Expenses:Unknown 并 needsReview=true；没有日期用今天。`
 }
 
-func importCategoryPrompt(existingCategories []string) string {
-	return `你是 Beancount 账单流水分类助手。只输出 JSON，不要 Markdown。
-你会收到一组导入流水。请为每条流水选择最合适的收入或支出分类。
+func transactionCategoryPrompt(existingCategories []string) string {
+	return `你是 Beancount 流水分类纠正助手。只输出 JSON，不要 Markdown。
+用户正在编辑一笔已经存在的流水，并会用 instruction 告诉你“这笔应该是哪一类”。
 
-优先复用已有分类：
+已有分类如下，格式为 账户名 | 显示名：
 - ` + strings.Join(existingCategories, "\n- ") + `
 
-如果现有分类都不合适，可以新建分类，但必须遵守：
+规则：
+- 不要根据商户或金额自行猜分类；instruction 是主要依据。
+- 先在已有分类中按账户名、显示名、中文含义、英文含义做匹配。能匹配到就必须复用已有分类。
+- 只有已有分类都表达不了用户指定类别时，才可以创建新分类。
 - 只允许 Expenses:* 或 Income:*。
 - 账户名必须是英文/数字/下划线/连字符组成的 Beancount 账户，例如 Expenses:Pets:Food 或 Income:Bonus。
-- 同一类新分类要复用同一个账户。
 - 新分类必须给出简短中文 alias。
-- 只有明显应该新建时才新建；不确定时用 Expenses:Unknown，并说明原因。
+- 如果用户说的是模糊的上级概念，优先使用已有最接近的上级或子分类；实在不确定才用 Expenses:Unknown。
 
-输出 {"suggestions":[{"entryId":"输入流水 id","categoryAccount":"Expenses:Food","alias":"新分类中文名，可选","reason":"简短原因","confidence":0.85,"isNew":false}]}。`
+输出 {"suggestion":{"entryId":"输入流水 id","categoryAccount":"Expenses:Food","alias":"新分类中文名，可选","reason":"简短原因","confidence":0.85,"isNew":false}}。`
 }
 
 func runAI(system, input string, chat bool) (string, error) {
@@ -222,6 +237,16 @@ func importCategoryAccounts(accounts []Account) []string {
 	for _, account := range accounts {
 		if account.Active && (strings.HasPrefix(account.Account, "Expenses:") || strings.HasPrefix(account.Account, "Income:")) {
 			out = append(out, account.Account)
+		}
+	}
+	return out
+}
+
+func categoryAccountLines(accounts []Account) []string {
+	out := []string{}
+	for _, account := range accounts {
+		if account.Active && (strings.HasPrefix(account.Account, "Expenses:") || strings.HasPrefix(account.Account, "Income:")) {
+			out = append(out, account.Account+" | "+account.Label)
 		}
 	}
 	return out

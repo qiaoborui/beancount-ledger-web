@@ -103,8 +103,7 @@ func TestImportPreviewAndCommit(t *testing.T) {
 		t.Fatalf("preview did not parse DEG output: %#v", preview.Entries[0])
 	}
 
-	preview.Entries[0].CategoryAccount = "Expenses:Convenience"
-	body, _ := json.Marshal(map[string]any{"importId": preview.ImportID, "provider": preview.Provider, "entries": preview.Entries, "newAccounts": []ImportNewAccount{{Account: "Expenses:Convenience", Alias: "便利店"}}})
+	body, _ := json.Marshal(map[string]any{"importId": preview.ImportID, "provider": preview.Provider, "entries": preview.Entries})
 	recorder = requestWithCookies(router, http.MethodPost, "/api/ledger/imports/commit", string(body), cookies)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("commit status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -118,12 +117,8 @@ func TestImportPreviewAndCommit(t *testing.T) {
 		t.Fatal("expected import output file")
 	}
 	importText := string(mustRead(t, filepath.Join(importsDir, files[0].Name())))
-	if !strings.Contains(importText, "document Assets:Cash") || !strings.Contains(importText, "orderId: \"alipay-1\"") || !strings.Contains(importText, "Expenses:Convenience") {
+	if !strings.Contains(importText, "document Assets:Cash") || !strings.Contains(importText, "orderId: \"alipay-1\"") {
 		t.Fatalf("import output missing document or transaction:\n%s", importText)
-	}
-	accountsText := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "accounts.bean")))
-	if !strings.Contains(accountsText, "open Expenses:Convenience CNY") || !strings.Contains(accountsText, `alias: "便利店"`) {
-		t.Fatalf("new import category account was not opened:\n%s", accountsText)
 	}
 	documentsDir := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports")
 	documents, err := os.ReadDir(documentsDir)
