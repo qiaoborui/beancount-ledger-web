@@ -100,6 +100,15 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if err != nil {
 		return nil, err
 	}
+	sourceAnalysis := providerSourceAnalysis{}
+	if upload.Provider == "alipay" {
+		sourceAnalysis, err = s.analyzeAlipayImportSource(prepared.InputFile, string(rawGeneratedBean))
+		if err != nil {
+			prepared.Warnings = append(prepared.Warnings, "支付宝原始明细核对失败："+err.Error())
+		} else {
+			prepared.Warnings = append(prepared.Warnings, sourceAnalysis.Warnings...)
+		}
+	}
 	dedupReport, err := s.runDedup(upload.Provider, generatedFile, "", alipayFundRounding, true)
 	if err != nil {
 		return nil, err
@@ -135,6 +144,9 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 		skippedDuplicateCount = 0
 	}
 	excludedRowCount := 0
+	if upload.Provider == "alipay" {
+		excludedRowCount = sourceAnalysis.ExcludedRowCount
+	}
 	if upload.Provider == "cmb" {
 		excludedRowCount = prepared.FilteredRowCount - generatedSummary.CandidateCount
 		if excludedRowCount < 0 {
@@ -166,6 +178,8 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	rawRowCount, filteredRowCount := generatedSummary.CandidateCount, generatedSummary.CandidateCount
 	if upload.Provider == "cmb" {
 		rawRowCount, filteredRowCount = prepared.RawRowCount, prepared.FilteredRowCount
+	} else if sourceAnalysis.RawRowCount > 0 {
+		rawRowCount, filteredRowCount = sourceAnalysis.RawRowCount, sourceAnalysis.FilteredRowCount
 	}
 	return ginH{
 		"importId":              importID,
@@ -296,6 +310,9 @@ func (s *Server) ensureImportRequirements(provider string) error {
 }
 
 func (s *Server) prepareProviderInput(provider, inputFile, originalFilename, importID string) (preparedImportInput, error) {
+	if provider == "alipay" {
+		return s.prepareAlipayCSVForDEG(inputFile, importID)
+	}
 	if provider != "cmb" {
 		return preparedImportInput{InputFile: inputFile}, nil
 	}
