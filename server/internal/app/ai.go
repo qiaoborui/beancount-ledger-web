@@ -22,6 +22,11 @@ type ChatResult struct {
 	Entries []LedgerEntry `json:"entries"`
 }
 
+type AccountChatResult struct {
+	Message    string             `json:"message"`
+	Operations []AccountOperation `json:"operations"`
+}
+
 func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error) {
 	snapshot, err := s.cache.Snapshot()
 	if err != nil {
@@ -81,6 +86,40 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	return parsed, nil
 }
 
+func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string) (AccountChatResult, error) {
+	snapshot, err := s.cache.Snapshot()
+	if err != nil {
+		return AccountChatResult{}, err
+	}
+	if err := validateAccountOperations(draft, snapshot.Accounts); err != nil {
+		return AccountChatResult{}, err
+	}
+	conversation := []string{}
+	for _, item := range messages {
+		role := "用户"
+		if item.Role == "assistant" {
+			role = "助理"
+		}
+		conversation = append(conversation, role+"："+item.Text)
+	}
+	payload := fmt.Sprintf("当前账户操作草稿 operations:\n%s\n\n最近对话:\n%s\n\n用户最新消息:\n%s", mustJSON(draft), strings.Join(conversation, "\n"), message)
+	content, err := runAI(accountAgentPrompt(today, snapshot.Accounts), payload, true)
+	if err != nil {
+		return AccountChatResult{}, err
+	}
+	var parsed AccountChatResult
+	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
+		return AccountChatResult{}, err
+	}
+	if err := validateAccountOperations(parsed.Operations, snapshot.Accounts); err != nil {
+		return AccountChatResult{}, err
+	}
+	if strings.TrimSpace(parsed.Message) == "" {
+		parsed.Message = fmt.Sprintf("已更新 %d 个账户操作草稿。", len(parsed.Operations))
+	}
+	return parsed, nil
+}
+
 func parserPrompt(today string, accounts []string) string {
 	return "你是一个 Beancount 记账解析器。只输出 JSON，不要 Markdown。今天日期：" + today + `。
 币种固定 CNY。只能使用这些账户：
@@ -88,6 +127,32 @@ func parserPrompt(today string, accounts []string) string {
 
 输出 {"entries":[{"kind":"transaction","date":"YYYY-MM-DD","payee":"商户/对方","narration":"说明","metadata":{},"tags":[],"postings":[{"account":"账户","amount":"12.00","currency":"CNY"},{"account":"账户","amount":"-12.00","currency":"CNY"}],"confidence":0.9,"needsReview":false,"questions":[]}]}。
 每条交易 postings 金额合计必须为 0；不确定分类用 Expenses:Unknown 并 needsReview=true；没有日期用今天。`
+}
+
+func accountAgentPrompt(today string, accounts []Account) string {
+	rows := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		active := "active"
+		if !account.Active {
+			active = "closed"
+		}
+		alias := ""
+		if account.Alias != nil && strings.TrimSpace(*account.Alias) != "" {
+			alias = " alias=" + *account.Alias
+		}
+		rows = append(rows, fmt.Sprintf("%s [%s] group=%s%s", account.Account, active, account.Group, alias))
+	}
+	return "你是一个 Beancount 账户管理助理。只输出 JSON，不要 Markdown。今天日期：" + today + `。
+你可以帮助用户生成账户操作草稿，但不能直接写入。支持的操作：
+- create: 创建账户，字段 kind,date,account,alias,currency,group。currency 固定 CNY，group 可用 cash/wealth/credit/receivable/expense/income/equity/other。
+- update: 更新账户显示名或分组，字段 kind,date,account,alias,group。不要改 account 路径；如果用户想改路径，建议新建账户并关闭旧账户。
+- disable: 禁用账户，即追加 close，字段 kind,date,account。
+
+已有账户：
+- ` + strings.Join(rows, "\n- ") + `
+
+只输出 {"message":"中文回复","operations":[...完整草稿...]}。
+operations 必须是本轮对话后的完整草稿；用户只是问问题时返回当前草稿或空数组。不要为已经存在的账户生成 create；不要为已关闭账户生成 disable；不确定时先追问并保持草稿不变。`
 }
 
 func runAI(system, input string, chat bool) (string, error) {

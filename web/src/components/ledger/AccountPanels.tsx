@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { ClientNavLink } from "./ClientNavLink";
-import { Eye, EyeOff } from "lucide-react";
+import { Bot, Eye, EyeOff, Pencil } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
+import { AccountAgentChat } from "./AccountAgentChat";
 import type { AccountGroup, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, Txn } from "./types";
 
 type BalanceRow = { account: string; label: string; value: number; active?: boolean; group?: AccountGroup };
@@ -68,11 +69,12 @@ function CreditSummary({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 font-medium text-olive">{value}</div></div>;
 }
 
-export function AccountManager({ accounts, onAdded }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void }) {
+export function AccountManager({ accounts, onAdded, refreshGitStatus, showToast }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [account, setAccount] = useState("");
   const [alias, setAlias] = useState("");
   const [message, setMessage] = useState("");
+  const [agentOpen, setAgentOpen] = useState(false);
   const groups: { key: AccountGroup; label: string }[] = [{ key: "cash", label: "现金账户" }, { key: "credit", label: "信用卡/负债" }, { key: "wealth", label: "理财账户" }, { key: "receivable", label: "应收应付" }, { key: "expense", label: "支出分类" }, { key: "income", label: "收入分类" }, { key: "equity", label: "权益" }, { key: "other", label: "其他" }];
   async function submit() {
     setMessage("写入中...");
@@ -84,7 +86,7 @@ export function AccountManager({ accounts, onAdded }: { accounts: AccountView[];
     setAlias("");
     onAdded();
   }
-  return <section className="card p-4"><h2 className="font-serif text-2xl">账户管理</h2><p className="mt-2 text-sm text-olive">这里管理账户定义和分组；余额集中在下方“账户余额”里并默认隐藏。</p><div className="mt-4 grid gap-3 sm:grid-cols-[150px_1fr_1fr_auto]"><input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><input className="border border-line bg-panel p-3" placeholder="Assets:CN:Bank:Checking" value={account} onChange={(e) => setAccount(e.target.value)} /><input className="border border-line bg-panel p-3" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><button className="bg-brand px-4 py-3 text-paper" onClick={submit}>新增账户</button></div>{message && <p className="mt-2 text-sm text-olive">{message}</p>}<div className="mt-5 grid gap-3 sm:grid-cols-2">{groups.map((group) => { const rows = accounts.filter((a) => a.group === group.key); if (!rows.length) return null; return <div key={group.key} className="rounded-xl border border-line bg-panel p-3"><h3 className="text-sm font-medium text-stone">{group.label} · {rows.length}</h3><div className="mt-2 space-y-2">{rows.map((a) => <div key={a.account} className="text-sm"><div className="flex items-center gap-2"><strong>{a.label}</strong>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></div>; })}</div></section>;
+  return <section className="card p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="font-serif text-2xl">账户管理</h2><p className="mt-2 text-sm text-olive">这里管理账户定义和分组；余额集中在下方“账户余额”里并默认隐藏。</p></div><button type="button" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></button></div><div className="mt-4 grid gap-3 sm:grid-cols-[150px_1fr_1fr_auto]"><input className="border border-line bg-panel p-3" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><input className="border border-line bg-panel p-3" placeholder="Assets:CN:Bank:Checking" value={account} onChange={(e) => setAccount(e.target.value)} /><input className="border border-line bg-panel p-3" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><button className="bg-brand px-4 py-3 text-paper" onClick={submit}>新增账户</button></div>{message && <p className="mt-2 text-sm text-olive">{message}</p>}<div className="mt-5 grid gap-3 sm:grid-cols-2">{groups.map((group) => { const rows = accounts.filter((a) => a.group === group.key); if (!rows.length) return null; return <div key={group.key} className="rounded-xl border border-line bg-panel p-3"><h3 className="text-sm font-medium text-stone">{group.label} · {rows.length}</h3><div className="mt-2 space-y-2">{rows.map((a) => <div key={a.account} className="text-sm"><div className="flex items-center gap-2"><strong>{a.label}</strong>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></div>; })}</div><AccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} refreshGitStatus={refreshGitStatus} showToast={showToast} /></section>;
 }
 
 // ── 账户状态指示器 ──

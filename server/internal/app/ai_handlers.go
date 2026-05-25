@@ -62,3 +62,29 @@ func (s *Server) aiChat(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": result.Message, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
+
+func (s *Server) aiAccountsChat(c *gin.Context) {
+	if !s.limiter.Check(c, "ai.accounts_chat", 20, 5*time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input AIAccountChatRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Message) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account chat request"})
+		return
+	}
+	start := time.Now()
+	result, err := s.chatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"))
+	elapsed := time.Since(start).Milliseconds()
+	logDuration("ai.accounts_chat", start, map[string]any{"operations": len(result.Operations)})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+}
