@@ -471,6 +471,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onUnlockSensitive={loginWithPasskey}
       onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
+      themeMode={themeMode}
+      resolvedTheme={resolvedTheme}
+      onThemeModeChange={setThemeMode}
     >
       <Toast toast={toast} />
       <CommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} />
