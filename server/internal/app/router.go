@@ -229,6 +229,22 @@ func (s *Server) appendAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "account": input})
 }
 
+func (s *Server) applyAccountOperations(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	var input AccountOperationsRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	texts, err := s.writer.ApplyAccountOperations(input.Operations)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(input.Operations), "beanTexts": texts})
+}
+
 func (s *Server) accountDetail(c *gin.Context) {
 	snapshot, ok := s.snapshot(c, true)
 	if !ok {

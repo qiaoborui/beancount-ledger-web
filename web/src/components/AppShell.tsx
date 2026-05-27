@@ -1,11 +1,11 @@
 "use client";
 
-import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, PiggyBank, Plus, Scale, Settings, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { BarChart3, BookOpen, ChevronLeft, ChevronRight, FileUp, GitBranch, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, PiggyBank, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { haptic } from "./ledger/haptics";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
-import type { LedgerNavHref } from "./ledger/types";
+import type { LedgerNavHref, ResolvedTheme, ThemeMode } from "./ledger/types";
 
 export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof Home; mobilePrimary: boolean }[] = [
   { href: "/", label: "总览", icon: Home, mobilePrimary: true },
@@ -22,6 +22,12 @@ export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof 
 
 const sidebarCollapsedKey = "ledger_sidebar_collapsed";
 
+const themeOptions: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
+  { value: "system", label: "跟随系统", icon: Monitor },
+  { value: "light", label: "浅色", icon: Sun },
+  { value: "dark", label: "深色", icon: Moon },
+];
+
 function readSidebarCollapsed() {
   if (typeof window === "undefined") return false;
   return localStorage.getItem(sidebarCollapsedKey) === "1";
@@ -32,7 +38,7 @@ function writeSidebarCollapsed(collapsed: boolean) {
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
 }
 
-export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onLockSensitive, onActiveRouteTap }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void }) {
+export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +46,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
   const [navPendingHref, setNavPendingHref] = useState<string | null>(null);
   const navPendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
 
   useEffect(() => {
     setSidebarCollapsed(readSidebarCollapsed());
@@ -129,6 +136,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
           </div>
           <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs tracking-wide text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
           <div className="flex items-center gap-2">
+            <ThemeMenu themeMode={themeMode} resolvedTheme={resolvedTheme} open={themeMenuOpen} onOpenChange={setThemeMenuOpen} onThemeModeChange={onThemeModeChange} />
             {passkeyEnabled && (
               <button
                 type="button"
@@ -176,10 +184,10 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
       </div>}
 
       <div className="md:flex">
-        <aside className={`hidden min-h-[calc(100vh-64px)] shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 transition-[width] duration-200 ease-out md:block ${sidebarCollapsed ? "w-20" : "w-64"}`}>
-          <div className={`mb-3 flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
-            <div className={`min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium uppercase tracking-[0.24em] text-stone transition-[max-width,opacity,transform] duration-150 ease-out ${sidebarCollapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-32 translate-x-0 opacity-100 delay-75"}`}>本月账页</div>
-            <button type="button" onClick={toggleSidebarCollapsed} className="rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
+        <aside className={`desktop-sidebar hidden min-h-[calc(100vh-64px)] shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 md:block ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
+          <div className="desktop-sidebar-header mb-3">
+            <div className="desktop-sidebar-heading min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium uppercase tracking-[0.24em] text-stone">本月账页</div>
+            <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
@@ -188,9 +196,9 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`flex items-center rounded-2xl px-3 py-3 text-sm ${sidebarCollapsed ? "justify-center gap-0" : "gap-3"} ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-2xl text-sm ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span className={`min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-150 ease-out ${sidebarCollapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-32 translate-x-0 opacity-100 delay-75"}`}>{item.label}</span>
+                  <span className="desktop-sidebar-link-label min-w-0">{item.label}</span>
                 </ClientNavLink>
               );
             })}
@@ -216,6 +224,58 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeChange }: { themeMode: ThemeMode; resolvedTheme: ResolvedTheme; open: boolean; onOpenChange: (open: boolean) => void; onThemeModeChange: (mode: ThemeMode) => void }) {
+  const activeOption = themeOptions.find((option) => option.value === themeMode) ?? themeOptions[0];
+  const ActiveIcon = activeOption.icon;
+  const title = `主题：${activeOption.label}，当前${resolvedTheme === "dark" ? "深色" : "浅色"}`;
+
+  function chooseTheme(mode: ThemeMode) {
+    haptic(5);
+    onThemeModeChange(mode);
+    onOpenChange(false);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag"
+        onClick={() => {
+          haptic(4);
+          onOpenChange(!open);
+        }}
+        aria-label={title}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={title}
+      >
+        <ActiveIcon className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">{activeOption.label}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-36 rounded-2xl border border-line bg-panel p-1.5 text-sm shadow-lg" role="menu">
+          {themeOptions.map((option) => {
+            const Icon = option.icon;
+            const active = themeMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}
+                onClick={() => chooseTheme(option.value)}
+                role="menuitemradio"
+                aria-checked={active}
+              >
+                <Icon className={`h-4 w-4 ${active ? "text-paper" : "text-brand"}`} />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

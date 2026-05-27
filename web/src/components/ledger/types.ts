@@ -7,6 +7,7 @@ export type AccountDetailRow = { date: string; payee: string; narration: string;
 export type BudgetRow = { account: string; budget: number; spent: number; remaining: number; ratio: number | null };
 export type ReconcileRow = { account: string; label: string; ledgerBalance: number; status: "asserted" | "pending"; lastAssertion: { date: string; amount: number; currency: "CNY" } | null };
 export type AccountGroup = "cash" | "credit" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";
+export type AccountOperation = { kind: "create" | "update" | "disable"; date: string; account: string; alias?: string; currency?: "CNY"; group?: AccountGroup };
 export type AccountStatus = {
   account: string;
   status: "green" | "red" | "yellow" | "grey";

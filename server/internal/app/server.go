@@ -58,6 +58,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.GET("/dashboard", s.dashboard)
 	ledger.GET("/accounts", s.accounts)
 	ledger.POST("/accounts", s.appendAccount)
+	ledger.POST("/accounts/operations", s.applyAccountOperations)
 	ledger.GET("/accounts/detail", s.accountDetail)
 	ledger.GET("/account-status", s.accountStatus)
 	ledger.GET("/reconciliation", s.reconciliation)
@@ -72,6 +73,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/chat", s.aiChat)
+	api.POST("/ai/accounts-chat", s.aiAccountsChat)
 	api.GET("/git/status", s.gitStatus)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)
