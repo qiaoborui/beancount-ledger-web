@@ -231,6 +231,26 @@ button.card:active, a.card:active { transform: scale(0.992); }
   overscroll-behavior: contain;
   touch-action: none;
 }
+.dashboard-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+.dashboard-panel-shell {
+  position: relative;
+}
+.dashboard-chart-canvas {
+  height: var(--dashboard-chart-height, 20rem);
+  min-height: 12rem;
+}
+.dashboard-chart-canvas-compact {
+  height: var(--dashboard-chart-height, 16rem);
+}
+@media (min-width: 1280px) {
+  .dashboard-panel-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+}
 .kami-float { box-shadow: var(--float-shadow); }
 .kami-overlay { background: var(--overlay); }
 .kami-status-ok { color: var(--success); }

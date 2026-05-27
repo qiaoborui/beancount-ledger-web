@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
@@ -28,6 +29,20 @@ type DashboardFilterState = {
   maxAmount: string;
 };
 
+type DashboardPanelId =
+  | "dailyExpense"
+  | "weekdayExpense"
+  | "categoryRank"
+  | "payeeRank"
+  | "paymentAccounts"
+  | "budgetPressure"
+  | "anomalies"
+  | "categoryTrend"
+  | "privateKpis"
+  | "cashflow"
+  | "netWorth"
+  | "accountTrend";
+
 const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
   category: [],
   account: [],
@@ -42,10 +57,20 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
   const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
+  const [viewPanelId, setViewPanelId] = useState<DashboardPanelId | null>(null);
   const mask = (value: string) => visible ? value : "••••••";
   const setFilter = (key: keyof DashboardFilterState, value: string | string[]) => setFilters((current) => ({ ...current, [key]: value }));
   const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: Array.isArray(current[key]) ? [] : "" }));
   const clearFilters = () => setFilters(DEFAULT_DASHBOARD_FILTERS);
+
+  useEffect(() => {
+    if (!viewPanelId) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewPanelId(null);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [viewPanelId]);
 
   if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
   if (error && !data) return <section className="card p-6 text-sm text-stone">{error}</section>;
@@ -55,6 +80,69 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(formatCompactCny(topCategory.total / 100))}` : "暂无";
+  const panels: Record<DashboardPanelId, DashboardPanelDefinition> = {
+    dailyExpense: {
+      title: "每日支出节奏",
+      subtitle: `${data.dailyExpenseSeries.length} 个支出日`,
+      render: () => visible ? <DailyExpenseChart data={data} onOpenTransactions={onOpenTransactions} /> : <HiddenChart />,
+    },
+    weekdayExpense: {
+      title: "星期分布",
+      subtitle: "消费节律",
+      render: () => visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />,
+    },
+    categoryRank: {
+      title: "分类排行",
+      subtitle: `${data.categorySeries.length} 个分类`,
+      render: () => <CategoryRank rows={data.categorySeries} visible={visible} onOpenTransactions={onOpenTransactions} />,
+    },
+    payeeRank: {
+      title: "商户排行",
+      subtitle: `${data.topPayees.length} 个商户`,
+      render: () => <PayeeList data={data} visible={visible} onOpenTransactions={onOpenTransactions} />,
+    },
+    paymentAccounts: {
+      title: "消费来源",
+      subtitle: `${data.topPaymentAccounts.length} 个账户`,
+      render: () => <PaymentAccounts data={data} visible={visible} onOpenTransactions={onOpenTransactions} />,
+    },
+    budgetPressure: {
+      title: "预算压力",
+      subtitle: visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏",
+      render: () => <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />,
+    },
+    anomalies: {
+      title: "高额支出",
+      subtitle: `${data.anomalies.length} 笔`,
+      render: () => <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />,
+    },
+    categoryTrend: {
+      title: "分类趋势",
+      subtitle: `${data.categorySeries.length} 个 Top 分类`,
+      render: () => visible ? <CategoryTrendChart data={data} /> : <HiddenChart />,
+    },
+    privateKpis: {
+      title: "资产 KPI",
+      subtitle: "敏感",
+      render: () => <PrivateKpis data={data} visible={visible} />,
+    },
+    cashflow: {
+      title: "收入与结余",
+      subtitle: cashflowSubtitle(data, visible),
+      render: () => visible ? <CashflowChart data={data} /> : <HiddenChart compact />,
+    },
+    netWorth: {
+      title: "净资产趋势",
+      subtitle: data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无",
+      render: () => visible ? <NetWorthChart data={data} /> : <HiddenChart compact />,
+    },
+    accountTrend: {
+      title: "账户余额趋势",
+      subtitle: `${data.accountBalanceSeries.length} 个主要账户`,
+      render: () => visible ? <AccountTrendChart data={data} /> : <HiddenChart />,
+    },
+  };
+  const viewPanel = viewPanelId ? panels[viewPanelId] : null;
 
   return <div className="space-y-5">
     <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
@@ -78,57 +166,64 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     </DashboardRow>
 
     <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-7" title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
-        {visible ? <DailyExpenseChart data={data} onOpenTransactions={onOpenTransactions} /> : <HiddenChart />}
+    <div className="dashboard-panel-grid">
+      <Panel panelId="dailyExpense" className="xl:col-span-7" onView={setViewPanelId} title={panels.dailyExpense.title} subtitle={panels.dailyExpense.subtitle}>
+        {panels.dailyExpense.render()}
       </Panel>
-      <Panel className="xl:col-span-5" title="星期分布" subtitle="消费节律">
-        {visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />}
+      <Panel panelId="weekdayExpense" className="xl:col-span-5" onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
+        {panels.weekdayExpense.render()}
       </Panel>
-      <Panel className="xl:col-span-4" title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
-        <CategoryRank rows={data.categorySeries} visible={visible} onOpenTransactions={onOpenTransactions} />
+      <Panel panelId="categoryRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
+        {panels.categoryRank.render()}
       </Panel>
-      <Panel className="xl:col-span-4" title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
-        <PayeeList data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
+      <Panel panelId="payeeRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.payeeRank.title} subtitle={panels.payeeRank.subtitle}>
+        {panels.payeeRank.render()}
       </Panel>
-      <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
-        <PaymentAccounts data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
+      <Panel panelId="paymentAccounts" className="xl:col-span-4" onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
+        {panels.paymentAccounts.render()}
       </Panel>
     </div>
     </DashboardRow>
 
     <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
-        <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
+    <div className="dashboard-panel-grid">
+      <Panel panelId="budgetPressure" className="xl:col-span-6" onView={setViewPanelId} title={panels.budgetPressure.title} subtitle={panels.budgetPressure.subtitle}>
+        {panels.budgetPressure.render()}
       </Panel>
-      <Panel className="xl:col-span-6" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
-        <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
+      <Panel panelId="anomalies" className="xl:col-span-6" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
+        {panels.anomalies.render()}
       </Panel>
-      <Panel className="xl:col-span-12" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
-        {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
+      <Panel panelId="categoryTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
+        {panels.categoryTrend.render()}
       </Panel>
     </div>
     </DashboardRow>
 
     <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-4" title="资产 KPI" subtitle="敏感">
-        <PrivateKpis data={data} visible={visible} />
+    <div className="dashboard-panel-grid">
+      <Panel panelId="privateKpis" className="xl:col-span-4" onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
+        {panels.privateKpis.render()}
       </Panel>
-      <Panel className="xl:col-span-4" title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
-        {visible ? <CashflowChart data={data} /> : <HiddenChart compact />}
+      <Panel panelId="cashflow" className="xl:col-span-4" onView={setViewPanelId} title={panels.cashflow.title} subtitle={panels.cashflow.subtitle}>
+        {panels.cashflow.render()}
       </Panel>
-      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无"}>
-        {visible ? <NetWorthChart data={data} /> : <HiddenChart compact />}
+      <Panel panelId="netWorth" className="xl:col-span-4" onView={setViewPanelId} title={panels.netWorth.title} subtitle={panels.netWorth.subtitle}>
+        {panels.netWorth.render()}
       </Panel>
-      <Panel className="xl:col-span-12" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
-        {visible ? <AccountTrendChart data={data} /> : <HiddenChart />}
+      <Panel panelId="accountTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.accountTrend.title} subtitle={panels.accountTrend.subtitle}>
+        {panels.accountTrend.render()}
       </Panel>
     </div>
     </DashboardRow>
+    {viewPanel && <DashboardPanelView panel={viewPanel} onClose={() => setViewPanelId(null)} />}
   </div>;
 }
+
+type DashboardPanelDefinition = {
+  title: string;
+  subtitle?: string;
+  render: () => ReactNode;
+};
 
 const DEFAULT_COLLAPSED_ROWS: Record<DashboardRowId, boolean> = {
   monitor: false,
@@ -321,11 +416,46 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: strin
   return <div className="min-w-0 bg-panel p-3 text-center"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold md:text-lg ${tone}`}>{value}</div></div>;
 }
 
-function Panel({ title, subtitle, className, children }: { title: string; subtitle?: string; className?: string; children: ReactNode }) {
-  return <section className={`card min-w-0 p-4 ${className ?? ""}`}>
+function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinition; onClose: () => void }) {
+  const viewStyle = {
+    "--dashboard-chart-height": "min(68dvh, 720px)",
+  } as CSSProperties;
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(<div className="fixed inset-0 z-[130] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5" role="dialog" aria-modal="true" aria-label={`${panel.title} 全屏查看`} onClick={onClose}>
+    <section className="dashboard-panel-view card mx-auto flex h-[calc(100dvh-1.5rem)] max-w-7xl flex-col p-4 sm:h-[calc(100dvh-2.5rem)] sm:p-5" style={viewStyle} onClick={(event) => event.stopPropagation()}>
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line pb-3">
+        <div className="min-w-0">
+          <h2 className="truncate font-serif text-2xl">{panel.title}</h2>
+          {panel.subtitle && <p className="mt-1 truncate text-sm text-stone">{panel.subtitle}</p>}
+        </div>
+        <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag hover:text-brand" onClick={onClose} title="关闭" aria-label="关闭全屏面板">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pt-1">
+        {panel.render()}
+      </div>
+    </section>
+  </div>, document.body);
+}
+
+function Panel({ panelId, title, subtitle, className, onView, children }: { panelId: DashboardPanelId; title: string; subtitle?: string; className?: string; onView: (panelId: DashboardPanelId) => void; children: ReactNode }) {
+  return <section className={`dashboard-panel-shell card min-w-0 p-4 ${className ?? ""}`}>
     <div className="flex items-start justify-between gap-3">
-      <h3 className="font-serif text-xl">{title}</h3>
-      {subtitle && <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{subtitle}</span>}
+      <h3 className="min-w-0 truncate font-serif text-xl">{title}</h3>
+      <div className="flex shrink-0 items-center gap-2">
+        {subtitle && <span className="max-w-[12rem] truncate rounded-full bg-tag px-2 py-1 text-xs text-stone">{subtitle}</span>}
+        <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag hover:text-brand" onClick={() => onView(panelId)} title="全屏查看" aria-label={`全屏查看 ${title}`}>
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
     {children}
   </section>;
@@ -586,14 +716,14 @@ function SmallMetric({ label, value, tone }: { label: string; value: string; ton
 function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
   if (empty) return <EmptyPanel text="暂无趋势数据" compact={compact} />;
   return <div className="mt-4 min-w-0 max-w-full overflow-hidden pb-2">
-    <div className={`ledger-chart min-w-0 max-w-full ${compact ? "h-64" : "h-80"}`}>
+    <div className={`ledger-chart dashboard-chart-canvas min-w-0 max-w-full ${compact ? "dashboard-chart-canvas-compact" : ""}`}>
       {children}
     </div>
   </div>;
 }
 
 function HiddenChart({ compact = false }: { compact?: boolean }) {
-  return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel text-sm text-stone ${compact ? "h-64" : "h-80"}`}>金额已隐藏</div>;
+  return <div className={`dashboard-chart-canvas mt-4 grid place-items-center rounded-xl border border-line bg-panel text-sm text-stone ${compact ? "dashboard-chart-canvas-compact" : ""}`}>金额已隐藏</div>;
 }
 
 function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean }) {
