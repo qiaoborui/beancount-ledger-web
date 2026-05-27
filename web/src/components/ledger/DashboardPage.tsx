@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Grip, Maximize2, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
@@ -43,33 +43,6 @@ type DashboardPanelId =
   | "netWorth"
   | "accountTrend";
 
-type DashboardPanelLayout = {
-  colSpan: number;
-  height: number;
-};
-
-const DASHBOARD_PANEL_STORAGE_KEY = "ledger.dashboard.panelLayout.v1";
-const MIN_PANEL_SPAN = 3;
-const MAX_PANEL_SPAN = 12;
-const MIN_PANEL_HEIGHT = 220;
-const MAX_PANEL_HEIGHT = 720;
-const PANEL_HEIGHT_STEP = 24;
-
-const DEFAULT_PANEL_LAYOUT: Record<DashboardPanelId, DashboardPanelLayout> = {
-  dailyExpense: { colSpan: 7, height: 320 },
-  weekdayExpense: { colSpan: 5, height: 320 },
-  categoryRank: { colSpan: 4, height: 280 },
-  payeeRank: { colSpan: 4, height: 280 },
-  paymentAccounts: { colSpan: 4, height: 280 },
-  budgetPressure: { colSpan: 6, height: 300 },
-  anomalies: { colSpan: 6, height: 300 },
-  categoryTrend: { colSpan: 12, height: 360 },
-  privateKpis: { colSpan: 4, height: 260 },
-  cashflow: { colSpan: 4, height: 280 },
-  netWorth: { colSpan: 4, height: 280 },
-  accountTrend: { colSpan: 12, height: 360 },
-};
-
 const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
   category: [],
   account: [],
@@ -84,7 +57,6 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
   const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
-  const { panelLayout, resizePanel, resetPanelLayout } = useDashboardPanelLayout();
   const [viewPanelId, setViewPanelId] = useState<DashboardPanelId | null>(null);
   const mask = (value: string) => visible ? value : "••••••";
   const setFilter = (key: keyof DashboardFilterState, value: string | string[]) => setFilters((current) => ({ ...current, [key]: value }));
@@ -173,7 +145,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const viewPanel = viewPanelId ? panels[viewPanelId] : null;
 
   return <div className="space-y-5">
-    <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} onResetLayout={resetPanelLayout} />
+    <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
 
     <DashboardRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
     <section className="card p-3 md:p-4">
@@ -195,19 +167,19 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
 
     <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
     <div className="dashboard-panel-grid">
-      <Panel panelId="dailyExpense" layout={panelLayout.dailyExpense} onResize={resizePanel} onView={setViewPanelId} title={panels.dailyExpense.title} subtitle={panels.dailyExpense.subtitle}>
+      <Panel panelId="dailyExpense" className="xl:col-span-7" onView={setViewPanelId} title={panels.dailyExpense.title} subtitle={panels.dailyExpense.subtitle}>
         {panels.dailyExpense.render()}
       </Panel>
-      <Panel panelId="weekdayExpense" layout={panelLayout.weekdayExpense} onResize={resizePanel} onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
+      <Panel panelId="weekdayExpense" className="xl:col-span-5" onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
         {panels.weekdayExpense.render()}
       </Panel>
-      <Panel panelId="categoryRank" layout={panelLayout.categoryRank} onResize={resizePanel} onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
+      <Panel panelId="categoryRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
         {panels.categoryRank.render()}
       </Panel>
-      <Panel panelId="payeeRank" layout={panelLayout.payeeRank} onResize={resizePanel} onView={setViewPanelId} title={panels.payeeRank.title} subtitle={panels.payeeRank.subtitle}>
+      <Panel panelId="payeeRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.payeeRank.title} subtitle={panels.payeeRank.subtitle}>
         {panels.payeeRank.render()}
       </Panel>
-      <Panel panelId="paymentAccounts" layout={panelLayout.paymentAccounts} onResize={resizePanel} onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
+      <Panel panelId="paymentAccounts" className="xl:col-span-4" onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
         {panels.paymentAccounts.render()}
       </Panel>
     </div>
@@ -215,13 +187,13 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
 
     <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
     <div className="dashboard-panel-grid">
-      <Panel panelId="budgetPressure" layout={panelLayout.budgetPressure} onResize={resizePanel} onView={setViewPanelId} title={panels.budgetPressure.title} subtitle={panels.budgetPressure.subtitle}>
+      <Panel panelId="budgetPressure" className="xl:col-span-6" onView={setViewPanelId} title={panels.budgetPressure.title} subtitle={panels.budgetPressure.subtitle}>
         {panels.budgetPressure.render()}
       </Panel>
-      <Panel panelId="anomalies" layout={panelLayout.anomalies} onResize={resizePanel} onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
+      <Panel panelId="anomalies" className="xl:col-span-6" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
         {panels.anomalies.render()}
       </Panel>
-      <Panel panelId="categoryTrend" layout={panelLayout.categoryTrend} onResize={resizePanel} onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
+      <Panel panelId="categoryTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
         {panels.categoryTrend.render()}
       </Panel>
     </div>
@@ -229,16 +201,16 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
 
     <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
     <div className="dashboard-panel-grid">
-      <Panel panelId="privateKpis" layout={panelLayout.privateKpis} onResize={resizePanel} onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
+      <Panel panelId="privateKpis" className="xl:col-span-4" onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
         {panels.privateKpis.render()}
       </Panel>
-      <Panel panelId="cashflow" layout={panelLayout.cashflow} onResize={resizePanel} onView={setViewPanelId} title={panels.cashflow.title} subtitle={panels.cashflow.subtitle}>
+      <Panel panelId="cashflow" className="xl:col-span-4" onView={setViewPanelId} title={panels.cashflow.title} subtitle={panels.cashflow.subtitle}>
         {panels.cashflow.render()}
       </Panel>
-      <Panel panelId="netWorth" layout={panelLayout.netWorth} onResize={resizePanel} onView={setViewPanelId} title={panels.netWorth.title} subtitle={panels.netWorth.subtitle}>
+      <Panel panelId="netWorth" className="xl:col-span-4" onView={setViewPanelId} title={panels.netWorth.title} subtitle={panels.netWorth.subtitle}>
         {panels.netWorth.render()}
       </Panel>
-      <Panel panelId="accountTrend" layout={panelLayout.accountTrend} onResize={resizePanel} onView={setViewPanelId} title={panels.accountTrend.title} subtitle={panels.accountTrend.subtitle}>
+      <Panel panelId="accountTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.accountTrend.title} subtitle={panels.accountTrend.subtitle}>
         {panels.accountTrend.render()}
       </Panel>
     </div>
@@ -291,74 +263,6 @@ function useDashboardRowCollapse() {
   return { collapsedRows, toggleRow };
 }
 
-function useDashboardPanelLayout() {
-  const [panelLayout, setPanelLayout] = useState(DEFAULT_PANEL_LAYOUT);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(DASHBOARD_PANEL_STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as Partial<Record<DashboardPanelId, Partial<DashboardPanelLayout>>>;
-      setPanelLayout(mergePanelLayout(saved));
-    } catch {
-      setPanelLayout(DEFAULT_PANEL_LAYOUT);
-    }
-  }, []);
-
-  function resizePanel(panelId: DashboardPanelId, size: Partial<DashboardPanelLayout>) {
-    setPanelLayout((current) => {
-      const next = {
-        ...current,
-        [panelId]: normalizePanelLayout({
-          ...current[panelId],
-          ...size,
-        }),
-      };
-      persistPanelLayout(next);
-      return next;
-    });
-  }
-
-  function resetPanelLayout() {
-    setPanelLayout(DEFAULT_PANEL_LAYOUT);
-    persistPanelLayout(DEFAULT_PANEL_LAYOUT);
-  }
-
-  return { panelLayout, resizePanel, resetPanelLayout };
-}
-
-function mergePanelLayout(saved: Partial<Record<DashboardPanelId, Partial<DashboardPanelLayout>>>) {
-  const next = { ...DEFAULT_PANEL_LAYOUT };
-  for (const panelId of Object.keys(DEFAULT_PANEL_LAYOUT) as DashboardPanelId[]) {
-    next[panelId] = normalizePanelLayout({
-      ...DEFAULT_PANEL_LAYOUT[panelId],
-      ...saved[panelId],
-    });
-  }
-  return next;
-}
-
-function normalizePanelLayout(size: DashboardPanelLayout) {
-  const colSpan = Number.isFinite(size.colSpan) ? size.colSpan : MAX_PANEL_SPAN;
-  const height = Number.isFinite(size.height) ? size.height : MIN_PANEL_HEIGHT;
-  return {
-    colSpan: clampNumber(Math.round(colSpan), MIN_PANEL_SPAN, MAX_PANEL_SPAN),
-    height: clampNumber(Math.round(height / PANEL_HEIGHT_STEP) * PANEL_HEIGHT_STEP, MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT),
-  };
-}
-
-function persistPanelLayout(layout: Record<DashboardPanelId, DashboardPanelLayout>) {
-  try {
-    window.localStorage.setItem(DASHBOARD_PANEL_STORAGE_KEY, JSON.stringify(layout));
-  } catch {
-    // Layout changes should keep working even when storage is unavailable.
-  }
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
 function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState, onSensitiveLocked: () => void) {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -403,7 +307,7 @@ function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterStat
   return params.toString();
 }
 
-function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll, onResetLayout }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void; onResetLayout: () => void }) {
+function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
   const chips = activeFilterChips(data, filters);
   return <section className="card p-3 md:p-4">
     <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
@@ -420,10 +324,6 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll, onRe
         <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
         <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
       </div>
-      <button type="button" className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 text-sm text-stone hover:bg-tag" onClick={onResetLayout} title="重置看板布局" aria-label="重置看板布局">
-        <RotateCcw className="h-4 w-4" />
-        <span className="hidden 2xl:inline">重置布局</span>
-      </button>
     </div>
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {chips.length ? chips.map((chip) => <button key={chip.key} type="button" className="inline-flex items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
@@ -546,67 +446,8 @@ function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinitio
   </div>, document.body);
 }
 
-function Panel({ panelId, title, subtitle, layout, onResize, onView, children }: { panelId: DashboardPanelId; title: string; subtitle?: string; layout: DashboardPanelLayout; onResize: (panelId: DashboardPanelId, size: Partial<DashboardPanelLayout>) => void; onView: (panelId: DashboardPanelId) => void; children: ReactNode }) {
-  const resizeRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    startSpan: number;
-    startHeight: number;
-    columnWidth: number;
-    canResizeColumns: boolean;
-  } | null>(null);
-  const panelStyle = {
-    "--dashboard-panel-span": String(layout.colSpan),
-    "--dashboard-chart-height": `${layout.height}px`,
-    minHeight: `${layout.height + 88}px`,
-  } as CSSProperties;
-
-  function beginResize(event: PointerEvent<HTMLButtonElement>) {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    const grid = event.currentTarget.closest(".dashboard-panel-grid");
-    if (!grid) return;
-    const gridRect = grid.getBoundingClientRect();
-    const gridStyles = window.getComputedStyle(grid);
-    const columns = gridStyles.gridTemplateColumns.split(" ").filter(Boolean).length;
-    const gap = Number.parseFloat(gridStyles.columnGap) || 0;
-    const columnWidth = columns > 1 ? (gridRect.width - gap * (columns - 1)) / columns : gridRect.width;
-    resizeRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startSpan: layout.colSpan,
-      startHeight: layout.height,
-      columnWidth,
-      canResizeColumns: columns > 1,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function resize(event: PointerEvent<HTMLButtonElement>) {
-    const state = resizeRef.current;
-    if (!state || state.pointerId !== event.pointerId) return;
-    const spanDelta = state.canResizeColumns ? Math.round((event.clientX - state.startX) / state.columnWidth) : 0;
-    const heightDelta = event.clientY - state.startY;
-    onResize(panelId, {
-      colSpan: state.startSpan + spanDelta,
-      height: state.startHeight + heightDelta,
-    });
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function endResize(event: PointerEvent<HTMLButtonElement>) {
-    const state = resizeRef.current;
-    if (state?.pointerId === event.pointerId) {
-      resizeRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  return <section className="dashboard-panel-shell card min-w-0 p-4" style={panelStyle}>
+function Panel({ panelId, title, subtitle, className, onView, children }: { panelId: DashboardPanelId; title: string; subtitle?: string; className?: string; onView: (panelId: DashboardPanelId) => void; children: ReactNode }) {
+  return <section className={`dashboard-panel-shell card min-w-0 p-4 ${className ?? ""}`}>
     <div className="flex items-start justify-between gap-3">
       <h3 className="min-w-0 truncate font-serif text-xl">{title}</h3>
       <div className="flex shrink-0 items-center gap-2">
@@ -617,9 +458,6 @@ function Panel({ panelId, title, subtitle, layout, onResize, onView, children }:
       </div>
     </div>
     {children}
-    <button type="button" className="dashboard-panel-resize-handle absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel/90 text-stone shadow-sm backdrop-blur hover:bg-tag hover:text-brand" onPointerDown={beginResize} onPointerMove={resize} onPointerUp={endResize} onPointerCancel={endResize} title="调整面板大小" aria-label="调整面板大小">
-      <Grip className="h-4 w-4" />
-    </button>
   </section>;
 }
 

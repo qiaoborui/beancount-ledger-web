@@ -239,10 +239,6 @@ button.card:active, a.card:active { transform: scale(0.992); }
 .dashboard-panel-shell {
   position: relative;
 }
-.dashboard-panel-resize-handle {
-  cursor: nwse-resize;
-  touch-action: none;
-}
 .dashboard-chart-canvas {
   height: var(--dashboard-chart-height, 20rem);
   min-height: 12rem;
@@ -253,9 +249,6 @@ button.card:active, a.card:active { transform: scale(0.992); }
 @media (min-width: 1280px) {
   .dashboard-panel-grid {
     grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
-  .dashboard-panel-shell {
-    grid-column: span var(--dashboard-panel-span) / span var(--dashboard-panel-span);
   }
 }
 .kami-float { box-shadow: var(--float-shadow); }
