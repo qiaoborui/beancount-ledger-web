@@ -335,7 +335,7 @@ function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummar
   const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), fullDate: row.date, 支出: row.amount / 100, 笔数: row.txCount }));
   const annotations = data.annotations.filter((annotation) => annotation.date >= data.start && annotation.date < data.end);
   return <>
-    <ChartBox empty={!rows.length} points={rows.length} minPointWidth={42}>
+    <ChartBox empty={!rows.length}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%" onClick={(state) => {
           const payload = state?.activePayload?.[0]?.payload as { fullDate?: string } | undefined;
@@ -372,7 +372,7 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
 
 function NetWorthChart({ data }: { data: DashboardSummary }) {
   const rows = data.netWorthSeries.map((row) => ({ month: row.date, 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
-  return <ChartBox empty={!rows.length} compact points={rows.length} minPointWidth={40}>
+  return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -390,7 +390,7 @@ function NetWorthChart({ data }: { data: DashboardSummary }) {
 
 function CashflowChart({ data }: { data: DashboardSummary }) {
   const rows = data.cashflowSeries.map((row) => ({ month: row.month, 收入: row.income / 100, 支出: row.expense / 100, 结余: row.net / 100 }));
-  return <ChartBox empty={!rows.length} compact points={rows.length} minPointWidth={42}>
+  return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="28%">
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -410,7 +410,7 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
   const chartSeries = useMemo(() => data.categorySeries.slice(0, 8), [data.categorySeries]);
   const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
   const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
-  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={46}>
+  return <ChartBox empty={!rows.length}>
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -435,7 +435,7 @@ function AccountTrendChart({ data }: { data: DashboardSummary }) {
   const chartSeries = data.accountBalanceSeries;
   const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
   const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
-  return <ChartBox empty={!rows.length} points={rows.length} minPointWidth={44}>
+  return <ChartBox empty={!rows.length}>
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -583,11 +583,10 @@ function SmallMetric({ label, value, tone }: { label: string; value: string; ton
   return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
 }
 
-function ChartBox({ empty, compact = false, points = 0, minPointWidth = 40, children }: { empty: boolean; compact?: boolean; points?: number; minPointWidth?: number; children: ReactNode }) {
+function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
   if (empty) return <EmptyPanel text="暂无趋势数据" compact={compact} />;
-  const minWidth = points > 18 ? Math.max(720, points * minPointWidth) : undefined;
-  return <div className="mt-4 min-w-0 overflow-x-auto pb-2">
-    <div className={`ledger-chart min-w-0 ${compact ? "h-64" : "h-80"}`} style={{ minWidth }}>
+  return <div className="mt-4 min-w-0 max-w-full overflow-hidden pb-2">
+    <div className={`ledger-chart min-w-0 max-w-full ${compact ? "h-64" : "h-80"}`}>
       {children}
     </div>
   </div>;
