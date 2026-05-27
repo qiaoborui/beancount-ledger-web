@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Grip, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
@@ -28,6 +28,47 @@ type DashboardFilterState = {
   maxAmount: string;
 };
 
+type DashboardPanelId =
+  | "dailyExpense"
+  | "weekdayExpense"
+  | "categoryRank"
+  | "payeeRank"
+  | "paymentAccounts"
+  | "budgetPressure"
+  | "anomalies"
+  | "categoryTrend"
+  | "privateKpis"
+  | "cashflow"
+  | "netWorth"
+  | "accountTrend";
+
+type DashboardPanelLayout = {
+  colSpan: number;
+  height: number;
+};
+
+const DASHBOARD_PANEL_STORAGE_KEY = "ledger.dashboard.panelLayout.v1";
+const MIN_PANEL_SPAN = 3;
+const MAX_PANEL_SPAN = 12;
+const MIN_PANEL_HEIGHT = 220;
+const MAX_PANEL_HEIGHT = 720;
+const PANEL_HEIGHT_STEP = 24;
+
+const DEFAULT_PANEL_LAYOUT: Record<DashboardPanelId, DashboardPanelLayout> = {
+  dailyExpense: { colSpan: 7, height: 320 },
+  weekdayExpense: { colSpan: 5, height: 320 },
+  categoryRank: { colSpan: 4, height: 280 },
+  payeeRank: { colSpan: 4, height: 280 },
+  paymentAccounts: { colSpan: 4, height: 280 },
+  budgetPressure: { colSpan: 6, height: 300 },
+  anomalies: { colSpan: 6, height: 300 },
+  categoryTrend: { colSpan: 12, height: 360 },
+  privateKpis: { colSpan: 4, height: 260 },
+  cashflow: { colSpan: 4, height: 280 },
+  netWorth: { colSpan: 4, height: 280 },
+  accountTrend: { colSpan: 12, height: 360 },
+};
+
 const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
   category: [],
   account: [],
@@ -42,6 +83,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
   const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
+  const { panelLayout, resizePanel, resetPanelLayout } = useDashboardPanelLayout();
   const mask = (value: string) => visible ? value : "••••••";
   const setFilter = (key: keyof DashboardFilterState, value: string | string[]) => setFilters((current) => ({ ...current, [key]: value }));
   const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: Array.isArray(current[key]) ? [] : "" }));
@@ -57,7 +99,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(formatCompactCny(topCategory.total / 100))}` : "暂无";
 
   return <div className="space-y-5">
-    <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
+    <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} onResetLayout={resetPanelLayout} />
 
     <DashboardRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
     <section className="card p-3 md:p-4">
@@ -78,51 +120,51 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     </DashboardRow>
 
     <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-7" title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
+    <div className="dashboard-panel-grid">
+      <Panel panelId="dailyExpense" layout={panelLayout.dailyExpense} onResize={resizePanel} title="每日支出节奏" subtitle={`${data.dailyExpenseSeries.length} 个支出日`}>
         {visible ? <DailyExpenseChart data={data} onOpenTransactions={onOpenTransactions} /> : <HiddenChart />}
       </Panel>
-      <Panel className="xl:col-span-5" title="星期分布" subtitle="消费节律">
+      <Panel panelId="weekdayExpense" layout={panelLayout.weekdayExpense} onResize={resizePanel} title="星期分布" subtitle="消费节律">
         {visible ? <WeekdayExpenseChart data={data} /> : <HiddenChart />}
       </Panel>
-      <Panel className="xl:col-span-4" title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
+      <Panel panelId="categoryRank" layout={panelLayout.categoryRank} onResize={resizePanel} title="分类排行" subtitle={`${data.categorySeries.length} 个分类`}>
         <CategoryRank rows={data.categorySeries} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
-      <Panel className="xl:col-span-4" title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
+      <Panel panelId="payeeRank" layout={panelLayout.payeeRank} onResize={resizePanel} title="商户排行" subtitle={`${data.topPayees.length} 个商户`}>
         <PayeeList data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
-      <Panel className="xl:col-span-4" title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
+      <Panel panelId="paymentAccounts" layout={panelLayout.paymentAccounts} onResize={resizePanel} title="消费来源" subtitle={`${data.topPaymentAccounts.length} 个账户`}>
         <PaymentAccounts data={data} visible={visible} onOpenTransactions={onOpenTransactions} />
       </Panel>
     </div>
     </DashboardRow>
 
     <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-6" title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
+    <div className="dashboard-panel-grid">
+      <Panel panelId="budgetPressure" layout={panelLayout.budgetPressure} onResize={resizePanel} title="预算压力" subtitle={visible ? `剩余 ${formatCompactCny(data.kpis.budgetRemaining / 100)}` : "金额已隐藏"}>
         <BudgetPressure rows={data.budgetPressure} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
       </Panel>
-      <Panel className="xl:col-span-6" title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
+      <Panel panelId="anomalies" layout={panelLayout.anomalies} onResize={resizePanel} title="高额支出" subtitle={`${data.anomalies.length} 笔`}>
         <AnomalyList rows={data.anomalies} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />
       </Panel>
-      <Panel className="xl:col-span-12" title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
+      <Panel panelId="categoryTrend" layout={panelLayout.categoryTrend} onResize={resizePanel} title="分类趋势" subtitle={`${data.categorySeries.length} 个 Top 分类`}>
         {visible ? <CategoryTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
     </DashboardRow>
 
     <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
-    <div className="grid gap-4 xl:grid-cols-12">
-      <Panel className="xl:col-span-4" title="资产 KPI" subtitle="敏感">
+    <div className="dashboard-panel-grid">
+      <Panel panelId="privateKpis" layout={panelLayout.privateKpis} onResize={resizePanel} title="资产 KPI" subtitle="敏感">
         <PrivateKpis data={data} visible={visible} />
       </Panel>
-      <Panel className="xl:col-span-4" title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
+      <Panel panelId="cashflow" layout={panelLayout.cashflow} onResize={resizePanel} title="收入与结余" subtitle={cashflowSubtitle(data, visible)}>
         {visible ? <CashflowChart data={data} /> : <HiddenChart compact />}
       </Panel>
-      <Panel className="xl:col-span-4" title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无"}>
+      <Panel panelId="netWorth" layout={panelLayout.netWorth} onResize={resizePanel} title="净资产趋势" subtitle={data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无"}>
         {visible ? <NetWorthChart data={data} /> : <HiddenChart compact />}
       </Panel>
-      <Panel className="xl:col-span-12" title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
+      <Panel panelId="accountTrend" layout={panelLayout.accountTrend} onResize={resizePanel} title="账户余额趋势" subtitle={`${data.accountBalanceSeries.length} 个主要账户`}>
         {visible ? <AccountTrendChart data={data} /> : <HiddenChart />}
       </Panel>
     </div>
@@ -166,6 +208,74 @@ function useDashboardRowCollapse() {
   }
 
   return { collapsedRows, toggleRow };
+}
+
+function useDashboardPanelLayout() {
+  const [panelLayout, setPanelLayout] = useState(DEFAULT_PANEL_LAYOUT);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DASHBOARD_PANEL_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<Record<DashboardPanelId, Partial<DashboardPanelLayout>>>;
+      setPanelLayout(mergePanelLayout(saved));
+    } catch {
+      setPanelLayout(DEFAULT_PANEL_LAYOUT);
+    }
+  }, []);
+
+  function resizePanel(panelId: DashboardPanelId, size: Partial<DashboardPanelLayout>) {
+    setPanelLayout((current) => {
+      const next = {
+        ...current,
+        [panelId]: normalizePanelLayout({
+          ...current[panelId],
+          ...size,
+        }),
+      };
+      persistPanelLayout(next);
+      return next;
+    });
+  }
+
+  function resetPanelLayout() {
+    setPanelLayout(DEFAULT_PANEL_LAYOUT);
+    persistPanelLayout(DEFAULT_PANEL_LAYOUT);
+  }
+
+  return { panelLayout, resizePanel, resetPanelLayout };
+}
+
+function mergePanelLayout(saved: Partial<Record<DashboardPanelId, Partial<DashboardPanelLayout>>>) {
+  const next = { ...DEFAULT_PANEL_LAYOUT };
+  for (const panelId of Object.keys(DEFAULT_PANEL_LAYOUT) as DashboardPanelId[]) {
+    next[panelId] = normalizePanelLayout({
+      ...DEFAULT_PANEL_LAYOUT[panelId],
+      ...saved[panelId],
+    });
+  }
+  return next;
+}
+
+function normalizePanelLayout(size: DashboardPanelLayout) {
+  const colSpan = Number.isFinite(size.colSpan) ? size.colSpan : MAX_PANEL_SPAN;
+  const height = Number.isFinite(size.height) ? size.height : MIN_PANEL_HEIGHT;
+  return {
+    colSpan: clampNumber(Math.round(colSpan), MIN_PANEL_SPAN, MAX_PANEL_SPAN),
+    height: clampNumber(Math.round(height / PANEL_HEIGHT_STEP) * PANEL_HEIGHT_STEP, MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT),
+  };
+}
+
+function persistPanelLayout(layout: Record<DashboardPanelId, DashboardPanelLayout>) {
+  try {
+    window.localStorage.setItem(DASHBOARD_PANEL_STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // Layout changes should keep working even when storage is unavailable.
+  }
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState, onSensitiveLocked: () => void) {
@@ -212,7 +322,7 @@ function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterStat
   return params.toString();
 }
 
-function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll, onResetLayout }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void; onResetLayout: () => void }) {
   const chips = activeFilterChips(data, filters);
   return <section className="card p-3 md:p-4">
     <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
@@ -229,6 +339,10 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
         <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
         <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
       </div>
+      <button type="button" className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 text-sm text-stone hover:bg-tag" onClick={onResetLayout} title="重置看板布局" aria-label="重置看板布局">
+        <RotateCcw className="h-4 w-4" />
+        <span className="hidden 2xl:inline">重置布局</span>
+      </button>
     </div>
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {chips.length ? chips.map((chip) => <button key={chip.key} type="button" className="inline-flex items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
@@ -321,13 +435,75 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: strin
   return <div className="min-w-0 bg-panel p-3 text-center"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold md:text-lg ${tone}`}>{value}</div></div>;
 }
 
-function Panel({ title, subtitle, className, children }: { title: string; subtitle?: string; className?: string; children: ReactNode }) {
-  return <section className={`card min-w-0 p-4 ${className ?? ""}`}>
+function Panel({ panelId, title, subtitle, layout, onResize, children }: { panelId: DashboardPanelId; title: string; subtitle?: string; layout: DashboardPanelLayout; onResize: (panelId: DashboardPanelId, size: Partial<DashboardPanelLayout>) => void; children: ReactNode }) {
+  const resizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startSpan: number;
+    startHeight: number;
+    columnWidth: number;
+    canResizeColumns: boolean;
+  } | null>(null);
+  const panelStyle = {
+    "--dashboard-panel-span": String(layout.colSpan),
+    "--dashboard-chart-height": `${layout.height}px`,
+    minHeight: `${layout.height + 88}px`,
+  } as CSSProperties;
+
+  function beginResize(event: PointerEvent<HTMLButtonElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const grid = event.currentTarget.closest(".dashboard-panel-grid");
+    if (!grid) return;
+    const gridRect = grid.getBoundingClientRect();
+    const gridStyles = window.getComputedStyle(grid);
+    const columns = gridStyles.gridTemplateColumns.split(" ").filter(Boolean).length;
+    const gap = Number.parseFloat(gridStyles.columnGap) || 0;
+    const columnWidth = columns > 1 ? (gridRect.width - gap * (columns - 1)) / columns : gridRect.width;
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startSpan: layout.colSpan,
+      startHeight: layout.height,
+      columnWidth,
+      canResizeColumns: columns > 1,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function resize(event: PointerEvent<HTMLButtonElement>) {
+    const state = resizeRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const spanDelta = state.canResizeColumns ? Math.round((event.clientX - state.startX) / state.columnWidth) : 0;
+    const heightDelta = event.clientY - state.startY;
+    onResize(panelId, {
+      colSpan: state.startSpan + spanDelta,
+      height: state.startHeight + heightDelta,
+    });
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function endResize(event: PointerEvent<HTMLButtonElement>) {
+    const state = resizeRef.current;
+    if (state?.pointerId === event.pointerId) {
+      resizeRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  return <section className="dashboard-panel-shell card min-w-0 p-4" style={panelStyle}>
     <div className="flex items-start justify-between gap-3">
       <h3 className="font-serif text-xl">{title}</h3>
       {subtitle && <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{subtitle}</span>}
     </div>
     {children}
+    <button type="button" className="dashboard-panel-resize-handle absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel/90 text-stone shadow-sm backdrop-blur hover:bg-tag hover:text-brand" onPointerDown={beginResize} onPointerMove={resize} onPointerUp={endResize} onPointerCancel={endResize} title="调整面板大小" aria-label="调整面板大小">
+      <Grip className="h-4 w-4" />
+    </button>
   </section>;
 }
 
@@ -587,14 +763,14 @@ function ChartBox({ empty, compact = false, points = 0, minPointWidth = 40, chil
   if (empty) return <EmptyPanel text="暂无趋势数据" compact={compact} />;
   const minWidth = points > 18 ? Math.max(720, points * minPointWidth) : undefined;
   return <div className="mt-4 min-w-0 overflow-x-auto pb-2">
-    <div className={`ledger-chart min-w-0 ${compact ? "h-64" : "h-80"}`} style={{ minWidth }}>
+    <div className={`ledger-chart dashboard-chart-canvas min-w-0 ${compact ? "dashboard-chart-canvas-compact" : ""}`} style={{ minWidth }}>
       {children}
     </div>
   </div>;
 }
 
 function HiddenChart({ compact = false }: { compact?: boolean }) {
-  return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel text-sm text-stone ${compact ? "h-64" : "h-80"}`}>金额已隐藏</div>;
+  return <div className={`dashboard-chart-canvas mt-4 grid place-items-center rounded-xl border border-line bg-panel text-sm text-stone ${compact ? "dashboard-chart-canvas-compact" : ""}`}>金额已隐藏</div>;
 }
 
 function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean }) {
