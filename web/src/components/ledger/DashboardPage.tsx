@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Grip, Maximize2, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJson } from "@/lib/clientFetch";
@@ -519,7 +520,15 @@ function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinitio
   const viewStyle = {
     "--dashboard-chart-height": "min(68dvh, 720px)",
   } as CSSProperties;
-  return <div className="fixed inset-0 z-[130] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5" role="dialog" aria-modal="true" aria-label={`${panel.title} 全屏查看`} onClick={onClose}>
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(<div className="fixed inset-0 z-[130] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5" role="dialog" aria-modal="true" aria-label={`${panel.title} 全屏查看`} onClick={onClose}>
     <section className="dashboard-panel-view card mx-auto flex h-[calc(100dvh-1.5rem)] max-w-7xl flex-col p-4 sm:h-[calc(100dvh-2.5rem)] sm:p-5" style={viewStyle} onClick={(event) => event.stopPropagation()}>
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line pb-3">
         <div className="min-w-0">
@@ -534,7 +543,7 @@ function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinitio
         {panel.render()}
       </div>
     </section>
-  </div>;
+  </div>, document.body);
 }
 
 function Panel({ panelId, title, subtitle, layout, onResize, onView, children }: { panelId: DashboardPanelId; title: string; subtitle?: string; layout: DashboardPanelLayout; onResize: (panelId: DashboardPanelId, size: Partial<DashboardPanelLayout>) => void; onView: (panelId: DashboardPanelId) => void; children: ReactNode }) {
