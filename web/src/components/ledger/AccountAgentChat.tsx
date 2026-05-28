@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
-import { Ban, Bot, Check, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { Ban, Check, Pencil, Plus, Trash2 } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import type { AccountOperation } from "./types";
+import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-};
+type ChatMessage = LedgerAiChatMessage;
 
 type ChatStatus = "idle" | "thinking" | "writing" | "error";
 
@@ -24,23 +21,6 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     { id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" },
   ]);
   const [operations, setOperations] = useState<AccountOperation[]>([]);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    if (!open) { setKeyboardHeight(0); return; }
-    const vv = window.visualViewport;
-    textareaRef.current?.focus();
-    if (!vv) return;
-    const update = () => {
-      const kbH = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0));
-      setKeyboardHeight(kbH > 50 ? kbH : 0);
-    };
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    update();
-    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
-  }, [open]);
 
   const busy = status === "thinking" || status === "writing";
   const statusText = status === "thinking" ? "AI 正在整理账户草稿…" : status === "writing" ? "正在写入账户定义…" : status === "error" ? "刚才处理失败，可以调整后再发" : operations.length ? `${operations.length} 个操作待确认` : "确认后才会写入 accounts.bean";
@@ -58,14 +38,10 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setOperations([]);
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" }]);
-    textareaRef.current?.focus();
   }
 
-  async function handleSubmit(event?: FormEvent) {
-    event?.preventDefault();
-    const text = input.trim();
+  async function handleSubmit(text: string) {
     if (!text || busy) return;
-    setInput("");
     pushMessage("user", text);
     setStatus("thinking");
     try {
@@ -82,15 +58,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       pushMessage("assistant", `处理失败：${message}`);
       setStatus("error");
       showToast("error", message || "账户草稿生成失败");
-    } finally {
-      textareaRef.current?.focus();
-    }
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void handleSubmit();
+      throw error;
     }
   }
 
@@ -120,65 +88,39 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     }
   }
 
-  if (!open) return null;
-
   return (
-    <div
-      className="kami-float fixed inset-x-0 top-0 bottom-[var(--account-agent-bottom)] z-50 flex w-full flex-col overflow-hidden bg-paper md:inset-x-auto md:right-6 md:top-auto md:bottom-[calc(7rem+env(safe-area-inset-bottom))] md:h-[min(78dvh,680px)] md:w-[440px] md:max-w-md md:rounded-3xl md:border md:border-line"
-      style={{ "--account-agent-bottom": `${keyboardHeight}px` } as CSSProperties}
+    <LedgerAiChatShell
+      open={open}
+      title="账户 AI"
+      statusText={statusText}
+      messages={messages}
+      input={input}
+      placeholder={"例如：\n新增一个差旅支出分类叫差旅\n把 Income:Other 改名为其他收入\n今天关闭旧的微信零钱账户"}
+      note="AI 只生成草稿，不会自动写入。"
+      busy={busy}
+      inputDisabled={status === "writing"}
+      thinkingText={status === "thinking" ? "AI 正在整理…" : undefined}
+      widthClassName="md:w-[440px]"
+      onInputChange={setInput}
+      onSubmit={handleSubmit}
+      onReset={resetChat}
+      onClose={onClose}
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
-        <div className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center rounded-2xl bg-brand text-paper"><Bot className="h-4 w-4" /></div>
-          <div>
-            <div className="font-serif text-lg text-warm">账户 AI</div>
-            <div className="text-xs text-stone">{statusText}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="rounded-xl border border-line p-2 text-stone hover:text-[var(--danger)] disabled:opacity-50" onClick={resetChat} disabled={busy} aria-label="清空账户 AI 对话" title="清空对话">
-            <Trash2 className="h-4 w-4" />
-          </button>
-          <button type="button" className="rounded-xl border border-line p-2 text-stone hover:text-warm" onClick={onClose} aria-label="关闭账户 AI">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {messages.map((message) => (
-          <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.role === "user" ? "bg-brand text-paper" : "border border-line bg-panel text-warm"}`}>{message.text}</div>
-          </div>
-        ))}
-        {busy && status === "thinking" && <div className="text-sm text-stone">AI 正在整理…</div>}
-
-        {operations.length > 0 && (
-          <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-medium text-warm">账户操作草稿</div>
-                <div className="text-xs text-stone">可移除单项，确认后写入 accounts.bean。</div>
-              </div>
-              <button type="button" className="shrink-0 rounded-xl bg-brand px-3 py-2 text-sm text-paper disabled:opacity-60" onClick={applyOperations} disabled={busy}>{status === "writing" ? "写入中…" : `确认 ${operations.length} 个`}</button>
+      {operations.length > 0 && (
+        <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-medium text-warm">账户操作草稿</div>
+              <div className="text-xs text-stone">可移除单项，确认后写入 accounts.bean。</div>
             </div>
-            <div className="space-y-2">
-              {operations.map((operation, index) => <OperationCard key={`${operation.kind}-${operation.account}-${index}`} operation={operation} busy={busy} onRemove={() => removeOperation(index)} />)}
-            </div>
+            <button type="button" className="shrink-0 rounded-xl bg-brand px-3 py-2 text-sm text-paper disabled:opacity-60" onClick={applyOperations} disabled={busy}>{status === "writing" ? "写入中…" : `确认 ${operations.length} 个`}</button>
           </div>
-        )}
-      </div>
-
-      <form className="shrink-0 border-t border-line bg-paper px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:p-3" onSubmit={handleSubmit}>
-        <textarea ref={textareaRef} className="h-24 w-full resize-none rounded-2xl border border-line bg-panel p-3 text-sm outline-none focus:border-brand" placeholder={"例如：\n新增一个差旅支出分类叫差旅\n把 Income:Other 改名为其他收入\n今天关闭旧的微信零钱账户"} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleKeyDown} disabled={status === "writing"} />
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="text-xs text-stone">AI 只生成草稿，不会自动写入。</div>
-          <button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm text-paper disabled:opacity-60" disabled={!input.trim() || busy}>
-            <Send className="h-3.5 w-3.5" />发送
-          </button>
+          <div className="space-y-2">
+            {operations.map((operation, index) => <OperationCard key={`${operation.kind}-${operation.account}-${index}`} operation={operation} busy={busy} onRemove={() => removeOperation(index)} />)}
+          </div>
         </div>
-      </form>
-    </div>
+      )}
+    </LedgerAiChatShell>
   );
 }
 
