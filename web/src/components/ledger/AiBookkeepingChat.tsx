@@ -51,6 +51,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
   ]);
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [plan, setPlan] = useState<LedgerAiPlan>(null);
+  const [streamingStatus, setStreamingStatus] = useState("");
 
   useEffect(() => {
     if (openSignal > 0) setOpen(true);
@@ -67,6 +68,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setInput("");
     setPreviews([]);
     setPlan(null);
+    setStreamingStatus("");
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是你的 AI 记账助理。可以直接发多笔流水，我会先生成预览，不会自动写入。" }]);
   }
@@ -85,18 +87,22 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     const assistantId = nextId();
     setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
+    setPlan(null);
+    setStreamingStatus("读取当前记账草稿");
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) });
-      const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan }>(res, (message) => updateMessage(assistantId, message));
+      const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan }>(res, { onMessage: (message) => updateMessage(assistantId, message), onStatus: setStreamingStatus });
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : [];
       const hadPreviews = previews.length > 0;
       setPreviews(entries);
       setPlan(data.plan ?? null);
+      setStreamingStatus("");
       updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
       setStatus("idle");
       showToast("success", entries.length ? `AI 已生成 ${entries.length} 条预览` : hadPreviews ? "AI 已清空预览" : "AI 已回答");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setStreamingStatus("");
       updateMessage(assistantId, `解析失败：${message}`);
       setStatus("error");
       showToast("error", message || "解析失败");
@@ -119,6 +125,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       const count = typeof data.count === "number" ? data.count : entriesToWrite.length;
       setPreviews([]);
       setPlan(null);
+      setStreamingStatus("");
       pushMessage("assistant", `已写入 ${count} 条账本记录。你可以继续发下一笔。`);
       setStatus("idle");
       showToast("success", `已写入 ${count} 条账本记录`);
@@ -136,20 +143,20 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     <LedgerAiChatShell
       open={open}
       title="AI 记账"
-      statusText={statusText}
+      statusText={streamingStatus || statusText}
       messages={messages}
       input={input}
       placeholder={"例如：\n今天星巴克 38 支付宝\n昨天打车 25 微信\n按 Enter 发送，Shift+Enter 换行"}
       note="AI 只生成预览，不会自动写入。"
       busy={busy}
       inputDisabled={status === "writing"}
-      thinkingText={status === "thinking" ? "AI 正在解析…" : undefined}
+      thinkingText={status === "thinking" ? streamingStatus || "AI 正在解析…" : undefined}
       onInputChange={setInput}
       onSubmit={handleSubmit}
       onReset={resetChat}
       onClose={() => setOpen(false)}
     >
-      <LedgerAiPlanCard plan={plan} />
+      <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />
       {previews.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
           <div className="flex items-center justify-between gap-3">

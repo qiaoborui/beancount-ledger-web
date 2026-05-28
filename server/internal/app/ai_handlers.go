@@ -102,8 +102,11 @@ func (s *Server) aiAccountsChat(c *gin.Context) {
 func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
 	start := time.Now()
 	prepareSSE(c)
+	_ = writeSSEEvent(c, "status", gin.H{"text": "读取当前记账草稿"})
 	result, err := s.streamChatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"), func(message string) error {
 		return writeSSEEvent(c, "message", gin.H{"text": message})
+	}, func(status string) error {
+		return writeSSEEvent(c, "status", gin.H{"text": status})
 	})
 	elapsed := time.Since(start).Milliseconds()
 	logDuration("ai.chat.stream", start, map[string]any{"entries": len(result.Entries)})
@@ -117,8 +120,11 @@ func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
 func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest) {
 	start := time.Now()
 	prepareSSE(c)
+	_ = writeSSEEvent(c, "status", gin.H{"text": "读取账户草稿和账户表"})
 	result, err := s.streamChatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"), func(message string) error {
 		return writeSSEEvent(c, "message", gin.H{"text": message})
+	}, func(status string) error {
+		return writeSSEEvent(c, "status", gin.H{"text": status})
 	})
 	elapsed := time.Since(start).Milliseconds()
 	logDuration("ai.accounts_chat.stream", start, map[string]any{"operations": len(result.Operations)})

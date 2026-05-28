@@ -24,6 +24,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
   ]);
   const [operations, setOperations] = useState<AccountOperation[]>([]);
   const [plan, setPlan] = useState<LedgerAiPlan>(null);
+  const [streamingStatus, setStreamingStatus] = useState("");
 
   const busy = status === "thinking" || status === "writing";
   const statusText = status === "thinking" ? "AI 正在整理账户草稿…" : status === "writing" ? "正在写入账户定义…" : status === "error" ? "刚才处理失败，可以调整后再发" : operations.length ? `${operations.length} 个操作待确认` : "确认后才会写入 accounts.bean";
@@ -44,6 +45,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setInput("");
     setOperations([]);
     setPlan(null);
+    setStreamingStatus("");
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" }]);
   }
@@ -53,17 +55,21 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     const assistantId = nextId();
     setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
+    setPlan(null);
+    setStreamingStatus("读取账户草稿和账户表");
     try {
       const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations, stream: true }) });
-      const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan }>(res, (message) => updateMessage(assistantId, message));
+      const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan }>(res, { onMessage: (message) => updateMessage(assistantId, message), onStatus: setStreamingStatus });
       const nextOperations = Array.isArray(data.operations) ? data.operations : [];
       setOperations(nextOperations);
       setPlan(data.plan ?? null);
+      setStreamingStatus("");
       updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : nextOperations.length ? `已更新 ${nextOperations.length} 个账户操作草稿。` : "我需要更多信息后再生成草稿。");
       setStatus("idle");
       showToast("success", nextOperations.length ? `AI 已生成 ${nextOperations.length} 个账户操作` : "AI 已回答");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setStreamingStatus("");
       updateMessage(assistantId, `处理失败：${message}`);
       setStatus("error");
       showToast("error", message || "账户草稿生成失败");
@@ -85,6 +91,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       const count = typeof data.count === "number" ? data.count : operations.length;
       setOperations([]);
       setPlan(null);
+      setStreamingStatus("");
       pushMessage("assistant", `已写入 ${count} 个账户操作。你可以继续整理下一组。`);
       setStatus("idle");
       showToast("success", `已写入 ${count} 个账户操作`);
@@ -102,21 +109,21 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     <LedgerAiChatShell
       open={open}
       title="账户 AI"
-      statusText={statusText}
+      statusText={streamingStatus || statusText}
       messages={messages}
       input={input}
       placeholder={"例如：\n新增一个差旅支出分类叫差旅\n把 Income:Other 改名为其他收入\n今天关闭旧的微信零钱账户"}
       note="AI 只生成草稿，不会自动写入。"
       busy={busy}
       inputDisabled={status === "writing"}
-      thinkingText={status === "thinking" ? "AI 正在整理…" : undefined}
+      thinkingText={status === "thinking" ? streamingStatus || "AI 正在整理…" : undefined}
       widthClassName="md:w-[440px]"
       onInputChange={setInput}
       onSubmit={handleSubmit}
       onReset={resetChat}
       onClose={onClose}
     >
-      <LedgerAiPlanCard plan={plan} />
+      <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />
       {operations.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
           <div className="flex items-center justify-between gap-3">

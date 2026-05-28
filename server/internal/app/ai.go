@@ -70,10 +70,15 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	return parseBookkeepingChatResult(content, accounts)
 }
 
-func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error) (ChatResult, error) {
+func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error, onStatus func(string) error) (ChatResult, error) {
 	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return ChatResult{}, err
+	}
+	if onStatus != nil {
+		if err := onStatus("生成回复和处理计划"); err != nil {
+			return ChatResult{}, err
+		}
 	}
 	var buffer strings.Builder
 	lastMessage := ""
@@ -91,7 +96,21 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 	if err != nil {
 		return ChatResult{}, err
 	}
-	return parseBookkeepingChatResult(content, accounts)
+	if onStatus != nil {
+		if err := onStatus("解析并校验分录草稿"); err != nil {
+			return ChatResult{}, err
+		}
+	}
+	result, err := parseBookkeepingChatResult(content, accounts)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	if onStatus != nil {
+		if err := onStatus("预览已准备好"); err != nil {
+			return ChatResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (s *Server) bookkeepingChatPrompt(message string, messages []ChatMessage, draft []LedgerEntry, today string) (string, string, []string, error) {
@@ -145,10 +164,15 @@ func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []Ac
 	return parseAccountChatResult(content, accounts)
 }
 
-func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error) (AccountChatResult, error) {
+func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error, onStatus func(string) error) (AccountChatResult, error) {
 	system, payload, accounts, err := s.accountsChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return AccountChatResult{}, err
+	}
+	if onStatus != nil {
+		if err := onStatus("生成账户处理计划"); err != nil {
+			return AccountChatResult{}, err
+		}
 	}
 	var buffer strings.Builder
 	lastMessage := ""
@@ -166,7 +190,21 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 	if err != nil {
 		return AccountChatResult{}, err
 	}
-	return parseAccountChatResult(content, accounts)
+	if onStatus != nil {
+		if err := onStatus("解析并校验账户操作"); err != nil {
+			return AccountChatResult{}, err
+		}
+	}
+	result, err := parseAccountChatResult(content, accounts)
+	if err != nil {
+		return AccountChatResult{}, err
+	}
+	if onStatus != nil {
+		if err := onStatus("账户草稿已准备好"); err != nil {
+			return AccountChatResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (s *Server) accountsChatPrompt(message string, messages []ChatMessage, draft []AccountOperation, today string) (string, string, []Account, error) {
