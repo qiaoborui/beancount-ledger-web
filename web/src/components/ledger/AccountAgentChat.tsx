@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { Ban, Check, Pencil, Plus, Trash2 } from "lucide-react";
-import { readAiEventStream } from "@/lib/aiStream";
+import { readAiEventStream, type AiToolEvent } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
 import type { AccountOperation } from "./types";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
 import { LedgerAiConfirmationCard } from "./LedgerAiConfirmationCard";
 import { LedgerAiPlanCard, type LedgerAiPlan } from "./LedgerAiPlanCard";
 import { LedgerAiSourcesCard, type LedgerAiSource } from "./LedgerAiSourcesCard";
+import { LedgerAiToolCard, type LedgerAiTool, upsertLedgerAiTool } from "./LedgerAiToolCard";
 
 type ChatMessage = LedgerAiChatMessage;
 
@@ -20,6 +21,13 @@ const accountSuggestions = [
   "今天关闭旧的微信零钱账户",
   "新增一个招商银行信用卡账户",
 ];
+
+const accountDraftTools: LedgerAiTool[] = [
+  { id: "parse-account-operations", name: "parseAccountOperations", title: "解析账户操作", status: "pending" },
+  { id: "validate-account-operations", name: "validateAccountOperations", title: "校验账户定义", status: "pending" },
+];
+
+const writeAccountsTool: LedgerAiTool = { id: "write-accounts", name: "writeAccounts", title: "写入 accounts.bean", status: "pending" };
 
 function nextId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -34,6 +42,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
   const [operations, setOperations] = useState<AccountOperation[]>([]);
   const [plan, setPlan] = useState<LedgerAiPlan>(null);
   const [sources, setSources] = useState<LedgerAiSource[]>([]);
+  const [tools, setTools] = useState<LedgerAiTool[]>([]);
   const [streamingStatus, setStreamingStatus] = useState("");
 
   const busy = status === "thinking" || status === "writing";
@@ -56,6 +65,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setOperations([]);
     setPlan(null);
     setSources([]);
+    setTools([]);
     setStreamingStatus("");
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" }]);
@@ -67,14 +77,20 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
     setPlan(null);
+    setTools(accountDraftTools);
     setStreamingStatus("读取账户草稿和账户表");
     try {
       const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations, stream: true }) });
-      const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, { onMessage: (message) => updateMessage(assistantId, message), onStatus: setStreamingStatus });
+      const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, {
+        onMessage: (message) => updateMessage(assistantId, message),
+        onStatus: setStreamingStatus,
+        onTool: (tool: AiToolEvent) => setTools((current) => upsertLedgerAiTool(current, tool)),
+      });
       const nextOperations = Array.isArray(data.operations) ? data.operations : [];
       setOperations(nextOperations);
       setPlan(data.plan ?? null);
       setSources(Array.isArray(data.sources) ? data.sources : []);
+      setTools((current) => nextOperations.length ? upsertLedgerAiTool(current, writeAccountsTool) : current);
       setStreamingStatus("");
       updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : nextOperations.length ? `已更新 ${nextOperations.length} 个账户操作草稿。` : "我需要更多信息后再生成草稿。");
       setStatus("idle");
@@ -90,7 +106,11 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
   }
 
   function removeOperation(index: number) {
-    setOperations((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setOperations((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      if (next.length === 0) setTools((tools) => tools.filter((tool) => tool.id !== "write-accounts"));
+      return next;
+    });
   }
 
   function cancelOperations() {
@@ -98,12 +118,14 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setOperations([]);
     setPlan(null);
     setSources([]);
+    setTools([]);
     pushMessage("assistant", "已清空待确认账户草稿。可以继续描述下一组账户调整。");
   }
 
   async function applyOperations() {
     if (!operations.length || busy) return;
     setStatus("writing");
+    setTools((current) => upsertLedgerAiTool(current, { ...writeAccountsTool, status: "running", input: { operations: operations.length } }));
     try {
       const res = await fetch("/api/ledger/accounts/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operations }) });
       const data = await readJson<{ error?: string; count?: number }>(res);
@@ -112,6 +134,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       setOperations([]);
       setPlan(null);
       setSources([]);
+      setTools((current) => upsertLedgerAiTool(current, { ...writeAccountsTool, status: "completed", output: { operations: count } }));
       setStreamingStatus("");
       pushMessage("assistant", `已写入 ${count} 个账户操作。你可以继续整理下一组。`);
       setStatus("idle");
@@ -120,6 +143,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       await refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setTools((current) => upsertLedgerAiTool(current, { ...writeAccountsTool, status: "error", error: message }));
       pushMessage("assistant", `写入失败：${message}`);
       setStatus("error");
       showToast("error", message || "账户写入失败");
@@ -146,6 +170,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       onClose={onClose}
     >
       <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />
+      <LedgerAiToolCard tools={tools} />
       <LedgerAiSourcesCard sources={sources} />
       {operations.length > 0 && (
         <div className="space-y-3">

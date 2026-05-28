@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { readAiEventStream } from "@/lib/aiStream";
+import { readAiEventStream, type AiToolEvent } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
 import { LedgerAiConfirmationCard } from "./LedgerAiConfirmationCard";
 import { LedgerAiPlanCard, type LedgerAiPlan } from "./LedgerAiPlanCard";
 import { LedgerAiSourcesCard, type LedgerAiSource } from "./LedgerAiSourcesCard";
+import { LedgerAiToolCard, type LedgerAiTool, upsertLedgerAiTool } from "./LedgerAiToolCard";
 
 type ChatMessage = LedgerAiChatMessage;
 
@@ -20,6 +21,13 @@ const bookkeepingSuggestions = [
   "把上一条改成招行信用卡",
   "这几笔都用 Expenses:Food",
 ];
+
+const bookkeepingDraftTools: LedgerAiTool[] = [
+  { id: "parse-ledger", name: "parseLedger", title: "解析流水", status: "pending" },
+  { id: "validate-beancount", name: "validateBeancount", title: "校验 Beancount", status: "pending" },
+];
+
+const writeLedgerTool: LedgerAiTool = { id: "write-ledger", name: "writeLedger", title: "写入 ledger", status: "pending" };
 
 function nextId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -61,6 +69,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [plan, setPlan] = useState<LedgerAiPlan>(null);
   const [sources, setSources] = useState<LedgerAiSource[]>([]);
+  const [tools, setTools] = useState<LedgerAiTool[]>([]);
   const [streamingStatus, setStreamingStatus] = useState("");
 
   useEffect(() => {
@@ -79,6 +88,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setPreviews([]);
     setPlan(null);
     setSources([]);
+    setTools([]);
     setStreamingStatus("");
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是你的 AI 记账助理。可以直接发多笔流水，我会先生成预览，不会自动写入。" }]);
@@ -99,15 +109,21 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
     setPlan(null);
+    setTools(bookkeepingDraftTools);
     setStreamingStatus("读取当前记账草稿");
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) });
-      const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, { onMessage: (message) => updateMessage(assistantId, message), onStatus: setStreamingStatus });
+      const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, {
+        onMessage: (message) => updateMessage(assistantId, message),
+        onStatus: setStreamingStatus,
+        onTool: (tool: AiToolEvent) => setTools((current) => upsertLedgerAiTool(current, tool)),
+      });
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : [];
       const hadPreviews = previews.length > 0;
       setPreviews(entries);
       setPlan(data.plan ?? null);
       setSources(Array.isArray(data.sources) ? data.sources : []);
+      setTools((current) => entries.length ? upsertLedgerAiTool(current, writeLedgerTool) : current);
       setStreamingStatus("");
       updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
       setStatus("idle");
@@ -123,7 +139,11 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
   }
 
   function removePreview(index: number) {
-    setPreviews((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setPreviews((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      if (next.length === 0) setTools((tools) => tools.filter((tool) => tool.id !== "write-ledger"));
+      return next;
+    });
   }
 
   function cancelPreviews() {
@@ -131,12 +151,14 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setPreviews([]);
     setPlan(null);
     setSources([]);
+    setTools([]);
     pushMessage("assistant", "已清空待确认预览。可以继续发新的流水。");
   }
 
   async function appendPreviews() {
     if (!previews.length || busy) return;
     setStatus("writing");
+    setTools((current) => upsertLedgerAiTool(current, { ...writeLedgerTool, status: "running", input: { entries: previews.length } }));
     try {
       const entriesToWrite = previews;
       const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: entriesToWrite }) });
@@ -146,6 +168,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       setPreviews([]);
       setPlan(null);
       setSources([]);
+      setTools((current) => upsertLedgerAiTool(current, { ...writeLedgerTool, status: "completed", output: { entries: count } }));
       setStreamingStatus("");
       pushMessage("assistant", `已写入 ${count} 条账本记录。你可以继续发下一笔。`);
       setStatus("idle");
@@ -154,6 +177,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       await refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setTools((current) => upsertLedgerAiTool(current, { ...writeLedgerTool, status: "error", error: message }));
       pushMessage("assistant", `写入失败：${message}`);
       setStatus("error");
       showToast("error", message || "写入失败");
@@ -179,6 +203,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       onClose={() => setOpen(false)}
     >
       <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />
+      <LedgerAiToolCard tools={tools} />
       <LedgerAiSourcesCard sources={sources} />
       {previews.length > 0 && (
         <div className="space-y-3">

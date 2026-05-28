@@ -31,6 +31,16 @@ type ChatSource struct {
 	Reference   string `json:"reference,omitempty"`
 }
 
+type ChatToolEvent struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Input  any    `json:"input,omitempty"`
+	Output any    `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 type ChatResult struct {
 	Message string        `json:"message"`
 	Plan    *ChatPlan     `json:"plan,omitempty"`
@@ -79,7 +89,7 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	return parseBookkeepingChatResult(content, accounts, len(draft))
 }
 
-func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error, onStatus func(string) error) (ChatResult, error) {
+func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error, onStatus func(string) error, onTool func(ChatToolEvent) error) (ChatResult, error) {
 	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return ChatResult{}, err
@@ -88,6 +98,15 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 		if err := onStatus("生成回复和处理计划"); err != nil {
 			return ChatResult{}, err
 		}
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "parse-ledger",
+		Name:   "parseLedger",
+		Title:  "解析流水",
+		Status: "running",
+		Input:  map[string]any{"messages": len(messages), "draftEntries": len(draft)},
+	}); err != nil {
+		return ChatResult{}, err
 	}
 	var buffer strings.Builder
 	lastMessage := ""
@@ -103,6 +122,16 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 		return nil
 	})
 	if err != nil {
+		_ = emitChatTool(onTool, ChatToolEvent{ID: "parse-ledger", Name: "parseLedger", Title: "解析流水", Status: "error", Error: err.Error()})
+		return ChatResult{}, err
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "parse-ledger",
+		Name:   "parseLedger",
+		Title:  "解析流水",
+		Status: "completed",
+		Output: map[string]any{"message": "AI 已返回结构化草稿"},
+	}); err != nil {
 		return ChatResult{}, err
 	}
 	if onStatus != nil {
@@ -110,8 +139,27 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 			return ChatResult{}, err
 		}
 	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "validate-beancount",
+		Name:   "validateBeancount",
+		Title:  "校验 Beancount",
+		Status: "running",
+		Input:  map[string]any{"accounts": len(accounts)},
+	}); err != nil {
+		return ChatResult{}, err
+	}
 	result, err := parseBookkeepingChatResult(content, accounts, len(draft))
 	if err != nil {
+		_ = emitChatTool(onTool, ChatToolEvent{ID: "validate-beancount", Name: "validateBeancount", Title: "校验 Beancount", Status: "error", Error: err.Error()})
+		return ChatResult{}, err
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "validate-beancount",
+		Name:   "validateBeancount",
+		Title:  "校验 Beancount",
+		Status: "completed",
+		Output: map[string]any{"entries": len(result.Entries)},
+	}); err != nil {
 		return ChatResult{}, err
 	}
 	if onStatus != nil {
@@ -174,7 +222,7 @@ func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []Ac
 	return parseAccountChatResult(content, accounts, len(draft))
 }
 
-func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error, onStatus func(string) error) (AccountChatResult, error) {
+func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error, onStatus func(string) error, onTool func(ChatToolEvent) error) (AccountChatResult, error) {
 	system, payload, accounts, err := s.accountsChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return AccountChatResult{}, err
@@ -183,6 +231,15 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 		if err := onStatus("生成账户处理计划"); err != nil {
 			return AccountChatResult{}, err
 		}
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "parse-account-operations",
+		Name:   "parseAccountOperations",
+		Title:  "解析账户操作",
+		Status: "running",
+		Input:  map[string]any{"messages": len(messages), "draftOperations": len(draft)},
+	}); err != nil {
+		return AccountChatResult{}, err
 	}
 	var buffer strings.Builder
 	lastMessage := ""
@@ -198,6 +255,16 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 		return nil
 	})
 	if err != nil {
+		_ = emitChatTool(onTool, ChatToolEvent{ID: "parse-account-operations", Name: "parseAccountOperations", Title: "解析账户操作", Status: "error", Error: err.Error()})
+		return AccountChatResult{}, err
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "parse-account-operations",
+		Name:   "parseAccountOperations",
+		Title:  "解析账户操作",
+		Status: "completed",
+		Output: map[string]any{"message": "AI 已返回账户操作草稿"},
+	}); err != nil {
 		return AccountChatResult{}, err
 	}
 	if onStatus != nil {
@@ -205,8 +272,27 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 			return AccountChatResult{}, err
 		}
 	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "validate-account-operations",
+		Name:   "validateAccountOperations",
+		Title:  "校验账户定义",
+		Status: "running",
+		Input:  map[string]any{"accounts": len(accounts)},
+	}); err != nil {
+		return AccountChatResult{}, err
+	}
 	result, err := parseAccountChatResult(content, accounts, len(draft))
 	if err != nil {
+		_ = emitChatTool(onTool, ChatToolEvent{ID: "validate-account-operations", Name: "validateAccountOperations", Title: "校验账户定义", Status: "error", Error: err.Error()})
+		return AccountChatResult{}, err
+	}
+	if err := emitChatTool(onTool, ChatToolEvent{
+		ID:     "validate-account-operations",
+		Name:   "validateAccountOperations",
+		Title:  "校验账户定义",
+		Status: "completed",
+		Output: map[string]any{"operations": len(result.Operations)},
+	}); err != nil {
 		return AccountChatResult{}, err
 	}
 	if onStatus != nil {
@@ -251,6 +337,13 @@ func parseAccountChatResult(content string, accounts []Account, draftCount int) 
 	parsed.Plan = normalizeChatPlan(parsed.Plan)
 	parsed.Sources = accountChatSources(parsed.Operations, accounts, draftCount)
 	return parsed, nil
+}
+
+func emitChatTool(onTool func(ChatToolEvent) error, event ChatToolEvent) error {
+	if onTool == nil {
+		return nil
+	}
+	return onTool(event)
 }
 
 func bookkeepingChatSources(entries []LedgerEntry, accounts []string, draftCount int) []ChatSource {

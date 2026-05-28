@@ -131,6 +131,9 @@ func TestAIChatRouteStreamsAssistantMessageAndFinalDraft(t *testing.T) {
 	if !strings.Contains(body, "event: status") || !strings.Contains(body, "生成回复和处理计划") {
 		t.Fatalf("stream should include status events, got:\n%s", body)
 	}
+	if !strings.Contains(body, "event: tool") || !strings.Contains(body, "parseLedger") || !strings.Contains(body, "validateBeancount") {
+		t.Fatalf("stream should include tool events, got:\n%s", body)
+	}
 	if !strings.Contains(body, "event: message") || !strings.Contains(body, "可以") {
 		t.Fatalf("stream should include assistant message events, got:\n%s", body)
 	}

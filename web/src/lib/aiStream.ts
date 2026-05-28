@@ -4,7 +4,20 @@ type AiStreamError = {
   error?: string;
 };
 
-export async function readAiEventStream<T>(response: Response, options: { onMessage: (text: string) => void; onStatus?: (text: string) => void }): Promise<T> {
+export type AiToolEvent = {
+  id: string;
+  name: string;
+  title: string;
+  status: "pending" | "running" | "completed" | "error";
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+};
+
+export async function readAiEventStream<T>(
+  response: Response,
+  options: { onMessage: (text: string) => void; onStatus?: (text: string) => void; onTool?: (tool: AiToolEvent) => void }
+): Promise<T> {
   if (!response.ok || !response.body) {
     const data = await readJson<AiStreamError>(response, {});
     throw new Error(data.error || "AI 流式请求失败");
@@ -31,6 +44,9 @@ export async function readAiEventStream<T>(response: Response, options: { onMess
           } else if (event.type === "status") {
             const payload = JSON.parse(event.data) as { text?: string };
             if (typeof payload.text === "string") options.onStatus?.(payload.text);
+          } else if (event.type === "tool") {
+            const payload = JSON.parse(event.data) as AiToolEvent;
+            if (payload.id && payload.name && payload.title && payload.status) options.onTool?.(payload);
           } else if (event.type === "final") {
             final = JSON.parse(event.data) as T;
           } else if (event.type === "error") {

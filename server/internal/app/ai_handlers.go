@@ -107,6 +107,8 @@ func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
 		return writeSSEEvent(c, "message", gin.H{"text": message})
 	}, func(status string) error {
 		return writeSSEEvent(c, "status", gin.H{"text": status})
+	}, func(tool ChatToolEvent) error {
+		return writeSSEEvent(c, "tool", tool)
 	})
 	elapsed := time.Since(start).Milliseconds()
 	logDuration("ai.chat.stream", start, map[string]any{"entries": len(result.Entries)})
@@ -125,6 +127,8 @@ func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest
 		return writeSSEEvent(c, "message", gin.H{"text": message})
 	}, func(status string) error {
 		return writeSSEEvent(c, "status", gin.H{"text": status})
+	}, func(tool ChatToolEvent) error {
+		return writeSSEEvent(c, "tool", tool)
 	})
 	elapsed := time.Since(start).Milliseconds()
 	logDuration("ai.accounts_chat.stream", start, map[string]any{"operations": len(result.Operations)})
