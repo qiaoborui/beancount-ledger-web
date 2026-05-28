@@ -288,6 +288,12 @@ button.card:active, a.card:active { transform: scale(0.992); }
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+@media (min-width: 768px) {
+  .mobile-bottom-nav {
+    display: none;
+  }
+}
+
 .mobile-bottom-tab {
   position: relative;
   overflow: hidden;
