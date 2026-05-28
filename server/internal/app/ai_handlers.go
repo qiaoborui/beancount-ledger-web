@@ -66,7 +66,7 @@ func (s *Server) aiChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func (s *Server) aiAccountsChat(c *gin.Context) {
@@ -96,7 +96,7 @@ func (s *Server) aiAccountsChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
@@ -114,7 +114,7 @@ func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
 		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
+	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest) {
@@ -132,7 +132,7 @@ func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest
 		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func prepareSSE(c *gin.Context) {

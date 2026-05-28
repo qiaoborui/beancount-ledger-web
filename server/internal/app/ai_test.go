@@ -76,6 +76,7 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	var body struct {
 		Message string        `json:"message"`
 		Plan    *ChatPlan     `json:"plan"`
+		Sources []ChatSource  `json:"sources"`
 		Entries []LedgerEntry `json:"entries"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
@@ -86,6 +87,9 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	if body.Plan == nil || body.Plan.Title != "记账计划" || len(body.Plan.Steps) != 2 {
 		t.Fatalf("unexpected chat plan: %#v", body.Plan)
+	}
+	if len(body.Sources) == 0 || body.Sources[0].Kind != "accounts" {
+		t.Fatalf("unexpected chat sources: %#v", body.Sources)
 	}
 }
 
@@ -133,6 +137,9 @@ func TestAIChatRouteStreamsAssistantMessageAndFinalDraft(t *testing.T) {
 	if !strings.Contains(body, "event: final") || !strings.Contains(body, "Coffee") {
 		t.Fatalf("stream should include final draft event, got:\n%s", body)
 	}
+	if !strings.Contains(body, `"sources"`) || !strings.Contains(body, "当前账户表") {
+		t.Fatalf("stream should include final sources, got:\n%s", body)
+	}
 }
 
 func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
@@ -170,6 +177,7 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 	var body struct {
 		Message    string             `json:"message"`
 		Plan       *ChatPlan          `json:"plan"`
+		Sources    []ChatSource       `json:"sources"`
 		Operations []AccountOperation `json:"operations"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
@@ -180,5 +188,8 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 	}
 	if body.Plan == nil || body.Plan.Title != "账户计划" || len(body.Plan.Steps) != 1 {
 		t.Fatalf("unexpected account chat plan: %#v", body.Plan)
+	}
+	if len(body.Sources) == 0 || body.Sources[0].Kind != "accounts" {
+		t.Fatalf("unexpected account chat sources: %#v", body.Sources)
 	}
 }

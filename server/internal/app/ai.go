@@ -24,15 +24,24 @@ type ChatPlan struct {
 	Steps       []string `json:"steps"`
 }
 
+type ChatSource struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Reference   string `json:"reference,omitempty"`
+}
+
 type ChatResult struct {
 	Message string        `json:"message"`
 	Plan    *ChatPlan     `json:"plan,omitempty"`
+	Sources []ChatSource  `json:"sources,omitempty"`
 	Entries []LedgerEntry `json:"entries"`
 }
 
 type AccountChatResult struct {
 	Message    string             `json:"message"`
 	Plan       *ChatPlan          `json:"plan,omitempty"`
+	Sources    []ChatSource       `json:"sources,omitempty"`
 	Operations []AccountOperation `json:"operations"`
 }
 
@@ -67,7 +76,7 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	if err != nil {
 		return ChatResult{}, err
 	}
-	return parseBookkeepingChatResult(content, accounts)
+	return parseBookkeepingChatResult(content, accounts, len(draft))
 }
 
 func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error, onStatus func(string) error) (ChatResult, error) {
@@ -101,7 +110,7 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 			return ChatResult{}, err
 		}
 	}
-	result, err := parseBookkeepingChatResult(content, accounts)
+	result, err := parseBookkeepingChatResult(content, accounts, len(draft))
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -135,7 +144,7 @@ func (s *Server) bookkeepingChatPrompt(message string, messages []ChatMessage, d
 	return system, payload, accounts, nil
 }
 
-func parseBookkeepingChatResult(content string, accounts []string) (ChatResult, error) {
+func parseBookkeepingChatResult(content string, accounts []string, draftCount int) (ChatResult, error) {
 	var parsed ChatResult
 	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
 		return ChatResult{}, err
@@ -149,6 +158,7 @@ func parseBookkeepingChatResult(content string, accounts []string) (ChatResult, 
 	}
 	parsed.Plan = normalizeChatPlan(parsed.Plan)
 	parsed.Entries = entries
+	parsed.Sources = bookkeepingChatSources(entries, accounts, draftCount)
 	return parsed, nil
 }
 
@@ -161,7 +171,7 @@ func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []Ac
 	if err != nil {
 		return AccountChatResult{}, err
 	}
-	return parseAccountChatResult(content, accounts)
+	return parseAccountChatResult(content, accounts, len(draft))
 }
 
 func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error, onStatus func(string) error) (AccountChatResult, error) {
@@ -195,7 +205,7 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 			return AccountChatResult{}, err
 		}
 	}
-	result, err := parseAccountChatResult(content, accounts)
+	result, err := parseAccountChatResult(content, accounts, len(draft))
 	if err != nil {
 		return AccountChatResult{}, err
 	}
@@ -227,7 +237,7 @@ func (s *Server) accountsChatPrompt(message string, messages []ChatMessage, draf
 	return accountAgentPrompt(today, snapshot.Accounts), payload, snapshot.Accounts, nil
 }
 
-func parseAccountChatResult(content string, accounts []Account) (AccountChatResult, error) {
+func parseAccountChatResult(content string, accounts []Account, draftCount int) (AccountChatResult, error) {
 	var parsed AccountChatResult
 	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
 		return AccountChatResult{}, err
@@ -239,7 +249,100 @@ func parseAccountChatResult(content string, accounts []Account) (AccountChatResu
 		parsed.Message = fmt.Sprintf("已更新 %d 个账户操作草稿。", len(parsed.Operations))
 	}
 	parsed.Plan = normalizeChatPlan(parsed.Plan)
+	parsed.Sources = accountChatSources(parsed.Operations, accounts, draftCount)
 	return parsed, nil
+}
+
+func bookkeepingChatSources(entries []LedgerEntry, accounts []string, draftCount int) []ChatSource {
+	sources := []ChatSource{{
+		Title:       "当前账户表",
+		Description: fmt.Sprintf("%d 个可用账户用于分类和平衡检查", len(accounts)),
+		Kind:        "accounts",
+		Reference:   "active accounts",
+	}}
+	if draftCount > 0 {
+		sources = append(sources, ChatSource{
+			Title:       "当前记账草稿",
+			Description: fmt.Sprintf("沿用并更新了 %d 条待确认预览", draftCount),
+			Kind:        "draft",
+			Reference:   "draftEntries",
+		})
+	}
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		for _, posting := range entry.Postings {
+			if posting.Account == "" || seen[posting.Account] {
+				continue
+			}
+			seen[posting.Account] = true
+			sources = append(sources, ChatSource{
+				Title:       posting.Account,
+				Description: "本次草稿使用的账户",
+				Kind:        "account",
+				Reference:   posting.Account,
+			})
+			if len(sources) >= 8 {
+				return sources
+			}
+		}
+	}
+	for _, entry := range entries {
+		if entry.NeedsReview {
+			sources = append(sources, ChatSource{
+				Title:       "待确认问题",
+				Description: "AI 标记了需要人工复核的分类或字段",
+				Kind:        "review",
+				Reference:   "needsReview",
+			})
+			break
+		}
+	}
+	return sources
+}
+
+func accountChatSources(operations []AccountOperation, accounts []Account, draftCount int) []ChatSource {
+	sources := []ChatSource{{
+		Title:       "accounts.bean 账户表",
+		Description: fmt.Sprintf("%d 个现有账户用于冲突检查", len(accounts)),
+		Kind:        "accounts",
+		Reference:   "accounts",
+	}}
+	if draftCount > 0 {
+		sources = append(sources, ChatSource{
+			Title:       "当前账户操作草稿",
+			Description: fmt.Sprintf("沿用并更新了 %d 个待确认操作", draftCount),
+			Kind:        "draft",
+			Reference:   "draftOperations",
+		})
+	}
+	accountByName := map[string]Account{}
+	for _, account := range accounts {
+		accountByName[account.Account] = account
+	}
+	seen := map[string]bool{}
+	for _, operation := range operations {
+		if operation.Account == "" || seen[operation.Account] {
+			continue
+		}
+		seen[operation.Account] = true
+		description := "拟新增账户路径"
+		if account, ok := accountByName[operation.Account]; ok {
+			description = fmt.Sprintf("现有账户，分组 %s", account.Group)
+			if !account.Active {
+				description += "，当前已关闭"
+			}
+		}
+		sources = append(sources, ChatSource{
+			Title:       operation.Account,
+			Description: description,
+			Kind:        "account",
+			Reference:   operation.Kind,
+		})
+		if len(sources) >= 8 {
+			return sources
+		}
+	}
+	return sources
 }
 
 func parserPrompt(today string, accounts []string) string {

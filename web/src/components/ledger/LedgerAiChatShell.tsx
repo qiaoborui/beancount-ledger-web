@@ -20,6 +20,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 
 export type LedgerAiChatMessage = {
   id: string;
@@ -38,6 +39,7 @@ type LedgerAiChatShellProps = {
   busy: boolean;
   inputDisabled?: boolean;
   thinkingText?: string;
+  suggestions?: string[];
   widthClassName?: string;
   onInputChange: (value: string) => void;
   onSubmit: (text: string) => void | Promise<void>;
@@ -57,6 +59,7 @@ export function LedgerAiChatShell({
   busy,
   inputDisabled = false,
   thinkingText,
+  suggestions = [],
   widthClassName = "md:w-[420px]",
   onInputChange,
   onSubmit,
@@ -95,6 +98,12 @@ export function LedgerAiChatShell({
     if (!text || busy) return;
     await onSubmit(text);
     onInputChange("");
+  }
+
+  function handleSuggestion(suggestion: string) {
+    if (busy || inputDisabled) return;
+    onInputChange(suggestion);
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
   const shell = (
@@ -143,6 +152,19 @@ export function LedgerAiChatShell({
       </Conversation>
 
       <div className="shrink-0 border-t border-line bg-paper px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:p-3">
+        {suggestions.length > 0 && (
+          <Suggestions className="pb-2">
+            {suggestions.map((suggestion) => (
+              <Suggestion
+                key={suggestion}
+                className="border-line bg-paper text-stone hover:bg-tag hover:text-warm"
+                disabled={busy || inputDisabled}
+                suggestion={suggestion}
+                onClick={handleSuggestion}
+              />
+            ))}
+          </Suggestions>
+        )}
         <PromptInput className="rounded-2xl border border-line bg-panel" onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
