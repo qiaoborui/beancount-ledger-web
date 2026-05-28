@@ -3,10 +3,29 @@ import type { Config } from "tailwindcss";
 const color = (name: string) => `rgb(var(--color-${name}) / <alpha-value>)`;
 
 const config: Config = {
+  darkMode: ["selector", 'html[data-theme="dark"]'],
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
+        background: color("background"),
+        foreground: color("foreground"),
+        primary: color("primary"),
+        "primary-foreground": color("primary-foreground"),
+        secondary: color("secondary"),
+        "secondary-foreground": color("secondary-foreground"),
+        muted: color("muted"),
+        "muted-foreground": color("muted-foreground"),
+        accent: color("accent"),
+        "accent-foreground": color("accent-foreground"),
+        card: color("card"),
+        "card-foreground": color("card-foreground"),
+        destructive: color("destructive"),
+        popover: color("popover"),
+        "popover-foreground": color("popover-foreground"),
+        border: color("border"),
+        input: color("input"),
+        ring: color("ring"),
         brand: color("brand"),
         brandLight: color("brand-light"),
         ink: color("ink"),

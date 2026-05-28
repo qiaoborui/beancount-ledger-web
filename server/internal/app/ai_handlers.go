@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +54,10 @@ func (s *Server) aiChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chat request"})
 		return
 	}
+	if input.Stream {
+		s.aiChatStream(c, input)
+		return
+	}
 	start := time.Now()
 	result, err := s.chatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"))
 	elapsed := time.Since(start).Milliseconds()
@@ -60,7 +66,7 @@ func (s *Server) aiChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func (s *Server) aiAccountsChat(c *gin.Context) {
@@ -78,6 +84,10 @@ func (s *Server) aiAccountsChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account chat request"})
 		return
 	}
+	if input.Stream {
+		s.aiAccountsChatStream(c, input)
+		return
+	}
 	start := time.Now()
 	result, err := s.chatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"))
 	elapsed := time.Since(start).Milliseconds()
@@ -86,5 +96,65 @@ func (s *Server) aiAccountsChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+}
+
+func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
+	start := time.Now()
+	prepareSSE(c)
+	_ = writeSSEEvent(c, "status", gin.H{"text": "读取当前记账草稿"})
+	result, err := s.streamChatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"), func(message string) error {
+		return writeSSEEvent(c, "message", gin.H{"text": message})
+	}, func(status string) error {
+		return writeSSEEvent(c, "status", gin.H{"text": status})
+	}, func(tool ChatToolEvent) error {
+		return writeSSEEvent(c, "tool", tool)
+	})
+	elapsed := time.Since(start).Milliseconds()
+	logDuration("ai.chat.stream", start, map[string]any{"entries": len(result.Entries)})
+	if err != nil {
+		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
+		return
+	}
+	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
+}
+
+func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest) {
+	start := time.Now()
+	prepareSSE(c)
+	_ = writeSSEEvent(c, "status", gin.H{"text": "读取账户草稿和账户表"})
+	result, err := s.streamChatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"), func(message string) error {
+		return writeSSEEvent(c, "message", gin.H{"text": message})
+	}, func(status string) error {
+		return writeSSEEvent(c, "status", gin.H{"text": status})
+	}, func(tool ChatToolEvent) error {
+		return writeSSEEvent(c, "tool", tool)
+	})
+	elapsed := time.Since(start).Milliseconds()
+	logDuration("ai.accounts_chat.stream", start, map[string]any{"operations": len(result.Operations)})
+	if err != nil {
+		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
+		return
+	}
+	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+}
+
+func prepareSSE(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(http.StatusOK)
+	c.Writer.Flush()
+}
+
+func writeSSEEvent(c *gin.Context, event string, payload any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, raw); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
 }
