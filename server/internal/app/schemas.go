@@ -57,12 +57,14 @@ type AIChatRequest struct {
 	Message      string        `json:"message"`
 	Messages     []ChatMessage `json:"messages"`
 	DraftEntries []LedgerEntry `json:"draftEntries"`
+	Stream       bool          `json:"stream"`
 }
 
 type AIAccountChatRequest struct {
 	Message         string             `json:"message"`
 	Messages        []ChatMessage      `json:"messages"`
 	DraftOperations []AccountOperation `json:"draftOperations"`
+	Stream          bool               `json:"stream"`
 }
 
 type ImportCommitRequest struct {

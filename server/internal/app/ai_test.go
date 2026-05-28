@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,6 +86,49 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	if body.Plan == nil || body.Plan.Title != "记账计划" || len(body.Plan.Steps) != 2 {
 		t.Fatalf("unexpected chat plan: %#v", body.Plan)
+	}
+}
+
+func TestAIChatRouteStreamsAssistantMessageAndFinalDraft(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Stream {
+			t.Fatalf("expected streaming AI request")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"message":"可以`,
+			`这样记。","plan":null,`,
+			`"entries":[{"kind":"transaction","date":"2026-05-04","payee":"Cafe","narration":"Coffee","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-18.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}]}`,
+		} {
+			_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", chunk)
+		}
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer fakeAI.Close()
+	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[],"draftEntries":[],"stream":true}`, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ai chat stream=%d body=%s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "event: message") || !strings.Contains(body, "可以") {
+		t.Fatalf("stream should include assistant message events, got:\n%s", body)
+	}
+	if !strings.Contains(body, "event: final") || !strings.Contains(body, "Coffee") {
+		t.Fatalf("stream should include final draft event, got:\n%s", body)
 	}
 }
 

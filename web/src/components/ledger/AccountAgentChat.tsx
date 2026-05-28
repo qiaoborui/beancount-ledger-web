@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Ban, Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { readAiEventStream } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
 import type { AccountOperation } from "./types";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
@@ -32,6 +33,10 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setMessages((current) => [...current, { id: nextId(), role, text }]);
   }
 
+  function updateMessage(id: string, text: string) {
+    setMessages((current) => current.map((message) => message.id === id ? { ...message, text } : message));
+  }
+
   function resetChat() {
     if (busy) return;
     const hasWork = messages.length > 1 || operations.length > 0 || input.trim();
@@ -45,21 +50,21 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
 
   async function handleSubmit(text: string) {
     if (!text || busy) return;
-    pushMessage("user", text);
+    const assistantId = nextId();
+    setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
     try {
-      const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations }) });
-      const data = await readJson<{ error?: string; operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan }>(res);
-      if (!res.ok) throw new Error(data.error || "账户草稿生成失败");
+      const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations, stream: true }) });
+      const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan }>(res, (message) => updateMessage(assistantId, message));
       const nextOperations = Array.isArray(data.operations) ? data.operations : [];
       setOperations(nextOperations);
       setPlan(data.plan ?? null);
-      pushMessage("assistant", typeof data.message === "string" && data.message.trim() ? data.message : nextOperations.length ? `已更新 ${nextOperations.length} 个账户操作草稿。` : "我需要更多信息后再生成草稿。");
+      updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : nextOperations.length ? `已更新 ${nextOperations.length} 个账户操作草稿。` : "我需要更多信息后再生成草稿。");
       setStatus("idle");
       showToast("success", nextOperations.length ? `AI 已生成 ${nextOperations.length} 个账户操作` : "AI 已回答");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      pushMessage("assistant", `处理失败：${message}`);
+      updateMessage(assistantId, `处理失败：${message}`);
       setStatus("error");
       showToast("error", message || "账户草稿生成失败");
       throw error;

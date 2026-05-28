@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
+import { readAiEventStream } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
@@ -74,25 +75,29 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setMessages((current) => [...current, { id: nextId(), role, text }]);
   }
 
+  function updateMessage(id: string, text: string) {
+    setMessages((current) => current.map((message) => message.id === id ? { ...message, text } : message));
+  }
+
   async function handleSubmit(text: string) {
     if (!text || busy) return;
 
-    pushMessage("user", text);
+    const assistantId = nextId();
+    setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
     try {
-      const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews }) });
-      const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan }>(res);
-      if (!res.ok) throw new Error(data.error || "解析失败");
+      const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) });
+      const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan }>(res, (message) => updateMessage(assistantId, message));
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : [];
       const hadPreviews = previews.length > 0;
       setPreviews(entries);
       setPlan(data.plan ?? null);
-      pushMessage("assistant", typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
+      updateMessage(assistantId, typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
       setStatus("idle");
       showToast("success", entries.length ? `AI 已生成 ${entries.length} 条预览` : hadPreviews ? "AI 已清空预览" : "AI 已回答");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      pushMessage("assistant", `解析失败：${message}`);
+      updateMessage(assistantId, `解析失败：${message}`);
       setStatus("error");
       showToast("error", message || "解析失败");
       throw error;

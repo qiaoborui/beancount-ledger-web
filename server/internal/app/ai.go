@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -58,13 +59,49 @@ func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error
 }
 
 func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string) (ChatResult, error) {
-	snapshot, err := s.cache.Snapshot()
+	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return ChatResult{}, err
 	}
+	content, err := runAI(system, payload, true)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	return parseBookkeepingChatResult(content, accounts)
+}
+
+func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error) (ChatResult, error) {
+	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	var buffer strings.Builder
+	lastMessage := ""
+	content, err := runAIStream(system, payload, func(delta string) error {
+		buffer.WriteString(delta)
+		message := partialJSONStringField(buffer.String(), "message")
+		if message != "" && message != lastMessage {
+			lastMessage = message
+			if err := onMessage(message); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ChatResult{}, err
+	}
+	return parseBookkeepingChatResult(content, accounts)
+}
+
+func (s *Server) bookkeepingChatPrompt(message string, messages []ChatMessage, draft []LedgerEntry, today string) (string, string, []string, error) {
+	snapshot, err := s.cache.Snapshot()
+	if err != nil {
+		return "", "", nil, err
+	}
 	accounts := activeAccounts(snapshot.Accounts)
 	if _, err := validateAIEntries(draft, accounts); err != nil {
-		return ChatResult{}, err
+		return "", "", nil, err
 	}
 	conversation := []string{}
 	for _, item := range messages {
@@ -75,10 +112,11 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 		conversation = append(conversation, role+"："+item.Text)
 	}
 	payload := fmt.Sprintf("当前草稿 entries:\n%s\n\n最近对话:\n%s\n\n用户最新消息:\n%s", mustJSON(draft), strings.Join(conversation, "\n"), message)
-	content, err := runAI(parserPrompt(today, accounts)+`\n\n你是聊天式 AI 记账助理。只输出 {"message":"中文回复","plan":{"title":"计划标题","description":"一句话说明","steps":["步骤1","步骤2"]},"entries":[...完整草稿...]}。plan 是给用户确认前看的执行计划：有新增/调整草稿时用 2-4 个简短步骤说明你会如何分类、平衡和标记待确认问题；如果只是回答问题且没有草稿变化，plan 返回 null。entries 必须是本轮对话后的完整草稿；如果用户只是问能力且没有流水，entries 返回当前草稿或空数组。`, payload, true)
-	if err != nil {
-		return ChatResult{}, err
-	}
+	system := parserPrompt(today, accounts) + `\n\n你是聊天式 AI 记账助理。只输出 {"message":"中文回复","plan":{"title":"计划标题","description":"一句话说明","steps":["步骤1","步骤2"]},"entries":[...完整草稿...]}。plan 是给用户确认前看的执行计划：有新增/调整草稿时用 2-4 个简短步骤说明你会如何分类、平衡和标记待确认问题；如果只是回答问题且没有草稿变化，plan 返回 null。entries 必须是本轮对话后的完整草稿；如果用户只是问能力且没有流水，entries 返回当前草稿或空数组。`
+	return system, payload, accounts, nil
+}
+
+func parseBookkeepingChatResult(content string, accounts []string) (ChatResult, error) {
 	var parsed ChatResult
 	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
 		return ChatResult{}, err
@@ -96,12 +134,48 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 }
 
 func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string) (AccountChatResult, error) {
-	snapshot, err := s.cache.Snapshot()
+	system, payload, accounts, err := s.accountsChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return AccountChatResult{}, err
 	}
-	if err := validateAccountOperations(draft, snapshot.Accounts); err != nil {
+	content, err := runAI(system, payload, true)
+	if err != nil {
 		return AccountChatResult{}, err
+	}
+	return parseAccountChatResult(content, accounts)
+}
+
+func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draft []AccountOperation, today string, onMessage func(string) error) (AccountChatResult, error) {
+	system, payload, accounts, err := s.accountsChatPrompt(message, messages, draft, today)
+	if err != nil {
+		return AccountChatResult{}, err
+	}
+	var buffer strings.Builder
+	lastMessage := ""
+	content, err := runAIStream(system, payload, func(delta string) error {
+		buffer.WriteString(delta)
+		message := partialJSONStringField(buffer.String(), "message")
+		if message != "" && message != lastMessage {
+			lastMessage = message
+			if err := onMessage(message); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return AccountChatResult{}, err
+	}
+	return parseAccountChatResult(content, accounts)
+}
+
+func (s *Server) accountsChatPrompt(message string, messages []ChatMessage, draft []AccountOperation, today string) (string, string, []Account, error) {
+	snapshot, err := s.cache.Snapshot()
+	if err != nil {
+		return "", "", nil, err
+	}
+	if err := validateAccountOperations(draft, snapshot.Accounts); err != nil {
+		return "", "", nil, err
 	}
 	conversation := []string{}
 	for _, item := range messages {
@@ -112,15 +186,15 @@ func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []Ac
 		conversation = append(conversation, role+"："+item.Text)
 	}
 	payload := fmt.Sprintf("当前账户操作草稿 operations:\n%s\n\n最近对话:\n%s\n\n用户最新消息:\n%s", mustJSON(draft), strings.Join(conversation, "\n"), message)
-	content, err := runAI(accountAgentPrompt(today, snapshot.Accounts), payload, true)
-	if err != nil {
-		return AccountChatResult{}, err
-	}
+	return accountAgentPrompt(today, snapshot.Accounts), payload, snapshot.Accounts, nil
+}
+
+func parseAccountChatResult(content string, accounts []Account) (AccountChatResult, error) {
 	var parsed AccountChatResult
 	if err := json.Unmarshal([]byte(extractJSON(content)), &parsed); err != nil {
 		return AccountChatResult{}, err
 	}
-	if err := validateAccountOperations(parsed.Operations, snapshot.Accounts); err != nil {
+	if err := validateAccountOperations(parsed.Operations, accounts); err != nil {
 		return AccountChatResult{}, err
 	}
 	if strings.TrimSpace(parsed.Message) == "" {
@@ -193,6 +267,18 @@ func normalizeChatPlan(plan *ChatPlan) *ChatPlan {
 }
 
 func runAI(system, input string, chat bool) (string, error) {
+	content, err := runAIRequest(system, input, false, nil)
+	if err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
+func runAIStream(system, input string, onDelta func(string) error) (string, error) {
+	return runAIRequest(system, input, true, onDelta)
+}
+
+func runAIRequest(system, input string, stream bool, onDelta func(string) error) (string, error) {
 	provider := strings.ToLower(env("LEDGER_AI_PROVIDER", "deepseek"))
 	apiKey, baseURL, model := os.Getenv("DEEPSEEK_API_KEY"), env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"), env("DEEPSEEK_MODEL", "deepseek-chat")
 	if provider != "deepseek" {
@@ -213,6 +299,9 @@ func runAI(system, input string, chat bool) (string, error) {
 		"temperature":     0,
 		"response_format": map[string]string{"type": "json_object"},
 	}
+	if stream {
+		body["stream"] = true
+	}
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
@@ -226,10 +315,14 @@ func runAI(system, input string, chat bool) (string, error) {
 		return "", err
 	}
 	defer res.Body.Close()
-	content, _ := io.ReadAll(res.Body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		content, _ := io.ReadAll(res.Body)
 		return "", fmt.Errorf("AI request failed: %s", strings.TrimSpace(string(content)))
 	}
+	if stream {
+		return readAIStream(res.Body, onDelta)
+	}
+	content, _ := io.ReadAll(res.Body)
 	var parsed struct {
 		Choices []struct {
 			Message struct {
@@ -244,6 +337,57 @@ func runAI(system, input string, chat bool) (string, error) {
 		return "", errors.New("AI returned empty content")
 	}
 	return parsed.Choices[0].Message.Content, nil
+}
+
+func readAIStream(reader io.Reader, onDelta func(string) error) (string, error) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var out strings.Builder
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", err
+		}
+		for _, choice := range chunk.Choices {
+			delta := choice.Delta.Content
+			if delta == "" {
+				delta = choice.Message.Content
+			}
+			if delta == "" {
+				continue
+			}
+			out.WriteString(delta)
+			if onDelta != nil {
+				if err := onDelta(delta); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		return "", errors.New("AI returned empty streamed content")
+	}
+	return out.String(), nil
 }
 
 func activeAccounts(accounts []Account) []string {
@@ -291,6 +435,52 @@ func extractJSON(content string) string {
 		}
 	}
 	return trimmed
+}
+
+func partialJSONStringField(content, field string) string {
+	index := strings.Index(content, `"`+field+`"`)
+	if index < 0 {
+		return ""
+	}
+	rest := content[index+len(field)+2:]
+	colon := strings.Index(rest, ":")
+	if colon < 0 {
+		return ""
+	}
+	rest = strings.TrimLeft(rest[colon+1:], " \n\r\t")
+	if !strings.HasPrefix(rest, `"`) {
+		return ""
+	}
+	var out strings.Builder
+	escaped := false
+	for i := 1; i < len(rest); i++ {
+		ch := rest[i]
+		if escaped {
+			switch ch {
+			case '"', '\\', '/':
+				out.WriteByte(ch)
+			case 'n':
+				out.WriteByte('\n')
+			case 'r':
+				out.WriteByte('\r')
+			case 't':
+				out.WriteByte('\t')
+			default:
+				out.WriteByte(ch)
+			}
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			return out.String()
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
 }
 
 func mustJSON(value any) string {
