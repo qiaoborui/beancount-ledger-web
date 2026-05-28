@@ -144,13 +144,12 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
   };
   const viewPanel = viewPanelId ? panels[viewPanelId] : null;
 
-  return <div className="space-y-5">
+  return <div className="space-y-4">
     <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
 
-    <DashboardRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
-    <section className="card p-3 md:p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-xl border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
+    <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
           <Kpi label="本期支出" value={mask(formatCompactCny(data.kpis.expense / 100))} tone="amount-expense" />
           <Kpi label="预算使用" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} />
           <Kpi label="最大单笔" value={mask(formatCompactCny(maxExpense / 100))} tone="amount-expense" />
@@ -158,12 +157,11 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
           <Kpi label="Top 分类" value={topCategoryText} tone="text-warm" />
           <Kpi label="结余" value={mask(formatCompactCny(data.kpis.net / 100))} tone={tone(data.kpis.net)} />
         </div>
-        <button className="shrink-0 self-end rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag lg:self-auto" onClick={onToggleVisible} aria-label={visible ? "隐藏看板金额" : "显示看板金额"} title={visible ? "隐藏看板金额" : "显示看板金额"}>
+        <button className="shrink-0 self-end rounded-lg border border-line bg-panel px-2.5 py-1.5 text-sm text-olive hover:bg-tag lg:self-auto" onClick={onToggleVisible} aria-label={visible ? "隐藏看板金额" : "显示看板金额"} title={visible ? "隐藏看板金额" : "显示看板金额"}>
           {visible ? <EyeOff className="inline h-4 w-4 text-brand" /> : <Eye className="inline h-4 w-4 text-brand" />} <span className="ml-1">{visible ? "隐藏金额" : "显示金额"}</span>
         </button>
       </div>
-    </section>
-    </DashboardRow>
+    </DashboardInlineRow>
 
     <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
     <div className="dashboard-panel-grid">
@@ -308,14 +306,27 @@ function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterStat
 }
 
 function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const chips = activeFilterChips(data, filters);
-  return <section className="card p-3 md:p-4">
-    <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-      <div className="flex items-center gap-2 text-sm font-medium text-warm xl:w-28">
-        <SlidersHorizontal className="h-4 w-4 text-brand" />
-        筛选
-      </div>
-      <div className="grid flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-7">
+  const Icon = expanded ? ChevronDown : ChevronRight;
+  return <section className={`border border-line transition-colors ${expanded ? "card p-3 md:p-4" : "rounded-lg bg-panel/80 px-3 py-2"}`}>
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <button type="button" className="flex min-w-0 items-center gap-2 text-left text-sm font-medium text-warm hover:text-brand" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-line bg-panel">
+          <SlidersHorizontal className="h-4 w-4 text-brand" />
+        </span>
+        <span className="min-w-0 truncate">筛选</span>
+        <span className="shrink-0 rounded-full bg-tag px-2 py-0.5 text-xs font-normal text-stone">{chips.length ? `${chips.length} 个条件` : "全部数据"}</span>
+        <Icon className="h-4 w-4 shrink-0 text-stone" />
+      </button>
+      {!expanded && chips.length > 0 && <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+        {chips.slice(0, 4).map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />)}
+        {chips.length > 4 && <span className="rounded-full bg-tag px-2.5 py-1 text-xs text-stone">+{chips.length - 4}</span>}
+        <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>
+      </div>}
+    </div>
+    {expanded && <>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
         <MultiFilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
         <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
@@ -324,15 +335,19 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
         <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
         <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
       </div>
-    </div>
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      {chips.length ? chips.map((chip) => <button key={chip.key} type="button" className="inline-flex items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
-        <span>{chip.label}</span>
-        <X className="h-3 w-3" />
-      </button>) : <span className="text-xs text-stone">未添加变量筛选</span>}
-      {chips.length > 0 && <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>}
-    </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {chips.length ? chips.map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />) : <span className="text-xs text-stone">未添加变量筛选</span>}
+        {chips.length > 0 && <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>}
+      </div>
+    </>}
   </section>;
+}
+
+function FilterChip({ chip, onClear }: { chip: { key: keyof DashboardFilterState; label: string }; onClear: (key: keyof DashboardFilterState) => void }) {
+  return <button type="button" className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
+    <span className="truncate">{chip.label}</span>
+    <X className="h-3 w-3 shrink-0" />
+  </button>;
 }
 
 function MultiFilterSelect({ label, value, options, onChange }: { label: string; value: string[]; options: DashboardFilterOption[]; onChange: (value: string[]) => void }) {
@@ -391,15 +406,15 @@ function typeLabel(value: string) {
 
 function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
   const Icon = collapsed ? ChevronRight : ChevronDown;
-  return <section className="space-y-3">
-    <button type="button" className={`group flex w-full flex-col gap-3 rounded-lg border border-line px-3 py-3 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between ${collapsed ? "bg-panel" : "bg-transparent"}`} onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
-      <span className="flex min-w-0 items-start gap-3">
-        <span className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-panel text-olive group-hover:text-brand">
-          <Icon className="h-4 w-4" />
+  return <section className="space-y-2">
+    <button type="button" className={`group flex w-full flex-col gap-2 rounded-lg border border-line px-3 py-2 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between ${collapsed ? "bg-panel" : "bg-transparent"}`} onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-line bg-panel text-olive group-hover:text-brand">
+          <Icon className="h-3.5 w-3.5" />
         </span>
         <span className="min-w-0">
-          <span className="block font-serif text-2xl font-medium">{title}</span>
-          {subtitle && <span className="mt-1 block text-xs text-stone">{subtitle}</span>}
+          <span className="block font-serif text-xl font-medium leading-tight">{title}</span>
+          {subtitle && <span className="mt-0.5 block truncate text-xs text-stone">{subtitle}</span>}
         </span>
       </span>
       {summary}
@@ -408,12 +423,31 @@ function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, ch
   </section>;
 }
 
+function DashboardInlineRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
+  const Icon = collapsed ? ChevronRight : ChevronDown;
+  return <section className="card overflow-hidden p-0">
+    <button type="button" className="group flex w-full flex-col gap-2 px-3 py-2 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between" onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-line bg-panel text-olive group-hover:text-brand">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="min-w-0">
+          <span className="block font-serif text-xl font-medium leading-tight">{title}</span>
+          {subtitle && <span className="mt-0.5 block truncate text-xs text-stone">{subtitle}</span>}
+        </span>
+      </span>
+      {summary}
+    </button>
+    {!collapsed && <div className="border-t border-line p-2 md:p-2.5">{children}</div>}
+  </section>;
+}
+
 function RowSummary({ children }: { children: ReactNode }) {
-  return <span className="inline-flex max-w-full items-center rounded-full bg-tag px-3 py-1 text-xs text-stone sm:shrink-0">{children}</span>;
+  return <span className="inline-flex max-w-full items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0">{children}</span>;
 }
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="min-w-0 bg-panel p-3 text-center"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold md:text-lg ${tone}`}>{value}</div></div>;
+  return <div className="min-w-0 bg-panel px-2 py-2 text-center"><div className="text-[10px] uppercase tracking-[0.12em] text-stone">{label}</div><div className={`mt-0.5 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
 }
 
 function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinition; onClose: () => void }) {
