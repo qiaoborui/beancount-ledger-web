@@ -59,7 +59,7 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 			t.Fatalf("chat payload missing latest message context: %#v", body.Messages)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"可以这样记。\",\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-04\",\"payee\":\"Cafe\",\"narration\":\"Coffee\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"18.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-18.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"可以这样记。\",\"plan\":{\"title\":\"记账计划\",\"description\":\"先生成预览再确认写入。\",\"steps\":[\"识别咖啡消费金额\",\"用现金账户平衡分录\"]},\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-04\",\"payee\":\"Cafe\",\"narration\":\"Coffee\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"18.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-18.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}]}"}}]}`))
 	}))
 	defer fakeAI.Close()
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
@@ -74,6 +74,7 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	var body struct {
 		Message string        `json:"message"`
+		Plan    *ChatPlan     `json:"plan"`
 		Entries []LedgerEntry `json:"entries"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
@@ -81,6 +82,9 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	if body.Message != "可以这样记。" || len(body.Entries) != 1 || body.Entries[0].Narration != "Coffee" {
 		t.Fatalf("unexpected chat response: %#v", body)
+	}
+	if body.Plan == nil || body.Plan.Title != "记账计划" || len(body.Plan.Steps) != 2 {
+		t.Fatalf("unexpected chat plan: %#v", body.Plan)
 	}
 }
 
@@ -103,7 +107,7 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 			t.Fatalf("account chat payload missing draft context: %#v", body.Messages)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"已准备创建差旅分类。\",\"operations\":[{\"kind\":\"create\",\"date\":\"2026-05-25\",\"account\":\"Expenses:Travel\",\"alias\":\"差旅\",\"currency\":\"CNY\",\"group\":\"expense\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"已准备创建差旅分类。\",\"plan\":{\"title\":\"账户计划\",\"description\":\"确认后写入 accounts.bean。\",\"steps\":[\"创建差旅支出账户\"]},\"operations\":[{\"kind\":\"create\",\"date\":\"2026-05-25\",\"account\":\"Expenses:Travel\",\"alias\":\"差旅\",\"currency\":\"CNY\",\"group\":\"expense\"}]}"}}]}`))
 	}))
 	defer fakeAI.Close()
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
@@ -118,6 +122,7 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 	}
 	var body struct {
 		Message    string             `json:"message"`
+		Plan       *ChatPlan          `json:"plan"`
 		Operations []AccountOperation `json:"operations"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
@@ -125,5 +130,8 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 	}
 	if body.Message != "已准备创建差旅分类。" || len(body.Operations) != 1 || body.Operations[0].Account != "Expenses:Travel" {
 		t.Fatalf("unexpected account chat response: %#v", body)
+	}
+	if body.Plan == nil || body.Plan.Title != "账户计划" || len(body.Plan.Steps) != 1 {
+		t.Fatalf("unexpected account chat plan: %#v", body.Plan)
 	}
 }

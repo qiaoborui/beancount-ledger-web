@@ -5,6 +5,7 @@ import { Ban, Check, Pencil, Plus, Trash2 } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import type { AccountOperation } from "./types";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
+import { LedgerAiPlanCard, type LedgerAiPlan } from "./LedgerAiPlanCard";
 
 type ChatMessage = LedgerAiChatMessage;
 
@@ -21,6 +22,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     { id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" },
   ]);
   const [operations, setOperations] = useState<AccountOperation[]>([]);
+  const [plan, setPlan] = useState<LedgerAiPlan>(null);
 
   const busy = status === "thinking" || status === "writing";
   const statusText = status === "thinking" ? "AI 正在整理账户草稿…" : status === "writing" ? "正在写入账户定义…" : status === "error" ? "刚才处理失败，可以调整后再发" : operations.length ? `${operations.length} 个操作待确认` : "确认后才会写入 accounts.bean";
@@ -36,6 +38,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     if (hasWork && !window.confirm("清空本次账户 AI 对话和待确认草稿？")) return;
     setInput("");
     setOperations([]);
+    setPlan(null);
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是账户管理助理。你可以告诉我想创建、调整显示名/分组，或禁用哪些账户；我会先生成草稿。" }]);
   }
@@ -46,10 +49,11 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
     setStatus("thinking");
     try {
       const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations }) });
-      const data = await readJson<{ error?: string; operations?: AccountOperation[]; message?: string }>(res);
+      const data = await readJson<{ error?: string; operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan }>(res);
       if (!res.ok) throw new Error(data.error || "账户草稿生成失败");
       const nextOperations = Array.isArray(data.operations) ? data.operations : [];
       setOperations(nextOperations);
+      setPlan(data.plan ?? null);
       pushMessage("assistant", typeof data.message === "string" && data.message.trim() ? data.message : nextOperations.length ? `已更新 ${nextOperations.length} 个账户操作草稿。` : "我需要更多信息后再生成草稿。");
       setStatus("idle");
       showToast("success", nextOperations.length ? `AI 已生成 ${nextOperations.length} 个账户操作` : "AI 已回答");
@@ -75,6 +79,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       if (!res.ok) throw new Error(data.error || "账户写入失败");
       const count = typeof data.count === "number" ? data.count : operations.length;
       setOperations([]);
+      setPlan(null);
       pushMessage("assistant", `已写入 ${count} 个账户操作。你可以继续整理下一组。`);
       setStatus("idle");
       showToast("success", `已写入 ${count} 个账户操作`);
@@ -106,6 +111,7 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       onReset={resetChat}
       onClose={onClose}
     >
+      <LedgerAiPlanCard plan={plan} />
       {operations.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
           <div className="flex items-center justify-between gap-3">

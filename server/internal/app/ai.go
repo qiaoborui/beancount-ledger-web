@@ -17,13 +17,21 @@ type ChatMessage struct {
 	Text string `json:"text"`
 }
 
+type ChatPlan struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Steps       []string `json:"steps"`
+}
+
 type ChatResult struct {
 	Message string        `json:"message"`
+	Plan    *ChatPlan     `json:"plan,omitempty"`
 	Entries []LedgerEntry `json:"entries"`
 }
 
 type AccountChatResult struct {
 	Message    string             `json:"message"`
+	Plan       *ChatPlan          `json:"plan,omitempty"`
 	Operations []AccountOperation `json:"operations"`
 }
 
@@ -67,7 +75,7 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 		conversation = append(conversation, role+"："+item.Text)
 	}
 	payload := fmt.Sprintf("当前草稿 entries:\n%s\n\n最近对话:\n%s\n\n用户最新消息:\n%s", mustJSON(draft), strings.Join(conversation, "\n"), message)
-	content, err := runAI(parserPrompt(today, accounts)+`\n\n你是聊天式 AI 记账助理。只输出 {"message":"中文回复","entries":[...完整草稿...]}。如果用户只是问能力且没有流水，entries 返回当前草稿或空数组。`, payload, true)
+	content, err := runAI(parserPrompt(today, accounts)+`\n\n你是聊天式 AI 记账助理。只输出 {"message":"中文回复","plan":{"title":"计划标题","description":"一句话说明","steps":["步骤1","步骤2"]},"entries":[...完整草稿...]}。plan 是给用户确认前看的执行计划：有新增/调整草稿时用 2-4 个简短步骤说明你会如何分类、平衡和标记待确认问题；如果只是回答问题且没有草稿变化，plan 返回 null。entries 必须是本轮对话后的完整草稿；如果用户只是问能力且没有流水，entries 返回当前草稿或空数组。`, payload, true)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -82,6 +90,7 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 	if strings.TrimSpace(parsed.Message) == "" {
 		parsed.Message = fmt.Sprintf("已更新 %d 条预览。", len(entries))
 	}
+	parsed.Plan = normalizeChatPlan(parsed.Plan)
 	parsed.Entries = entries
 	return parsed, nil
 }
@@ -117,6 +126,7 @@ func (s *Server) chatAccounts(message string, messages []ChatMessage, draft []Ac
 	if strings.TrimSpace(parsed.Message) == "" {
 		parsed.Message = fmt.Sprintf("已更新 %d 个账户操作草稿。", len(parsed.Operations))
 	}
+	parsed.Plan = normalizeChatPlan(parsed.Plan)
 	return parsed, nil
 }
 
@@ -151,8 +161,35 @@ func accountAgentPrompt(today string, accounts []Account) string {
 已有账户：
 - ` + strings.Join(rows, "\n- ") + `
 
-只输出 {"message":"中文回复","operations":[...完整草稿...]}。
+只输出 {"message":"中文回复","plan":{"title":"计划标题","description":"一句话说明","steps":["步骤1","步骤2"]},"operations":[...完整草稿...]}。
+plan 是给用户确认前看的执行计划：有新增/调整账户操作草稿时用 2-4 个简短步骤说明你会创建、更新或关闭哪些账户以及原因；如果只是回答问题或需要追问且没有草稿变化，plan 返回 null。
 operations 必须是本轮对话后的完整草稿；用户只是问问题时返回当前草稿或空数组。不要为已经存在的账户生成 create；不要为已关闭账户生成 disable；不确定时先追问并保持草稿不变。`
+}
+
+func normalizeChatPlan(plan *ChatPlan) *ChatPlan {
+	if plan == nil {
+		return nil
+	}
+	plan.Title = strings.TrimSpace(plan.Title)
+	plan.Description = strings.TrimSpace(plan.Description)
+	steps := make([]string, 0, len(plan.Steps))
+	for _, step := range plan.Steps {
+		step = strings.TrimSpace(step)
+		if step != "" {
+			steps = append(steps, step)
+		}
+		if len(steps) >= 4 {
+			break
+		}
+	}
+	plan.Steps = steps
+	if plan.Title == "" && plan.Description == "" && len(plan.Steps) == 0 {
+		return nil
+	}
+	if plan.Title == "" {
+		plan.Title = "处理计划"
+	}
+	return plan
 }
 
 func runAI(system, input string, chat bool) (string, error) {

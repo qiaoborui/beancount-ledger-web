@@ -3,6 +3,7 @@
 @source "../../node_modules/streamdown/dist/*.js";
 
 :root {
+  --radius: 0.75rem;
   --font-serif: "Noto Serif SC";
   --font-serif-fallback: "Songti SC", "STSong", Georgia, "Times New Roman", serif;
   --font-sans: var(--font-serif), var(--font-serif-fallback);
@@ -32,6 +33,10 @@
   --color-muted-foreground: var(--color-stone);
   --color-accent: var(--color-tag);
   --color-accent-foreground: var(--color-ink);
+  --color-card: var(--color-panel);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-panel);
+  --color-popover-foreground: var(--color-ink);
   --color-destructive: 122 75 64;
   --color-border: var(--color-line);
   --color-input: var(--color-line);
@@ -94,6 +99,10 @@ html[data-theme="dark"] {
   --color-muted-foreground: var(--color-stone);
   --color-accent: var(--color-tag);
   --color-accent-foreground: var(--color-ink);
+  --color-card: var(--color-panel);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-panel);
+  --color-popover-foreground: var(--color-ink);
   --color-destructive: 198 137 126;
   --color-border: var(--color-line);
   --color-input: var(--color-line);
@@ -149,6 +158,10 @@ html[data-theme="dark"] {
     --color-muted-foreground: var(--color-stone);
     --color-accent: var(--color-tag);
     --color-accent-foreground: var(--color-ink);
+    --color-card: var(--color-panel);
+    --color-card-foreground: var(--color-ink);
+    --color-popover: var(--color-panel);
+    --color-popover-foreground: var(--color-ink);
     --color-destructive: 198 137 126;
     --color-border: var(--color-line);
     --color-input: var(--color-line);

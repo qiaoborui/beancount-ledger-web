@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
+import { LedgerAiPlanCard, type LedgerAiPlan } from "./LedgerAiPlanCard";
 
 type ChatMessage = LedgerAiChatMessage;
 
@@ -48,6 +49,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     { id: nextId(), role: "assistant", text: "我是你的 AI 记账助理。可以直接发多笔流水，我会先生成预览，不会自动写入。" },
   ]);
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
+  const [plan, setPlan] = useState<LedgerAiPlan>(null);
 
   useEffect(() => {
     if (openSignal > 0) setOpen(true);
@@ -63,6 +65,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     if (hasWork && !window.confirm("清空本次 AI 对话和待确认预览？")) return;
     setInput("");
     setPreviews([]);
+    setPlan(null);
     setStatus("idle");
     setMessages([{ id: nextId(), role: "assistant", text: "我是你的 AI 记账助理。可以直接发多笔流水，我会先生成预览，不会自动写入。" }]);
   }
@@ -78,11 +81,12 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setStatus("thinking");
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews }) });
-      const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; message?: string }>(res);
+      const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan }>(res);
       if (!res.ok) throw new Error(data.error || "解析失败");
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : [];
       const hadPreviews = previews.length > 0;
       setPreviews(entries);
+      setPlan(data.plan ?? null);
       pushMessage("assistant", typeof data.message === "string" && data.message.trim() ? data.message : entries.length ? `已更新 ${entries.length} 条预览。` : hadPreviews ? "已清空预览。" : "已回答。");
       setStatus("idle");
       showToast("success", entries.length ? `AI 已生成 ${entries.length} 条预览` : hadPreviews ? "AI 已清空预览" : "AI 已回答");
@@ -109,6 +113,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       if (!res.ok) throw new Error(data.error || "写入失败");
       const count = typeof data.count === "number" ? data.count : entriesToWrite.length;
       setPreviews([]);
+      setPlan(null);
       pushMessage("assistant", `已写入 ${count} 条账本记录。你可以继续发下一笔。`);
       setStatus("idle");
       showToast("success", `已写入 ${count} 条账本记录`);
@@ -139,6 +144,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       onReset={resetChat}
       onClose={() => setOpen(false)}
     >
+      <LedgerAiPlanCard plan={plan} />
       {previews.length > 0 && (
         <div className="space-y-3 rounded-2xl border border-line bg-panel p-3">
           <div className="flex items-center justify-between gap-3">

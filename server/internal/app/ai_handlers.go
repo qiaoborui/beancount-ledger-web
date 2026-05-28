@@ -60,7 +60,7 @@ func (s *Server) aiChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func (s *Server) aiAccountsChat(c *gin.Context) {
@@ -86,5 +86,5 @@ func (s *Server) aiAccountsChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
+	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
 }
