@@ -133,6 +133,7 @@ export function LedgerAiChatShell({
         <ConversationContent className="gap-3 p-4">
           {messages.map((message) => {
             const from = message.role === "user" ? "user" : "assistant";
+            if (from === "assistant" && !message.text.trim()) return null;
             return (
               <Message key={message.id} from={from} className="max-w-[88%]">
                 <MessageContent className={from === "user" ? "rounded-2xl bg-brand px-3 py-2 text-paper" : "rounded-2xl border border-line bg-panel px-3 py-2 text-warm"}>
