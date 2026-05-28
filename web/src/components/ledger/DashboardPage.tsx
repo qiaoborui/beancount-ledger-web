@@ -213,14 +213,27 @@ function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterStat
 }
 
 function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const chips = activeFilterChips(data, filters);
-  return <section className="card p-3 md:p-4">
-    <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-      <div className="flex items-center gap-2 text-sm font-medium text-warm xl:w-28">
-        <SlidersHorizontal className="h-4 w-4 text-brand" />
-        筛选
-      </div>
-      <div className="grid flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-7">
+  const Icon = expanded ? ChevronDown : ChevronRight;
+  return <section className={`border border-line transition-colors ${expanded ? "card p-3 md:p-4" : "rounded-lg bg-panel/80 px-3 py-2"}`}>
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <button type="button" className="flex min-w-0 items-center gap-2 text-left text-sm font-medium text-warm hover:text-brand" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-line bg-panel">
+          <SlidersHorizontal className="h-4 w-4 text-brand" />
+        </span>
+        <span className="min-w-0 truncate">筛选</span>
+        <span className="shrink-0 rounded-full bg-tag px-2 py-0.5 text-xs font-normal text-stone">{chips.length ? `${chips.length} 个条件` : "全部数据"}</span>
+        <Icon className="h-4 w-4 shrink-0 text-stone" />
+      </button>
+      {!expanded && chips.length > 0 && <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+        {chips.slice(0, 4).map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />)}
+        {chips.length > 4 && <span className="rounded-full bg-tag px-2.5 py-1 text-xs text-stone">+{chips.length - 4}</span>}
+        <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>
+      </div>}
+    </div>
+    {expanded && <>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
         <MultiFilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
         <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
@@ -229,15 +242,19 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
         <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
         <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
       </div>
-    </div>
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      {chips.length ? chips.map((chip) => <button key={chip.key} type="button" className="inline-flex items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
-        <span>{chip.label}</span>
-        <X className="h-3 w-3" />
-      </button>) : <span className="text-xs text-stone">未添加变量筛选</span>}
-      {chips.length > 0 && <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>}
-    </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {chips.length ? chips.map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />) : <span className="text-xs text-stone">未添加变量筛选</span>}
+        {chips.length > 0 && <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>}
+      </div>
+    </>}
   </section>;
+}
+
+function FilterChip({ chip, onClear }: { chip: { key: keyof DashboardFilterState; label: string }; onClear: (key: keyof DashboardFilterState) => void }) {
+  return <button type="button" className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
+    <span className="truncate">{chip.label}</span>
+    <X className="h-3 w-3 shrink-0" />
+  </button>;
 }
 
 function MultiFilterSelect({ label, value, options, onChange }: { label: string; value: string[]; options: DashboardFilterOption[]; onChange: (value: string[]) => void }) {
