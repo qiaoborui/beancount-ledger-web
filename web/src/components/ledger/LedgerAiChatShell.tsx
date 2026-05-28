@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Bot, Trash2, X } from "lucide-react";
 import {
   Conversation,
@@ -96,7 +97,7 @@ export function LedgerAiChatShell({
     onInputChange("");
   }
 
-  return (
+  const shell = (
     <div
       className={`kami-float fixed inset-x-0 top-0 bottom-[var(--ledger-ai-chat-bottom)] z-50 flex w-full flex-col overflow-hidden bg-paper md:inset-x-auto md:right-6 md:top-auto md:bottom-[calc(7rem+env(safe-area-inset-bottom))] md:h-[min(78dvh,680px)] ${widthClassName} md:max-w-md md:rounded-3xl md:border md:border-line`}
       style={{ "--ledger-ai-chat-bottom": `${keyboardHeight}px` } as CSSProperties}
@@ -161,4 +162,6 @@ export function LedgerAiChatShell({
       </div>
     </div>
   );
+
+  return createPortal(shell, document.body);
 }
