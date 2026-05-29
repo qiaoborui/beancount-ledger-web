@@ -60,10 +60,10 @@ in an `EnvironmentFile`.
 
 ```bash
 cd /opt/beancount-ledger-web/source/web
-npm ci
-npm run typecheck
-npm run test
-npm run build
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test
+pnpm run build
 ```
 
 Publish the generated `web/dist` directory to the stable frontend release path,
@@ -88,7 +88,7 @@ The Go binary can still serve `STATIC_DIR` when `SERVE_STATIC` is unset or true.
 That mode is useful for Docker and small local deployments:
 
 ```bash
-cd /opt/beancount-ledger-web/source/web && npm ci && npm run build
+cd /opt/beancount-ledger-web/source/web && pnpm install --frozen-lockfile && pnpm run build
 cd /opt/beancount-ledger-web/source/server
 STATIC_DIR=../web/dist PORT=3000 go run ./cmd/ledger-web
 ```

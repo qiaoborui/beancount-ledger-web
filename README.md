@@ -55,9 +55,9 @@ The app never needs your ledger data to be committed to this repository.
 ```bash
 git clone <this-repo-url> beancount-ledger-web
 cd beancount-ledger-web/web
-npm install
+pnpm install
 cp .env.example .env.local
-npm run dev
+pnpm run dev
 ```
 
 By default, local development uses:
@@ -102,7 +102,7 @@ LEDGER_GIT_AUTHOR_NAME=Your Name
 LEDGER_GIT_AUTHOR_EMAIL=you@example.com
 LEDGER_GIT_SCHEDULER=false
 EOF
-npm run dev
+pnpm run dev
 ```
 
 ## Deployment
@@ -180,9 +180,9 @@ LEDGER_ROOT=/path/to/private-ledger python3 scripts/budget_report.py 2026-01 --l
 
 ```bash
 cd web
-npm install
-npm run typecheck
-npm run build
+pnpm install
+pnpm run typecheck
+pnpm run build
 ```
 
 ## License

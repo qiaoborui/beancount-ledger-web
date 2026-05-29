@@ -194,32 +194,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.11.0
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck frontend
         working-directory: web
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Test frontend
         working-directory: web
-        run: npm run test
+        run: pnpm run test
 
       - name: Audit high severity vulnerabilities
         working-directory: web
-        run: npm audit --audit-level=high
+        run: pnpm audit --audit-level=high
 
       - name: Build frontend
         working-directory: web
-        run: npm run build
+        run: pnpm run build
 
       - name: Pack frontend artifact
         run: |
