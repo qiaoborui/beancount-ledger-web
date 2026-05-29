@@ -22,11 +22,6 @@ const bookkeepingSuggestions = [
   "这几笔都用 Expenses:Food",
 ];
 
-const bookkeepingDraftTools: LedgerAiTool[] = [
-  { id: "parse-ledger", name: "parseLedger", title: "解析流水", status: "pending" },
-  { id: "validate-beancount", name: "validateBeancount", title: "校验 Beancount", status: "pending" },
-];
-
 const writeLedgerTool: LedgerAiTool = { id: "write-ledger", name: "writeLedger", title: "写入 ledger", status: "pending" };
 
 function nextId() {
@@ -109,7 +104,7 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
     setMessages((current) => [...current, { id: nextId(), role: "user", text }, { id: assistantId, role: "assistant", text: "" }]);
     setStatus("thinking");
     setPlan(null);
-    setTools(bookkeepingDraftTools);
+    setTools([]);
     setStreamingStatus("读取当前记账草稿");
     try {
       const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) });

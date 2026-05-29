@@ -1,0 +1,16 @@
+{
+  "name": "beancount-ledger-agent-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check ledger-mcp-server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.1.13"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

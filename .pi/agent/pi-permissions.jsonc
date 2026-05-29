@@ -1,0 +1,39 @@
+{
+  // Project policy for running Pi against the ledger assistant.
+  // Keep this restrictive: the ledger MCP server is the only allowed capability.
+  "defaultPolicy": {
+    "tools": "deny",
+    "bash": "deny",
+    "mcp": "deny",
+    "skills": "deny",
+    "special": "deny"
+  },
+  "tools": {
+    "*": "deny",
+    "mcp": "allow"
+  },
+  "bash": {
+    "*": "deny"
+  },
+  "mcp": {
+    "*": "deny",
+    "mcp_status": "allow",
+    "mcp_list": "allow",
+    "mcp_search": "allow",
+    "mcp_describe": "allow",
+    "mcp_connect": "allow",
+    "mcp_connect_ledger": "allow",
+    "mcp_call": "allow",
+    "mcp_server_ledger": "allow",
+    "ledger": "allow",
+    "ledger:*": "allow",
+    "ledger_*": "allow"
+  },
+  "skills": {
+    "*": "deny"
+  },
+  "special": {
+    "external_directory": "deny",
+    "doom_loop": "deny"
+  }
+}

@@ -5,10 +5,13 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
+      - ".mcp.json"
       - ".agents/**"
       - "scripts/deploy-backend-artifact.sh"
       - "scripts/deploy-frontend-artifact.sh"
       - "server/**"
+      - "agent/**"
+      - ".pi/**"
       - "web/**"
       - "examples/**"
       - "docker/**"
@@ -16,10 +19,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/workflows/deploy-raspberry-pi.yml"
+      - ".mcp.json"
       - ".agents/**"
       - "scripts/deploy-backend-artifact.sh"
       - "scripts/deploy-frontend-artifact.sh"
       - "server/**"
+      - "agent/**"
+      - ".pi/**"
       - "web/**"
       - "examples/**"
       - "docker/**"
@@ -117,7 +123,7 @@ jobs:
             deploy_frontend=false
             while IFS= read -r file; do
               case "$file" in
-                .github/workflows/deploy-raspberry-pi.yml|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
+                .github/workflows/deploy-raspberry-pi.yml|.mcp.json|.agents/*|.agents/**/*|.pi/*|.pi/**/*|server/*|server/**/*|agent/*|agent/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
                   deploy_backend=true
                   ;;
               esac
@@ -153,6 +159,14 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Setup Node.js for agent tools
+        if: ${{ hashFiles('agent/package-lock.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
       - name: Test backend
         working-directory: server
         run: go test ./...
@@ -161,12 +175,21 @@ jobs:
         working-directory: server
         run: go build -o ../ledger-web ./cmd/ledger-web
 
+      - name: Check agent tools
+        if: ${{ hashFiles('agent/package-lock.json') != '' }}
+        run: |
+          npm ci --prefix agent
+          npm run check --prefix agent
+
       - name: Pack backend artifact
         run: |
           mkdir -p artifact
           cp ledger-web artifact/ledger-web
           if [[ -d examples ]]; then cp -a examples artifact/examples; fi
           if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
+          if [[ -d .pi ]]; then cp -a .pi artifact/.pi; fi
+          if [[ -d agent ]]; then cp -a agent artifact/agent; fi
+          if [[ -f .mcp.json ]]; then cp -a .mcp.json artifact/.mcp.json; fi
           cat > artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
           sha=${{ github.sha }}

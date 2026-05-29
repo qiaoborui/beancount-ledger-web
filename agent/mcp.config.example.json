@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ledger": {
+      "command": "node",
+      "args": ["agent/ledger-mcp-server.mjs"],
+      "env": {
+        "LEDGER_AGENT_TOOL_BASE_URL": "http://127.0.0.1:3000",
+        "LEDGER_AGENT_TOOL_TOKEN": "replace-with-a-long-random-token"
+      }
+    }
+  }
+}

@@ -78,6 +78,9 @@ func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error
 }
 
 func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string) (ChatResult, error) {
+	if s.cfg.AIRuntime == "pi" {
+		return s.chatBookkeepingWithPi(message, messages, draft, today)
+	}
 	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return ChatResult{}, err
@@ -90,6 +93,51 @@ func (s *Server) chatBookkeeping(message string, messages []ChatMessage, draft [
 }
 
 func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, draft []LedgerEntry, today string, onMessage func(string) error, onStatus func(string) error, onTool func(ChatToolEvent) error) (ChatResult, error) {
+	if s.cfg.AIRuntime == "pi" {
+		if onStatus != nil {
+			if err := onStatus("运行 Pi 账本 Agent"); err != nil {
+				return ChatResult{}, err
+			}
+		}
+		if err := emitChatTool(onTool, ChatToolEvent{
+			ID:     "pi-ledger-agent",
+			Name:   "piLedgerAgent",
+			Title:  "Pi 账本 Agent",
+			Status: "running",
+			Input:  map[string]any{"messages": len(messages), "draftEntries": len(draft)},
+		}); err != nil {
+			return ChatResult{}, err
+		}
+		result, err := s.runBookkeepingPiAgent(message, messages, draft, today, &piAgentCallbacks{
+			onMessage: onMessage,
+			onStatus:  onStatus,
+			onTool:    onTool,
+		})
+		if err != nil {
+			_ = emitChatTool(onTool, ChatToolEvent{ID: "pi-ledger-agent", Name: "piLedgerAgent", Title: "Pi 账本 Agent", Status: "error", Error: err.Error()})
+			return ChatResult{}, err
+		}
+		if onMessage != nil && strings.TrimSpace(result.Message) != "" {
+			if err := onMessage(result.Message); err != nil {
+				return ChatResult{}, err
+			}
+		}
+		if err := emitChatTool(onTool, ChatToolEvent{
+			ID:     "pi-ledger-agent",
+			Name:   "piLedgerAgent",
+			Title:  "Pi 账本 Agent",
+			Status: "completed",
+			Output: map[string]any{"entries": len(result.Entries)},
+		}); err != nil {
+			return ChatResult{}, err
+		}
+		if onStatus != nil {
+			if err := onStatus("Pi Agent 已完成"); err != nil {
+				return ChatResult{}, err
+			}
+		}
+		return result, nil
+	}
 	system, payload, accounts, err := s.bookkeepingChatPrompt(message, messages, draft, today)
 	if err != nil {
 		return ChatResult{}, err
