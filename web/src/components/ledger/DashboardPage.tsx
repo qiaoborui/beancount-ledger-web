@@ -5,6 +5,8 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, L
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { timeRangeToParams } from "@/lib/timeRange";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import type { TimeRange } from "@/lib/timeRange";
 import type { DashboardFilterOption, DashboardSummary } from "./types";
 
@@ -361,11 +363,14 @@ function MultiFilterSelect({ label, value, options, onChange }: { label: string;
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />
       </summary>
       <div className="absolute z-30 mt-1 max-h-72 w-72 overflow-auto rounded-xl border border-line bg-paper p-2 shadow-xl">
-        {options.length ? options.map((option) => <label key={option.value} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-tag">
-          <input type="checkbox" checked={selected.has(option.value)} onChange={() => toggle(option.value)} />
-          <span className="min-w-0 flex-1 truncate text-olive">{option.label}</span>
+        {options.length ? options.map((option, index) => {
+          const optionId = `dashboard-filter-${Array.from(label).map((char) => char.charCodeAt(0).toString(36)).join("-")}-${index}`;
+          return <div key={option.value} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-tag">
+          <Checkbox id={optionId} checked={selected.has(option.value)} onCheckedChange={() => toggle(option.value)} />
+          <label htmlFor={optionId} className="min-w-0 flex-1 cursor-pointer truncate text-olive">{option.label}</label>
           {option.count > 0 && <span className="shrink-0 text-xs text-stone">{option.count}</span>}
-        </label>) : <div className="px-2 py-3 text-sm text-stone">暂无可选项</div>}
+        </div>;
+        }) : <div className="px-2 py-3 text-sm text-stone">暂无可选项</div>}
       </div>
     </details>
   </div>;
@@ -374,7 +379,7 @@ function MultiFilterSelect({ label, value, options, onChange }: { label: string;
 function MoneyFilterInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return <label className="min-w-0">
     <span className="mb-1 block text-[11px] text-stone">{label}</span>
-    <input className="w-full min-w-0 rounded-lg border border-line bg-panel px-2 py-2 text-sm text-olive outline-none focus:border-brand" inputMode="decimal" placeholder="全部" value={value} onChange={(event) => onChange(event.target.value)} />
+    <Input className="h-10 w-full min-w-0 rounded-lg bg-panel text-sm text-olive" inputMode="decimal" placeholder="全部" value={value} onChange={(event) => onChange(event.target.value)} />
   </label>;
 }
 

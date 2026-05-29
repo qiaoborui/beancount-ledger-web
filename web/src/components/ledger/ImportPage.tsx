@@ -9,9 +9,17 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb";
@@ -119,6 +127,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
     return "对方账户";
+  }
+
+  function categoryAccountOptions(entry: ImportEntry) {
+    if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
+    return [{ account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
   }
 
   function resetForFile(next: File | null) {
@@ -300,17 +313,22 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <div className="mt-4 space-y-4">
                   <Label className="block">
                     <span className="mb-2 block">账单来源覆盖</span>
-                    <select className="h-10 w-full min-w-0 rounded-xl border border-line bg-panel px-3 text-sm text-ink outline-none" value={providerOverride} onChange={(event) => setProviderOverride(event.target.value as ProviderOverride)}>
-                      {providerChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
-                    </select>
+                    <Select value={providerOverride} onValueChange={(value) => setProviderOverride(value as ProviderOverride)}>
+                      <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-panel text-sm text-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providerChoices.map((choice) => <SelectItem key={choice.value} value={choice.value}>{choice.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </Label>
-                  <label className="flex items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-sm">
-                    <input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} />
-                    <span>
+                  <div className="flex items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-sm">
+                    <Checkbox id="alipay-fund-rounding" className="mt-1" checked={alipayFundRounding} onCheckedChange={(value) => setAlipayFundRounding(value === true)} />
+                    <label htmlFor="alipay-fund-rounding" className="cursor-pointer">
                       <span className="font-medium text-warm">支付宝基金 9.99 → 10.00 补差</span>
                       <span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span>
-                    </span>
-                  </label>
+                    </label>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -366,9 +384,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <div className="min-w-0 text-xs leading-5 text-stone">
                 {hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条交易` : `确认后将写入 ${entries.length} 条交易，写入前仍可修改标题、分类和 metadata。`}
               </div>
-              <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
-                <Button className="w-full" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
-                <Button className="w-full" onClick={commitImport} disabled={!canCommit}>
+              <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
+                <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
+                <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
                   {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                   {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
                 </Button>
@@ -448,9 +466,14 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                       </Label>
                       <Label className="block min-w-0">
                         <span className="mb-1.5 block text-stone">{editableAccountLabel(entry)}</span>
-                        <select className="h-10 w-full min-w-0 rounded-xl border border-line bg-paper px-3 text-sm text-ink shadow-sm outline-none" value={entry.categoryAccount} onChange={(event) => updateEntry(entry.id, { categoryAccount: event.target.value })}>
-                          {accountOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}
-                        </select>
+                        <Select value={entry.categoryAccount} onValueChange={(value) => updateEntry(entry.id, { categoryAccount: value })}>
+                          <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-80">
+                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{account.label} · {account.account}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </Label>
                     </div>
 

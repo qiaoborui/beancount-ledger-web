@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
+import { Button } from "@/components/ui/button";
+import { MobileSheet } from "./MobileSheet";
 import type { LedgerNotification } from "./types";
 
 export function NotificationCenter({ notifications, open, onClose, onChange }: { notifications: LedgerNotification[]; open: boolean; onClose: () => void; onChange: (updated: LedgerNotification[]) => void }) {
@@ -18,15 +20,8 @@ export function NotificationCenter({ notifications, open, onClose, onChange }: {
   }
 
   if (!open) return null;
-  return <div className="fixed inset-0 z-50 flex justify-end bg-ink/35" onClick={onClose}>
-    <aside className="kami-float h-full w-full max-w-md overflow-y-auto bg-paper px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1.25rem)]" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="font-serif text-3xl">通知中心</h2>
-          <p className="mt-1 text-sm text-stone">通知状态保存在账本仓库里，换设备也会跟随 Git 同步。</p>
-        </div>
-        <button className="rounded-xl border border-line px-3 py-1 text-sm" onClick={onClose}>关闭</button>
-      </div>
+  return <MobileSheet open={open} title="通知中心" onClose={onClose} size="lg" zIndexClassName="z-[105]">
+      <p className="text-sm text-stone">通知状态保存在账本仓库里，换设备也会跟随 Git 同步。</p>
       <div className="mt-4 grid grid-cols-3 divide-x divide-line rounded-xl border border-line bg-panel p-3 text-center text-sm">
         <div><strong>{unread.length}</strong><div className="text-xs text-stone">未读</div></div>
         <div><strong className="text-[var(--danger)]">{criticalUnread}</strong><div className="text-xs text-stone">严重未读</div></div>
@@ -34,9 +29,9 @@ export function NotificationCenter({ notifications, open, onClose, onChange }: {
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex rounded-xl border border-line bg-panel p-1 text-sm">
-          {(["unread", "all", "read", "dismissed"] as const).map((key) => <button key={key} className={`rounded px-3 py-1 ${filter === key ? "bg-brand text-paper" : "text-olive"}`} onClick={() => setFilter(key)}>{key === "unread" ? `未读 ${unread.length}` : key === "read" ? `已读 ${read.length}` : key === "dismissed" ? `已忽略 ${dismissed.length}` : `全部 ${notifications.length}`}</button>)}
+          {(["unread", "all", "read", "dismissed"] as const).map((key) => <Button key={key} variant={filter === key ? "default" : "ghost"} size="xs" className={`rounded ${filter === key ? "" : "text-olive"}`} onClick={() => setFilter(key)}>{key === "unread" ? `未读 ${unread.length}` : key === "read" ? `已读 ${read.length}` : key === "dismissed" ? `已忽略 ${dismissed.length}` : `全部 ${notifications.length}`}</Button>)}
         </div>
-        {unread.length > 0 && <button className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive" onClick={() => updateStatus(unread.map((notification) => notification.id), "read")}>全部标为已读</button>}
+        {unread.length > 0 && <Button variant="outline" className="rounded-xl bg-panel text-olive" onClick={() => void updateStatus(unread.map((notification) => notification.id), "read")}>全部标为已读</Button>}
       </div>
       <div className="mt-5 space-y-3">
         {visibleNotifications.length === 0 && <div className="rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone">{filter === "unread" ? "暂无未读提示。" : "暂无提示。"}</div>}
@@ -51,15 +46,14 @@ export function NotificationCenter({ notifications, open, onClose, onChange }: {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <span className="rounded bg-panel/70 px-2 py-0.5 text-xs text-stone">{notification.severity === "critical" ? "严重" : notification.severity === "warning" ? "提醒" : "信息"}</span>
-                {notification.status === "unread" && <button className="text-xs text-stone underline" onClick={() => updateStatus([notification.id], "read")}>标为已读</button>}
-                {notification.status === "read" && <button className="text-xs text-stone underline" onClick={() => updateStatus([notification.id], "unread")}>标为未读</button>}
-                {notification.status !== "dismissed" && <button className="text-xs text-stone underline" onClick={() => updateStatus([notification.id], "dismissed")}>忽略</button>}
-                {notification.status === "dismissed" && <button className="text-xs text-stone underline" onClick={() => updateStatus([notification.id], "unread")}>恢复</button>}
+                {notification.status === "unread" && <Button variant="link" size="xs" className="h-auto px-0 text-stone" onClick={() => void updateStatus([notification.id], "read")}>标为已读</Button>}
+                {notification.status === "read" && <Button variant="link" size="xs" className="h-auto px-0 text-stone" onClick={() => void updateStatus([notification.id], "unread")}>标为未读</Button>}
+                {notification.status !== "dismissed" && <Button variant="link" size="xs" className="h-auto px-0 text-stone" onClick={() => void updateStatus([notification.id], "dismissed")}>忽略</Button>}
+                {notification.status === "dismissed" && <Button variant="link" size="xs" className="h-auto px-0 text-stone" onClick={() => void updateStatus([notification.id], "unread")}>恢复</Button>}
               </div>
             </div>
           </div>;
         })}
       </div>
-    </aside>
-  </div>;
+  </MobileSheet>;
 }
