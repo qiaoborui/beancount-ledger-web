@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ClientNavLink } from "./ClientNavLink";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Area,
   AreaChart,
@@ -201,7 +203,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
             <p className="mt-1 text-sm text-olive">{rangeLabel} · {filteredRows.length} / {data.rows.length} 笔变动</p>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {canMoveRange && <button type="button" className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-brand" onClick={() => moveRange(-1)}>‹</button>}
+            {canMoveRange && <Button type="button" variant="outline" className="rounded-xl bg-panel px-3 text-brand" onClick={() => moveRange(-1)}>‹</Button>}
             <div className="flex min-w-0 overflow-x-auto rounded-xl border border-line bg-panel p-1 text-sm">
               {ACCOUNT_TIME_PRESETS.map((preset) => (
                 <button
@@ -214,15 +216,15 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                 </button>
               ))}
             </div>
-            {canMoveRange && <button type="button" className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-brand" onClick={() => moveRange(1)}>›</button>}
+            {canMoveRange && <Button type="button" variant="outline" className="rounded-xl bg-panel px-3 text-brand" onClick={() => moveRange(1)}>›</Button>}
           </div>
         </div>
         {timeRange.preset === "custom" && (
           <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] sm:items-center">
-            <input type="date" className="min-w-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={customStart} onChange={(event) => setCustomStart(event.target.value)} />
+            <Input type="date" className="min-w-0 rounded-xl bg-panel text-sm" value={customStart} onChange={(event) => setCustomStart(event.target.value)} />
             <span className="hidden text-sm text-stone sm:block">~</span>
-            <input type="date" className="min-w-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
-            <button type="button" className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-brand disabled:opacity-50" disabled={!customStart || !customEnd || customStart >= customEnd} onClick={applyCustomRange}>确定</button>
+            <Input type="date" className="min-w-0 rounded-xl bg-panel text-sm" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
+            <Button type="button" variant="outline" className="rounded-xl bg-panel text-brand" disabled={!customStart || !customEnd || customStart >= customEnd} onClick={applyCustomRange}>确定</Button>
           </div>
         )}
       </section>
@@ -320,13 +322,13 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
           </p>
         </div>
         <div className="flex min-w-0 gap-2">
-          <input
-            className="min-w-0 flex-1 rounded-xl border border-line bg-panel px-3 py-2 text-sm lg:w-72"
+          <Input
+            className="min-w-0 flex-1 rounded-xl bg-panel text-sm lg:w-72"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="筛选商户、说明、账户、metadata"
           />
-          {query.trim() && <button type="button" className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone" onClick={clearFilter}>清空</button>}
+          {query.trim() && <Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-stone" onClick={clearFilter}>清空</Button>}
         </div>
       </div>
 
