@@ -82,8 +82,6 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
 
   function resetChat() {
     if (busy) return;
-    const hasWork = messages.length > 1 || previews.length > 0 || input.trim();
-    if (hasWork && !window.confirm("清空本次 AI 对话和待确认预览？")) return;
     setInput("");
     setPreviews([]);
     setPlan(null);
@@ -200,6 +198,8 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       onInputChange={setInput}
       onSubmit={handleSubmit}
       onReset={resetChat}
+      resetRequiresConfirmation={messages.length > 1 || previews.length > 0 || Boolean(input.trim())}
+      resetConfirmDescription="本次 AI 对话、待确认预览和当前输入都会被清空。"
       onClose={() => setOpen(false)}
     >
       <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />

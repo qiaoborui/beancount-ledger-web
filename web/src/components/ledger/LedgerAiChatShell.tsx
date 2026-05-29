@@ -4,6 +4,16 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { createPortal } from "react-dom";
 import { Bot, Trash2, X } from "lucide-react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
@@ -44,6 +54,8 @@ type LedgerAiChatShellProps = {
   onInputChange: (value: string) => void;
   onSubmit: (text: string) => void | Promise<void>;
   onReset: () => void;
+  resetRequiresConfirmation?: boolean;
+  resetConfirmDescription?: string;
   onClose: () => void;
   children?: ReactNode;
 };
@@ -64,10 +76,13 @@ export function LedgerAiChatShell({
   onInputChange,
   onSubmit,
   onReset,
+  resetRequiresConfirmation = false,
+  resetConfirmDescription = "当前对话和待确认内容会被清空。",
   onClose,
   children,
 }: LedgerAiChatShellProps) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -106,6 +121,15 @@ export function LedgerAiChatShell({
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
+  function requestReset() {
+    if (busy) return;
+    if (resetRequiresConfirmation) {
+      setResetDialogOpen(true);
+      return;
+    }
+    onReset();
+  }
+
   const shell = (
     <div
       className={`kami-float fixed inset-x-0 top-0 bottom-[var(--ledger-ai-chat-bottom)] z-50 flex w-full flex-col overflow-hidden bg-paper md:inset-x-auto md:right-6 md:top-auto md:bottom-[calc(7rem+env(safe-area-inset-bottom))] md:h-[min(78dvh,680px)] ${widthClassName} md:max-w-md md:rounded-3xl md:border md:border-line`}
@@ -120,7 +144,7 @@ export function LedgerAiChatShell({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="rounded-xl border border-line p-2 text-stone hover:text-[var(--danger)] disabled:opacity-50" onClick={onReset} disabled={busy} aria-label={`清空${title}对话`} title="清空对话">
+          <button type="button" className="rounded-xl border border-line p-2 text-stone hover:text-[var(--danger)] disabled:opacity-50" onClick={requestReset} disabled={busy} aria-label={`清空${title}对话`} title="清空对话">
             <Trash2 className="h-4 w-4" />
           </button>
           <button type="button" className="rounded-xl border border-line p-2 text-stone hover:text-warm" onClick={onClose} aria-label={`关闭${title}`}>
@@ -186,5 +210,19 @@ export function LedgerAiChatShell({
     </div>
   );
 
-  return createPortal(shell, document.body);
+  return createPortal(<>
+    {shell}
+    <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>清空{title}对话？</AlertDialogTitle>
+          <AlertDialogDescription>{resetConfirmDescription}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => { setResetDialogOpen(false); onReset(); }}>确认清空</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </>, document.body);
 }

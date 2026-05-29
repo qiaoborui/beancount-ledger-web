@@ -59,8 +59,6 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
 
   function resetChat() {
     if (busy) return;
-    const hasWork = messages.length > 1 || operations.length > 0 || input.trim();
-    if (hasWork && !window.confirm("清空本次账户 AI 对话和待确认草稿？")) return;
     setInput("");
     setOperations([]);
     setPlan(null);
@@ -167,6 +165,8 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       onInputChange={setInput}
       onSubmit={handleSubmit}
       onReset={resetChat}
+      resetRequiresConfirmation={messages.length > 1 || operations.length > 0 || Boolean(input.trim())}
+      resetConfirmDescription="本次账户 AI 对话、待确认草稿和当前输入都会被清空。"
       onClose={onClose}
     >
       <LedgerAiPlanCard plan={plan} streamingStatus={status === "thinking" ? streamingStatus : undefined} />
