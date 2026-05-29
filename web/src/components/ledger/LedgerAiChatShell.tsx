@@ -132,8 +132,8 @@ export function LedgerAiChatShell({
 
   const shell = (
     <div
-      className={`kami-float fixed inset-x-0 top-0 bottom-[var(--ledger-ai-chat-bottom)] z-50 flex w-full flex-col overflow-hidden bg-paper md:inset-x-auto md:right-6 md:top-auto md:bottom-[calc(7rem+env(safe-area-inset-bottom))] md:h-[min(78dvh,680px)] ${widthClassName} md:max-w-md md:rounded-3xl md:border md:border-line`}
-      style={{ "--ledger-ai-chat-bottom": `${keyboardHeight}px` } as CSSProperties}
+      className={`kami-float fixed inset-x-0 bottom-0 top-0 z-50 flex w-full flex-col overflow-hidden bg-paper md:inset-x-auto md:right-6 md:top-auto md:bottom-[calc(7rem+env(safe-area-inset-bottom))] md:h-[min(78dvh,680px)] ${widthClassName} md:max-w-md md:rounded-3xl md:border md:border-line`}
+      style={{ "--ledger-ai-keyboard-height": `${keyboardHeight}px` } as CSSProperties}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -176,7 +176,7 @@ export function LedgerAiChatShell({
         <ConversationScrollButton className="border-line bg-paper text-brand hover:bg-tag" />
       </Conversation>
 
-      <div className="shrink-0 border-t border-line bg-paper px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:p-3">
+      <div className="mb-[var(--ledger-ai-keyboard-height)] shrink-0 border-t border-line bg-paper px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:mb-0 md:p-3">
         {suggestions.length > 0 && (
           <Suggestions className="pb-2">
             {suggestions.map((suggestion) => (
