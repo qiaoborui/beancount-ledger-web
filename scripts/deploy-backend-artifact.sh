@@ -10,7 +10,7 @@ Deploy the Go API artifact on a Raspberry Pi/self-hosted runner.
 Arguments:
   environment   prod | preview
   port          Public app port to bind, e.g. 3001 or 3002
-  artifact-dir  Directory containing ledger-web and optional examples/.agents/.pi/agent
+  artifact-dir  Directory containing ledger-web and optional examples/.agents
 
 Environment:
   DEPLOY_BASE       Base directory for app releases (default: $HOME/beancount-ledger-web-deploy)
@@ -80,15 +80,6 @@ fi
 if [[ -d "$ARTIFACT_DIR/.agents" ]]; then
   cp -a "$ARTIFACT_DIR/.agents" "$RELEASE_DIR/.agents"
 fi
-if [[ -d "$ARTIFACT_DIR/.pi" ]]; then
-  cp -a "$ARTIFACT_DIR/.pi" "$RELEASE_DIR/.pi"
-fi
-if [[ -d "$ARTIFACT_DIR/agent" ]]; then
-  cp -a "$ARTIFACT_DIR/agent" "$RELEASE_DIR/agent"
-fi
-if [[ -f "$ARTIFACT_DIR/.mcp.json" ]]; then
-  cp -a "$ARTIFACT_DIR/.mcp.json" "$RELEASE_DIR/.mcp.json"
-fi
 if [[ -f "$ARTIFACT_DIR/DEPLOYMENT.txt" ]]; then
   cp -a "$ARTIFACT_DIR/DEPLOYMENT.txt" "$RELEASE_DIR/DEPLOYMENT.txt"
 fi
@@ -153,10 +144,6 @@ if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1; th
   sudo apt-get install -y poppler-utils
   PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
 fi
-if [[ -f "$CURRENT_LINK/agent/package-lock.json" ]] && PATH="$PATH_EFFECTIVE" command -v npm >/dev/null 2>&1; then
-  echo "==> Installing agent MCP dependencies"
-  (cd "$CURRENT_LINK/agent" && PATH="$PATH_EFFECTIVE" npm ci --omit=dev)
-fi
 
 git_ledger() {
   git -c "safe.directory=$LEDGER_ROOT_EFFECTIVE" -C "$LEDGER_ROOT_EFFECTIVE" "$@"
@@ -194,15 +181,6 @@ DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
 OPENAI_API_KEY=${OPENAI_API_KEY:-}
 OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
 OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
-LEDGER_AI_RUNTIME=${LEDGER_AI_RUNTIME:-legacy}
-LEDGER_AGENT_TOOL_TOKEN=${LEDGER_AGENT_TOOL_TOKEN:-}
-LEDGER_AGENT_TOOL_BASE_URL=${LEDGER_AGENT_TOOL_BASE_URL:-http://127.0.0.1:$PORT_EFFECTIVE}
-LEDGER_PI_COMMAND=${LEDGER_PI_COMMAND:-}
-LEDGER_PI_ARGS=${LEDGER_PI_ARGS:-}
-LEDGER_PI_TIMEOUT_SECONDS=${LEDGER_PI_TIMEOUT_SECONDS:-120}
-LEDGER_PI_PROVIDER=${LEDGER_PI_PROVIDER:-deepseek}
-LEDGER_PI_MODEL=${LEDGER_PI_MODEL:-deepseek-v4-flash}
-LEDGER_PI_THINKING=${LEDGER_PI_THINKING:-low}
 WEB_PUSH_VAPID_PUBLIC_KEY=${WEB_PUSH_VAPID_PUBLIC_KEY:-}
 WEB_PUSH_VAPID_PRIVATE_KEY=${WEB_PUSH_VAPID_PRIVATE_KEY:-}
 WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-}

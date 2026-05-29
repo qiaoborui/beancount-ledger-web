@@ -36,9 +36,9 @@ Recommended layout on the Pi:
 /home/pi/beancount-ledger/          # private production ledger repo
 ```
 
-The backend release owns the Go binary, `.agents/`, `.pi/`, `agent/`, example
-ledgers, runtime configuration, and the systemd service. The frontend release
-owns only the Vite `dist/` output and can be updated without restarting the API.
+The backend release owns the Go binary, `.agents/`, example ledgers, runtime
+configuration, and the systemd service. The frontend release owns only the Vite
+`dist/` output and can be updated without restarting the API.
 
 ## GitHub runner
 
@@ -74,17 +74,6 @@ LEDGER_AI_PROVIDER=deepseek
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
-
-# Optional Pi agent runtime. Keep legacy until the Pi wrapper and MCP bridge
-# are configured on the host.
-LEDGER_AI_RUNTIME=legacy
-LEDGER_AGENT_TOOL_TOKEN=
-LEDGER_PI_COMMAND=
-LEDGER_PI_ARGS=
-LEDGER_PI_TIMEOUT_SECONDS=120
-LEDGER_PI_PROVIDER=deepseek
-LEDGER_PI_MODEL=deepseek-v4-flash
-LEDGER_PI_THINKING=low
 
 WEB_PUSH_VAPID_PUBLIC_KEY=
 WEB_PUSH_VAPID_PRIVATE_KEY=
@@ -190,8 +179,8 @@ Preview should proxy to the preview app port.
 - Pull requests deploy preview when the PR is not a draft.
 - Manual `workflow_dispatch` can deploy production or preview and can choose
   `all`, `backend`, or `frontend`.
-- Changes under `server/**`, `agent/**`, `.pi/**`, `examples/**`, `.agents/**`,
-  `docker/**`, or the backend deploy script build and deploy only the backend.
+- Changes under `server/**`, `examples/**`, `.agents/**`, `docker/**`, or the
+  backend deploy script build and deploy only the backend.
 - Changes under `web/**` or the frontend deploy script build and deploy only the
   frontend.
 - Changes to the deploy workflow deploy both components.
