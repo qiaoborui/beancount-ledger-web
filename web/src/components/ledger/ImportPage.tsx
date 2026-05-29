@@ -209,7 +209,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   return (
     <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
       <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-        <CardContent className="grid min-w-0 items-stretch gap-5 bg-paper/45 px-4 py-4 sm:px-6 lg:min-h-[calc(100dvh-18.25rem)] lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
+        <CardContent className="grid min-w-0 items-stretch gap-5 bg-paper/45 px-4 py-4 sm:px-6 lg:min-h-[calc(100dvh-18.25rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)] xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
           <div className="min-w-0 lg:flex">
             <div
               role="button"
@@ -252,10 +252,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           </div>
 
-          <div className="grid min-w-0 grid-rows-[auto_auto_auto_auto] gap-4">
-            <div className="min-w-0 rounded-2xl border border-line bg-paper">
+          <div className="grid min-w-0 max-w-full grid-rows-[auto_auto_auto_auto] gap-4 overflow-hidden">
+            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1 overflow-hidden">
                   <span className="block truncate font-medium text-ink">来源设置：{selectedProvider.label}</span>
                   <span className="mt-1 block truncate text-xs text-stone">{selectedProvider.detail}</span>
                 </span>
@@ -287,9 +287,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               ) : null}
             </div>
 
-            <div className="rounded-2xl border border-line bg-paper p-4">
+            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
               <div className="flex items-center justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <div className="text-sm font-medium text-ink">导入流程</div>
                   <div className="mt-1 text-xs text-stone">预览、校对、写入，三步分开确认。</div>
                 </div>
@@ -301,11 +301,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
             </div>
 
-            <div className="rounded-2xl border border-line bg-paper p-4">
-              <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
-                <span>
+            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
+              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
+                <span className="min-w-0 flex-1 overflow-hidden">
                   <span className="block text-sm font-medium text-ink">高级选项</span>
-                  <span className="mt-1 block text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
+                  <span className="mt-1 block truncate text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
                 </span>
                 {advancedOpen ? <ChevronUp className="h-4 w-4 text-stone" /> : <ChevronDown className="h-4 w-4 text-stone" />}
               </button>
@@ -333,7 +333,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               ) : null}
             </div>
 
-            <div className="rounded-2xl border border-line bg-panel p-3">
+            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
               <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
                 生成预览
@@ -520,12 +520,12 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
 function ImportStep({ index, title, detail, active, done }: { index: number; title: string; detail: string; active: boolean; done: boolean }) {
   return (
-    <div className="flex gap-3 pb-4 last:pb-0">
+    <div className="flex min-w-0 max-w-full gap-3 overflow-hidden pb-4 last:pb-0">
       <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-medium", done ? "border-brand bg-brand text-paper" : active ? "border-brand bg-[var(--selected-bg)] text-brand" : "border-line bg-panel text-stone")}>
         {done ? <Check className="h-3.5 w-3.5" /> : index}
       </div>
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-ink">{title}</div>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <div className="truncate text-sm font-medium text-ink">{title}</div>
         <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
       </div>
     </div>
