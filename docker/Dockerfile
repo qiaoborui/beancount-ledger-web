@@ -1,14 +1,15 @@
 FROM node:24-bookworm AS web-deps
 WORKDIR /app/web
-COPY web/package*.json ./
-RUN npm ci
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 FROM node:24-bookworm AS web-builder
 WORKDIR /app
 COPY --from=web-deps /app/web/node_modules ./web/node_modules
 COPY web ./web
 WORKDIR /app/web
-RUN npm run build
+RUN corepack enable && pnpm run build
 
 FROM golang:1.25-bookworm AS go-builder
 WORKDIR /app/server
