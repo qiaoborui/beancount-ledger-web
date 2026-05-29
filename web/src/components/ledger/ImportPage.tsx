@@ -4,6 +4,17 @@ import { useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Provider = "alipay" | "wechat" | "cmb";
 type ProviderOverride = "auto" | Provider;
@@ -90,6 +101,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
     return "对方账户";
+  }
+
+  function categoryAccountOptions(entry: ImportEntry) {
+    if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
+    return [{ account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
   }
 
   function resetForFile(next: File | null) {
@@ -185,23 +201,39 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           {file && <div className="mx-auto mt-4 flex max-w-full items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-left text-sm sm:inline-flex"><FileSpreadsheet className="h-4 w-4 shrink-0" /><span className="min-w-0 flex-1 break-all font-medium sm:max-w-md">{file.name}</span><span className="shrink-0 text-stone">{fileSize(file.size)}</span></div>}
         </div>
 
-        <button className="mt-4 flex items-center gap-2 text-sm text-stone underline" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</button>
+        <Button variant="ghost" className="mt-4 h-auto gap-2 px-0 py-0 text-sm text-stone underline hover:bg-transparent" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</Button>
         {advancedOpen && <div className="mt-3 grid gap-4 rounded-2xl border border-line bg-paper p-4 md:grid-cols-2">
-          <label className="block text-sm"><span className="mb-1 block text-xs text-stone">账单来源覆盖</span><select className="w-full rounded-xl border border-line bg-panel px-3 py-2" value={providerOverride} onChange={(e) => setProviderOverride(e.target.value as ProviderOverride)}><option value="auto">自动识别</option><option value="alipay">支付宝 CSV</option><option value="wechat">微信支付 XLSX</option><option value="cmb">招商银行信用卡 PDF</option></select></label>
-          <label className="flex items-start gap-3 text-sm"><input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} /><span><span className="font-medium">支付宝基金 9.99 → 10.00 补差</span><span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span></span></label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-stone">账单来源覆盖</span>
+            <Select value={providerOverride} onValueChange={(value) => setProviderOverride(value as ProviderOverride)}>
+              <SelectTrigger className="h-10 w-full rounded-xl bg-panel">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">自动识别</SelectItem>
+                <SelectItem value="alipay">支付宝 CSV</SelectItem>
+                <SelectItem value="wechat">微信支付 XLSX</SelectItem>
+                <SelectItem value="cmb">招商银行信用卡 PDF</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <div className="flex items-start gap-3 text-sm">
+            <Checkbox id="alipay-fund-rounding" className="mt-1" checked={alipayFundRounding} onCheckedChange={(value) => setAlipayFundRounding(value === true)} />
+            <label htmlFor="alipay-fund-rounding" className="cursor-pointer"><span className="font-medium">支付宝基金 9.99 → 10.00 补差</span><span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span></label>
+          </div>
         </div>}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={generatePreview} disabled={loading || !file}>{loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <FileUp className="mr-2 inline h-4 w-4" />}生成预览</button>
+          <Button className="h-12 rounded-xl px-5" onClick={generatePreview} disabled={loading || !file}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}生成预览</Button>
         </div>
       </section>
 
-      {error && <div className="rounded-2xl border border-line bg-panel p-4 text-sm text-[var(--danger)]"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
+      {error && <Alert variant="destructive" className="rounded-2xl bg-panel"><AlertTriangle /><AlertDescription>{error}</AlertDescription></Alert>}
 
       {preview && <section className="card p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
-          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
+          <Button className="h-12 rounded-xl px-5" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}确认写入账本</Button>
         </div>
         {commitResult?.ok && <div className="mt-4 rounded-2xl border border-brand/30 bg-[var(--selected-bg)] p-4 text-sm text-olive">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -209,10 +241,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
               <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
             </div>
-            <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setResultOpen((open) => !open)}>
-              {resultOpen ? <ChevronUp className="mr-1 inline h-4 w-4" /> : <ChevronDown className="mr-1 inline h-4 w-4" />}
+            <Button variant="outline" className="shrink-0 rounded-xl bg-panel text-olive" onClick={() => setResultOpen((open) => !open)}>
+              {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               {resultOpen ? "收起结果" : "查看写入结果"}
-            </button>
+            </Button>
           </div>
           {resultOpen && <CommitResultDetails result={commitResult} />}
         </div>}
@@ -225,17 +257,27 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <div className="min-w-0 flex-1 space-y-3">
                 <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span className="rounded-full bg-panel px-2 py-1 text-xs text-stone">{entry.date}</span><span className="truncate font-medium" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span><span className="whitespace-nowrap text-sm font-medium text-warm">{formatCny(entry.amount)}</span></div>
                 <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-                  <label className="block text-xs text-stone">标题<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></label>
-                  <label className="block min-w-0 text-xs text-stone">{editableAccountLabel(entry)}<select className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.categoryAccount} onChange={(e) => updateEntry(entry.id, { categoryAccount: e.target.value })}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}</select></label>
+                  <label className="block text-xs text-stone">标题<Input className="mt-1 h-10 rounded-xl bg-panel text-sm text-ink" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></label>
+                  <label className="block min-w-0 text-xs text-stone">
+                    {editableAccountLabel(entry)}
+                    <Select value={entry.categoryAccount} onValueChange={(value) => updateEntry(entry.id, { categoryAccount: value })}>
+                      <SelectTrigger className="mt-1 h-10 w-full rounded-xl bg-panel text-sm text-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-80">
+                        {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{account.label} · {account.account}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </label>
                 </div>
               </div>
             </div>
             <div className="mt-3 grid gap-3 text-xs text-stone md:grid-cols-3"><div>支付方式：{entry.method || "-"}</div><div>资金账户：{entry.fundingAccount || "-"}</div><div>订单号：{entry.orderId || "-"}</div></div>
-            <details className="mt-3"><summary className="cursor-pointer text-xs text-stone"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary><div className="mt-3 grid gap-2 md:grid-cols-2"><label className="text-xs text-stone">note<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.note ?? ""} onChange={(e) => updateMetadata(entry.id, "note", e.target.value)} placeholder="添加备注" /></label><label className="text-xs text-stone">purpose<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.purpose ?? ""} onChange={(e) => updateMetadata(entry.id, "purpose", e.target.value)} placeholder="例如: travel / work" /></label></div></details>
+            <details className="mt-3"><summary className="cursor-pointer text-xs text-stone"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary><div className="mt-3 grid gap-2 md:grid-cols-2"><label className="text-xs text-stone">note<Input className="mt-1 h-10 rounded-xl bg-panel text-sm text-ink" value={entry.metadata.note ?? ""} onChange={(e) => updateMetadata(entry.id, "note", e.target.value)} placeholder="添加备注" /></label><label className="text-xs text-stone">purpose<Input className="mt-1 h-10 rounded-xl bg-panel text-sm text-ink" value={entry.metadata.purpose ?? ""} onChange={(e) => updateMetadata(entry.id, "purpose", e.target.value)} placeholder="例如: travel / work" /></label></div></details>
           </article>)}
         </div>
 
-        <button className="mt-5 flex items-center gap-2 text-sm text-stone underline" onClick={() => setRawOpen((value) => !value)}>{rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}查看原始输出 / dedup 报告</button>
+        <Button variant="ghost" className="mt-5 h-auto gap-2 px-0 py-0 text-sm text-stone underline hover:bg-transparent" onClick={() => setRawOpen((value) => !value)}>{rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}查看原始输出 / dedup 报告</Button>
         {rawOpen && <div className="mt-4 grid gap-4 lg:grid-cols-2"><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre></div>}
       </section>}
 
