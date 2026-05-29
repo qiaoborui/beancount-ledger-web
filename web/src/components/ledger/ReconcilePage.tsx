@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle, Info } from "lucide-react";
 import { formatCny } from "@/lib/money";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { TimeRange } from "@/lib/timeRange";
 import type { AccountStatus, ReconcileRow } from "./types";
 import { statusColor, statusTitle } from "./AccountPanels";
@@ -123,27 +125,27 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
       <div className="border-t border-line px-4 py-3">
         <label className="mb-1 block text-xs text-stone">实际余额（来自 App / 银行 / 对账单）</label>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-          <input
-            className="w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-sm"
+          <Input
+            className="h-11 rounded-xl bg-panel text-sm"
             inputMode="decimal"
             placeholder={row.account.startsWith("Liabilities") ? "欠款填负数，如 -5000.00" : "如 12345.67"}
             value={actual}
             onChange={(e) => setActual(e.target.value)}
           />
-          <input
-            className="rounded-xl border border-line bg-panel px-3 py-2.5 text-sm"
+          <Input
+            className="h-11 rounded-xl bg-panel text-sm"
             type="date"
             value={balanceDate}
             onChange={(e) => setBalanceDate(e.target.value)}
             title="对账日：余额断言将写在这一天"
           />
-          <button
-            className="rounded-xl bg-brand px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-40"
+          <Button
+            className="h-11 rounded-xl px-5 text-sm"
             disabled={diff == null}
             onClick={handleSubmit}
           >
             {diff === 0 ? "写入断言" : "调整并断言"}
-          </button>
+          </Button>
         </div>
         <p className="mt-1.5 text-xs text-stone">对账日填写余额断言日期；调整分录将自动写入对账日前一天（{adjDate}）。</p>
       </div>

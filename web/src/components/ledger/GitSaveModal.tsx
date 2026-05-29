@@ -2,6 +2,8 @@
 
 import { GitBranch } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { MobileSheet } from "./MobileSheet";
 
 export type GitChange = {
@@ -39,10 +41,10 @@ export function GitSaveModal({
   const hasChanges = changedFileCount > 0;
 
   const footer = <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-    <button className="rounded-xl border border-line bg-paper px-4 py-2 text-warm disabled:opacity-60" onClick={onClose} disabled={committing}>取消</button>
-    <button className="rounded-xl bg-brand px-4 py-2 text-paper disabled:opacity-60" onClick={() => onCommit(message)} disabled={!hasChanges || loading || committing || !message.trim()}>
-      <GitBranch className="mr-1 inline h-4 w-4" /> {committing ? "提交中…" : `提交并推送 ${changedFileCount} 个文件`}
-    </button>
+    <Button variant="outline" className="rounded-xl bg-paper text-warm" onClick={onClose} disabled={committing}>取消</Button>
+    <Button className="rounded-xl" onClick={() => onCommit(message)} disabled={!hasChanges || loading || committing || !message.trim()}>
+      <GitBranch className="h-4 w-4" /> {committing ? "提交中…" : `提交并推送 ${changedFileCount} 个文件`}
+    </Button>
   </div>;
 
   return (
@@ -57,7 +59,7 @@ export function GitSaveModal({
         <div className="mt-5 rounded-2xl border border-line bg-panel">
           <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
             <div className="text-sm font-medium text-warm">变动文件</div>
-            <button className="rounded-xl border border-line bg-paper px-3 py-1.5 text-xs text-brand disabled:opacity-60" onClick={onRefresh} disabled={loading || committing}>刷新</button>
+            <Button variant="outline" size="xs" className="rounded-xl bg-paper text-brand" onClick={onRefresh} disabled={loading || committing}>刷新</Button>
           </div>
           <div className="max-h-72 overflow-y-auto p-2">
             {loading ? (
@@ -82,8 +84,8 @@ export function GitSaveModal({
 
         <label className="mt-5 block text-sm font-medium text-warm">
           提交信息
-          <input
-            className="mt-2 w-full rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-ink outline-none focus:border-brand disabled:opacity-60"
+          <Input
+            className="mt-2 h-12 rounded-2xl bg-panel text-sm text-ink"
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             disabled={!hasChanges || committing}
