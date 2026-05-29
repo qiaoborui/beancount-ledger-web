@@ -1,9 +1,18 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet, FileUp, Loader2, Pencil, UploadCloud } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
+import { cn } from "@/lib/utils";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb";
 type ProviderOverride = "auto" | Provider;
@@ -55,10 +64,23 @@ type ImportPreview = {
 
 type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
 
+const providerChoices: { value: ProviderOverride; label: string; detail: string; accept: string }[] = [
+  { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
+  { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
+  { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
+  { value: "cmb", label: "招商银行", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
+];
+
 function providerLabel(provider: Provider) {
   if (provider === "alipay") return "支付宝";
   if (provider === "wechat") return "微信支付";
   return "招商银行信用卡";
+}
+
+function confidenceLabel(confidence: ImportPreview["providerDetection"]["confidence"]) {
+  if (confidence === "high") return "高置信";
+  if (confidence === "medium") return "中置信";
+  return "低置信";
 }
 
 function fileSize(bytes: number) {
@@ -71,6 +93,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const [alipayFundRounding, setAlipayFundRounding] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [entries, setEntries] = useState<ImportEntry[]>([]);
@@ -79,13 +102,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
+  const [providerOpen, setProviderOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
     return accounts.filter((account) => account.active);
   }, [preview]);
+
+  const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
+  const hasCommitted = commitResult?.ok === true;
+  const canCommit = Boolean(preview) && entries.length > 0 && !committing && !hasCommitted;
 
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
@@ -98,6 +127,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setEntries([]);
     setCommitResult(null);
     setResultOpen(false);
+    setReviewOpen(false);
     setError("");
   }
 
@@ -122,6 +152,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
       setPreview(data);
       setEntries(data.entries);
+      setReviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -145,6 +176,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
       setCommitResult(data);
       setResultOpen(true);
+      setReviewOpen(true);
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -158,97 +190,362 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   }
 
   function updateMetadata(id: string, key: string, value: string) {
-    setEntries((current) => current.map((entry) => entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry));
+    setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry)));
   }
 
   return (
-    <div className="space-y-6">
-      <section className="card p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 className="font-serif text-2xl">账单导入</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">上传支付宝 CSV、微信支付 XLSX 或招商银行信用卡 PDF，系统会自动识别来源、生成分录、去重，并在确认后把原始账单作为 Beancount document 保存到账本仓库。</p>
-          </div>
-          {preview && <div className="rounded-2xl border border-line bg-paper px-4 py-3 text-xs leading-5 text-stone">识别为：<span className="font-medium text-warm">{providerLabel(preview.provider)}</span><br />{preview.providerDetection.reason}</div>}
-        </div>
-
-        <div
-          className="mt-5 cursor-pointer rounded-3xl border-2 border-dashed border-line bg-paper p-8 text-center transition hover:border-brand/60 hover:bg-panel"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => { event.preventDefault(); resetForFile(event.dataTransfer.files?.[0] ?? null); }}
-        >
-          <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
-          <UploadCloud className="mx-auto h-10 w-10 text-brand" />
-          <div className="mt-3 font-medium">拖拽账单到这里，或点击选择文件</div>
-          <div className="mt-1 text-sm text-stone">支持支付宝 CSV、微信支付 XLSX/XLS、招商银行信用卡 PDF</div>
-          {file && <div className="mx-auto mt-4 flex max-w-full items-center gap-2 rounded-2xl border border-line bg-panel px-4 py-2 text-left text-sm sm:inline-flex"><FileSpreadsheet className="h-4 w-4 shrink-0" /><span className="min-w-0 flex-1 break-all font-medium sm:max-w-md">{file.name}</span><span className="shrink-0 text-stone">{fileSize(file.size)}</span></div>}
-        </div>
-
-        <button className="mt-4 flex items-center gap-2 text-sm text-stone underline" onClick={() => setAdvancedOpen((value) => !value)}>{advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级选项</button>
-        {advancedOpen && <div className="mt-3 grid gap-4 rounded-2xl border border-line bg-paper p-4 md:grid-cols-2">
-          <label className="block text-sm"><span className="mb-1 block text-xs text-stone">账单来源覆盖</span><select className="w-full rounded-xl border border-line bg-panel px-3 py-2" value={providerOverride} onChange={(e) => setProviderOverride(e.target.value as ProviderOverride)}><option value="auto">自动识别</option><option value="alipay">支付宝 CSV</option><option value="wechat">微信支付 XLSX</option><option value="cmb">招商银行信用卡 PDF</option></select></label>
-          <label className="flex items-start gap-3 text-sm"><input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} /><span><span className="font-medium">支付宝基金 9.99 → 10.00 补差</span><span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span></span></label>
-        </div>}
-
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={generatePreview} disabled={loading || !file}>{loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <FileUp className="mr-2 inline h-4 w-4" />}生成预览</button>
-        </div>
-      </section>
-
-      {error && <div className="rounded-2xl border border-line bg-panel p-4 text-sm text-[var(--danger)]"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
-
-      {preview && <section className="card p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div><h3 className="font-serif text-xl">{providerLabel(preview.provider)}导入预览</h3><p className="mt-1 text-sm text-stone">{preview.originalFilename} · 去重后 {entries.length} 条新交易 · {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</p></div>
-          <button className="rounded-xl bg-brand px-5 py-3 text-paper disabled:opacity-60" onClick={commitImport} disabled={committing || commitResult?.ok === true || entries.length === 0}>{committing ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null}确认写入账本</button>
-        </div>
-        {commitResult?.ok && <div className="mt-4 rounded-2xl border border-brand/30 bg-[var(--selected-bg)] p-4 text-sm text-olive">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
-              <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+    <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
+      <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
+        <CardContent className="grid min-w-0 items-stretch gap-5 bg-paper/45 px-4 py-4 sm:px-6 lg:min-h-[calc(100dvh-18.25rem)] lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 lg:flex">
+            <div
+              role="button"
+              tabIndex={0}
+              className={cn(
+                "group flex min-h-56 min-w-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-panel p-4 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] sm:min-h-[18rem] sm:p-6 lg:min-h-full lg:w-full",
+                dragActive ? "border-brand bg-[var(--selected-bg)]" : "hover:border-brand/60 hover:bg-panel",
+              )}
+              onClick={() => inputRef.current?.click()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") inputRef.current?.click();
+              }}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+                resetForFile(event.dataTransfer.files?.[0] ?? null);
+              }}
+            >
+              <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
+              <div className="grid h-14 w-14 place-items-center rounded-2xl border border-line bg-panel text-brand shadow-sm transition group-hover:scale-105">
+                <UploadCloud className="h-7 w-7" />
+              </div>
+              <div className="mt-4 text-base font-medium leading-6 text-ink">拖拽账单到这里，或点击选择文件</div>
+              <div className="mt-1 max-w-full break-words text-sm text-stone">当前模式：{selectedProvider.label} · {selectedProvider.accept}</div>
+              {file ? (
+                <div className="mt-5 flex w-full max-w-full items-center gap-3 rounded-2xl border border-line bg-panel px-3 py-3 text-left text-sm sm:w-auto sm:px-4">
+                  <FileSpreadsheet className="h-5 w-5 shrink-0 text-brand" />
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 break-all font-medium leading-5 text-warm">{file.name}</div>
+                    <div className="mt-0.5 text-xs text-stone">{fileSize(file.size)}</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => setResultOpen((open) => !open)}>
-              {resultOpen ? <ChevronUp className="mr-1 inline h-4 w-4" /> : <ChevronDown className="mr-1 inline h-4 w-4" />}
-              {resultOpen ? "收起结果" : "查看写入结果"}
-            </button>
           </div>
-          {resultOpen && <CommitResultDetails result={commitResult} />}
-        </div>}
-        {preview.warnings.length > 0 && <div className="mt-4 rounded-2xl border border-line bg-paper p-4 text-sm text-warm">{preview.warnings.map((warning) => <div key={warning}>⚠️ {warning}</div>)}</div>}
-        {preview.provider === "cmb" && <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-paper p-4 text-sm md:grid-cols-5"><div><div className="text-xs text-stone">PDF/CSV 明细</div><div className="font-medium">{preview.rawRowCount}</div></div><div><div className="text-xs text-stone">Web 前置过滤后</div><div className="font-medium">{preview.filteredRowCount}</div></div><div><div className="text-xs text-stone">DEG 生成</div><div className="font-medium">{preview.generatedCount}</div></div><div><div className="text-xs text-stone">已去重跳过</div><div className="font-medium">{preview.skippedDuplicateCount}</div></div><div><div className="text-xs text-stone">待确认写入</div><div className="font-medium">{entries.length}</div></div></div>}
 
-        <div className="mt-5 space-y-3">
-          {entries.map((entry) => <article key={entry.id} className="rounded-2xl border border-line bg-paper p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1 space-y-3">
-                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span className="rounded-full bg-panel px-2 py-1 text-xs text-stone">{entry.date}</span><span className="truncate font-medium" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span><span className="whitespace-nowrap text-sm font-medium text-warm">{formatCny(entry.amount)}</span></div>
-                <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-                  <label className="block text-xs text-stone">标题<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.narration} onChange={(e) => updateEntry(entry.id, { narration: e.target.value })} /></label>
-                  <label className="block min-w-0 text-xs text-stone">{editableAccountLabel(entry)}<select className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.categoryAccount} onChange={(e) => updateEntry(entry.id, { categoryAccount: e.target.value })}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}</select></label>
+          <div className="grid min-w-0 grid-rows-[auto_auto_auto_auto] gap-4">
+            <div className="min-w-0 rounded-2xl border border-line bg-paper">
+              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-ink">来源设置：{selectedProvider.label}</span>
+                  <span className="mt-1 block truncate text-xs text-stone">{selectedProvider.detail}</span>
+                </span>
+                {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
+              </button>
+              {providerOpen ? (
+                <div className="grid min-w-0 gap-2 border-t border-line p-3">
+                  {providerChoices.map((choice) => (
+                    <button
+                      key={choice.value}
+                      type="button"
+                      className={cn(
+                        "min-w-0 rounded-2xl border p-3 text-left transition",
+                        providerOverride === choice.value ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-line bg-panel text-olive hover:bg-paper",
+                      )}
+                      onClick={() => {
+                        setProviderOverride(choice.value);
+                        setProviderOpen(false);
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{choice.label}</span>
+                        {providerOverride === choice.value ? <Check className="h-4 w-4 text-brand" /> : null}
+                      </div>
+                      <div className="mt-1 break-words text-xs leading-5 text-stone">{choice.detail}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-line bg-paper p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-ink">导入流程</div>
+                  <div className="mt-1 text-xs text-stone">预览、校对、写入，三步分开确认。</div>
+                </div>
+                <FileArchive className="h-5 w-5 text-brand" />
+              </div>
+              <Separator className="my-4" />
+              <ImportStep index={1} title="选择来源" active done={Boolean(file)} detail={file ? file.name : "等待上传账单文件"} />
+              <ImportStep index={2} title="生成预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
+              <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
+            </div>
+
+            <div className="rounded-2xl border border-line bg-paper p-4">
+              <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
+                <span>
+                  <span className="block text-sm font-medium text-ink">高级选项</span>
+                  <span className="mt-1 block text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
+                </span>
+                {advancedOpen ? <ChevronUp className="h-4 w-4 text-stone" /> : <ChevronDown className="h-4 w-4 text-stone" />}
+              </button>
+              {advancedOpen ? (
+                <div className="mt-4 space-y-4">
+                  <Label className="block">
+                    <span className="mb-2 block">账单来源覆盖</span>
+                    <select className="h-10 w-full min-w-0 rounded-xl border border-line bg-panel px-3 text-sm text-ink outline-none" value={providerOverride} onChange={(event) => setProviderOverride(event.target.value as ProviderOverride)}>
+                      {providerChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                    </select>
+                  </Label>
+                  <label className="flex items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-sm">
+                    <input className="mt-1 h-4 w-4 accent-brand" type="checkbox" checked={alipayFundRounding} onChange={(event) => setAlipayFundRounding(event.target.checked)} />
+                    <span>
+                      <span className="font-medium text-warm">支付宝基金 9.99 → 10.00 补差</span>
+                      <span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-line bg-panel p-3">
+              <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+                生成预览
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {error ? (
+        <Alert variant="destructive" className="flex items-start gap-2">
+          <AlertTriangle className="mt-1 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </Alert>
+      ) : null}
+
+      {preview ? (
+        <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
+          <CardContent className="flex min-w-0 flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
+                <Badge variant="secondary">{providerLabel(preview.provider)}</Badge>
+                <span className="text-sm text-stone">{entries.length} 条交易</span>
+              </div>
+              <div className="mt-2 line-clamp-2 break-all font-medium text-ink">{preview.originalFilename}</div>
+              <div className="mt-1 text-sm text-stone">{preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}</div>
+            </div>
+            <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
+              {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+              {hasCommitted ? "查看写入结果" : "打开审核"}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {preview ? (
+        <MobileSheet
+          open={reviewOpen}
+          title={`${providerLabel(preview.provider)}导入审核`}
+          onClose={() => setReviewOpen(false)}
+          shouldClose={() => !committing}
+          size="xl"
+          align="center"
+          closeLabel={committing ? "写入中" : "关闭"}
+          footer={
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 text-xs leading-5 text-stone">
+                {hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条交易` : `确认后将写入 ${entries.length} 条交易，写入前仍可修改标题、分类和 metadata。`}
+              </div>
+              <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
+                <Button className="w-full" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
+                <Button className="w-full" onClick={commitImport} disabled={!canCommit}>
+                  {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                  {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="-mx-4 -my-4 min-w-0 space-y-4 bg-sand/45 px-3 py-4 sm:-mx-5 sm:px-5">
+            <div className="rounded-2xl border border-line bg-panel p-4 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{confidenceLabel(preview.providerDetection.confidence)}</Badge>
+                    <Badge variant="secondary" className="max-w-full break-all leading-5 sm:max-w-xl">{preview.originalFilename}</Badge>
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-olive">{preview.providerDetection.reason}</div>
+                </div>
+                <div className="shrink-0 rounded-2xl border border-line bg-paper px-4 py-3 text-sm text-stone">
+                  {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}
                 </div>
               </div>
             </div>
-            <div className="mt-3 grid gap-3 text-xs text-stone md:grid-cols-3"><div>支付方式：{entry.method || "-"}</div><div>资金账户：{entry.fundingAccount || "-"}</div><div>订单号：{entry.orderId || "-"}</div></div>
-            <details className="mt-3"><summary className="cursor-pointer text-xs text-stone"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary><div className="mt-3 grid gap-2 md:grid-cols-2"><label className="text-xs text-stone">note<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.note ?? ""} onChange={(e) => updateMetadata(entry.id, "note", e.target.value)} placeholder="添加备注" /></label><label className="text-xs text-stone">purpose<input className="mt-1 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink" value={entry.metadata.purpose ?? ""} onChange={(e) => updateMetadata(entry.id, "purpose", e.target.value)} placeholder="例如: travel / work" /></label></div></details>
-          </article>)}
+
+            <ImportStats preview={preview} entryCount={entries.length} />
+
+            {commitResult?.ok ? (
+              <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
+                    <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
+                    {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    {resultOpen ? "收起结果" : "查看写入结果"}
+                  </Button>
+                </div>
+                {resultOpen ? <CommitResultDetails result={commitResult} /> : null}
+              </Alert>
+            ) : null}
+
+            {preview.warnings.length > 0 ? (
+              <Alert className="space-y-2">
+                {preview.warnings.map((warning) => (
+                  <div key={warning} className="flex items-start gap-2">
+                    <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
+                    <span>{warning}</span>
+                  </div>
+                ))}
+              </Alert>
+            ) : null}
+
+            <div className="space-y-4">
+              {entries.map((entry) => (
+                <article key={entry.id} className="overflow-hidden rounded-2xl border border-line bg-panel shadow-sm ring-1 ring-ink/[0.03]">
+                  <div className="border-l-4 border-brand bg-paper px-4 py-4">
+                    <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <Badge variant="secondary" className="bg-tag text-warm">{entry.date}</Badge>
+                          {entry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{entry.source}</Badge> : null}
+                          <span className="min-w-0 break-words text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl bg-panel px-3 py-2 text-left lg:text-right">
+                        <div className="whitespace-nowrap font-serif text-2xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
+                        <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 p-4">
+                    <div className="grid min-w-0 items-end gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
+                      <Label className="block min-w-0">
+                        <span className="mb-1.5 block text-stone">标题</span>
+                        <Input className="min-w-0 border-line bg-paper shadow-sm" value={entry.narration} onChange={(event) => updateEntry(entry.id, { narration: event.target.value })} />
+                      </Label>
+                      <Label className="block min-w-0">
+                        <span className="mb-1.5 block text-stone">{editableAccountLabel(entry)}</span>
+                        <select className="h-10 w-full min-w-0 rounded-xl border border-line bg-paper px-3 text-sm text-ink shadow-sm outline-none" value={entry.categoryAccount} onChange={(event) => updateEntry(entry.id, { categoryAccount: event.target.value })}>
+                          {accountOptions.map((account) => <option key={account.account} value={account.account}>{account.label} · {account.account}</option>)}
+                        </select>
+                      </Label>
+                    </div>
+
+                    <div className="grid min-w-0 gap-2 rounded-2xl border border-line bg-paper px-3 py-3 text-xs leading-5 text-stone md:grid-cols-3">
+                      <div className="min-w-0 break-words"><span className="text-olive">支付方式：</span>{entry.method || "-"}</div>
+                      <div className="min-w-0 break-words"><span className="text-olive">资金账户：</span>{entry.fundingAccount || "-"}</div>
+                      <div className="min-w-0 break-all"><span className="text-olive">订单号：</span>{entry.orderId || "-"}</div>
+                    </div>
+
+                    <details>
+                      <summary className="cursor-pointer text-xs text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <Label className="block">
+                          <span className="mb-1.5 block">note</span>
+                          <Input className="border-line bg-paper shadow-sm" value={entry.metadata.note ?? ""} onChange={(event) => updateMetadata(entry.id, "note", event.target.value)} placeholder="添加备注" />
+                        </Label>
+                        <Label className="block">
+                          <span className="mb-1.5 block">purpose</span>
+                          <Input className="border-line bg-paper shadow-sm" value={entry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(entry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
+                        </Label>
+                      </div>
+                    </details>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <Button variant="ghost" className="px-0 text-stone underline" onClick={() => setRawOpen((value) => !value)}>
+              {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              查看原始输出 / dedup 报告
+            </Button>
+            {rawOpen ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre>
+                <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre>
+              </div>
+            ) : null}
+          </div>
+        </MobileSheet>
+      ) : null}
+    </div>
+  );
+}
+
+function ImportStep({ index, title, detail, active, done }: { index: number; title: string; detail: string; active: boolean; done: boolean }) {
+  return (
+    <div className="flex gap-3 pb-4 last:pb-0">
+      <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-medium", done ? "border-brand bg-brand text-paper" : active ? "border-brand bg-[var(--selected-bg)] text-brand" : "border-line bg-panel text-stone")}>
+        {done ? <Check className="h-3.5 w-3.5" /> : index}
+      </div>
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-ink">{title}</div>
+        <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function ImportStats({ preview, entryCount }: { preview: ImportPreview; entryCount: number }) {
+  const stats = preview.provider === "cmb"
+    ? [
+        ["PDF/CSV 明细", preview.rawRowCount],
+        ["Web 前置过滤后", preview.filteredRowCount],
+        ["DEG 生成", preview.generatedCount],
+        ["已去重跳过", preview.skippedDuplicateCount],
+        ["待确认写入", entryCount],
+      ]
+    : [
+        ["候选交易", preview.candidateCount],
+        ["生成分录", preview.generatedCount],
+        ["已去重跳过", preview.skippedDuplicateCount],
+        ["排除记录", preview.excludedRowCount],
+        ["待确认写入", entryCount],
+      ];
+
+  return (
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {stats.map(([label, value]) => (
+        <div key={label} className="rounded-2xl border border-line bg-panel p-4 shadow-sm">
+          <div className="text-xs text-stone">{label}</div>
+          <div className="mt-2 font-serif text-xl font-medium text-ink">{value}</div>
         </div>
-
-        <button className="mt-5 flex items-center gap-2 text-sm text-stone underline" onClick={() => setRawOpen((value) => !value)}>{rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}查看原始输出 / dedup 报告</button>
-        {rawOpen && <div className="mt-4 grid gap-4 lg:grid-cols-2"><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre><pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre></div>}
-      </section>}
-
+      ))}
     </div>
   );
 }
 
 function CommitResultDetails({ result }: { result: CommitResult }) {
-  return <div className="mt-4 space-y-2 rounded-2xl border border-line bg-panel p-4 text-sm text-olive">
-    <div>写入交易：{result.count} 条</div>
-    {result.outputFile && <div className="break-all">导入文件：{result.outputFile}</div>}
-    {result.includeFile && <div className="break-all">月份 include：{result.includeFile}</div>}
-    {result.documentFile && <div className="break-all">原始账单 document：{result.documentFile}</div>}
-    <div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div>
-  </div>;
+  return (
+    <div className="mt-4 space-y-2 rounded-2xl border border-line bg-paper p-4 text-sm text-olive">
+      <div>写入交易：{result.count} 条</div>
+      {result.outputFile ? <div className="break-all">导入文件：{result.outputFile}</div> : null}
+      {result.includeFile ? <div className="break-all">月份 include：{result.includeFile}</div> : null}
+      {result.documentFile ? <div className="break-all">原始账单 document：{result.documentFile}</div> : null}
+      <div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div>
+    </div>
+  );
 }
