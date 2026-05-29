@@ -384,9 +384,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <div className="min-w-0 text-xs leading-5 text-stone">
                 {hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条交易` : `确认后将写入 ${entries.length} 条交易，写入前仍可修改标题、分类和 metadata。`}
               </div>
-              <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
-                <Button className="w-full" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
-                <Button className="w-full" onClick={commitImport} disabled={!canCommit}>
+              <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
+                <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
+                <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
                   {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                   {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
                 </Button>
