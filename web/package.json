@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@8.11.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "vite preview --host 0.0.0.0",
-    "lint": "npm run typecheck",
+    "lint": "pnpm run typecheck",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

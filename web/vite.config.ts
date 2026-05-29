@@ -16,6 +16,34 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: /node_modules[\\/](react|react-dom|scheduler|use-sync-external-store)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: "chart-vendor",
+              test: /node_modules[\\/](recharts|victory-vendor|d3-|react-smooth|react-transition-group)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: "markdown-vendor",
+              test: /node_modules[\\/](@streamdown|streamdown|hast|mdast|micromark|remark|rehype|unified|unist|vfile|marked|mermaid|@mermaid-js)[\\/]/,
+              priority: 10,
+            },
+            {
+              name: "ai-vendor",
+              test: /node_modules[\\/](@ai-sdk|ai)[\\/]/,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
   },
   server: {
     allowedHosts: [".tunelo.net", "43.130.251.4", "ucloud.borui.fun"],

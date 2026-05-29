@@ -23,8 +23,8 @@ through `LEDGER_ROOT`.
 ## Project Shape
 
 - `web/` is the Vite / React 19 app. Scripts are defined in
-  `web/package.json`: `npm run typecheck`, `npm run test`, and
-  `npm run build`.
+  `web/package.json`: `pnpm run typecheck`, `pnpm run test`, and
+  `pnpm run build`.
 - `web/src/components/ledger/` contains the main product UI: pages, mobile
   sheets, modals, notification center, transaction list, command palette,
   import/reconcile flows, and shared ledger UI.
@@ -95,14 +95,14 @@ Run the smallest useful checks for the change. For frontend changes, run from
 `web/`:
 
 ```bash
-npm run typecheck
-npm run test
+pnpm run typecheck
+pnpm run test
 ```
 
 For build, dependency, deployment, or broad UI changes, also run from `web/`:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 For backend changes, run from `server/`:
