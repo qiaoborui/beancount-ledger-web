@@ -429,11 +429,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             ) : null}
 
             {preview.warnings.length > 0 ? (
-              <Alert className="space-y-2">
+              <Alert className="grid-cols-1 space-y-2">
                 {preview.warnings.map((warning) => (
-                  <div key={warning} className="flex items-start gap-2">
+                  <div key={warning} className="flex min-w-0 items-start gap-2">
                     <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
-                    <span>{warning}</span>
+                    <span className="min-w-0 break-words leading-6">{warning}</span>
                   </div>
                 ))}
               </Alert>
