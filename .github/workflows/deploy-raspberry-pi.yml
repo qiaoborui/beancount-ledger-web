@@ -1,4 +1,4 @@
-name: Deploy Raspberry Pi
+name: Deploy Ubuntu Server
 
 on:
   push:
@@ -51,7 +51,6 @@ jobs:
       target: ${{ steps.target.outputs.target }}
       short_target: ${{ steps.target.outputs.short_target }}
       backend_port: ${{ steps.target.outputs.backend_port }}
-      env_file_secret: ${{ steps.target.outputs.env_file_secret }}
       environment_url: ${{ steps.target.outputs.environment_url }}
       deploy_backend: ${{ steps.changes.outputs.deploy_backend }}
       deploy_frontend: ${{ steps.changes.outputs.deploy_frontend }}
@@ -70,14 +69,12 @@ jobs:
           if [[ "$target" == "production" ]]; then
             echo "target=production" >> "$GITHUB_OUTPUT"
             echo "short_target=prod" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
-            echo "env_file_secret=RASPI_PROD_ENV_FILE" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.DEPLOY_PROD_PORT || vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
           else
             echo "target=preview" >> "$GITHUB_OUTPUT"
             echo "short_target=preview" >> "$GITHUB_OUTPUT"
-            echo "backend_port=${{ vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
-            echo "env_file_secret=RASPI_PREVIEW_ENV_FILE" >> "$GITHUB_OUTPUT"
+            echo "backend_port=${{ vars.DEPLOY_PREVIEW_PORT || vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
             echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -141,7 +138,7 @@ jobs:
   build_backend:
     name: Build backend artifact
     needs: plan
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     if: ${{ needs.plan.outputs.deploy_backend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     steps:
       - name: Checkout
@@ -248,9 +245,9 @@ jobs:
           retention-days: 7
 
   deploy_frontend:
-    name: Deploy frontend to Raspberry Pi
+    name: Deploy frontend to Ubuntu Server
     needs: [plan, build_frontend]
-    runs-on: [self-hosted, raspberry-pi]
+    runs-on: [self-hosted, mibook]
     if: ${{ needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
@@ -276,8 +273,8 @@ jobs:
 
       - name: Deploy frontend artifact
         env:
-          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
-          FRONTEND_RELOAD_COMMAND: ${{ secrets.RASPI_FRONTEND_RELOAD_COMMAND }}
+          DEPLOY_BASE: ${{ secrets.DEPLOY_BASE || secrets.RASPI_DEPLOY_BASE }}
+          FRONTEND_RELOAD_COMMAND: ${{ secrets.FRONTEND_RELOAD_COMMAND || secrets.RASPI_FRONTEND_RELOAD_COMMAND }}
         run: |
           chmod +x scripts/deploy-frontend-artifact.sh
           scripts/deploy-frontend-artifact.sh \
@@ -295,9 +292,9 @@ jobs:
           EOF
 
   deploy_backend:
-    name: Deploy backend to Raspberry Pi
+    name: Deploy backend to Ubuntu Server
     needs: [plan, build_backend, deploy_frontend]
-    runs-on: [self-hosted, raspberry-pi]
+    runs-on: [self-hosted, mibook]
     if: ${{ always() && needs.plan.outputs.deploy_backend == 'true' && needs.build_backend.result == 'success' && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success' || needs.deploy_frontend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
@@ -323,8 +320,8 @@ jobs:
 
       - name: Deploy backend artifact
         env:
-          DEPLOY_BASE: ${{ secrets.RASPI_DEPLOY_BASE }}
-          APP_ENV_FILE: ${{ needs.plan.outputs.env_file_secret == 'RASPI_PROD_ENV_FILE' && secrets.RASPI_PROD_ENV_FILE || secrets.RASPI_PREVIEW_ENV_FILE }}
+          DEPLOY_BASE: ${{ secrets.DEPLOY_BASE || secrets.RASPI_DEPLOY_BASE }}
+          APP_ENV_FILE: ${{ needs.plan.outputs.short_target == 'prod' && (secrets.DEPLOY_PROD_ENV_FILE || secrets.RASPI_PROD_ENV_FILE) || (secrets.DEPLOY_PREVIEW_ENV_FILE || secrets.RASPI_PREVIEW_ENV_FILE) }}
         run: |
           chmod +x scripts/deploy-backend-artifact.sh
           scripts/deploy-backend-artifact.sh \

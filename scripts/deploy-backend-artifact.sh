@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: deploy-backend-artifact.sh <environment> <port> <artifact-dir>
 
-Deploy the Go API artifact on a Raspberry Pi/self-hosted runner.
+Deploy the Go API artifact on a self-hosted runner.
 
 Arguments:
   environment   prod | preview
@@ -87,9 +87,12 @@ fi
 if [[ -n "${APP_ENV_FILE:-}" ]]; then
   if [[ -f "$APP_ENV_FILE" ]]; then
     install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
-  else
+  elif [[ "$APP_ENV_FILE" == *"="* ]]; then
     umask 077
     printf '%s\n' "$APP_ENV_FILE" > "$RELEASE_DIR/.env.local"
+  else
+    echo "APP_ENV_FILE points to a missing env file: $APP_ENV_FILE" >&2
+    exit 1
   fi
 fi
 
@@ -104,7 +107,7 @@ if [[ -f .env.local ]]; then
 fi
 set +a
 
-# The deploy workflow owns the public port. Pi-side env files may still contain
+# The deploy workflow owns the public port. Runner-side env files may still contain
 # PORT from the legacy combined service; ignore that value so the app keeps the
 # externally routed port selected by GitHub Actions variables.
 PORT_EFFECTIVE="$REQUESTED_PORT"
@@ -121,7 +124,7 @@ if [[ "$ENVIRONMENT" == "preview" ]]; then
 fi
 RUNTIME_DIR_EFFECTIVE="${RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 STATIC_DIR_EFFECTIVE="$ENV_DIR/frontend/current/dist"
-DEFAULT_SERVICE_PATH="/home/pi/.local/share/uv/tools/beancount/bin:/home/pi/go/bin:/home/pi/.local/bin:/home/pi/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin"
+DEFAULT_SERVICE_PATH="$SERVICE_HOME_EFFECTIVE/.local/share/uv/tools/beancount/bin:$SERVICE_HOME_EFFECTIVE/go/bin:$SERVICE_HOME_EFFECTIVE/.local/bin:$SERVICE_HOME_EFFECTIVE/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin"
 PATH_EFFECTIVE="$DEFAULT_SERVICE_PATH"
 if [[ -n "${PATH:-}" ]]; then
   PATH_EFFECTIVE="$DEFAULT_SERVICE_PATH:$PATH"
@@ -138,7 +141,7 @@ PDFTOTEXT_BIN_EFFECTIVE="${PDFTOTEXT_BIN:-}"
 if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]]; then
   PDFTOTEXT_BIN_EFFECTIVE="$(PATH="$PATH_EFFECTIVE" command -v pdftotext || true)"
 fi
-if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1; then
+if [[ -z "$PDFTOTEXT_BIN_EFFECTIVE" ]] && command -v apt-get >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
   echo "==> Installing poppler-utils for PDF statement import"
   sudo apt-get update
   sudo apt-get install -y poppler-utils
@@ -196,7 +199,35 @@ LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
 LEDGER_GIT_COMMIT_INTERVAL_MINUTES=${LEDGER_GIT_COMMIT_INTERVAL_MINUTES:-60}
 SYSEOF
 
-sudo tee "/etc/systemd/system/$APP_NAME.service" >/dev/null << SERVICEEOF
+SERVICE_SCOPE="${SERVICE_SCOPE:-}"
+if [[ -z "$SERVICE_SCOPE" ]]; then
+  if sudo -n true >/dev/null 2>&1; then
+    SERVICE_SCOPE=system
+  else
+    SERVICE_SCOPE=user
+  fi
+fi
+
+case "$SERVICE_SCOPE" in
+  system)
+    SERVICE_FILE="/etc/systemd/system/$APP_NAME.service"
+    SYSTEMCTL=(sudo systemctl)
+    SERVICE_INSTALL_TARGET=multi-user.target
+    SERVICE_USER_LINES=$'User='"$SERVICE_USER_EFFECTIVE"$'\nGroup='"$SERVICE_GROUP_EFFECTIVE"
+    ;;
+  user)
+    USER_SYSTEMD_DIR="$SERVICE_HOME_EFFECTIVE/.config/systemd/user"
+    mkdir -p "$USER_SYSTEMD_DIR"
+    SERVICE_FILE="$USER_SYSTEMD_DIR/$APP_NAME.service"
+    SYSTEMCTL=(systemctl --user)
+    SERVICE_INSTALL_TARGET=default.target
+    SERVICE_USER_LINES=""
+    ;;
+  *) echo "SERVICE_SCOPE must be system or user" >&2; exit 2 ;;
+esac
+
+if [[ "$SERVICE_SCOPE" == "system" ]]; then
+  sudo tee "$SERVICE_FILE" >/dev/null << SERVICEEOF
 [Unit]
 Description=Beancount Ledger API ($ENVIRONMENT)
 After=network-online.target
@@ -204,8 +235,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER_EFFECTIVE
-Group=$SERVICE_GROUP_EFFECTIVE
+$SERVICE_USER_LINES
 WorkingDirectory=$CURRENT_LINK
 EnvironmentFile=$BACKEND_DIR/systemd.env
 ExecStart=$CURRENT_LINK/ledger-web
@@ -213,19 +243,42 @@ Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=$SERVICE_INSTALL_TARGET
 SERVICEEOF
-sudo systemctl daemon-reload
-sudo systemctl enable "$APP_NAME" >/dev/null
-if systemctl list-unit-files "$LEGACY_APP_NAME.service" >/dev/null 2>&1; then
-  sudo systemctl disable --now "$LEGACY_APP_NAME" >/dev/null 2>&1 || true
+else
+  cat > "$SERVICE_FILE" << SERVICEEOF
+[Unit]
+Description=Beancount Ledger API ($ENVIRONMENT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$CURRENT_LINK
+EnvironmentFile=$BACKEND_DIR/systemd.env
+ExecStart=$CURRENT_LINK/ledger-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=$SERVICE_INSTALL_TARGET
+SERVICEEOF
 fi
-sudo systemctl restart "$APP_NAME"
-if systemctl is-active --quiet "$APP_NAME"; then
+"${SYSTEMCTL[@]}" daemon-reload
+"${SYSTEMCTL[@]}" enable "$APP_NAME" >/dev/null
+if "${SYSTEMCTL[@]}" list-unit-files "$LEGACY_APP_NAME.service" >/dev/null 2>&1; then
+  "${SYSTEMCTL[@]}" disable --now "$LEGACY_APP_NAME" >/dev/null 2>&1 || true
+fi
+"${SYSTEMCTL[@]}" restart "$APP_NAME"
+if "${SYSTEMCTL[@]}" is-active --quiet "$APP_NAME"; then
   echo "==> $APP_NAME restarted successfully"
 else
   echo "==> WARNING: $APP_NAME failed to start, checking logs..." >&2
-  sudo journalctl -u "$APP_NAME" --no-pager -n 10 >&2
+  if [[ "$SERVICE_SCOPE" == "system" ]]; then
+    sudo journalctl -u "$APP_NAME" --no-pager -n 10 >&2
+  else
+    journalctl --user -u "$APP_NAME" --no-pager -n 10 >&2
+  fi
   exit 1
 fi
 
@@ -239,3 +292,4 @@ echo "    Release: $RELEASE_DIR"
 echo "    LEDGER_ROOT: $LEDGER_ROOT_EFFECTIVE"
 echo "    RUNTIME_DIR: $RUNTIME_DIR_EFFECTIVE"
 echo "    STATIC_DIR: $STATIC_DIR_EFFECTIVE"
+echo "    SERVICE_SCOPE: $SERVICE_SCOPE"

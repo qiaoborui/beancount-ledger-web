@@ -45,7 +45,7 @@ through `LEDGER_ROOT`.
   scripts. They must read external ledger paths from environment/config rather
   than assuming real data lives in this repo.
 - `docs/` contains privacy, ledger layout, self-hosting, backend architecture,
-  and Raspberry Pi deployment documentation.
+  and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
 - `.github/workflows/ci.yml` runs selective backend and frontend checks.
 - `.github/workflows/deploy-raspberry-pi.yml` builds deploy artifacts and PR
@@ -60,7 +60,7 @@ through `LEDGER_ROOT`.
   different naming convention.
 - Keep PRs small and focused. Include validation results in the PR body when
   creating or updating a PR.
-- Pull requests trigger the Raspberry Pi preview deployment workflow when the
+- Pull requests trigger the Ubuntu server preview deployment workflow when the
   PR is not a draft.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.

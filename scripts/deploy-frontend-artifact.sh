@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: deploy-frontend-artifact.sh <environment> <artifact-dir>
 
-Deploy the Vite static artifact on a Raspberry Pi/self-hosted runner.
+Deploy the Vite static artifact on a self-hosted runner.
 
 Arguments:
   environment   prod | preview

@@ -1,16 +1,15 @@
-# Raspberry Pi deployment
+# Ubuntu server deployment
 
 This repository deploys the Go API and the Vite frontend as separate release
-streams on a Raspberry Pi self-hosted GitHub Actions runner. Real ledger data
-still lives outside this public application repository and is selected with
-`LEDGER_ROOT`.
+streams on a self-hosted GitHub Actions runner. Real ledger data lives outside
+this public application repository and is selected with `LEDGER_ROOT`.
 
 ## Target layout
 
-Recommended layout on the Pi:
+Recommended layout on the Ubuntu server:
 
 ```text
-/home/pi/beancount-ledger-web-deploy/
+/home/borui/beancount-ledger-web-deploy/
 ├── env/
 │   ├── prod.env
 │   └── preview.env
@@ -33,7 +32,7 @@ Recommended layout on the Pi:
     │   └── current -> releases/<sha>/
     └── runtime/
 
-/home/pi/beancount-ledger/          # private production ledger repo
+/home/borui/beancount-ledger/       # private production ledger repo
 ```
 
 The backend release owns the Go binary, `.agents/`, example ledgers, runtime
@@ -42,18 +41,18 @@ configuration, and the systemd service. The frontend release owns only the Vite
 
 ## GitHub runner
 
-Install a self-hosted runner on the Raspberry Pi and add the label:
+Install a self-hosted runner on the Ubuntu server and add the label:
 
 ```text
-raspberry-pi
+mibook
 ```
 
-Backend artifacts are built on GitHub-hosted ARM64 runners so the binary matches
-the Pi. Frontend artifacts are static and build on Ubuntu x64.
+Backend artifacts are built on GitHub-hosted Ubuntu x64 runners so the binary
+matches the Ubuntu server. Frontend artifacts are static and build on Ubuntu x64.
 
 ## Environment files
 
-Create Pi-side env files:
+Create server-side env files:
 
 ```bash
 mkdir -p ~/beancount-ledger-web-deploy/env
@@ -65,8 +64,8 @@ chmod 600 ~/beancount-ledger-web-deploy/env/*.env
 Example `prod.env`:
 
 ```bash
-LEDGER_ROOT=/home/pi/beancount-ledger
-RUNTIME_DIR=/home/pi/beancount-ledger-web-deploy/prod/runtime
+LEDGER_ROOT=/home/borui/beancount-ledger
+RUNTIME_DIR=/home/borui/beancount-ledger-web-deploy/prod/runtime
 AUTH_SECRET=replace-with-openssl-rand-base64-32
 APP_PASSWORD=replace-with-long-password
 
@@ -79,7 +78,7 @@ WEB_PUSH_VAPID_PUBLIC_KEY=
 WEB_PUSH_VAPID_PRIVATE_KEY=
 WEB_PUSH_SUBJECT=mailto:you@example.com
 
-BEAN_CHECK_BIN=/home/pi/.local/bin/bean-check
+BEAN_CHECK_BIN=/home/borui/.local/bin/bean-check
 LEDGER_GIT_AUTHOR_NAME=Your Name
 LEDGER_GIT_AUTHOR_EMAIL=you@example.com
 LEDGER_GIT_SCHEDULER=true
@@ -97,14 +96,17 @@ initializes it as a local Git repository, disables remote sync, and enables
 Configure these Actions secrets:
 
 ```text
-RASPI_DEPLOY_BASE=/home/pi/beancount-ledger-web-deploy
-RASPI_PROD_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/prod.env
-RASPI_PREVIEW_ENV_FILE=/home/pi/beancount-ledger-web-deploy/env/preview.env
-RASPI_FRONTEND_RELOAD_COMMAND=
+DEPLOY_BASE=/home/borui/beancount-ledger-web-deploy
+DEPLOY_PROD_ENV_FILE=/home/borui/beancount-ledger-web-deploy/env/prod.env
+DEPLOY_PREVIEW_ENV_FILE=/home/borui/beancount-ledger-web-deploy/env/preview.env
+FRONTEND_RELOAD_COMMAND=
 ```
 
-`RASPI_FRONTEND_RELOAD_COMMAND` is optional. It can stay empty when the Go
-service owns the public port and serves the frontend symlink directly.
+`FRONTEND_RELOAD_COMMAND` is optional. It can stay empty when the Go service
+owns the public port and serves the frontend symlink directly.
+
+Legacy `RASPI_*` secrets and variables are still accepted as fallbacks during
+migration.
 
 ## GitHub variables
 
@@ -113,14 +115,13 @@ Configure Actions variables:
 ```text
 PRODUCTION_URL=https://your-production-domain.example
 PREVIEW_URL=https://your-preview-domain.example
-RASPI_PROD_PORT=3001
-RASPI_PREVIEW_PORT=3002
+DEPLOY_PROD_PORT=3001
+DEPLOY_PREVIEW_PORT=3002
 ```
 
-These ports are the public app ports already routed from the outside world. The
-split deployment keeps using them; the backend deploy script stops the legacy
-`beancount-web-*` service before starting the new `beancount-ledger-api-*`
-service on the same port.
+These ports are the public app ports routed from the outside world. The backend
+deploy script stops the legacy `beancount-web-*` service before starting the
+`beancount-ledger-api-*` service on the same port.
 
 ## Backend systemd services
 
@@ -131,29 +132,30 @@ beancount-ledger-api-prod.service
 beancount-ledger-api-preview.service
 ```
 
-The generated service runs the Go binary on the existing public app port with
+The generated service runs the Go binary on the selected public app port with
 `STATIC_DIR=<deploy-base>/<env>/frontend/current/dist` and `SERVE_STATIC=true`.
-The frontend artifact is still deployed independently; the backend reads the
-stable frontend symlink at request time.
+The frontend artifact is deployed independently; the backend reads the stable
+frontend symlink at request time.
+
 By default, the service runs as the user executing the deploy script, with
 `HOME` set to that user's home directory so Git can read the user's GitHub
 credential helper configuration. Override with `SERVICE_USER` and
-`SERVICE_GROUP` if your runner uses a different deployment user.
+`SERVICE_GROUP` if the runner uses a different deployment user.
 
 For production ledger commits, configure a Git author either in `prod.env` with
 `LEDGER_GIT_AUTHOR_NAME` and `LEDGER_GIT_AUTHOR_EMAIL`, or directly in the
 private ledger repository:
 
 ```bash
-cd /home/pi/beancount-ledger
+cd /home/borui/beancount-ledger
 git config user.name "Your Name"
 git config user.email "you@example.com"
 ```
 
 ## Public routing
 
-Keep your existing public routing pointed at `RASPI_PROD_PORT` and
-`RASPI_PREVIEW_PORT`. You do not need to expose a new backend-only port.
+Keep production routing pointed at `DEPLOY_PROD_PORT` and preview routing pointed
+at `DEPLOY_PREVIEW_PORT`.
 
 Example Nginx production server:
 
@@ -176,7 +178,7 @@ Preview should proxy to the preview app port.
 ## Workflow behavior
 
 - Push to `main` deploys production.
-- Pull requests deploy preview when the PR is not a draft.
+- Pull requests deploy preview when the PR is ready for review.
 - Manual `workflow_dispatch` can deploy production or preview and can choose
   `all`, `backend`, or `frontend`.
 - Changes under `server/**`, `examples/**`, `.agents/**`, `docker/**`, or the
@@ -184,6 +186,7 @@ Preview should proxy to the preview app port.
 - Changes under `web/**` or the frontend deploy script build and deploy only the
   frontend.
 - Changes to the deploy workflow deploy both components.
-- When both components changed, backend deploy completes before frontend deploy.
+- When both components changed, frontend deploy completes before backend deploy,
+  so a backend restart sees the latest frontend symlink.
 
 Each component keeps the latest five releases for quick manual rollback.
