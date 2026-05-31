@@ -48,55 +48,100 @@
   alias: "欠朋友的钱"
 
 2026-01-01 open Income:Salary CNY
+  alias: "工资"
 2026-01-01 open Income:Bonus CNY
+  alias: "奖金"
 2026-01-01 open Income:Benefits:HousingFund CNY
+  alias: "公积金缴存"
 2026-01-01 open Income:Interest:Bank CNY
+  alias: "银行利息"
 2026-01-01 open Income:Interest:AlipayFund CNY
+  alias: "支付宝基金收益"
 2026-01-01 open Income:SideProject CNY
+  alias: "副业收入"
 2026-01-01 open Income:Rental CNY
+  alias: "租金收入"
 2026-01-01 open Income:Reimbursement CNY
+  alias: "报销收入"
 2026-01-01 open Income:Social:RedPacket CNY
+  alias: "红包收入"
 2026-01-01 open Income:Social:Gift CNY
+  alias: "礼金收入"
 2026-01-01 open Income:Other CNY
+  alias: "其他收入"
 
 2026-01-01 open Expenses:Food:Meals CNY
+  alias: "餐饮正餐"
 2026-01-01 open Expenses:Food:Drinks CNY
+  alias: "饮品咖啡"
 2026-01-01 open Expenses:Food:Groceries CNY
+  alias: "买菜日用品"
 
 2026-01-01 open Expenses:Transport:Public CNY
+  alias: "公共交通"
 2026-01-01 open Expenses:Transport:Taxi CNY
+  alias: "打车"
 2026-01-01 open Expenses:Transport:Parking CNY
+  alias: "停车费"
 2026-01-01 open Expenses:Transport:CarRental CNY
+  alias: "租车"
 2026-01-01 open Expenses:Transport:Other CNY
+  alias: "其他交通"
 
 2026-01-01 open Expenses:Housing:Rent CNY
+  alias: "房租"
 2026-01-01 open Expenses:Housing:Utilities CNY
+  alias: "水电燃气"
 2026-01-01 open Expenses:Housing:Property CNY
+  alias: "物业费"
 2026-01-01 open Expenses:Housing:Other CNY
+  alias: "其他居住"
 
 2026-01-01 open Expenses:Communication:Mobile CNY
+  alias: "手机话费"
 2026-01-01 open Expenses:Communication:Internet CNY
+  alias: "宽带网络"
 
 2026-01-01 open Expenses:Shopping:Daily CNY
+  alias: "日用购物"
 2026-01-01 open Expenses:Shopping:Clothing CNY
+  alias: "服饰鞋包"
 2026-01-01 open Expenses:Shopping:Electronics CNY
+  alias: "数码电器"
 2026-01-01 open Expenses:Shopping:Gifts CNY
+  alias: "礼物购物"
 2026-01-01 open Expenses:Shopping:Other CNY
+  alias: "其他购物"
 
 2026-01-01 open Expenses:Social:RedPacket CNY
+  alias: "红包支出"
 2026-01-01 open Expenses:Social:Gift CNY
+  alias: "礼金支出"
 2026-01-01 open Expenses:Social:Treat CNY
+  alias: "请客聚餐"
 
 2026-01-01 open Expenses:Digital:Subscription CNY
+  alias: "数字订阅"
 2026-01-01 open Expenses:Digital:Devices CNY
+  alias: "数码设备"
 2026-01-01 open Expenses:Health:Medical CNY
+  alias: "看病就医"
 2026-01-01 open Expenses:Health:Pharmacy CNY
+  alias: "买药"
 2026-01-01 open Expenses:Health:Fitness CNY
+  alias: "运动健身"
 2026-01-01 open Expenses:Entertainment CNY
+  alias: "娱乐休闲"
 2026-01-01 open Expenses:Travel CNY
+  alias: "旅行"
 2026-01-01 open Expenses:Fees CNY
+  alias: "手续费"
 2026-01-01 open Expenses:Investment:Loss CNY
+  alias: "投资亏损"
 2026-01-01 open Expenses:Unknown CNY
+  alias: "待分类支出"
 
 2026-01-01 open Equity:Opening-Balances CNY
+  alias: "期初余额"
 2026-01-01 open Equity:Balance-Adjustments CNY
+  alias: "余额调整"
