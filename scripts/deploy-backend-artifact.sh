@@ -87,9 +87,12 @@ fi
 if [[ -n "${APP_ENV_FILE:-}" ]]; then
   if [[ -f "$APP_ENV_FILE" ]]; then
     install -m 600 "$APP_ENV_FILE" "$RELEASE_DIR/.env.local"
-  else
+  elif [[ "$APP_ENV_FILE" == *"="* ]]; then
     umask 077
     printf '%s\n' "$APP_ENV_FILE" > "$RELEASE_DIR/.env.local"
+  else
+    echo "APP_ENV_FILE points to a missing env file: $APP_ENV_FILE" >&2
+    exit 1
   fi
 fi
 
