@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Eye, EyeOff } 
 import { formatCny } from "@/lib/money";
 import { CashFlowCard } from "./CashFlowCard";
 import { HiddenPanel, Metric } from "./shared";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountAnalytics, CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
 export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, creditCards, totalIncome, totalExpense, netIncome, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; creditCards: CreditCardAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
@@ -95,7 +96,7 @@ function CategoryAnalyticsPanel({ rows, topPayees, topPaymentAccounts, onSelectC
           {topRows.map((row) => <button key={row.account} className="rounded-xl border border-line bg-panel p-3 text-left transition-colors hover:bg-tag" onClick={() => onSelectCategory?.(row.account, "prefix")}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-warm">{row.account}</div>
+                <div className="truncate text-sm font-medium text-warm">{formatAccountOptionLabel(row.account, row.label, row.alias)}</div>
                 <div className="mt-1 text-xs text-stone">{row.txCount} 笔 · 占支出 {formatPercent(row.share)}</div>
               </div>
               <div className="shrink-0 text-right">
@@ -121,7 +122,7 @@ function CategoryAnalyticsPanel({ rows, topPayees, topPaymentAccounts, onSelectC
         </button> : <div className="rounded-xl border border-line bg-paper p-4 text-sm text-stone">当前周期没有 Expenses:Unknown。</div>}
       </CollapsibleAnalysisCard>
       <CollapsibleAnalysisCard title="Top 支付账户" subtitle="按 Assets / Liabilities 出账账户汇总">
-        <RankList rows={topPaymentAccounts.map((row) => ({ key: row.account, label: row.account, amount: row.amount, detail: `${row.txCount} 笔` }))} empty="当前周期没有支付账户支出" />
+        <RankList rows={topPaymentAccounts.map((row) => ({ key: row.account, label: formatAccountOptionLabel(row.account, row.label, row.alias), amount: row.amount, detail: `${row.txCount} 笔` }))} empty="当前周期没有支付账户支出" />
       </CollapsibleAnalysisCard>
     </div>
   </section>;
@@ -159,7 +160,7 @@ function TreeNode({ node, visible, onSelectCategory }: { node: IncomeStatementNo
       <span className="grid h-5 w-5 shrink-0 place-items-center text-stone">
         {hasChildren ? expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" /> : <span className="text-[10px] text-stone/50">·</span>}
       </span>
-      <span className="min-w-0 truncate text-sm">{node.label}</span>
+      <span className="min-w-0 truncate text-sm">{formatAccountOptionLabel(node.account, node.label, node.alias)}</span>
       <span className="ml-auto shrink-0 pl-3 text-sm tabular-nums">{visible ? formatCny(node.amount / 100) : "••••••"}</span>
       {isLeaf && <span className="shrink-0 text-xs text-stone">{node.txCount} 笔</span>}
     </button>

@@ -6,6 +6,7 @@ import { formatCny, formatCompactCny } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AccountAgentChat } from "./AccountAgentChat";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountGroup, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, Txn } from "./types";
 
 type BalanceRow = { account: string; label: string; value: number; active?: boolean; group?: AccountGroup };
@@ -53,7 +54,7 @@ function AccountSparkline({ points, liability }: { points: number[]; liability: 
 }
 
 export function BudgetPanel({ rows, full }: { rows: BudgetRow[]; full?: boolean }) {
-  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">预算</h2>{rows.map((r) => { const pct = r.ratio == null ? 0 : Math.round(r.ratio * 100); return <div key={r.account} className="border-b border-line py-3"><div className="flex justify-between gap-3 text-sm"><span>{r.account}</span><strong>{formatCny(r.spent / 100)} / {formatCny(r.budget / 100)}</strong></div><div className="mt-2 h-2 overflow-hidden rounded-xl bg-line"><div className={pct > 100 ? "h-full bg-[var(--danger)]" : "h-full bg-brand"} style={{ width: `${Math.min(pct, 140)}%` }} /></div><div className="mt-1 text-xs text-stone">剩余 {formatCny(r.remaining / 100)}，使用率 {r.ratio == null ? "n/a" : `${pct}%`}</div></div>; })}{!full && <p className="mt-3 text-xs text-stone">完整预算在“预算”页。</p>}</section>;
+  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">预算</h2>{rows.map((r) => { const pct = r.ratio == null ? 0 : Math.round(r.ratio * 100); return <div key={r.account} className="border-b border-line py-3"><div className="flex justify-between gap-3 text-sm"><span>{formatAccountOptionLabel(r.account, r.label, r.alias)}</span><strong>{formatCny(r.spent / 100)} / {formatCny(r.budget / 100)}</strong></div><div className="mt-2 h-2 overflow-hidden rounded-xl bg-line"><div className={pct > 100 ? "h-full bg-[var(--danger)]" : "h-full bg-brand"} style={{ width: `${Math.min(pct, 140)}%` }} /></div><div className="mt-1 text-xs text-stone">剩余 {formatCny(r.remaining / 100)}，使用率 {r.ratio == null ? "n/a" : `${pct}%`}</div></div>; })}{!full && <p className="mt-3 text-xs text-stone">完整预算在“预算”页。</p>}</section>;
 }
 
 export function CreditCardPanel({ cards, statuses, visibleAccountMap = {}, visible, summaryVisible, onToggleSummaryVisible, onToggleAccount }: { cards: CreditCardAnalytics[]; statuses: AccountStatus[]; visibleAccountMap?: Record<string, boolean>; visible: boolean; summaryVisible: boolean; onToggleSummaryVisible: () => void; onToggleAccount?: (account: string) => void }) {

@@ -405,7 +405,7 @@ function optionLabel(options: DashboardFilterOption[], value: string) {
 }
 
 function filterOptionLabel(option: DashboardFilterOption) {
-  return isLedgerAccount(option.value) ? formatAccountOptionLabel(option.value, option.label) : option.label;
+  return isLedgerAccount(option.value) ? formatAccountOptionLabel(option.value, option.label, option.alias) : option.label;
 }
 
 function typeLabel(value: string) {
@@ -652,15 +652,16 @@ function useFocusedSeries<T extends { account: string }>(series: T[]) {
   return { focusedAccount, visibleSeries, toggleFocus };
 }
 
-function InteractiveLegend({ series, focusedAccount, onToggle }: { series: { account: string; label: string }[]; focusedAccount: string | null; onToggle: (account: string) => void }) {
+function InteractiveLegend({ series, focusedAccount, onToggle }: { series: { account: string; alias?: string | null; label: string }[]; focusedAccount: string | null; onToggle: (account: string) => void }) {
   if (!series.length) return null;
   return <div className="mt-2 flex max-h-20 flex-wrap items-center justify-center gap-x-3 gap-y-2 overflow-y-auto px-1 text-xs" aria-label="图例">
     {series.map((item, index) => {
       const selected = focusedAccount === item.account;
       const muted = focusedAccount != null && !selected;
-      return <button key={item.account} type="button" className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2 py-1 transition ${selected ? "border-brand bg-tag text-ink" : muted ? "border-transparent text-stone opacity-55 hover:bg-tag hover:opacity-100" : "border-transparent text-stone hover:bg-tag"}`} onClick={() => onToggle(item.account)} aria-pressed={selected} title={selected ? "恢复全部显示" : `只显示 ${item.label}`}>
+      const label = formatAccountOptionLabel(item.account, item.label, item.alias);
+      return <button key={item.account} type="button" className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2 py-1 transition ${selected ? "border-brand bg-tag text-ink" : muted ? "border-transparent text-stone opacity-55 hover:bg-tag hover:opacity-100" : "border-transparent text-stone hover:bg-tag"}`} onClick={() => onToggle(item.account)} aria-pressed={selected} title={selected ? "恢复全部显示" : `只显示 ${label}`}>
         <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: COLORS[index % COLORS.length], opacity: muted ? 0.45 : 1 }} />
-        <span className="max-w-[11rem] truncate">{item.label}</span>
+        <span className="max-w-[11rem] truncate">{label}</span>
       </button>;
     })}
   </div>;
@@ -672,7 +673,7 @@ function CategoryRank({ rows, visible, onOpenTransactions }: { rows: DashboardSu
   return <div className="mt-4 space-y-3">
     {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ category: row.account }))}>
       <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-olive">{row.label}</span>
+        <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.total / 100) : "••••••"}</strong>
       </div>
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full" style={{ width: `${row.total / maxValue * 100}%`, background: COLORS[index % COLORS.length] }} /></div>
@@ -704,7 +705,7 @@ function BudgetPressure({ rows, visible, onSelectCategory }: { rows: DashboardSu
       const pct = Math.max(0, Math.min(140, (row.ratio ?? 0) * 100));
       return <button key={row.account} className="w-full rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="min-w-0 truncate text-olive">{row.label}</span>
+          <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
           <strong className={pct >= 100 ? "amount-expense" : pct >= 80 ? "amount-gold" : "amount-income"}>{row.ratio == null ? "暂无" : `${Math.round(pct)}%`}</strong>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-line"><div className={pct >= 100 ? "h-full bg-[rgb(var(--color-expense))]" : "h-full bg-brand"} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
@@ -734,7 +735,7 @@ function PaymentAccounts({ data, visible, onOpenTransactions }: { data: Dashboar
   return <div className="mt-4 space-y-3">
     {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.account }))}>
       <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-olive">{row.account.replace(/^(Assets|Liabilities):/, "")}</span>
+        <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
         <strong className="shrink-0 text-warm">{visible ? formatCompactCny(row.amount / 100) : "••••••"}</strong>
       </div>
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full bg-[var(--chart-tertiary)]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
@@ -826,8 +827,9 @@ function trendPointCount(series: { values: { month: string }[] }[]) {
   return bucketLabels(series).length;
 }
 
-function labelForSeries(series: { account: string; label: string }[], account: string) {
-  return series.find((row) => row.account === account)?.label ?? account;
+function labelForSeries(series: { account: string; alias?: string | null; label: string }[], account: string) {
+  const row = series.find((item) => item.account === account);
+  return row ? formatAccountOptionLabel(row.account, row.label, row.alias) : account;
 }
 
 const tooltipStyle = { background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" };

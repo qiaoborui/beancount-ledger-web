@@ -87,11 +87,25 @@ type Summary struct {
 
 type IncomeStatementNode struct {
 	Account  string                `json:"account"`
+	Alias    *string               `json:"alias,omitempty"`
 	Label    string                `json:"label"`
 	Amount   int                   `json:"amount"`
 	Children []IncomeStatementNode `json:"children"`
 	Depth    int                   `json:"depth"`
 	TxCount  int                   `json:"txCount"`
+}
+
+func ApplyIncomeStatementAccountLabels(nodes []IncomeStatementNode, accounts []Account) []IncomeStatementNode {
+	accountMap := accountByName(accounts)
+	out := make([]IncomeStatementNode, len(nodes))
+	for i, node := range nodes {
+		label, alias := accountLabelAlias(node.Account, accountMap)
+		node.Label = label
+		node.Alias = alias
+		node.Children = ApplyIncomeStatementAccountLabels(node.Children, accounts)
+		out[i] = node
+	}
+	return out
 }
 
 type NetWorthPoint struct {

@@ -55,12 +55,13 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 		t.Fatalf("income statement status=%d body=%s", res.Code, res.Body.String())
 	}
 	var body struct {
-		Income           []IncomeStatementNode      `json:"income"`
-		Expense          []IncomeStatementNode      `json:"expense"`
-		ExpenseAnalytics []ExpenseCategoryAnalytics `json:"expenseAnalytics"`
-		TotalIncome      int                        `json:"totalIncome"`
-		TotalExpense     int                        `json:"totalExpense"`
-		NetIncome        int                        `json:"netIncome"`
+		Income             []IncomeStatementNode      `json:"income"`
+		Expense            []IncomeStatementNode      `json:"expense"`
+		ExpenseAnalytics   []ExpenseCategoryAnalytics `json:"expenseAnalytics"`
+		TopPaymentAccounts []AccountAnalytics         `json:"topPaymentAccounts"`
+		TotalIncome        int                        `json:"totalIncome"`
+		TotalExpense       int                        `json:"totalExpense"`
+		NetIncome          int                        `json:"netIncome"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -73,6 +74,9 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 	}
 	if len(body.ExpenseAnalytics) != 1 || body.ExpenseAnalytics[0].Account != "Expenses:Food" || body.ExpenseAnalytics[0].TxCount != 1 || len(body.ExpenseAnalytics[0].TopPayees) != 1 {
 		t.Fatalf("expense analytics should include transaction counts and top payees, got %#v", body.ExpenseAnalytics)
+	}
+	if len(body.TopPaymentAccounts) != 1 || body.TopPaymentAccounts[0].Account != "Assets:Cash" || body.TopPaymentAccounts[0].Alias == nil || *body.TopPaymentAccounts[0].Alias != "现金" || body.TopPaymentAccounts[0].Label != "现金" {
+		t.Fatalf("top payment accounts should include alias and label, got %#v", body.TopPaymentAccounts)
 	}
 	if body.TotalIncome != 100000 || body.TotalExpense != 1200 || body.NetIncome != 98800 {
 		t.Fatalf("unexpected income statement totals: %#v", body)
@@ -107,7 +111,7 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if len(body.CategorySeries) != 1 || body.CategorySeries[0].Account != "Expenses:Food" || body.CategorySeries[0].Total != 1200 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Value != 1200 {
 		t.Fatalf("unexpected category series: %#v", body.CategorySeries)
 	}
-	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[30].Value != 98800 {
+	if len(body.AccountBalanceSeries) != 1 || body.AccountBalanceSeries[0].Account != "Assets:Cash" || body.AccountBalanceSeries[0].Alias == nil || *body.AccountBalanceSeries[0].Alias != "现金" || body.AccountBalanceSeries[0].Label != "现金" || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Value != -1200 || body.AccountBalanceSeries[0].Values[30].Value != 98800 {
 		t.Fatalf("unexpected account balance series: %#v", body.AccountBalanceSeries)
 	}
 	if len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[30].NetWorth != 98800 {
@@ -166,8 +170,8 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if body.KPIs.Income != 0 || body.KPIs.Expense != 1200 || body.KPIs.Net != -1200 || len(body.Anomalies) != 1 {
 		t.Fatalf("unexpected filtered dashboard data: %#v", body)
 	}
-	if len(body.FilterOptions.Categories) == 0 || body.FilterOptions.Categories[0].Value != "Expenses:Food" {
-		t.Fatalf("expected unfiltered category options, got %#v", body.FilterOptions.Categories)
+	if len(body.FilterOptions.Categories) == 0 || body.FilterOptions.Categories[0].Value != "Expenses:Food" || len(body.FilterOptions.Accounts) == 0 || body.FilterOptions.Accounts[0].Value != "Assets:Cash" || body.FilterOptions.Accounts[0].Alias == nil || *body.FilterOptions.Accounts[0].Alias != "现金" {
+		t.Fatalf("expected unfiltered category/account options with aliases, got categories=%#v accounts=%#v", body.FilterOptions.Categories, body.FilterOptions.Accounts)
 	}
 	if len(body.Annotations) == 0 || body.Annotations[0].Kind != "tag" || !strings.Contains(body.Annotations[0].Drilldown, "%23work") {
 		t.Fatalf("expected dashboard annotation drilldown, got %#v", body.Annotations)
