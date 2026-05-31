@@ -278,7 +278,7 @@ func (s *Server) importAccountOptions() ([]ginH, error) {
 	options := []ginH{}
 	for _, account := range accounts {
 		if account.Active {
-			options = append(options, ginH{"account": account.Account, "label": account.Label, "group": account.Group, "active": account.Active})
+			options = append(options, ginH{"account": account.Account, "alias": account.Alias, "label": account.Label, "group": account.Group, "active": account.Active})
 		}
 	}
 	return options, nil

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
 import { formatCny } from "@/lib/money";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import type { CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode } from "./types";
 
 type CashFlowNode = { name: string; color: string; value?: number };
@@ -104,7 +105,7 @@ function buildCashFlowData({ income, expense, expenseAnalytics, creditCards, tot
   };
   const positiveTotalIncome = Math.max(0, totalIncome);
   const visibleIncomeRows = sensitiveUnlocked ? topNodes(income, 4) : [];
-  const expenseRows = expenseAnalytics.length ? expenseAnalytics.map((row) => ({ label: row.label || row.account, amount: row.amount })) : topNodes(expense, 8);
+  const expenseRows = expenseAnalytics.length ? expenseAnalytics.map((row) => ({ label: formatAccountOptionLabel(row.account, row.label, row.alias), amount: row.amount })) : topNodes(expense, 8);
   const shownExpenses = expenseRows.filter((row) => row.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 8);
   const otherExpense = Math.max(0, totalExpense - shownExpenses.reduce((sum, row) => sum + row.amount, 0));
   const creditCardRepayments = sensitiveUnlocked ? creditCards.reduce((sum, card) => sum + card.periodRepayments, 0) : 0;
@@ -131,5 +132,5 @@ function buildCashFlowData({ income, expense, expenseAnalytics, creditCards, tot
 }
 
 function topNodes(nodes: IncomeStatementNode[], limit: number) {
-  return nodes.map((node) => ({ label: node.label || node.account, amount: node.amount })).filter((node) => node.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, limit);
+  return nodes.map((node) => ({ label: formatAccountOptionLabel(node.account, node.label, node.alias), amount: node.amount })).filter((node) => node.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, limit);
 }

@@ -89,9 +89,14 @@ func TestImportPreviewAndCommit(t *testing.T) {
 		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	var preview struct {
-		ImportID string        `json:"importId"`
-		Provider string        `json:"provider"`
-		Entries  []ImportEntry `json:"entries"`
+		ImportID       string        `json:"importId"`
+		Provider       string        `json:"provider"`
+		Entries        []ImportEntry `json:"entries"`
+		AccountOptions []struct {
+			Account string  `json:"account"`
+			Alias   *string `json:"alias"`
+			Label   string  `json:"label"`
+		} `json:"accountOptions"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
 		t.Fatal(err)
@@ -101,6 +106,15 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 	if preview.Entries[0].OrderID != "alipay-1" || preview.Entries[0].CategoryAccount != "Expenses:Food" {
 		t.Fatalf("preview did not parse DEG output: %#v", preview.Entries[0])
+	}
+	foundAlias := false
+	for _, option := range preview.AccountOptions {
+		if option.Account == "Assets:Cash" && option.Alias != nil && *option.Alias == "现金" && option.Label == "现金" {
+			foundAlias = true
+		}
+	}
+	if !foundAlias {
+		t.Fatalf("preview account options missing alias: %#v", preview.AccountOptions)
 	}
 
 	body, _ := json.Marshal(map[string]any{"importId": preview.ImportID, "provider": preview.Provider, "entries": preview.Entries})

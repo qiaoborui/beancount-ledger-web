@@ -23,6 +23,7 @@ type NetWorthWindows struct {
 
 type CreditCardAnalytics struct {
 	Account          string  `json:"account"`
+	Alias            *string `json:"alias,omitempty"`
 	Label            string  `json:"label"`
 	Balance          int     `json:"balance"`
 	Outstanding      int     `json:"outstanding"`
@@ -45,13 +46,16 @@ type PayeeAnalytics struct {
 }
 
 type AccountAnalytics struct {
-	Account string `json:"account"`
-	Amount  int    `json:"amount"`
-	TxCount int    `json:"txCount"`
+	Account string  `json:"account"`
+	Alias   *string `json:"alias,omitempty"`
+	Label   string  `json:"label"`
+	Amount  int     `json:"amount"`
+	TxCount int     `json:"txCount"`
 }
 
 type ExpenseCategoryAnalytics struct {
 	Account        string           `json:"account"`
+	Alias          *string          `json:"alias,omitempty"`
 	Label          string           `json:"label"`
 	Amount         int              `json:"amount"`
 	TxCount        int              `json:"txCount"`
@@ -124,7 +128,7 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 		if account.Group != "credit" || !strings.HasPrefix(account.Account, "Liabilities:") {
 			continue
 		}
-		row := CreditCardAnalytics{Account: account.Account, Label: account.Label, BillCycleStart: cycleStart, BillCycleEnd: cycleEnd, StatementDate: statementDate, DueDate: dueDate}
+		row := CreditCardAnalytics{Account: account.Account, Alias: account.Alias, Label: accountDisplayLabel(account.Account, account.Label), BillCycleStart: cycleStart, BillCycleEnd: cycleEnd, StatementDate: statementDate, DueDate: dueDate}
 		for _, txn := range txns {
 			var cardTotal, expenseAmount, assetOutflow int
 			for _, posting := range txn.Postings {
@@ -176,10 +180,11 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 	return out
 }
 
-func ExpenseAnalytics(txns []Transaction, start, end string) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
+func ExpenseAnalytics(txns []Transaction, start, end string, accounts []Account) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
 	current := collectExpenseCategories(txns, start, end)
 	prevStart, prevEnd := previousRange(start, end)
 	previous := collectExpenseCategories(txns, prevStart, prevEnd)
+	accountMap := accountByName(accounts)
 	totalExpense := 0
 	for _, row := range current {
 		totalExpense += row.amount
@@ -203,9 +208,11 @@ func ExpenseAnalytics(txns []Transaction, start, end string) ([]ExpenseCategoryA
 			value := float64(row.amount-previousAmount) / float64(previousAmount)
 			changeRatio = &value
 		}
+		label, alias := accountLabelAlias(account, accountMap)
 		categories = append(categories, ExpenseCategoryAnalytics{
 			Account:        account,
-			Label:          labelFor(account),
+			Alias:          alias,
+			Label:          label,
 			Amount:         row.amount,
 			TxCount:        len(row.txns),
 			Share:          share,
@@ -220,7 +227,7 @@ func ExpenseAnalytics(txns []Transaction, start, end string) ([]ExpenseCategoryA
 		}
 		return categories[i].Amount > categories[j].Amount
 	})
-	return categories, summarizePayees(txns, start, end), summarizePaymentAccounts(txns, start, end)
+	return categories, summarizePayees(txns, start, end), summarizePaymentAccounts(txns, start, end, accountMap)
 }
 
 type expenseCategoryAccumulator struct {
@@ -352,7 +359,7 @@ func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
 	return out
 }
 
-func summarizePaymentAccounts(txns []Transaction, start, end string) []AccountAnalytics {
+func summarizePaymentAccounts(txns []Transaction, start, end string, accounts map[string]Account) []AccountAnalytics {
 	type acc struct {
 		amount int
 		txns   map[string]bool
@@ -391,7 +398,8 @@ func summarizePaymentAccounts(txns []Transaction, start, end string) []AccountAn
 	}
 	out := []AccountAnalytics{}
 	for account, row := range rows {
-		out = append(out, AccountAnalytics{Account: account, Amount: row.amount, TxCount: len(row.txns)})
+		label, alias := accountLabelAlias(account, accounts)
+		out = append(out, AccountAnalytics{Account: account, Alias: alias, Label: label, Amount: row.amount, TxCount: len(row.txns)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
 	if len(out) > 8 {
@@ -420,6 +428,28 @@ func labelFor(account string) string {
 		return account
 	}
 	return base
+}
+
+func accountByName(accounts []Account) map[string]Account {
+	out := map[string]Account{}
+	for _, account := range accounts {
+		out[account.Account] = account
+	}
+	return out
+}
+
+func accountLabelAlias(account string, accounts map[string]Account) (string, *string) {
+	if acct, ok := accounts[account]; ok {
+		return accountDisplayLabel(account, acct.Label), acct.Alias
+	}
+	return labelFor(account), nil
+}
+
+func accountDisplayLabel(account, label string) string {
+	if strings.TrimSpace(label) != "" {
+		return label
+	}
+	return labelFor(account)
 }
 
 func abs(value int) int {

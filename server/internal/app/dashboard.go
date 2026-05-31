@@ -51,9 +51,10 @@ type DashboardAnnotation struct {
 }
 
 type DashboardFilterOption struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
-	Count int    `json:"count"`
+	Value string  `json:"value"`
+	Alias *string `json:"alias,omitempty"`
+	Label string  `json:"label"`
+	Count int     `json:"count"`
 }
 
 type DashboardFilterOptions struct {
@@ -83,6 +84,7 @@ type DashboardWeekdayExpense struct {
 
 type DashboardCategorySeries struct {
 	Account string                 `json:"account"`
+	Alias   *string                `json:"alias,omitempty"`
 	Label   string                 `json:"label"`
 	Total   int                    `json:"total"`
 	Values  []DashboardSeriesPoint `json:"values"`
@@ -90,6 +92,7 @@ type DashboardCategorySeries struct {
 
 type DashboardAccountSeries struct {
 	Account string                 `json:"account"`
+	Alias   *string                `json:"alias,omitempty"`
 	Label   string                 `json:"label"`
 	Group   string                 `json:"group"`
 	Values  []DashboardSeriesPoint `json:"values"`
@@ -97,6 +100,7 @@ type DashboardAccountSeries struct {
 
 type DashboardBudgetPressure struct {
 	Account   string   `json:"account"`
+	Alias     *string  `json:"alias,omitempty"`
 	Label     string   `json:"label"`
 	Budget    int      `json:"budget"`
 	Spent     int      `json:"spent"`
@@ -145,7 +149,8 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 		balances = CurrentBalances(txns)
 	}
 	summary := MonthSummary(start, end, txns)
-	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, end)
+	accountMap := accountByName(snapshot.Accounts)
+	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, end, accountMap)
 	assets, liabilities := balanceTotals(balances)
 	var savingsRate *float64
 	if summary.Income > 0 {
@@ -157,7 +162,7 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 		value := float64(budgetSpent) / float64(budget)
 		budgetUsage = &value
 	}
-	_, topPayees, topPaymentAccounts := ExpenseAnalytics(txns, start, end)
+	_, topPayees, topPaymentAccounts := ExpenseAnalytics(txns, start, end, snapshot.Accounts)
 
 	return DashboardSummary{
 		Start:                start,
@@ -168,7 +173,7 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 		CashflowSeries:       dashboardCashflowSeries(txns, start, end),
 		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, start, end),
 		WeekdayExpense:       dashboardWeekdayExpense(txns, start, end),
-		CategorySeries:       dashboardCategorySeries(txns, start, end, 8),
+		CategorySeries:       dashboardCategorySeries(txns, start, end, 8, accountMap),
 		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balances, start, end, 6),
 		BudgetPressure:       budgetPressure,
 		Anomalies:            dashboardAnomalies(txns, start, end, 10),
@@ -302,10 +307,7 @@ func intersectsString(left []string, right []string) bool {
 }
 
 func dashboardFilterOptions(txns []Transaction, accounts []Account, start, end string) DashboardFilterOptions {
-	accountLabels := map[string]string{}
-	for _, account := range accounts {
-		accountLabels[account.Account] = account.Label
-	}
+	accountMap := accountByName(accounts)
 	categoryCounts, accountCounts, payeeCounts, tagCounts := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -339,21 +341,22 @@ func dashboardFilterOptions(txns []Transaction, accounts []Account, start, end s
 		payeeCounts[payee]++
 	}
 	return DashboardFilterOptions{
-		Categories: dashboardOptionRows(categoryCounts, accountLabels),
-		Accounts:   dashboardOptionRows(accountCounts, accountLabels),
+		Categories: dashboardOptionRows(categoryCounts, accountMap),
+		Accounts:   dashboardOptionRows(accountCounts, accountMap),
 		Payees:     dashboardOptionRows(payeeCounts, nil),
 		Tags:       dashboardOptionRows(tagCounts, nil),
 	}
 }
 
-func dashboardOptionRows(counts map[string]int, labels map[string]string) []DashboardFilterOption {
+func dashboardOptionRows(counts map[string]int, accounts map[string]Account) []DashboardFilterOption {
 	rows := make([]DashboardFilterOption, 0, len(counts))
 	for value, count := range counts {
-		label := value
-		if labels != nil && labels[value] != "" {
-			label = labels[value]
+		label, alias := accountLabelAlias(value, accounts)
+		if accounts == nil {
+			label = value
+			alias = nil
 		}
-		rows = append(rows, DashboardFilterOption{Value: value, Label: label, Count: count})
+		rows = append(rows, DashboardFilterOption{Value: value, Alias: alias, Label: label, Count: count})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Count == rows[j].Count {
@@ -480,7 +483,7 @@ func dashboardWeekdayExpense(txns []Transaction, start, end string) []DashboardW
 	return out
 }
 
-func dashboardCategorySeries(txns []Transaction, start, end string, limit int) []DashboardCategorySeries {
+func dashboardCategorySeries(txns []Transaction, start, end string, limit int, accountLookup map[string]Account) []DashboardCategorySeries {
 	buckets := dashboardBuckets(start, end)
 	byAccount := map[string]map[string]int{}
 	totals := map[string]int{}
@@ -508,11 +511,12 @@ func dashboardCategorySeries(txns []Transaction, start, end string, limit int) [
 	}
 	out := make([]DashboardCategorySeries, 0, len(accounts))
 	for _, account := range accounts {
+		label, alias := accountLabelAlias(account, accountLookup)
 		values := make([]DashboardSeriesPoint, 0, len(buckets))
 		for _, bucket := range buckets {
 			values = append(values, DashboardSeriesPoint{Month: bucket.Label, Value: byAccount[account][bucket.Label]})
 		}
-		out = append(out, DashboardCategorySeries{Account: account, Label: labelFor(account), Total: totals[account], Values: values})
+		out = append(out, DashboardCategorySeries{Account: account, Alias: alias, Label: label, Total: totals[account], Values: values})
 	}
 	return out
 }
@@ -578,7 +582,7 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 		if group == "" {
 			group = accountGroup(accountName, nil, nil)
 		}
-		out = append(out, DashboardAccountSeries{Account: accountName, Label: label, Group: group, Values: seriesValues[accountName]})
+		out = append(out, DashboardAccountSeries{Account: accountName, Alias: acct.Alias, Label: label, Group: group, Values: seriesValues[accountName]})
 	}
 	return out
 }
@@ -611,7 +615,7 @@ func accountBucketEndBalances(txns []Transaction, accounts []string, buckets []d
 	return out
 }
 
-func dashboardBudgetPressure(budgets []Budget, actual map[string]int, end string) ([]DashboardBudgetPressure, int, int) {
+func dashboardBudgetPressure(budgets []Budget, actual map[string]int, end string, accounts map[string]Account) ([]DashboardBudgetPressure, int, int) {
 	latest := map[string]Budget{}
 	for _, budget := range budgets {
 		if budget.Date <= end {
@@ -652,7 +656,8 @@ func dashboardBudgetPressure(budgets []Budget, actual map[string]int, end string
 			value := float64(spent) / float64(budget)
 			ratio = &value
 		}
-		out = append(out, DashboardBudgetPressure{Account: account, Label: labelFor(account), Budget: budget, Spent: spent, Remaining: budget - spent, Ratio: ratio})
+		label, alias := accountLabelAlias(account, accounts)
+		out = append(out, DashboardBudgetPressure{Account: account, Alias: alias, Label: label, Budget: budget, Spent: spent, Remaining: budget - spent, Ratio: ratio})
 	}
 	return out, totalBudget, totalSpent
 }

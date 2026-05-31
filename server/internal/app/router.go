@@ -136,7 +136,9 @@ func (s *Server) budget(c *gin.Context) {
 	}
 	sort.Strings(keys)
 	rows := []gin.H{}
+	accountMap := accountByName(snapshot.Accounts)
 	for _, account := range keys {
+		label, alias := accountLabelAlias(account, accountMap)
 		budget := latest[account].Amount
 		spent := actual[account]
 		var ratio *float64
@@ -144,7 +146,7 @@ func (s *Server) budget(c *gin.Context) {
 			value := float64(spent) / float64(budget)
 			ratio = &value
 		}
-		rows = append(rows, gin.H{"account": account, "budget": budget, "spent": spent, "remaining": budget - spent, "ratio": ratio})
+		rows = append(rows, gin.H{"account": account, "alias": alias, "label": label, "budget": budget, "spent": spent, "remaining": budget - spent, "ratio": ratio})
 	}
 	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "rows": rows})
 }
@@ -156,8 +158,10 @@ func (s *Server) incomeStatement(c *gin.Context) {
 	}
 	start, end := parseTimeParams(c)
 	unlocked := isSensitiveUnlocked(c)
-	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end)
+	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
 	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
+	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
+	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
 	incomeNodes := []IncomeStatementNode{}
 	if unlocked {
 		incomeNodes = allIncomeNodes
@@ -309,7 +313,7 @@ func (s *Server) reconciliation(c *gin.Context) {
 				status = "asserted"
 			}
 		}
-		rows = append(rows, gin.H{"account": account.Account, "label": account.Label, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
+		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
 	}
 	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "monthPrefix": start[:7], "rows": rows})
 }

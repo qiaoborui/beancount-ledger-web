@@ -23,7 +23,7 @@ export function EntryModal({ children, onClose }: { children: ReactNode; onClose
 
 export function EntryPanel({ nl, setNl, onParse, manual, setManual, onPreviewManual, previews, onRemovePreview, onAppendPreviews, parseStatus, parseMessage, appendStatus, expenseAccounts, incomeAccounts, paymentAccounts, accountLabels }: { nl: string; setNl: (value: string) => void; onParse: () => void; manual: ManualForm; setManual: (value: ManualForm) => void; onPreviewManual: () => void; previews: ParsedTransaction[]; onRemovePreview: (index: number) => void; onAppendPreviews: () => void; parseStatus: ParseStatus; parseMessage: string; appendStatus: AppendStatus; expenseAccounts: string[]; incomeAccounts: string[]; paymentAccounts: string[]; accountLabels: Record<string, string> }) {
   const categoryOptions = manual.kind === "income" ? incomeAccounts : expenseAccounts;
-  const optionLabel = (a: string) => `${accountLabels[a] ?? a} · ${a}`;
+  const optionLabel = (a: string) => accountLabels[a] ?? a;
   const busy = parseStatus === "parsing" || appendStatus === "writing";
   const [manualOpen, setManualOpen] = useState(false);
   const toAccountOptions = paymentAccounts.filter((a) => a.startsWith("Assets:") || manual.kind === "transfer");

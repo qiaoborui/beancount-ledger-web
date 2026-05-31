@@ -20,12 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb";
 type ProviderOverride = "auto" | Provider;
 
-type AccountOption = { account: string; label: string; group: string; active: boolean };
+type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
 type ImportPosting = { account: string; amount: string; currency: string };
 type ImportEntry = {
   id: string;
@@ -131,7 +132,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function categoryAccountOptions(entry: ImportEntry) {
     if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
-    return [{ account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
+    const previewAccount = preview?.accountOptions.find((account) => account.account === entry.categoryAccount);
+    return [previewAccount ?? { account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
   }
 
   function resetForFile(next: File | null) {
@@ -429,11 +431,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             ) : null}
 
             {preview.warnings.length > 0 ? (
-              <Alert className="space-y-2">
+              <Alert className="grid-cols-1 space-y-2">
                 {preview.warnings.map((warning) => (
-                  <div key={warning} className="flex items-start gap-2">
+                  <div key={warning} className="flex min-w-0 items-start gap-2">
                     <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
-                    <span>{warning}</span>
+                    <span className="min-w-0 break-words leading-6">{warning}</span>
                   </div>
                 ))}
               </Alert>
@@ -471,7 +473,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="max-h-80">
-                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{account.label} · {account.account}</SelectItem>)}
+                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </Label>
