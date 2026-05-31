@@ -26,7 +26,7 @@ import { MobileSheet } from "./MobileSheet";
 type Provider = "alipay" | "wechat" | "cmb";
 type ProviderOverride = "auto" | Provider;
 
-type AccountOption = { account: string; label: string; group: string; active: boolean };
+type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
 type ImportPosting = { account: string; amount: string; currency: string };
 type ImportEntry = {
   id: string;
@@ -132,7 +132,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function categoryAccountOptions(entry: ImportEntry) {
     if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
-    return [{ account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
+    const previewAccount = preview?.accountOptions.find((account) => account.account === entry.categoryAccount);
+    return [previewAccount ?? { account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
   }
 
   function resetForFile(next: File | null) {
@@ -472,7 +473,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="max-h-80">
-                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label)}</SelectItem>)}
+                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </Label>
