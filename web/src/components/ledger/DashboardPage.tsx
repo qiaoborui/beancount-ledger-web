@@ -8,6 +8,7 @@ import { timeRangeToParams } from "@/lib/timeRange";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { TimeRange } from "@/lib/timeRange";
+import { formatAccountOptionLabel, isLedgerAccount } from "./accountDisplay";
 import type { DashboardFilterOption, DashboardSummary } from "./types";
 
 const COLORS = [
@@ -367,7 +368,7 @@ function MultiFilterSelect({ label, value, options, onChange }: { label: string;
           const optionId = `dashboard-filter-${Array.from(label).map((char) => char.charCodeAt(0).toString(36)).join("-")}-${index}`;
           return <div key={option.value} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-tag">
           <Checkbox id={optionId} checked={selected.has(option.value)} onCheckedChange={() => toggle(option.value)} />
-          <label htmlFor={optionId} className="min-w-0 flex-1 cursor-pointer truncate text-olive">{option.label}</label>
+          <label htmlFor={optionId} className="min-w-0 flex-1 cursor-pointer truncate text-olive" title={filterOptionLabel(option)}>{filterOptionLabel(option)}</label>
           {option.count > 0 && <span className="shrink-0 text-xs text-stone">{option.count}</span>}
         </div>;
         }) : <div className="px-2 py-3 text-sm text-stone">暂无可选项</div>}
@@ -399,7 +400,12 @@ function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState
 }
 
 function optionLabel(options: DashboardFilterOption[], value: string) {
-  return options.find((option) => option.value === value)?.label ?? value;
+  const option = options.find((item) => item.value === value);
+  return option ? filterOptionLabel(option) : value;
+}
+
+function filterOptionLabel(option: DashboardFilterOption) {
+  return isLedgerAccount(option.value) ? formatAccountOptionLabel(option.value, option.label) : option.label;
 }
 
 function typeLabel(value: string) {

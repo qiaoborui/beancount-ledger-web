@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb";
@@ -471,7 +472,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="max-h-80">
-                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{account.label} · {account.account}</SelectItem>)}
+                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label)}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </Label>

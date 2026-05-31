@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { MobileSheet } from "./MobileSheet";
 import type { ParsedTransaction } from "@/lib/schemas";
+import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountView, MetadataValue, Txn } from "./types";
 
 function transactionKey(txn: Txn): string {
@@ -226,6 +227,8 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [selected, setSelected] = useState<Txn | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
+  const accountOptionLabels = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
+  const accountOptionLabel = (account: string) => accountOptionLabels[account] ?? account;
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
   const debouncedMetadataQuery = useDebouncedValue(metadataQuery ?? "");
@@ -301,7 +304,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             </SelectTrigger>
             <SelectContent className="max-h-80">
               <SelectItem value={ALL_FILTER_VALUE}>全部分类</SelectItem>
-              {categories.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+              {categories.map((category) => <SelectItem key={category} value={category}>{accountOptionLabel(category)}</SelectItem>)}
             </SelectContent>
           </Select>
         )}
@@ -321,7 +324,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
           <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
           {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-xl bg-paper text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
-          <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} />)}</datalist>
+          <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} label={accountOptionLabel(category)} />)}</datalist>
           {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-xl bg-paper text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-metadata-options`}>{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
         </div>
@@ -438,7 +441,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const [pendingAction, setPendingAction] = useState<PendingTransactionAction | null>(null);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const accountOptions = useMemo(() => accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account)), [accounts, postings]);
-  const optionLabel = (account: AccountView) => `${account.label} · ${account.account}`;
+  const optionLabel = (account: AccountView) => formatAccountOptionLabel(account);
   const reverseDate = new Date().toISOString().slice(0, 10);
   const hasUnsavedChanges = editing && (
     date !== txn.date ||
@@ -501,7 +504,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
                 </SelectContent>
               </Select>
               <Input list={`txn-account-options-${i}`} className="mt-2 h-11 bg-panel text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} />
-              <datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account}>{optionLabel(account)}</option>)}</datalist>
+              <datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account} label={optionLabel(account)} />)}</datalist>
             </div>
             <Input className="h-11 bg-panel" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
           </div>)}

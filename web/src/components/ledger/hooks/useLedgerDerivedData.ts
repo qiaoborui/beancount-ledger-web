@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { AccountView, Summary } from "../types";
+import { formatAccountOptionLabel } from "../accountDisplay";
 
 export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page }: { summary: Summary | null; accounts: AccountView[]; balances: Record<string, number>; netWorthRows: { date: string; assets: number; liabilities: number; netWorth: number }[]; page: string }) {
   const chart = useMemo(() => {
@@ -11,7 +12,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows
     }));
   }, [summary]);
 
-  const accountLabelMap = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, account.label])), [accounts]);
+  const accountLabelMap = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.active), [accounts]);
   const balanceAccounts = useMemo(() => accounts.filter((account) => !["expense", "income", "equity"].includes(account.group)), [accounts]);
   const expenseAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "expense").map((account) => account.account), [activeAccounts]);
