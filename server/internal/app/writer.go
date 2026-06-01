@@ -63,13 +63,82 @@ type fileSnapshot struct {
 	content []byte
 }
 
+type LedgerWriteTransaction struct {
+	snapshots map[string]fileSnapshot
+}
+
 func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
 	return &LedgerWriter{cfg: cfg, cache: cache}
 }
 
-func (w *LedgerWriter) AppendBeanText(date, beanText string) error {
+func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
+	if err := apply(tx); err != nil {
+		tx.Restore()
+		return err
+	}
+	if err := w.validateAndClear(); err != nil {
+		tx.Restore()
+		return err
+	}
+	return nil
+}
+
+func (tx *LedgerWriteTransaction) Snapshot(file string) error {
+	if _, ok := tx.snapshots[file]; ok {
+		return nil
+	}
+	content, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		tx.snapshots[file] = fileSnapshot{existed: false}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	tx.snapshots[file] = fileSnapshot{existed: true, content: content}
+	return nil
+}
+
+func (tx *LedgerWriteTransaction) WriteFile(file string, content []byte, perm os.FileMode) error {
+	if err := tx.Snapshot(file); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(file, content, perm)
+}
+
+func (tx *LedgerWriteTransaction) CopyFile(source, dest string, perm os.FileMode) error {
+	content, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	return tx.WriteFile(dest, content, perm)
+}
+
+func (tx *LedgerWriteTransaction) Restore() {
+	files := make([]string, 0, len(tx.snapshots))
+	for file := range tx.snapshots {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	for i := len(files) - 1; i >= 0; i-- {
+		file := files[i]
+		snap := tx.snapshots[file]
+		if snap.existed {
+			_ = os.MkdirAll(filepath.Dir(file), 0o755)
+			_ = os.WriteFile(file, snap.content, 0o644)
+		} else {
+			_ = os.Remove(file)
+		}
+	}
+}
+
+func (w *LedgerWriter) AppendBeanText(date, beanText string) error {
 	return w.appendItemsChecked([]appendItem{{date: date, beanText: beanText}})
 }
 
@@ -88,8 +157,6 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 		items = append(items, appendItem{date: entry.Date, beanText: text})
 		texts = append(texts, text)
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	if err := w.appendItemsChecked(items); err != nil {
 		return nil, err
 	}
@@ -97,143 +164,119 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 }
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	file := accountsBeanPath(w.cfg)
-	before, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-	sep := "\n\n"
-	if strings.HasSuffix(string(before), "\n") {
-		sep = "\n"
-	}
-	next := string(before) + sep + strings.TrimRight(AccountToBean(input.Date, input.Account, input.Alias, input.Currency), "\n") + "\n"
-	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
-		return err
-	}
-	if err := w.validateAndClear(); err != nil {
-		_ = os.WriteFile(file, before, 0o644)
-		return err
-	}
-	return nil
+	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		file := accountsBeanPath(w.cfg)
+		before, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		sep := "\n\n"
+		if strings.HasSuffix(string(before), "\n") {
+			sep = "\n"
+		}
+		next := string(before) + sep + strings.TrimRight(AccountToBean(input.Date, input.Account, input.Alias, input.Currency), "\n") + "\n"
+		return tx.WriteFile(file, []byte(next), 0o644)
+	})
 }
 
 func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	file := accountsBeanPath(w.cfg)
-	before, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-	accounts, err := ParseAccounts(w.cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateAccountOperations(operations, accounts); err != nil {
-		return nil, err
-	}
-	next := string(before)
 	texts := []string{}
-	for _, operation := range operations {
-		var text string
-		switch operation.Kind {
-		case "create":
-			if operation.Currency == "" {
-				operation.Currency = "CNY"
-			}
-			text = AccountToBeanWithMetadata(operation.Date, operation.Account, operation.Alias, operation.Currency, accountOperationMetadata(operation))
-			next = appendText(next, text)
-		case "update":
-			var updated string
-			updated, err = updateAccountMetadata(next, operation)
-			if err != nil {
-				return nil, err
-			}
-			next = updated
-			text = operationSummary(operation)
-		case "disable":
-			text = fmt.Sprintf("%s close %s\n", operation.Date, operation.Account)
-			next = appendText(next, text)
+	if err := w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		file := accountsBeanPath(w.cfg)
+		before, err := os.ReadFile(file)
+		if err != nil {
+			return err
 		}
-		texts = append(texts, text)
-	}
-	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
-		return nil, err
-	}
-	if err := w.validateAndClear(); err != nil {
-		_ = os.WriteFile(file, before, 0o644)
+		accounts, err := ParseAccounts(w.cfg)
+		if err != nil {
+			return err
+		}
+		if err := validateAccountOperations(operations, accounts); err != nil {
+			return err
+		}
+		next := string(before)
+		texts = []string{}
+		for _, operation := range operations {
+			var text string
+			switch operation.Kind {
+			case "create":
+				if operation.Currency == "" {
+					operation.Currency = "CNY"
+				}
+				text = AccountToBeanWithMetadata(operation.Date, operation.Account, operation.Alias, operation.Currency, accountOperationMetadata(operation))
+				next = appendText(next, text)
+			case "update":
+				var updated string
+				updated, err = updateAccountMetadata(next, operation)
+				if err != nil {
+					return err
+				}
+				next = updated
+				text = operationSummary(operation)
+			case "disable":
+				text = fmt.Sprintf("%s close %s\n", operation.Date, operation.Account)
+				next = appendText(next, text)
+			}
+			texts = append(texts, text)
+		}
+		return tx.WriteFile(file, []byte(next), 0o644)
+	}); err != nil {
 		return nil, err
 	}
 	return texts, nil
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	file, err := editableLedgerFile(w.cfg, source.File)
-	if err != nil {
-		return err
-	}
-	before, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-	lines, start, end, err := transactionBlock(string(before), source)
-	if err != nil {
-		return err
-	}
-	replacement := strings.Split(strings.TrimRight(TransactionToBean(entry), "\n"), "\n")
-	nextLines := append([]string{}, lines[:start]...)
-	nextLines = append(nextLines, replacement...)
-	nextLines = append(nextLines, lines[end:]...)
-	next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
-	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
-		return err
-	}
-	if err := w.validateAndClear(); err != nil {
-		_ = os.WriteFile(file, before, 0o644)
-		return err
-	}
-	return nil
+	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		file, err := editableLedgerFile(w.cfg, source.File)
+		if err != nil {
+			return err
+		}
+		before, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		lines, start, end, err := transactionBlock(string(before), source)
+		if err != nil {
+			return err
+		}
+		replacement := strings.Split(strings.TrimRight(TransactionToBean(entry), "\n"), "\n")
+		nextLines := append([]string{}, lines[:start]...)
+		nextLines = append(nextLines, replacement...)
+		nextLines = append(nextLines, lines[end:]...)
+		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
+		return tx.WriteFile(file, []byte(next), 0o644)
+	})
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	file, err := editableLedgerFile(w.cfg, source.File)
-	if err != nil {
-		return err
-	}
-	before, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-	lines, start, end, err := transactionBlock(string(before), source)
-	if err != nil {
-		return err
-	}
-	note := ""
-	if strings.TrimSpace(reason) != "" {
-		note = ": " + escapeBean(strings.TrimSpace(reason))
-	}
-	commented := []string{"; deleted " + time.Now().Format("2006-01-02") + note}
-	for _, line := range lines[start:end] {
-		commented = append(commented, "; "+line)
-	}
-	nextLines := append([]string{}, lines[:start]...)
-	nextLines = append(nextLines, commented...)
-	nextLines = append(nextLines, lines[end:]...)
-	next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
-	if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
-		return err
-	}
-	if err := w.validateAndClear(); err != nil {
-		_ = os.WriteFile(file, before, 0o644)
-		return err
-	}
-	return nil
+	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		file, err := editableLedgerFile(w.cfg, source.File)
+		if err != nil {
+			return err
+		}
+		before, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		lines, start, end, err := transactionBlock(string(before), source)
+		if err != nil {
+			return err
+		}
+		note := ""
+		if strings.TrimSpace(reason) != "" {
+			note = ": " + escapeBean(strings.TrimSpace(reason))
+		}
+		commented := []string{"; deleted " + time.Now().Format("2006-01-02") + note}
+		for _, line := range lines[start:end] {
+			commented = append(commented, "; "+line)
+		}
+		nextLines := append([]string{}, lines[:start]...)
+		nextLines = append(nextLines, commented...)
+		nextLines = append(nextLines, lines[end:]...)
+		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
+		return tx.WriteFile(file, []byte(next), 0o644)
+	})
 }
 
 type appendItem struct {
@@ -242,32 +285,6 @@ type appendItem struct {
 }
 
 func (w *LedgerWriter) appendItemsChecked(items []appendItem) error {
-	snapshots := map[string]fileSnapshot{}
-	snapshot := func(file string) error {
-		if _, ok := snapshots[file]; ok {
-			return nil
-		}
-		content, err := os.ReadFile(file)
-		if errors.Is(err, os.ErrNotExist) {
-			snapshots[file] = fileSnapshot{existed: false}
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		snapshots[file] = fileSnapshot{existed: true, content: content}
-		return nil
-	}
-	restore := func() {
-		for file, snap := range snapshots {
-			if snap.existed {
-				_ = os.MkdirAll(filepath.Dir(file), 0o755)
-				_ = os.WriteFile(file, snap.content, 0o644)
-			} else {
-				_ = os.Remove(file)
-			}
-		}
-	}
 	byFile := map[string][]appendItem{}
 	for _, item := range items {
 		file := transactionFileForDate(w.cfg, item.date)
@@ -278,46 +295,41 @@ func (w *LedgerWriter) appendItemsChecked(items []appendItem) error {
 		files = append(files, file)
 	}
 	sort.Strings(files)
-	for _, file := range files {
-		fileItems := byFile[file]
-		if err := w.ensureMonthlyFileAndInclude(file, fileItems[0].date, snapshot); err != nil {
-			restore()
-			return err
+	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		for _, file := range files {
+			fileItems := byFile[file]
+			if err := w.ensureMonthlyFileAndInclude(tx, file, fileItems[0].date); err != nil {
+				return err
+			}
+			before, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			next := string(before)
+			for _, item := range fileItems {
+				next = appendText(next, item.beanText)
+			}
+			if err := tx.WriteFile(file, []byte(next), 0o644); err != nil {
+				return err
+			}
 		}
-		before, err := os.ReadFile(file)
-		if err != nil {
-			restore()
-			return err
-		}
-		next := string(before)
-		for _, item := range fileItems {
-			next = appendText(next, item.beanText)
-		}
-		if err := os.WriteFile(file, []byte(next), 0o644); err != nil {
-			restore()
-			return err
-		}
-	}
-	if err := w.validateAndClear(); err != nil {
-		restore()
-		return err
-	}
-	return nil
+		return nil
+	})
 }
 
-func (w *LedgerWriter) ensureMonthlyFileAndInclude(file, date string, snapshot func(string) error) error {
+func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, file, date string) error {
 	main := mainBeanPath(w.cfg)
-	if err := snapshot(main); err != nil {
+	if err := tx.Snapshot(main); err != nil {
 		return err
 	}
-	if err := snapshot(file); err != nil {
+	if err := tx.Snapshot(file); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
 	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-		if err := os.WriteFile(file, []byte("; "+date[:7]+" 交易记录\n"), 0o644); err != nil {
+		if err := tx.WriteFile(file, []byte("; "+date[:7]+" 交易记录\n"), 0o644); err != nil {
 			return err
 		}
 	}
@@ -335,7 +347,7 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(file, date string, snapshot f
 	if !strings.HasSuffix(string(mainBefore), "\n") {
 		sep = "\n"
 	}
-	return os.WriteFile(main, []byte(string(mainBefore)+sep+includeLine+"\n"), 0o644)
+	return tx.WriteFile(main, []byte(string(mainBefore)+sep+includeLine+"\n"), 0o644)
 }
 
 func (w *LedgerWriter) validateAndClear() error {
