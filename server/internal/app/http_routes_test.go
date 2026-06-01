@@ -202,6 +202,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ai/chat":                    true,
 		"POST /api/ai/accounts-chat":           true,
 		"GET /api/git/status":                  true,
+		"GET /api/git/diff":                    true,
 		"POST /api/git/pull":                   true,
 		"POST /api/git/commit":                 true,
 		"GET /api/push/subscription":           true,
@@ -278,6 +279,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		{http.MethodGet, "/api/ledger/account-status", ""},
 		{http.MethodGet, "/api/ledger/reconciliation?start=2026-05-01&end=2026-06-01", ""},
 		{http.MethodGet, "/api/git/status", ""},
+		{http.MethodGet, "/api/git/diff?path=main.bean", ""},
 		{http.MethodPost, "/api/git/pull", ""},
 	} {
 		res := requestWithCookies(router, route.method, route.path, route.body, cookies)
