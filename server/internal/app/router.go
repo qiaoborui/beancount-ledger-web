@@ -38,6 +38,100 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 	return snapshot, true
 }
 
+func (s *Server) ledgerBootstrap(c *gin.Context) {
+	snapshot, ok := s.snapshot(c, false)
+	if !ok {
+		return
+	}
+	start, end := parseTimeParams(c)
+	unlocked := isSensitiveUnlocked(c)
+
+	summary := MonthSummary(start, end, snapshot.Transactions)
+	txns := append([]Transaction(nil), snapshot.Transactions...)
+	sort.Slice(txns, func(i, j int) bool { return txns[i].Date > txns[j].Date })
+	filteredTxns := []Transaction{}
+	for _, txn := range txns {
+		if txn.Date < start || txn.Date >= end {
+			continue
+		}
+		if !unlocked {
+			hasIncome := false
+			for _, posting := range txn.Postings {
+				if strings.HasPrefix(posting.Account, "Income:") {
+					hasIncome = true
+				}
+			}
+			if hasIncome {
+				continue
+			}
+		}
+		filteredTxns = append(filteredTxns, txn)
+	}
+
+	netWorthRows := []NetWorthPoint{}
+	monthEndRows := []NetWorthPoint{}
+	var windows any
+	creditCards := []CreditCardAnalytics{}
+	reconciliationRows := []gin.H{}
+	accountStatuses := []AccountStatus{}
+	if unlocked {
+		allRows := NetWorthHistory(snapshot.Transactions)
+		for _, row := range allRows {
+			if row.Date >= start && row.Date < end {
+				netWorthRows = append(netWorthRows, row)
+			}
+		}
+		monthEndRows = MonthEndNetWorth(netWorthRows)
+		windows = NetWorthChangeWindows(allRows)
+		creditCards = CreditCards(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end)
+		reconciliationRows = buildReconciliationRows(snapshot, start, end)
+		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
+	} else {
+		for day, value := range summary.Days {
+			value["income"] = 0
+			summary.Days[day] = value
+		}
+		summary.Income, summary.Net = 0, 0
+	}
+
+	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
+	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
+	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
+	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
+	incomeNodes := []IncomeStatementNode{}
+	if unlocked {
+		incomeNodes = allIncomeNodes
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"start":              start,
+		"end":                end,
+		"summary":            summary,
+		"balances":           statusMap(unlocked, snapshot.Balances),
+		"netWorthHistory":    netWorthRows,
+		"monthEndNetWorth":   monthEndRows,
+		"netWorthWindows":    windows,
+		"creditCards":        creditCards,
+		"transactions":       filteredTxns,
+		"budgetRows":         buildBudgetRows(snapshot, start, end),
+		"reconciliationRows": reconciliationRows,
+		"accounts":           snapshot.Accounts,
+		"incomeStatement": gin.H{
+			"income":             incomeNodes,
+			"expense":            expenseNodes,
+			"totalIncome":        statusInt(unlocked, totalIncome),
+			"totalExpense":       totalExpense,
+			"expenseAnalytics":   expense,
+			"topPayees":          topPayees,
+			"topPaymentAccounts": topAccounts,
+			"netIncome":          statusInt(unlocked, netIncome),
+		},
+		"accountStatuses":   accountStatuses,
+		"ledgerVersion":     snapshot.LedgerVersion,
+		"sensitiveUnlocked": unlocked,
+	})
+}
+
 func (s *Server) summary(c *gin.Context) {
 	snapshot, ok := s.snapshot(c, false)
 	if !ok {
@@ -114,6 +208,10 @@ func (s *Server) budget(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
+	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "rows": buildBudgetRows(snapshot, start, end)})
+}
+
+func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 	latest := map[string]Budget{}
 	for _, budget := range snapshot.Budgets {
 		if budget.Date <= end {
@@ -148,7 +246,7 @@ func (s *Server) budget(c *gin.Context) {
 		}
 		rows = append(rows, gin.H{"account": account, "alias": alias, "label": label, "budget": budget, "spent": spent, "remaining": budget - spent, "ratio": ratio})
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "rows": rows})
+	return rows
 }
 
 func (s *Server) incomeStatement(c *gin.Context) {
@@ -294,6 +392,10 @@ func (s *Server) reconciliation(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
+	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "monthPrefix": start[:7], "rows": buildReconciliationRows(snapshot, start, end)})
+}
+
+func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 	rows := []gin.H{}
 	for _, account := range snapshot.Accounts {
 		if !account.Active || !(strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
@@ -315,7 +417,7 @@ func (s *Server) reconciliation(c *gin.Context) {
 		}
 		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "monthPrefix": start[:7], "rows": rows})
+	return rows
 }
 
 func (s *Server) appendEntry(c *gin.Context) {

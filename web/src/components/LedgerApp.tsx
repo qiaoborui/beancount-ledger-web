@@ -363,7 +363,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         event.preventDefault();
         focusTransactionSearch();
       }
-      if (event.key.toLowerCase() === "n") {
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
         event.preventDefault();
         openManualEntry();
       }

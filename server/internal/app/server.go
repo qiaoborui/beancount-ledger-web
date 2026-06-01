@@ -46,6 +46,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/passkey/register/verify", s.passkeyRegisterVerify)
 
 	ledger := api.Group("/ledger")
+	ledger.GET("/bootstrap", s.ledgerBootstrap)
 	ledger.GET("/version", s.ledgerVersion)
 	ledger.GET("/summary", s.summary)
 	ledger.GET("/transactions", s.transactions)
