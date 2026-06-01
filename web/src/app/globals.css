@@ -192,6 +192,8 @@ html[data-theme="dark"] {
 * { box-sizing: border-box; }
 html {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   background: var(--brand);
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
@@ -201,6 +203,8 @@ html {
 body {
   min-height: 100vh;
   min-height: 100dvh;
+  max-width: 100%;
+  overflow-x: hidden;
   margin: 0;
   background: var(--body-gradient);
   color: var(--ink);

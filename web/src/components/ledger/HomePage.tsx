@@ -16,12 +16,12 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
   const budgetPressure = budgetRows.filter((row) => row.ratio !== null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0)).slice(0, 3);
   const healthCounts = accountStatuses.reduce<Record<AccountStatus["status"], number>>((acc, item) => ({ ...acc, [item.status]: acc[item.status] + 1 }), { green: 0, red: 0, yellow: 0, grey: 0 });
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const dashboardGridClass = "grid gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
+  const dashboardGridClass = "grid min-w-0 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
 
   return <>
     <div className={`${dashboardGridClass} xl:items-stretch`}>
-      <div className="flex flex-col gap-4 xl:h-full">
-        <section className="card overflow-hidden p-0">
+      <div className="flex min-w-0 flex-col gap-4 xl:h-full">
+        <section className="card min-w-0 overflow-hidden p-0">
           <div className="border-l-4 border-brand p-4 md:p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -40,7 +40,7 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
             <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
           </div>
         </section>
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-rows-2 xl:flex-1">
+        <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-rows-2 xl:flex-1">
           <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
           <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0] ? formatAccountOptionLabel(budgetPressure[0].account, budgetPressure[0].label, budgetPressure[0].alias) : "暂无预算数据"} />
           <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
@@ -65,7 +65,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
     income: value.income / 100,
     expense: value.expense / 100,
   }));
-  return <section className="card flex h-full min-h-[360px] flex-col p-4 xl:min-h-0">
+  return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-4 xl:min-h-0 max-xl:min-h-[360px]">
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
@@ -77,7 +77,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="ledger-chart mt-4 min-h-[260px] min-w-0 flex-1 xl:min-h-0">
+    {rows.length ? showAmounts ? <div className="ledger-chart mt-4 min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
           <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
@@ -105,14 +105,14 @@ function compactMoney(value: number) {
 }
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {
-  const content = <><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</>;
-  if (!onClick) return <div className="h-full rounded-2xl border border-line bg-panel p-3">{content}</div>;
-  return <button className="h-full rounded-2xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={onClick}>{content}</button>;
+  const content = <><div className="truncate text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 truncate text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>}</>;
+  if (!onClick) return <div className="h-full min-w-0 overflow-hidden rounded-2xl border border-line bg-panel p-3">{content}</div>;
+  return <button className="h-full min-w-0 overflow-hidden rounded-2xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={onClick}>{content}</button>;
 }
 
 function ListCard({ title, items, empty }: { title: string; items: { key: string; title: string; value: string; detail?: string; onClick?: () => void }[]; empty: string }) {
-  return <section className="card p-4"><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 space-y-2">{items.length ? items.map((item) => {
-    const content = <><div className="min-w-0"><div className="truncate text-sm font-medium text-olive">{item.title}</div>{item.detail && <div className="mt-0.5 text-xs text-stone">{item.detail}</div>}</div><div className="shrink-0 font-semibold text-warm">{item.value}</div></>;
-    return item.onClick ? <button key={item.key} className="flex w-full items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={item.onClick}>{content}</button> : <div key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3">{content}</div>;
+  return <section className="card min-w-0 overflow-hidden p-4"><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 space-y-2">{items.length ? items.map((item) => {
+    const content = <><div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-olive">{item.title}</div>{item.detail && <div className="mt-0.5 truncate text-xs text-stone">{item.detail}</div>}</div><div className="shrink-0 font-semibold text-warm">{item.value}</div></>;
+    return item.onClick ? <button key={item.key} className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={item.onClick}>{content}</button> : <div key={item.key} className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3">{content}</div>;
   }) : <div className="rounded-xl border border-line bg-panel p-4 text-center text-sm text-stone">{empty}</div>}</div></section>;
 }

@@ -484,7 +484,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       <div
         key={pathname}
-        className={`app-page-transition app-pull-surface ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+        className={`app-page-transition app-pull-surface min-w-0 max-w-full overflow-x-hidden ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
         style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -492,7 +492,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onTouchCancel={handleTouchEnd}
       >
       {/* ── 时间范围选择器 ── */}
-      <div className="mb-6">
+      <div className="mb-6 min-w-0 max-w-full">
         {/* 第一行：标题 + 翻页按钮 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {canNavigate && (
@@ -528,12 +528,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
         {/* 第二行：快捷按钮组 */}
         {canShowTimeControls && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="flex overflow-hidden rounded-xl border border-line">
+          <div className="mt-3 flex min-w-0 max-w-full flex-wrap items-center gap-2">
+            <div className="grid w-full min-w-0 grid-cols-6 overflow-hidden rounded-xl border border-line sm:flex sm:w-auto">
               {TIME_PRESETS.map((p) => (
                 <button
                   key={p.key}
-                  className={`px-3 py-1.5 text-sm transition-colors ${timeRange.preset === p.key ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
+                  className={`min-w-0 whitespace-nowrap px-2 py-1.5 text-sm transition-colors sm:px-3 ${timeRange.preset === p.key ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
                   onClick={() => setPreset(p.key)}
                 >
                   {p.label}
@@ -543,7 +543,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
             {/* 自定义范围：date input */}
             {timeRange.preset === "custom" && (
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <input
                   type="date"
                   className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"

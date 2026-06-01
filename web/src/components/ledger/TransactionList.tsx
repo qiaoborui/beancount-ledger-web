@@ -133,9 +133,9 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   if (allItems.length === 0) return null;
 
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
+    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
       {shownCredits.map((p, i) => (
-        <span key={`c-${i}`} className="amount-income">
+        <span key={`c-${i}`} className="amount-income min-w-0 [overflow-wrap:anywhere]">
           {shortAccount(p.account)} {fmtPostingAmount(p.amount)}
         </span>
       ))}
@@ -143,7 +143,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
         <span className="mx-0.5 text-stone/40">→</span>
       )}
       {shownDebits.map((p, i) => (
-        <span key={`d-${i}`} className="amount-expense">
+        <span key={`d-${i}`} className="amount-expense min-w-0 [overflow-wrap:anywhere]">
           {shortAccount(p.account)} {fmtPostingAmount(p.amount)}
         </span>
       ))}
@@ -155,7 +155,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
 function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
   const amt = primaryAmount(txn);
   return (
-    <button type="button" className={`transaction-list-card card mb-1.5 block w-full p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
+    <button type="button" className={`transaction-list-card card mb-1.5 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <strong className="block truncate">{txn.payee}</strong>
@@ -163,7 +163,7 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
         </div>
         {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
       </div>
-      <div className="mt-0.5 text-sm text-olive">{txn.narration}</div>
+      <div className="mt-0.5 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration}</div>
       {viewMode === "full" ? (
         <>
           <PostingFlow postings={txn.postings} />
@@ -172,7 +172,7 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
         </>
       ) : (
         <>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{txn.date}{txn.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j}>{p.account}</span>)}</div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{txn.date}{txn.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j} className="min-w-0 [overflow-wrap:anywhere]">{p.account}</span>)}</div>
           <MetadataBadges txn={txn} limit={3} />
         </>
       )}
