@@ -193,7 +193,7 @@ html[data-theme="dark"] {
 html {
   min-height: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   background: var(--brand);
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
@@ -204,7 +204,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   margin: 0;
   background: var(--body-gradient);
   color: var(--ink);
@@ -291,8 +291,8 @@ button.card:active, a.card:active { transform: scale(0.992); }
 .ledger-chart,
 .ledger-chart .recharts-wrapper,
 .ledger-chart .recharts-surface {
-  overscroll-behavior: contain;
-  touch-action: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-y;
 }
 .dashboard-panel-grid {
   display: grid;

@@ -210,7 +210,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   const rangeLabel = formatTimeRangeLabel(timeRange);
 
   return (
-    <div className="account-detail-stack w-full min-w-0 max-w-full overflow-x-hidden space-y-6">
+    <div className="account-detail-stack w-full min-w-0 max-w-full [overflow-x:clip] space-y-6">
       {/* Header */}
       <section className="card min-w-0 max-w-full overflow-hidden p-4">
         <ClientNavLink
