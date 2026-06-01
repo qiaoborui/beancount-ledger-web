@@ -71,6 +71,54 @@ function filterRowsByRange(rows: AccountDetailRow[], range: TimeRange) {
   return rows.filter((row) => row.date >= range.start && row.date < range.end);
 }
 
+type AccountPeriodSummary = {
+  inflow: number;
+  outflow: number;
+  netChange: number;
+  maxInflow: AccountDetailRow | null;
+  maxOutflow: AccountDetailRow | null;
+  counterparties: { account: string; amount: number; count: number }[];
+};
+
+function buildPeriodSummary(account: string, rows: AccountDetailRow[]): AccountPeriodSummary {
+  const counterparties = new Map<string, { amount: number; count: number }>();
+  let inflow = 0;
+  let outflow = 0;
+  let maxInflow: AccountDetailRow | null = null;
+  let maxOutflow: AccountDetailRow | null = null;
+
+  for (const row of rows) {
+    if (row.change > 0) {
+      inflow += row.change;
+      if (!maxInflow || row.change > maxInflow.change) maxInflow = row;
+    } else if (row.change < 0) {
+      outflow += Math.abs(row.change);
+      if (!maxOutflow || row.change < maxOutflow.change) maxOutflow = row;
+    }
+
+    const otherAccounts = Array.from(new Set(row.txn.postings.filter((posting) => posting.account !== account).map((posting) => posting.account)));
+    const weight = otherAccounts.length ? Math.abs(row.change) / otherAccounts.length : 0;
+    for (const other of otherAccounts) {
+      const current = counterparties.get(other) ?? { amount: 0, count: 0 };
+      current.amount += weight;
+      current.count += 1;
+      counterparties.set(other, current);
+    }
+  }
+
+  return {
+    inflow,
+    outflow,
+    netChange: inflow - outflow,
+    maxInflow,
+    maxOutflow,
+    counterparties: [...counterparties.entries()]
+      .map(([account, value]) => ({ account, ...value }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5),
+  };
+}
+
 export function AccountDetailSkeleton() {
   return (
     <div className="animate-pulse space-y-6">
@@ -131,6 +179,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   if (!data) return <AccountDetailSkeleton />;
 
   const filteredRows = filterRowsByRange(data.rows, timeRange);
+  const periodSummary = buildPeriodSummary(account, filteredRows);
 
   // 准备图表数据
   const chartData = filteredRows.map((row) => ({
@@ -229,51 +278,123 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         )}
       </section>
 
-      <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)] xl:items-start">
-        <div className="min-w-0 max-w-full space-y-6 xl:sticky xl:top-24">
-          {/* Balance Chart */}
-          {chartData.length > 0 ? (
-            <section className="card min-w-0 max-w-full overflow-hidden p-4">
+      {chartData.length > 0 ? (
+        <section className="card min-w-0 max-w-full overflow-hidden p-4">
+          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
               <h2 className="font-serif text-2xl">余额变化</h2>
               <p className="mt-1 text-sm text-olive">
                 {filteredRows.length} 笔变动 ·{" "}
                 {chartData[0].date} ~ {chartData.at(-1)!.date}
               </p>
-              <div className="account-balance-chart ledger-chart mt-4 h-64 min-w-0 max-w-full overflow-hidden sm:h-80">
-                <ResponsiveContainer width="100%" height="100%" debounce={80}>
-                  <AreaChart
-                    data={chartData}
-                    margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-                    <XAxis dataKey="date" minTickGap={32} fontSize={10} tickMargin={6} />
-                    <YAxis
-                      width={44}
-                      tickFormatter={chartMoney}
-                      fontSize={10}
-                    />
-                    <Tooltip
-                      formatter={(value: number) => [formatCny(value), "余额"]}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="balance"
-                      name="余额"
-                      stroke="var(--chart-primary)"
-                      fill="var(--chart-fill)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          ) : (
-            <section className="card min-w-0 max-w-full overflow-hidden p-4 text-sm text-stone">暂无可绘制的余额变化。</section>
-          )}
+            </div>
+            <div className={`shrink-0 text-sm font-medium tabular-nums ${periodSummary.netChange >= 0 ? "amount-income" : "amount-expense"}`}>
+              {periodSummary.netChange >= 0 ? "+" : ""}{formatCny(periodSummary.netChange / 100)}
+            </div>
+          </div>
+          <div className="account-balance-chart ledger-chart mt-4 h-72 min-w-0 max-w-full overflow-hidden md:h-80 xl:h-[360px]">
+            <ResponsiveContainer width="100%" height="100%" debounce={80}>
+              <AreaChart
+                data={chartData}
+                margin={{ left: 0, right: 10, top: 8, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                <XAxis dataKey="date" minTickGap={32} fontSize={10} tickMargin={6} />
+                <YAxis
+                  width={54}
+                  tickFormatter={chartMoney}
+                  fontSize={10}
+                />
+                <Tooltip
+                  formatter={(value: number) => [formatCny(value), "余额"]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="balance"
+                  name="余额"
+                  stroke="var(--chart-primary)"
+                  fill="var(--chart-fill)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      ) : (
+        <section className="card min-w-0 max-w-full overflow-hidden p-4 text-sm text-stone">暂无可绘制的余额变化。</section>
+      )}
+
+      <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)] xl:items-start">
+        <div className="min-w-0 max-w-full xl:sticky xl:top-24">
+          <AccountPeriodSummaryCard summary={periodSummary} rows={filteredRows} />
         </div>
 
         <AccountTransactionHistory account={account} rows={filteredRows} totalRows={data.rows.length} />
       </div>
+    </div>
+  );
+}
+
+function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSummary; rows: AccountDetailRow[] }) {
+  const hasRows = rows.length > 0;
+  return (
+    <section className="card min-w-0 max-w-full overflow-hidden p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-serif text-2xl">期间摘要</h2>
+          <p className="mt-1 text-sm text-olive">{hasRows ? `${rows.length} 笔变动解释当前范围` : "当前范围暂无账户变动"}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-3 divide-x divide-line rounded-xl border border-line bg-panel text-center">
+        <SummaryMetric label="流入" value={formatCny(summary.inflow / 100)} cls="amount-income" />
+        <SummaryMetric label="流出" value={formatCny(summary.outflow / 100)} cls="amount-expense" />
+        <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatCny(summary.netChange / 100)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <ExtremeRow label="最大流入" row={summary.maxInflow} />
+        <ExtremeRow label="最大流出" row={summary.maxOutflow} />
+      </div>
+      <div className="mt-4">
+        <div className="text-xs uppercase tracking-[0.18em] text-stone">主要对方账户</div>
+        {summary.counterparties.length ? (
+          <div className="mt-2 space-y-2">
+            {summary.counterparties.map((item) => (
+              <div key={item.account} className="rounded-xl border border-line bg-panel px-3 py-2">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate text-olive">{item.account}</span>
+                  <strong className="shrink-0 tabular-nums text-warm">{formatCny(item.amount / 100)}</strong>
+                </div>
+                <div className="mt-0.5 text-xs text-stone">{item.count} 笔相关变动</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2 rounded-xl border border-line bg-panel p-3 text-sm text-stone">暂无对方账户信息。</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SummaryMetric({ label, value, cls }: { label: string; value: string; cls: string }) {
+  return <div className="min-w-0 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-sm font-semibold tabular-nums sm:text-base ${cls}`}>{value}</div></div>;
+}
+
+function ExtremeRow({ label, row }: { label: string; row: AccountDetailRow | null }) {
+  return (
+    <div className="rounded-xl border border-line bg-panel p-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
+      {row ? (
+        <>
+          <div className="mt-1 flex items-baseline justify-between gap-2">
+            <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || "（无对手）"}</span>
+            <AmountCell amount={row.change} />
+          </div>
+          <div className="mt-0.5 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
+        </>
+      ) : (
+        <div className="mt-2 text-sm text-stone">暂无</div>
+      )}
     </div>
   );
 }

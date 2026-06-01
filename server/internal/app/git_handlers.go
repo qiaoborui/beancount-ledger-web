@@ -21,6 +21,19 @@ func (s *Server) gitStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": output, "dirty": len(changes) > 0, "changedFileCount": len(changes), "changes": changes})
 }
 
+func (s *Server) gitDiff(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	path := c.Query("path")
+	diff, truncated, err := ledgerGitDiffForPath(s.cfg, path)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"path": path, "diff": diff, "truncated": truncated})
+}
+
 func (s *Server) gitPull(c *gin.Context) {
 	if !requireAuth(c) {
 		return
