@@ -13,6 +13,7 @@ type Server struct {
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	reconcileService *ReconciliationService
+	txService        *TransactionService
 	limiter          *RateLimiter
 	events           *EventHub
 }
@@ -20,7 +21,7 @@ type Server struct {
 func NewRouter(cfg Config) *gin.Engine {
 	cache := NewLedgerCache(cfg)
 	writer := NewLedgerWriter(cfg, cache)
-	server := &Server{cfg: cfg, cache: cache, writer: writer, reconcileService: NewReconciliationService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
+	server := &Server{cfg: cfg, cache: cache, writer: writer, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
 	server.registerAPI(router.Group("/api"))
