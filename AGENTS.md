@@ -60,6 +60,9 @@ through `LEDGER_ROOT`.
   different naming convention.
 - Keep PRs small and focused. Include validation results in the PR body when
   creating or updating a PR.
+- After completing feature work, make sure a pull request exists. After opening
+  or updating a PR, check the PR status, mergeability, and conflict state; if
+  conflicts are reported, resolve them before handing the work back.
 - Pull requests trigger the Ubuntu server preview deployment workflow when the
   PR is not a draft.
 - When several dependent features must land serially, use Graphite stacked PRs
