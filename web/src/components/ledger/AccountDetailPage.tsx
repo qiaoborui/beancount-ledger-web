@@ -47,7 +47,7 @@ function AmountCell({ amount }: { amount: number }) {
         ? "amount-expense"
         : "text-stone";
   return (
-    <span className={`tabular-nums font-medium ${cls}`}>
+    <span className={`whitespace-nowrap tabular-nums font-medium ${cls}`}>
       {sign}
       {formatCny(amount / 100)}
     </span>
@@ -219,9 +219,9 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         >
           <ArrowLeft className="h-4 w-4" /> 账户列表
         </ClientNavLink>
-        <h1 className="font-serif text-2xl font-medium">{data.label}</h1>
+        <h1 className="break-words font-serif text-2xl font-medium">{data.label}</h1>
         {data.alias && data.alias !== data.label && (
-          <p className="mt-1 text-sm text-olive">{data.alias}</p>
+          <p className="mt-1 break-words text-sm text-olive">{data.alias}</p>
         )}
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           <span className="min-w-0 break-all text-xs text-stone">{data.account}</span>
@@ -339,18 +339,18 @@ function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSum
   const hasRows = rows.length > 0;
   return (
     <section className="card min-w-0 max-w-full overflow-hidden p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="font-serif text-2xl">期间摘要</h2>
           <p className="mt-1 text-sm text-olive">{hasRows ? `${rows.length} 笔变动解释当前范围` : "当前范围暂无账户变动"}</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-3 divide-x divide-line rounded-xl border border-line bg-panel text-center">
+      <div className="mt-4 grid min-w-0 grid-cols-3 divide-x divide-line overflow-hidden rounded-xl border border-line bg-panel text-center">
         <SummaryMetric label="流入" value={formatCny(summary.inflow / 100)} cls="amount-income" />
         <SummaryMetric label="流出" value={formatCny(summary.outflow / 100)} cls="amount-expense" />
         <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatCny(summary.netChange / 100)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
         <ExtremeRow label="最大流入" row={summary.maxInflow} />
         <ExtremeRow label="最大流出" row={summary.maxOutflow} />
       </div>
@@ -359,10 +359,10 @@ function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSum
         {summary.counterparties.length ? (
           <div className="mt-2 space-y-2">
             {summary.counterparties.map((item) => (
-              <div key={item.account} className="rounded-xl border border-line bg-panel px-3 py-2">
-                <div className="flex items-center justify-between gap-3 text-sm">
+              <div key={item.account} className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel px-3 py-2">
+                <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
                   <span className="min-w-0 truncate text-olive">{item.account}</span>
-                  <strong className="shrink-0 tabular-nums text-warm">{formatCny(item.amount / 100)}</strong>
+                  <strong className="shrink-0 whitespace-nowrap tabular-nums text-warm">{formatCny(item.amount / 100)}</strong>
                 </div>
                 <div className="mt-0.5 text-xs text-stone">{item.count} 笔相关变动</div>
               </div>
@@ -382,15 +382,15 @@ function SummaryMetric({ label, value, cls }: { label: string; value: string; cl
 
 function ExtremeRow({ label, row }: { label: string; row: AccountDetailRow | null }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-3">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel p-3">
       <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
       {row ? (
         <>
-          <div className="mt-1 flex items-baseline justify-between gap-2">
+          <div className="mt-1 flex min-w-0 items-baseline justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || "（无对手）"}</span>
             <AmountCell amount={row.change} />
           </div>
-          <div className="mt-0.5 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
+          <div className="mt-0.5 min-w-0 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
         </>
       ) : (
         <div className="mt-2 text-sm text-stone">暂无</div>
@@ -471,12 +471,12 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
               >
                 <button
                   type="button"
-                  className="account-detail-row-button w-full p-3 text-left"
+                  className="account-detail-row-button min-w-0 w-full overflow-hidden p-3 text-left"
                   onClick={() => toggleExpand(key)}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <strong className="truncate text-sm">
                           {row.payee || "（无对手）"}
                         </strong>
@@ -500,7 +500,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                     </div>
                   </div>
                   <div className="mt-1.5 flex min-w-0 items-baseline justify-between gap-x-3 gap-y-0.5">
-                    <span className="shrink-0 text-xs text-stone">
+                    <span className="shrink-0 whitespace-nowrap text-xs text-stone">
                       余额{" "}
                       <span className="font-medium tabular-nums text-warm">
                         {formatCny(row.balance / 100)}
@@ -556,7 +556,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                             ([key, value]) => (
                               <span
                                 key={key}
-                                className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"
+                                className="max-w-full break-all rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"
                               >
                                 {key}: {String(value)}
                               </span>
@@ -569,7 +569,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                         {row.txn.tags.map((tag) => (
                           <span
                             key={tag}
-                            className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"
+                            className="max-w-full break-all rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"
                           >
                             #{tag}
                           </span>
