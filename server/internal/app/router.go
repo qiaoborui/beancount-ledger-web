@@ -485,7 +485,7 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	for _, posting := range original.Postings {
 		entry.Postings = append(entry.Postings, EntryPosting{Account: posting.Account, Amount: fromCents(-posting.Amount), Currency: posting.Currency})
 	}
-	if err := s.writer.AppendBeanText(reverseDate, TransactionToBean(entry)); err != nil {
+	if err := s.writer.AppendBeanTextWithSource(reverseDate, TransactionToBean(entry), "transaction-reversal"); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -569,7 +569,7 @@ func (s *Server) reconcile(c *gin.Context) {
 	}
 	balance := LedgerEntry{Kind: "balance", Date: input.BalanceDate, Account: input.Account, Amount: fromCents(actual), Currency: "CNY"}
 	beanText += BalanceToBean(balance)
-	if err := s.writer.AppendBeanText(input.BalanceDate, beanText); err != nil {
+	if err := s.writer.AppendBeanTextWithSource(input.BalanceDate, beanText, "reconciliation"); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}

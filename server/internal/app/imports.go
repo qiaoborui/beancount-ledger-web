@@ -522,7 +522,7 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 }
 
 func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) error {
-	return s.writer.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	return s.writer.RunTransactionWithSource("import-commit", func(tx *LedgerWriteTransaction) error {
 		if err := s.writer.ensureMonthlyFileAndInclude(tx, monthFile, start); err != nil {
 			return err
 		}

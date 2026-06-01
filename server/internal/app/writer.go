@@ -72,6 +72,10 @@ func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
 }
 
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
+	return w.RunTransactionWithSource("ledger-write", apply)
+}
+
+func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*LedgerWriteTransaction) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
@@ -79,7 +83,7 @@ func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error)
 		tx.Restore()
 		return err
 	}
-	if err := w.validateAndClear(); err != nil {
+	if err := w.validateAndClear(source); err != nil {
 		tx.Restore()
 		return err
 	}
@@ -139,7 +143,11 @@ func (tx *LedgerWriteTransaction) Restore() {
 }
 
 func (w *LedgerWriter) AppendBeanText(date, beanText string) error {
-	return w.appendItemsChecked([]appendItem{{date: date, beanText: beanText}})
+	return w.AppendBeanTextWithSource(date, beanText, "ledger-append-text")
+}
+
+func (w *LedgerWriter) AppendBeanTextWithSource(date, beanText, source string) error {
+	return w.appendItemsChecked(source, []appendItem{{date: date, beanText: beanText}})
 }
 
 func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
@@ -157,14 +165,14 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 		items = append(items, appendItem{date: entry.Date, beanText: text})
 		texts = append(texts, text)
 	}
-	if err := w.appendItemsChecked(items); err != nil {
+	if err := w.appendItemsChecked("append-entries", items); err != nil {
 		return nil, err
 	}
 	return texts, nil
 }
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
-	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource("account-append", func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
 		if err != nil {
@@ -181,7 +189,7 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 
 func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
 	texts := []string{}
-	if err := w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	if err := w.RunTransactionWithSource("account-operations", func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
 		if err != nil {
@@ -227,7 +235,7 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
-	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource("transaction-update", func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -250,7 +258,7 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {
-	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource("transaction-delete", func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -284,7 +292,7 @@ type appendItem struct {
 	beanText string
 }
 
-func (w *LedgerWriter) appendItemsChecked(items []appendItem) error {
+func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem) error {
 	byFile := map[string][]appendItem{}
 	for _, item := range items {
 		file := transactionFileForDate(w.cfg, item.date)
@@ -295,7 +303,7 @@ func (w *LedgerWriter) appendItemsChecked(items []appendItem) error {
 		files = append(files, file)
 	}
 	sort.Strings(files)
-	return w.RunTransaction(func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource(source, func(tx *LedgerWriteTransaction) error {
 		for _, file := range files {
 			fileItems := byFile[file]
 			if err := w.ensureMonthlyFileAndInclude(tx, file, fileItems[0].date); err != nil {
@@ -350,13 +358,16 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, f
 	return tx.WriteFile(main, []byte(string(mainBefore)+sep+includeLine+"\n"), 0o644)
 }
 
-func (w *LedgerWriter) validateAndClear() error {
+func (w *LedgerWriter) validateAndClear(source string) error {
 	start := time.Now()
 	err := runBeanCheck(w.cfg)
 	logDuration("bean-check", start, map[string]any{"ok": err == nil})
 	if err == nil {
 		w.cache.Clear()
-		publishLedgerUpdated(w.cfg, "ledger-write")
+		if strings.TrimSpace(source) == "" {
+			source = "ledger-write"
+		}
+		publishLedgerUpdated(w.cfg, source)
 	}
 	return err
 }
