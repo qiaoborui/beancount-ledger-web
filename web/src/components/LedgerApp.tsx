@@ -484,7 +484,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       <div
         key={pathname}
-        className={`app-page-transition app-pull-surface min-w-0 max-w-full overflow-x-hidden ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+        className={`app-page-transition app-pull-surface min-w-0 max-w-full [overflow-x:clip] ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
         style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
