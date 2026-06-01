@@ -8,6 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestAccountDetailReturnsFrontendContract(t *testing.T) {
@@ -305,6 +308,43 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	lastCommitFiles := runGit(t, cfg, "show", "--name-only", "--pretty=format:", "HEAD")
 	if !strings.Contains(lastCommitFiles, "main.bean") || !strings.Contains(lastCommitFiles, "transactions/2026/06.bean") {
 		t.Fatalf("commit should include ledger write files:\n%s", lastCommitFiles)
+	}
+}
+
+func TestAppendEntryPublishesAppendEntrySource(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("APP_PASSWORD", "secret")
+
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+	sub := ledgerEventHub.Subscribe()
+	defer sub.Close()
+	appendBody := `{"kind":"transaction","date":"2026-06-02","payee":"Bakery","narration":"Breakfast","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"15.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-15.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}`
+	res := requestWithCookies(router, http.MethodPost, "/api/ledger/append", appendBody, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("append status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	select {
+	case event := <-sub.ch:
+		if event.Type != "ledger.updated" {
+			t.Fatalf("event type = %s, want ledger.updated", event.Type)
+		}
+		data, ok := event.Data.(gin.H)
+		if !ok {
+			t.Fatalf("event data has unexpected type: %#v", event.Data)
+		}
+		if data["source"] != ledgerWriteSourceAppendEntry {
+			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceAppendEntry)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ledger.updated event")
 	}
 }
 

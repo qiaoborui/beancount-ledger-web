@@ -428,7 +428,7 @@ func (s *Server) appendEntry(c *gin.Context) {
 	if !bindJSON(c, &entry) {
 		return
 	}
-	texts, err := s.writer.AppendEntries([]LedgerEntry{entry})
+	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendEntry, []LedgerEntry{entry})
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -444,7 +444,7 @@ func (s *Server) appendBatch(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	texts, err := s.writer.AppendEntries(input.Entries)
+	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendBatch, input.Entries)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -485,7 +485,7 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	for _, posting := range original.Postings {
 		entry.Postings = append(entry.Postings, EntryPosting{Account: posting.Account, Amount: fromCents(-posting.Amount), Currency: posting.Currency})
 	}
-	if err := s.writer.AppendBeanTextWithSource(reverseDate, TransactionToBean(entry), "transaction-reversal"); err != nil {
+	if err := s.writer.AppendBeanTextWithSource(reverseDate, TransactionToBean(entry), ledgerWriteSourceTransactionReversal); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -569,7 +569,7 @@ func (s *Server) reconcile(c *gin.Context) {
 	}
 	balance := LedgerEntry{Kind: "balance", Date: input.BalanceDate, Account: input.Account, Amount: fromCents(actual), Currency: "CNY"}
 	beanText += BalanceToBean(balance)
-	if err := s.writer.AppendBeanTextWithSource(input.BalanceDate, beanText, "reconciliation"); err != nil {
+	if err := s.writer.AppendBeanTextWithSource(input.BalanceDate, beanText, ledgerWriteSourceReconciliation); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}

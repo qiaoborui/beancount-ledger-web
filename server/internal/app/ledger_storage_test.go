@@ -167,8 +167,8 @@ func TestLedgerWriteTransactionPublishesSpecificSource(t *testing.T) {
 		if !ok {
 			t.Fatalf("event data has unexpected type: %#v", event.Data)
 		}
-		if data["source"] != "account-append" {
-			t.Fatalf("source = %#v, want account-append", data["source"])
+		if data["source"] != ledgerWriteSourceAccountAppend {
+			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceAccountAppend)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ledger.updated event")
