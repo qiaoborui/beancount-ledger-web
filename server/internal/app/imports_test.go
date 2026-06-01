@@ -144,6 +144,43 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+
+	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
+	server.writer = NewLedgerWriter(cfg, server.cache)
+	mainBefore := string(mustRead(t, mainBeanPath(cfg)))
+	sourceFile := filepath.Join(t.TempDir(), "statement.csv")
+	mustWrite(t, sourceFile, "date,payee,amount\n2026-06-01,Shop,8.00\n")
+	outputFile := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "failed-import.bean")
+	documentFile := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports", "failed-statement.csv")
+	monthFile := transactionFileForDate(cfg, "2026-06-01")
+	beanText := strings.Join([]string{
+		`2026-06-01 * "Shop" "Snack"`,
+		"  Expenses:Food                         8.00 CNY",
+		"  Assets:Cash                          -8.00 CNY",
+	}, "\n")
+
+	err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash")
+	if err == nil {
+		t.Fatal("expected bean-check failure")
+	}
+	if got := string(mustRead(t, mainBeanPath(cfg))); got != mainBefore {
+		t.Fatalf("main.bean was not rolled back:\n%s", got)
+	}
+	for _, file := range []string{monthFile, outputFile, documentFile} {
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Fatalf("%s should have been removed after rollback, err=%v", file, err)
+		}
+	}
+}
+
 func TestPrepareAlipayCSVForDEGPadsHeaderRecord(t *testing.T) {
 	cfg := testLedger(t)
 	input := filepath.Join(t.TempDir(), "alipay.csv")

@@ -522,92 +522,42 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 }
 
 func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) error {
-	s.writer.mu.Lock()
-	defer s.writer.mu.Unlock()
-	snapshots := map[string]fileSnapshot{}
-	snapshot := func(file string) error {
-		if _, ok := snapshots[file]; ok {
-			return nil
+	return s.writer.RunTransaction(func(tx *LedgerWriteTransaction) error {
+		if err := s.writer.ensureMonthlyFileAndInclude(tx, monthFile, start); err != nil {
+			return err
 		}
-		content, err := os.ReadFile(file)
-		if errors.Is(err, os.ErrNotExist) {
-			snapshots[file] = fileSnapshot{existed: false}
-			return nil
+		documentLine := ""
+		if sourceFile != "" && documentFile != "" {
+			if err := tx.CopyFile(sourceFile, documentFile, 0o600); err != nil {
+				return err
+			}
+			documentLine = documentDirective(end, documentAccount, outputFile, documentFile) + "\n\n"
 		}
+		header := fmt.Sprintf("; %s import: %s .. %s\n", importProviderTitle(provider), start, end)
+		if err := tx.WriteFile(outputFile, []byte(header+documentLine+strings.TrimRight(beanText, "\n")+"\n"), 0o644); err != nil {
+			return err
+		}
+		includeLine := includeLineRelative(monthFile, outputFile)
+		monthBefore, err := os.ReadFile(monthFile)
 		if err != nil {
 			return err
 		}
-		snapshots[file] = fileSnapshot{existed: true, content: content}
-		return nil
-	}
-	restore := func() {
-		for file, snap := range snapshots {
-			if snap.existed {
-				_ = os.MkdirAll(filepath.Dir(file), 0o755)
-				_ = os.WriteFile(file, snap.content, 0o644)
-			} else {
-				_ = os.Remove(file)
+		hasInclude := false
+		for _, line := range strings.Split(string(monthBefore), "\n") {
+			if strings.TrimSpace(line) == includeLine {
+				hasInclude = true
+				break
 			}
 		}
-	}
-	if err := s.writer.ensureMonthlyFileAndInclude(monthFile, start, snapshot); err != nil {
-		return err
-	}
-	for _, file := range []string{monthFile, outputFile, documentFile} {
-		if file != "" {
-			if err := snapshot(file); err != nil {
-				restore()
+		if !hasInclude {
+			sep := ""
+			if !strings.HasSuffix(string(monthBefore), "\n") {
+				sep = "\n"
+			}
+			if err := tx.WriteFile(monthFile, []byte(string(monthBefore)+sep+includeLine+"\n"), 0o644); err != nil {
 				return err
 			}
 		}
-	}
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
-		restore()
-		return err
-	}
-	documentLine := ""
-	if sourceFile != "" && documentFile != "" {
-		if err := os.MkdirAll(filepath.Dir(documentFile), 0o755); err != nil {
-			restore()
-			return err
-		}
-		if err := copyFile(sourceFile, documentFile); err != nil {
-			restore()
-			return err
-		}
-		documentLine = documentDirective(end, documentAccount, outputFile, documentFile) + "\n\n"
-	}
-	header := fmt.Sprintf("; %s import: %s .. %s\n", importProviderTitle(provider), start, end)
-	if err := os.WriteFile(outputFile, []byte(header+documentLine+strings.TrimRight(beanText, "\n")+"\n"), 0o644); err != nil {
-		restore()
-		return err
-	}
-	includeLine := includeLineRelative(monthFile, outputFile)
-	monthBefore, err := os.ReadFile(monthFile)
-	if err != nil {
-		restore()
-		return err
-	}
-	hasInclude := false
-	for _, line := range strings.Split(string(monthBefore), "\n") {
-		if strings.TrimSpace(line) == includeLine {
-			hasInclude = true
-			break
-		}
-	}
-	if !hasInclude {
-		sep := ""
-		if !strings.HasSuffix(string(monthBefore), "\n") {
-			sep = "\n"
-		}
-		if err := os.WriteFile(monthFile, []byte(string(monthBefore)+sep+includeLine+"\n"), 0o644); err != nil {
-			restore()
-			return err
-		}
-	}
-	if err := s.writer.validateAndClear(); err != nil {
-		restore()
-		return err
-	}
-	return nil
+		return nil
+	})
 }
