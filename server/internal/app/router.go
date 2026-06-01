@@ -460,32 +460,8 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	snapshot, err := s.cache.Snapshot()
+	entry, err := s.txService.Reverse(input)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	var original *Transaction
-	for i := range snapshot.Transactions {
-		txn := snapshot.Transactions[i]
-		if txn.Source.File == input.Source.File && (txn.Source.Line == input.Source.Line || (input.Source.Hash != "" && txn.Source.Hash == input.Source.Hash)) {
-			original = &txn
-			break
-		}
-	}
-	if original == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "找不到原交易，账本可能已被修改，请刷新后重试"})
-		return
-	}
-	reverseDate := input.Date
-	if reverseDate == "" {
-		reverseDate = time.Now().Format("2006-01-02")
-	}
-	entry := LedgerEntry{Kind: "transaction", Date: reverseDate, Payee: original.Payee, Narration: "冲销：" + original.Narration, Metadata: map[string]MetadataValue{"reversal": true}, Tags: original.Tags, Currency: "CNY", Confidence: 1, NeedsReview: false}
-	for _, posting := range original.Postings {
-		entry.Postings = append(entry.Postings, EntryPosting{Account: posting.Account, Amount: fromCents(-posting.Amount), Currency: posting.Currency})
-	}
-	if err := s.writer.AppendBeanTextWithSource(reverseDate, TransactionToBean(entry), ledgerWriteSourceTransactionReversal); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -500,7 +476,7 @@ func (s *Server) updateTransaction(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if err := s.writer.ReplaceTransactionBlock(input.Source, input.Entry); err != nil {
+	if err := s.txService.Update(input.Source, input.Entry); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -515,7 +491,7 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if err := s.writer.CommentTransactionBlock(input.Source, input.Reason); err != nil {
+	if err := s.txService.Delete(input.Source, input.Reason); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
