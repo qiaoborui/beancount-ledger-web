@@ -190,6 +190,14 @@ html[data-theme="dark"] {
 }
 
 * { box-sizing: border-box; }
+#root {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+@supports not (overflow: clip) {
+  #root { overflow-x: hidden; }
+}
 html {
   min-height: 100%;
   max-width: 100%;
@@ -220,6 +228,20 @@ body::before {
   inset: 0;
   z-index: -1;
   background: var(--body-gradient);
+}
+:where(.app-overflow-guard) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+:where(.app-overflow-guard, .app-overflow-guard *, .app-overflow-guard *::before, .app-overflow-guard *::after) {
+  min-width: 0;
+}
+:where(.app-overflow-guard img, .app-overflow-guard video, .app-overflow-guard canvas, .app-overflow-guard svg, .app-overflow-guard table) {
+  max-width: 100%;
+}
+@supports not (overflow: clip) {
+  :where(.app-overflow-guard) { overflow-x: hidden; }
 }
 button, input, textarea, select { font: inherit; }
 button, a {
