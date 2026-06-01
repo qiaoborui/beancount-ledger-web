@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -39,159 +40,42 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 }
 
 func (s *Server) ledgerBootstrap(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-
-	summary := MonthSummary(start, end, snapshot.Transactions)
-	txns := append([]Transaction(nil), snapshot.Transactions...)
-	sort.Slice(txns, func(i, j int) bool { return txns[i].Date > txns[j].Date })
-	filteredTxns := []Transaction{}
-	for _, txn := range txns {
-		if txn.Date < start || txn.Date >= end {
-			continue
-		}
-		if !unlocked {
-			hasIncome := false
-			for _, posting := range txn.Postings {
-				if strings.HasPrefix(posting.Account, "Income:") {
-					hasIncome = true
-				}
-			}
-			if hasIncome {
-				continue
-			}
-		}
-		filteredTxns = append(filteredTxns, txn)
+	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-
-	netWorthRows := []NetWorthPoint{}
-	monthEndRows := []NetWorthPoint{}
-	var windows any
-	creditCards := []CreditCardAnalytics{}
-	reconciliationRows := []gin.H{}
-	accountStatuses := []AccountStatus{}
-	if unlocked {
-		allRows := NetWorthHistory(snapshot.Transactions)
-		for _, row := range allRows {
-			if row.Date >= start && row.Date < end {
-				netWorthRows = append(netWorthRows, row)
-			}
-		}
-		monthEndRows = MonthEndNetWorth(netWorthRows)
-		windows = NetWorthChangeWindows(allRows)
-		creditCards = CreditCards(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end)
-		reconciliationRows = buildReconciliationRows(snapshot, start, end)
-		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-	} else {
-		for day, value := range summary.Days {
-			value["income"] = 0
-			summary.Days[day] = value
-		}
-		summary.Income, summary.Net = 0, 0
-	}
-
-	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
-	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
-	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
-	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
-	incomeNodes := []IncomeStatementNode{}
-	if unlocked {
-		incomeNodes = allIncomeNodes
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"start":              start,
-		"end":                end,
-		"summary":            summary,
-		"balances":           statusMap(unlocked, snapshot.Balances),
-		"netWorthHistory":    netWorthRows,
-		"monthEndNetWorth":   monthEndRows,
-		"netWorthWindows":    windows,
-		"creditCards":        creditCards,
-		"transactions":       filteredTxns,
-		"budgetRows":         buildBudgetRows(snapshot, start, end),
-		"reconciliationRows": reconciliationRows,
-		"accounts":           snapshot.Accounts,
-		"incomeStatement": gin.H{
-			"income":             incomeNodes,
-			"expense":            expenseNodes,
-			"totalIncome":        statusInt(unlocked, totalIncome),
-			"totalExpense":       totalExpense,
-			"expenseAnalytics":   expense,
-			"topPayees":          topPayees,
-			"topPaymentAccounts": topAccounts,
-			"netIncome":          statusInt(unlocked, netIncome),
-		},
-		"accountStatuses":   accountStatuses,
-		"ledgerVersion":     snapshot.LedgerVersion,
-		"sensitiveUnlocked": unlocked,
-	})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) summary(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	summary := MonthSummary(start, end, snapshot.Transactions)
-	netWorthRows := []NetWorthPoint{}
-	monthEndRows := []NetWorthPoint{}
-	var windows any
-	creditCards := []CreditCardAnalytics{}
-	if unlocked {
-		allRows := NetWorthHistory(snapshot.Transactions)
-		for _, row := range allRows {
-			if row.Date >= start && row.Date < end {
-				netWorthRows = append(netWorthRows, row)
-			}
-		}
-		monthEndRows = MonthEndNetWorth(netWorthRows)
-		windows = NetWorthChangeWindows(allRows)
-		creditCards = CreditCards(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end)
-	} else {
-		for day, value := range summary.Days {
-			value["income"] = 0
-			summary.Days[day] = value
-		}
-		summary.Income, summary.Net = 0, 0
+	payload, err := s.readService.Summary(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) transactions(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	txns := append([]Transaction(nil), snapshot.Transactions...)
-	sort.Slice(txns, func(i, j int) bool { return txns[i].Date > txns[j].Date })
-	filtered := []Transaction{}
-	for _, txn := range txns {
-		if txn.Date < start || txn.Date >= end {
-			continue
-		}
-		if !unlocked {
-			hasIncome := false
-			for _, posting := range txn.Postings {
-				if strings.HasPrefix(posting.Account, "Income:") {
-					hasIncome = true
-				}
-			}
-			if hasIncome {
-				continue
-			}
-		}
-		filtered = append(filtered, txn)
+	payload, err := s.readService.Transactions(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "transactions": filtered, "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) balances(c *gin.Context) {
@@ -250,21 +134,16 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 }
 
 func (s *Server) incomeStatement(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
-	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
-	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
-	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
-	incomeNodes := []IncomeStatementNode{}
-	if unlocked {
-		incomeNodes = allIncomeNodes
+	payload, err := s.readService.IncomeStatement(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) dashboard(c *gin.Context) {
@@ -307,10 +186,15 @@ func splitDashboardFilterValues(raw string) []string {
 }
 
 func (s *Server) accounts(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if ok {
-		c.JSON(http.StatusOK, gin.H{"accounts": snapshot.Accounts})
+	if !requireAuth(c) {
+		return
 	}
+	accounts, err := s.accountService.List()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"accounts": accounts})
 }
 
 func (s *Server) appendAccount(c *gin.Context) {
@@ -321,14 +205,12 @@ func (s *Server) appendAccount(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if input.Currency == "" {
-		input.Currency = "CNY"
-	}
-	if err := s.writer.AppendAccount(input); err != nil {
+	account, err := s.accountService.Append(input)
+	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "account": input})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "account": account})
 }
 
 func (s *Server) applyAccountOperations(c *gin.Context) {
@@ -339,7 +221,7 @@ func (s *Server) applyAccountOperations(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	texts, err := s.writer.ApplyAccountOperations(input.Operations)
+	texts, err := s.accountService.ApplyOperations(input.Operations)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -348,42 +230,35 @@ func (s *Server) applyAccountOperations(c *gin.Context) {
 }
 
 func (s *Server) accountDetail(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
-	if !ok {
+	if !requireSensitive(c) {
 		return
 	}
-	account := c.Query("account")
-	if account == "" {
+	detail, err := s.accountService.Detail(c.Query("account"))
+	if errors.Is(err, ErrAccountRequired) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "account is required"})
 		return
 	}
-	var acct *Account
-	for i := range snapshot.Accounts {
-		if snapshot.Accounts[i].Account == account {
-			acct = &snapshot.Accounts[i]
-		}
-	}
-	if acct == nil {
+	if errors.Is(err, ErrAccountNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"account":        acct.Account,
-		"label":          acct.Label,
-		"alias":          acct.Alias,
-		"group":          acct.Group,
-		"active":         acct.Active,
-		"currency":       acct.Currency,
-		"rows":           AccountDetail(account, snapshot.Transactions),
-		"currentBalance": snapshot.Balances[account],
-	})
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
 }
 
 func (s *Server) accountStatus(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
-	if ok {
-		c.JSON(http.StatusOK, gin.H{"statuses": AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)})
+	if !requireSensitive(c) {
+		return
 	}
+	statuses, err := s.accountService.Statuses()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"statuses": statuses})
 }
 
 func (s *Server) reconciliation(c *gin.Context) {
