@@ -67,12 +67,27 @@ type LedgerWriteTransaction struct {
 	snapshots map[string]fileSnapshot
 }
 
+const (
+	ledgerWriteSourceDefault             = "ledger-write"
+	ledgerWriteSourceAppendText          = "ledger-append-text"
+	ledgerWriteSourceAppendEntry         = "append-entry"
+	ledgerWriteSourceAppendBatch         = "append-batch"
+	ledgerWriteSourceAppendEntries       = "append-entries"
+	ledgerWriteSourceAccountAppend       = "account-append"
+	ledgerWriteSourceAccountOperations   = "account-operations"
+	ledgerWriteSourceTransactionUpdate   = "transaction-update"
+	ledgerWriteSourceTransactionDelete   = "transaction-delete"
+	ledgerWriteSourceTransactionReversal = "transaction-reversal"
+	ledgerWriteSourceReconciliation      = "reconciliation"
+	ledgerWriteSourceImportCommit        = "import-commit"
+)
+
 func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
 	return &LedgerWriter{cfg: cfg, cache: cache}
 }
 
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
-	return w.RunTransactionWithSource("ledger-write", apply)
+	return w.RunTransactionWithSource(ledgerWriteSourceDefault, apply)
 }
 
 func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*LedgerWriteTransaction) error) error {
@@ -143,7 +158,7 @@ func (tx *LedgerWriteTransaction) Restore() {
 }
 
 func (w *LedgerWriter) AppendBeanText(date, beanText string) error {
-	return w.AppendBeanTextWithSource(date, beanText, "ledger-append-text")
+	return w.AppendBeanTextWithSource(date, beanText, ledgerWriteSourceAppendText)
 }
 
 func (w *LedgerWriter) AppendBeanTextWithSource(date, beanText, source string) error {
@@ -151,6 +166,10 @@ func (w *LedgerWriter) AppendBeanTextWithSource(date, beanText, source string) e
 }
 
 func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
+	return w.AppendEntriesWithSource(ledgerWriteSourceAppendEntries, entries)
+}
+
+func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEntry) ([]string, error) {
 	items := make([]appendItem, 0, len(entries))
 	texts := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -165,14 +184,14 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 		items = append(items, appendItem{date: entry.Date, beanText: text})
 		texts = append(texts, text)
 	}
-	if err := w.appendItemsChecked("append-entries", items); err != nil {
+	if err := w.appendItemsChecked(source, items); err != nil {
 		return nil, err
 	}
 	return texts, nil
 }
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
-	return w.RunTransactionWithSource("account-append", func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
 		if err != nil {
@@ -189,7 +208,7 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 
 func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
 	texts := []string{}
-	if err := w.RunTransactionWithSource("account-operations", func(tx *LedgerWriteTransaction) error {
+	if err := w.RunTransactionWithSource(ledgerWriteSourceAccountOperations, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
 		if err != nil {
@@ -235,7 +254,7 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
-	return w.RunTransactionWithSource("transaction-update", func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource(ledgerWriteSourceTransactionUpdate, func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -258,7 +277,7 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {
-	return w.RunTransactionWithSource("transaction-delete", func(tx *LedgerWriteTransaction) error {
+	return w.RunTransactionWithSource(ledgerWriteSourceTransactionDelete, func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -365,7 +384,7 @@ func (w *LedgerWriter) validateAndClear(source string) error {
 	if err == nil {
 		w.cache.Clear()
 		if strings.TrimSpace(source) == "" {
-			source = "ledger-write"
+			source = ledgerWriteSourceDefault
 		}
 		publishLedgerUpdated(w.cfg, source)
 	}
