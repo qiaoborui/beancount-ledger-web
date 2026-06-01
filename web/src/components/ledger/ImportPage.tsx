@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny } from "@/lib/money";
@@ -72,6 +72,15 @@ type ImportPreview = {
 };
 
 type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
+type ImportDraft = {
+  savedAt: number;
+  providerOverride: ProviderOverride;
+  alipayFundRounding: boolean;
+  preview: ImportPreview;
+  entries: ImportEntry[];
+};
+
+const importDraftKey = "ledger_import_review_draft";
 
 const providerChoices: { value: ProviderOverride; label: string; detail: string; accept: string }[] = [
   { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
@@ -96,6 +105,35 @@ function fileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function readImportDraft(): ImportDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(importDraftKey);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as Partial<ImportDraft>;
+    if (!draft.preview?.importId || !Array.isArray(draft.entries)) return null;
+    return {
+      savedAt: typeof draft.savedAt === "number" ? draft.savedAt : Date.now(),
+      providerOverride: draft.providerOverride ?? "auto",
+      alipayFundRounding: Boolean(draft.alipayFundRounding),
+      preview: draft.preview,
+      entries: draft.entries,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeImportDraft(draft: ImportDraft | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!draft) localStorage.removeItem(importDraftKey);
+    else localStorage.setItem(importDraftKey, JSON.stringify(draft));
+  } catch {
+    // Storage can be unavailable or full for large imports; the in-memory review still works.
+  }
 }
 
 export function ImportPage({ onImported }: { onImported?: () => void }) {
@@ -125,6 +163,21 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const hasCommitted = commitResult?.ok === true;
   const canCommit = Boolean(preview) && entries.length > 0 && !committing && !hasCommitted;
 
+  useEffect(() => {
+    const draft = readImportDraft();
+    if (!draft) return;
+    setProviderOverride(draft.providerOverride);
+    setAlipayFundRounding(draft.alipayFundRounding);
+    setPreview(draft.preview);
+    setEntries(draft.entries);
+    setReviewOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!preview || hasCommitted) return;
+    writeImportDraft({ savedAt: Date.now(), providerOverride, alipayFundRounding, preview, entries });
+  }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
+
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
     return "对方账户";
@@ -144,6 +197,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setResultOpen(false);
     setReviewOpen(false);
     setError("");
+    writeImportDraft(null);
   }
 
   async function generatePreview() {
@@ -192,6 +246,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setCommitResult(data);
       setResultOpen(true);
       setReviewOpen(true);
+      writeImportDraft(null);
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

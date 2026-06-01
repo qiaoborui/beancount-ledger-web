@@ -246,6 +246,10 @@ input:focus, textarea:focus, select:focus {
 }
 button.card:active, a.card:active { transform: scale(0.992); }
 .transaction-list-card:active, .account-detail-row-button:active { transform: none; }
+.transaction-list-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 78px;
+}
 .account-balance-chart .recharts-wrapper,
 .account-balance-chart .recharts-surface {
   max-width: 100% !important;

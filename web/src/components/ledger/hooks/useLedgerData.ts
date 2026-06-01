@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
-import { fetchJson, readJson } from "@/lib/clientFetch";
+import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
 import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
@@ -21,15 +21,6 @@ function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, cache: Led
   runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked), cache };
 }
 
-async function fetchSensitiveJson<T>(input: RequestInfo | URL, fallback: T, onSensitiveLocked?: () => void): Promise<T> {
-  const response = await fetch(input);
-  if (response.status === 401 || response.status === 423) {
-    if (response.status === 423) onSensitiveLocked?.();
-    return fallback;
-  }
-  return readJson<T>(response, fallback);
-}
-
 async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   try {
     const data = await fetchJson<{ version?: LedgerVersion }>("/api/ledger/version", undefined, {});
@@ -38,6 +29,23 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
     return null;
   }
 }
+
+type LedgerBootstrapResponse = {
+  summary?: Summary;
+  balances?: Record<string, number>;
+  netWorthHistory?: NetWorthPoint[];
+  monthEndNetWorth?: NetWorthPoint[];
+  netWorthWindows?: NetWorthWindows | null;
+  creditCards?: CreditCardAnalytics[];
+  transactions?: Txn[];
+  budgetRows?: BudgetRow[];
+  reconciliationRows?: ReconcileRow[];
+  accounts?: AccountView[];
+  incomeStatement?: NonNullable<IncomeStatementCache>;
+  accountStatuses?: AccountStatus[];
+  ledgerVersion?: LedgerVersion;
+  sensitiveUnlocked?: boolean;
+};
 
 export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked);
@@ -76,8 +84,8 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     setLastSyncedAt(null);
   }, []);
 
-  const applyCache = useCallback((cache: LedgerCache) => {
-    writeRuntimeLedgerCache(timeRange, unlocked, cache);
+  const applyCache = useCallback((cache: LedgerCache, cacheUnlocked = unlocked) => {
+    writeRuntimeLedgerCache(timeRange, cacheUnlocked, cache);
     setSummary(cache.summary);
     setBalances(cache.balances);
     setNetWorthRows(cache.netWorthRows);
@@ -120,34 +128,29 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     const run = async () => {
       if (!options.background) setLoadingFresh(true);
       try {
-        const requests = [
-          fetchJson<{ summary?: Summary; balances?: Record<string, number>; netWorthHistory?: NetWorthPoint[]; monthEndNetWorth?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[] }>(`/api/ledger/summary?${params}`),
-          fetchJson<{ transactions?: Txn[] }>(`/api/ledger/transactions?${params}`),
-          fetchJson<{ rows?: BudgetRow[] }>(`/api/ledger/budget?${params}`),
-          unlocked ? fetchSensitiveJson<{ rows?: ReconcileRow[] }>(`/api/ledger/reconciliation?${params}`, { rows: [] }, onSensitiveLocked) : Promise.resolve({ rows: [] }),
-          fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
-          fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
-          unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }, onSensitiveLocked) : Promise.resolve({ statuses: [] }),
-        ] as const;
-        const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
+        const data = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${params}`);
+        const sensitiveUnlocked = Boolean(data.sensitiveUnlocked);
+        if (unlocked && !sensitiveUnlocked) onSensitiveLocked();
+        const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
+        const version = data.ledgerVersion ?? await fetchLedgerVersion();
         const fresh: LedgerCache = {
-          summary: s.summary ?? null,
-          balances: unlocked ? (s.balances ?? {}) : {},
-          netWorthRows: unlocked ? (s.netWorthHistory ?? []) : [],
-          monthEndNetWorthRows: unlocked ? (s.monthEndNetWorth ?? []) : [],
-          netWorthWindows: unlocked ? (s.netWorthWindows ?? null) : null,
-          creditCards: unlocked ? (s.creditCards ?? []) : [],
-          txns: t.transactions ?? [],
-          budgetRows: b.rows ?? [],
-          reconciliationRows: unlocked ? (r.rows ?? []) : [],
-          accounts: a.accounts ?? [],
-          accountStatuses: unlocked ? (st.statuses ?? []) : [],
-          incomeStatement: { income: unlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: unlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: unlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
+          summary: data.summary ?? null,
+          balances: sensitiveUnlocked ? (data.balances ?? {}) : {},
+          netWorthRows: sensitiveUnlocked ? (data.netWorthHistory ?? []) : [],
+          monthEndNetWorthRows: sensitiveUnlocked ? (data.monthEndNetWorth ?? []) : [],
+          netWorthWindows: sensitiveUnlocked ? (data.netWorthWindows ?? null) : null,
+          creditCards: sensitiveUnlocked ? (data.creditCards ?? []) : [],
+          txns: data.transactions ?? [],
+          budgetRows: data.budgetRows ?? [],
+          reconciliationRows: sensitiveUnlocked ? (data.reconciliationRows ?? []) : [],
+          accounts: data.accounts ?? [],
+          accountStatuses: sensitiveUnlocked ? (data.accountStatuses ?? []) : [],
+          incomeStatement: { income: sensitiveUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: sensitiveUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: sensitiveUnlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
           ledgerVersion: version ?? undefined,
           savedAt: Date.now(),
         };
-        applyCache(fresh);
-        if (unlocked) {
+        applyCache(fresh, sensitiveUnlocked);
+        if (sensitiveUnlocked) {
           writeLedgerCache(range, fresh);
           freshLedgerCacheKeys.add(timeRangeToParams(range));
         }

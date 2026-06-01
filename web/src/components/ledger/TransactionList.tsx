@@ -233,11 +233,25 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
   const debouncedMetadataQuery = useDebouncedValue(metadataQuery ?? "");
   const query = debouncedCategoryQuery.trim().toLowerCase();
-  const searchWords = debouncedSearchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const searchWords = useMemo(() => debouncedSearchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean), [debouncedSearchQuery]);
   const metadataOptions = useMemo(() => Array.from(new Set(txns.flatMap((t) => [
     ...metadataPairs(t).map(([key, value]) => `${key}:${String(value)}`),
     ...(t.tags ?? []).map((tag) => `#${tag}`),
   ]))).sort(), [txns]);
+  const searchIndex = useMemo(() => new Map(txns.map((txn) => [
+    transactionKey(txn),
+    {
+      categoryAccounts: txn.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account.toLowerCase()),
+      text: [
+        txn.payee,
+        txn.narration,
+        txn.date,
+        ...txn.postings.map((p) => p.account),
+        metadataText(txn),
+      ].join(" ").toLowerCase(),
+      metadata: metadataText(txn).toLowerCase(),
+    },
+  ])), [txns]);
   const metadataQ = debouncedMetadataQuery.trim();
 
   // 组合过滤：分类 AND 关键词搜索
@@ -248,12 +262,12 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     if (query) {
       if (matchMode === "prefix") {
         filtered = filtered.filter((t) =>
-          t.postings.some((p) => (p.account.startsWith("Expenses:") || p.account.startsWith("Income:")) && p.account.toLowerCase().startsWith(query))
+          searchIndex.get(transactionKey(t))?.categoryAccounts.some((account) => account.startsWith(query))
         );
       } else {
         // 精确匹配（忽略大小写）
         filtered = filtered.filter((t) =>
-          t.postings.some((p) => (p.account.startsWith("Expenses:") || p.account.startsWith("Income:")) && p.account.toLowerCase() === query)
+          searchIndex.get(transactionKey(t))?.categoryAccounts.some((account) => account === query)
         );
       }
     }
@@ -261,22 +275,22 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     // 关键词搜索：payee / narration / posting.account
     if (searchWords.length > 0) {
       filtered = filtered.filter((t) =>
-        searchWords.every((word) =>
-          t.payee.toLowerCase().includes(word) ||
-          t.narration.toLowerCase().includes(word) ||
-          t.date.includes(word) ||
-          t.postings.some((p) => p.account.toLowerCase().includes(word)) ||
-          metadataText(t).toLowerCase().includes(word)
-        )
+        searchWords.every((word) => searchIndex.get(transactionKey(t))?.text.includes(word))
       );
     }
 
     if (metadataQ) {
-      filtered = filtered.filter((t) => matchesMetadataQuery(t, metadataQ));
+      filtered = filtered.filter((t) => {
+        const index = searchIndex.get(transactionKey(t));
+        if (!index) return false;
+        const q = metadataQ.toLowerCase();
+        if (!/[#:]/.test(q)) return index.metadata.includes(q);
+        return matchesMetadataQuery(t, metadataQ);
+      });
     }
 
     return filtered;
-  }, [txns, query, debouncedSearchQuery, metadataQ, matchMode]);
+  }, [txns, query, searchWords, metadataQ, matchMode, searchIndex]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
