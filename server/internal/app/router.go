@@ -530,50 +530,12 @@ func (s *Server) reconcile(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	snapshot, err := s.cache.Snapshot()
+	result, err := s.reconcileService.Reconcile(input)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	var accountInfo *Account
-	for i := range snapshot.Accounts {
-		acct := &snapshot.Accounts[i]
-		if acct.Active && (strings.HasPrefix(acct.Account, "Assets:") || strings.HasPrefix(acct.Account, "Liabilities:")) && acct.Account == input.Account {
-			accountInfo = acct
-			break
-		}
-	}
-	if accountInfo == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的对账账户"})
-		return
-	}
-	ledgerBalance := balanceBefore(input.Account, snapshot.Transactions, input.BalanceDate)
-	actual := cents(input.ActualAmount)
-	diff := actual - ledgerBalance
-	adjustmentDate := input.AdjustmentDate
-	if adjustmentDate == "" {
-		adjustmentDate = input.BalanceDate
-	}
-	beanText := ""
-	var adjustment *LedgerEntry
-	if diff != 0 {
-		other := "Equity:Balance-Adjustments"
-		if accountInfo.Group == "wealth" && diff > 0 {
-			other = "Income:Other"
-		} else if accountInfo.Group == "wealth" && diff < 0 {
-			other = "Expenses:Unknown"
-		}
-		entry := LedgerEntry{Kind: "transaction", Date: adjustmentDate, Payee: accountInfo.Label, Narration: "余额差额调整", Metadata: map[string]MetadataValue{"purpose": "reconciliation"}, Tags: []string{}, Currency: "CNY", Confidence: 1, NeedsReview: false, Postings: []EntryPosting{{Account: input.Account, Amount: fromCents(diff), Currency: "CNY"}, {Account: other, Amount: fromCents(-diff), Currency: "CNY"}}}
-		adjustment = &entry
-		beanText += TransactionToBean(entry) + "\n"
-	}
-	balance := LedgerEntry{Kind: "balance", Date: input.BalanceDate, Account: input.Account, Amount: fromCents(actual), Currency: "CNY"}
-	beanText += BalanceToBean(balance)
-	if err := s.writer.AppendBeanTextWithSource(input.BalanceDate, beanText, ledgerWriteSourceReconciliation); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "ledgerBalance": ledgerBalance, "actual": actual, "diff": diff, "adjustment": adjustment, "balance": balance, "beanText": beanText})
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) staticFallback(c *gin.Context) {

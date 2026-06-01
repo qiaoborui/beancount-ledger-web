@@ -9,16 +9,18 @@ import (
 )
 
 type Server struct {
-	cfg     Config
-	cache   *LedgerCache
-	writer  *LedgerWriter
-	limiter *RateLimiter
-	events  *EventHub
+	cfg              Config
+	cache            *LedgerCache
+	writer           *LedgerWriter
+	reconcileService *ReconciliationService
+	limiter          *RateLimiter
+	events           *EventHub
 }
 
 func NewRouter(cfg Config) *gin.Engine {
 	cache := NewLedgerCache(cfg)
-	server := &Server{cfg: cfg, cache: cache, writer: NewLedgerWriter(cfg, cache), limiter: NewRateLimiter(), events: ledgerEventHub}
+	writer := NewLedgerWriter(cfg, cache)
+	server := &Server{cfg: cfg, cache: cache, writer: writer, reconcileService: NewReconciliationService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
 	server.registerAPI(router.Group("/api"))
