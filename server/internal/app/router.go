@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -185,10 +186,15 @@ func splitDashboardFilterValues(raw string) []string {
 }
 
 func (s *Server) accounts(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if ok {
-		c.JSON(http.StatusOK, gin.H{"accounts": snapshot.Accounts})
+	if !requireAuth(c) {
+		return
 	}
+	accounts, err := s.accountService.List()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"accounts": accounts})
 }
 
 func (s *Server) appendAccount(c *gin.Context) {
@@ -199,14 +205,12 @@ func (s *Server) appendAccount(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if input.Currency == "" {
-		input.Currency = "CNY"
-	}
-	if err := s.writer.AppendAccount(input); err != nil {
+	account, err := s.accountService.Append(input)
+	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "account": input})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "account": account})
 }
 
 func (s *Server) applyAccountOperations(c *gin.Context) {
@@ -217,7 +221,7 @@ func (s *Server) applyAccountOperations(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	texts, err := s.writer.ApplyAccountOperations(input.Operations)
+	texts, err := s.accountService.ApplyOperations(input.Operations)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -226,42 +230,35 @@ func (s *Server) applyAccountOperations(c *gin.Context) {
 }
 
 func (s *Server) accountDetail(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
-	if !ok {
+	if !requireSensitive(c) {
 		return
 	}
-	account := c.Query("account")
-	if account == "" {
+	detail, err := s.accountService.Detail(c.Query("account"))
+	if errors.Is(err, ErrAccountRequired) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "account is required"})
 		return
 	}
-	var acct *Account
-	for i := range snapshot.Accounts {
-		if snapshot.Accounts[i].Account == account {
-			acct = &snapshot.Accounts[i]
-		}
-	}
-	if acct == nil {
+	if errors.Is(err, ErrAccountNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"account":        acct.Account,
-		"label":          acct.Label,
-		"alias":          acct.Alias,
-		"group":          acct.Group,
-		"active":         acct.Active,
-		"currency":       acct.Currency,
-		"rows":           AccountDetail(account, snapshot.Transactions),
-		"currentBalance": snapshot.Balances[account],
-	})
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
 }
 
 func (s *Server) accountStatus(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
-	if ok {
-		c.JSON(http.StatusOK, gin.H{"statuses": AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)})
+	if !requireSensitive(c) {
+		return
 	}
+	statuses, err := s.accountService.Statuses()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"statuses": statuses})
 }
 
 func (s *Server) reconciliation(c *gin.Context) {
