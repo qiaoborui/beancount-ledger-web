@@ -39,159 +39,42 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 }
 
 func (s *Server) ledgerBootstrap(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-
-	summary := MonthSummary(start, end, snapshot.Transactions)
-	txns := append([]Transaction(nil), snapshot.Transactions...)
-	sort.Slice(txns, func(i, j int) bool { return txns[i].Date > txns[j].Date })
-	filteredTxns := []Transaction{}
-	for _, txn := range txns {
-		if txn.Date < start || txn.Date >= end {
-			continue
-		}
-		if !unlocked {
-			hasIncome := false
-			for _, posting := range txn.Postings {
-				if strings.HasPrefix(posting.Account, "Income:") {
-					hasIncome = true
-				}
-			}
-			if hasIncome {
-				continue
-			}
-		}
-		filteredTxns = append(filteredTxns, txn)
+	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-
-	netWorthRows := []NetWorthPoint{}
-	monthEndRows := []NetWorthPoint{}
-	var windows any
-	creditCards := []CreditCardAnalytics{}
-	reconciliationRows := []gin.H{}
-	accountStatuses := []AccountStatus{}
-	if unlocked {
-		allRows := NetWorthHistory(snapshot.Transactions)
-		for _, row := range allRows {
-			if row.Date >= start && row.Date < end {
-				netWorthRows = append(netWorthRows, row)
-			}
-		}
-		monthEndRows = MonthEndNetWorth(netWorthRows)
-		windows = NetWorthChangeWindows(allRows)
-		creditCards = CreditCards(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end)
-		reconciliationRows = buildReconciliationRows(snapshot, start, end)
-		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-	} else {
-		for day, value := range summary.Days {
-			value["income"] = 0
-			summary.Days[day] = value
-		}
-		summary.Income, summary.Net = 0, 0
-	}
-
-	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
-	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
-	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
-	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
-	incomeNodes := []IncomeStatementNode{}
-	if unlocked {
-		incomeNodes = allIncomeNodes
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"start":              start,
-		"end":                end,
-		"summary":            summary,
-		"balances":           statusMap(unlocked, snapshot.Balances),
-		"netWorthHistory":    netWorthRows,
-		"monthEndNetWorth":   monthEndRows,
-		"netWorthWindows":    windows,
-		"creditCards":        creditCards,
-		"transactions":       filteredTxns,
-		"budgetRows":         buildBudgetRows(snapshot, start, end),
-		"reconciliationRows": reconciliationRows,
-		"accounts":           snapshot.Accounts,
-		"incomeStatement": gin.H{
-			"income":             incomeNodes,
-			"expense":            expenseNodes,
-			"totalIncome":        statusInt(unlocked, totalIncome),
-			"totalExpense":       totalExpense,
-			"expenseAnalytics":   expense,
-			"topPayees":          topPayees,
-			"topPaymentAccounts": topAccounts,
-			"netIncome":          statusInt(unlocked, netIncome),
-		},
-		"accountStatuses":   accountStatuses,
-		"ledgerVersion":     snapshot.LedgerVersion,
-		"sensitiveUnlocked": unlocked,
-	})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) summary(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	summary := MonthSummary(start, end, snapshot.Transactions)
-	netWorthRows := []NetWorthPoint{}
-	monthEndRows := []NetWorthPoint{}
-	var windows any
-	creditCards := []CreditCardAnalytics{}
-	if unlocked {
-		allRows := NetWorthHistory(snapshot.Transactions)
-		for _, row := range allRows {
-			if row.Date >= start && row.Date < end {
-				netWorthRows = append(netWorthRows, row)
-			}
-		}
-		monthEndRows = MonthEndNetWorth(netWorthRows)
-		windows = NetWorthChangeWindows(allRows)
-		creditCards = CreditCards(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end)
-	} else {
-		for day, value := range summary.Days {
-			value["income"] = 0
-			summary.Days[day] = value
-		}
-		summary.Income, summary.Net = 0, 0
+	payload, err := s.readService.Summary(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) transactions(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	txns := append([]Transaction(nil), snapshot.Transactions...)
-	sort.Slice(txns, func(i, j int) bool { return txns[i].Date > txns[j].Date })
-	filtered := []Transaction{}
-	for _, txn := range txns {
-		if txn.Date < start || txn.Date >= end {
-			continue
-		}
-		if !unlocked {
-			hasIncome := false
-			for _, posting := range txn.Postings {
-				if strings.HasPrefix(posting.Account, "Income:") {
-					hasIncome = true
-				}
-			}
-			if hasIncome {
-				continue
-			}
-		}
-		filtered = append(filtered, txn)
+	payload, err := s.readService.Transactions(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "transactions": filtered, "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) balances(c *gin.Context) {
@@ -250,21 +133,16 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 }
 
 func (s *Server) incomeStatement(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	unlocked := isSensitiveUnlocked(c)
-	expense, topPayees, topAccounts := ExpenseAnalytics(snapshot.Transactions, start, end, snapshot.Accounts)
-	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTree(start, end, snapshot.Transactions)
-	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
-	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
-	incomeNodes := []IncomeStatementNode{}
-	if unlocked {
-		incomeNodes = allIncomeNodes
+	payload, err := s.readService.IncomeStatement(start, end, isSensitiveUnlocked(c))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "sensitiveUnlocked": unlocked})
+	c.JSON(http.StatusOK, payload)
 }
 
 func (s *Server) dashboard(c *gin.Context) {

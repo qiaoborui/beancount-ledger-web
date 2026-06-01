@@ -1,0 +1,83 @@
+package app
+
+import (
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
+	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
+
+	locked, err := service.Transactions("2026-05-01", "2026-06-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockedTxns := locked["transactions"].([]Transaction)
+	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
+		t.Fatalf("locked transaction feed should hide income transactions: %#v", lockedTxns)
+	}
+
+	unlocked, err := service.Transactions("2026-05-01", "2026-06-01", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlockedTxns := unlocked["transactions"].([]Transaction)
+	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
+		t.Fatalf("unlocked transaction feed should include all transactions newest first: %#v", unlockedTxns)
+	}
+}
+
+func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
+	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
+
+	locked, err := service.Summary("2026-05-01", "2026-06-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockedSummary := locked["summary"].(Summary)
+	if lockedSummary.Income != 0 || lockedSummary.Net != 0 || lockedSummary.Expense != 1200 {
+		t.Fatalf("locked summary should hide income while preserving expense: %#v", lockedSummary)
+	}
+	if balances := locked["balances"].(map[string]int); len(balances) != 0 {
+		t.Fatalf("locked summary should hide balances: %#v", balances)
+	}
+
+	lockedIncome, err := service.IncomeStatement("2026-05-01", "2026-06-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if income := lockedIncome["income"].([]IncomeStatementNode); len(income) != 0 {
+		t.Fatalf("locked income statement should hide income nodes: %#v", income)
+	}
+	if lockedIncome["totalIncome"].(int) != 0 || lockedIncome["netIncome"].(int) != 0 || lockedIncome["totalExpense"].(int) != 1200 {
+		t.Fatalf("locked income statement totals should hide income: %#v", lockedIncome)
+	}
+
+	unlocked, err := service.IncomeStatement("2026-05-01", "2026-06-01", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if income := unlocked["income"].([]IncomeStatementNode); len(income) != 1 || income[0].Account != "Income:Salary" {
+		t.Fatalf("unlocked income statement should include income nodes: %#v", income)
+	}
+	if unlocked["totalIncome"].(int) != 100000 || unlocked["netIncome"].(int) != 98800 {
+		t.Fatalf("unlocked income statement totals should include income: %#v", unlocked)
+	}
+}
+
+func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
+	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
+
+	bootstrap, err := service.Bootstrap("2026-05-01", "2026-06-01", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incomeStatement := bootstrap["incomeStatement"].(gin.H)
+	if _, ok := incomeStatement["start"]; ok {
+		t.Fatalf("nested income statement should not include top-level date fields: %#v", incomeStatement)
+	}
+	if incomeStatement["totalIncome"].(int) != 100000 || incomeStatement["netIncome"].(int) != 98800 {
+		t.Fatalf("nested income statement totals changed: %#v", incomeStatement)
+	}
+}
