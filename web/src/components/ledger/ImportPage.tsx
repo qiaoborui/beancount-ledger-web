@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, UploadCloud } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
+import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
 import { formatCny } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
@@ -23,7 +24,7 @@ import {
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
-type Provider = "alipay" | "wechat" | "cmb";
+type Provider = "alipay" | "wechat" | "cmb" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
 
 type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
@@ -86,12 +87,14 @@ const providerChoices: { value: ProviderOverride; label: string; detail: string;
   { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
   { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
   { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
-  { value: "cmb", label: "招商银行", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
+  { value: "cmb", label: "招商银行信用卡", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
+  { value: "cmb-checking", label: "招商银行储蓄卡", detail: "储蓄卡交易流水 CSV，PDF 可尝试", accept: ".csv / .pdf" },
 ];
 
 function providerLabel(provider: Provider) {
   if (provider === "alipay") return "支付宝";
   if (provider === "wechat") return "微信支付";
+  if (provider === "cmb-checking") return "招商银行储蓄卡";
   return "招商银行信用卡";
 }
 
@@ -212,9 +215,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     try {
+      const uploadFile = shouldConvertCmbCheckingPdf(file, providerOverride)
+        ? await convertCmbCheckingPdfToCsv(file)
+        : file;
       const form = new FormData();
       if (providerOverride !== "auto") form.set("provider", providerOverride);
-      form.set("file", file);
+      form.set("file", uploadFile);
+      if (uploadFile !== file) form.set("originalFile", file);
       form.set("alipayFundRounding", String(alipayFundRounding));
       const res = await fetch("/api/ledger/imports/preview", { method: "POST", body: form });
       const data = await readJson<ImportPreview>(res);
@@ -257,6 +264,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function updateEntry(id: string, patch: Partial<ImportEntry>) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  }
+
+  function removeEntry(id: string) {
+    setEntries((current) => current.filter((entry) => entry.id !== id));
   }
 
   function updateMetadata(id: string, key: string, value: string) {
@@ -497,6 +508,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             ) : null}
 
             <div className="space-y-4">
+              {entries.length === 0 ? (
+                <Alert className="text-sm text-stone">
+                  已删除所有候选交易。
+                </Alert>
+              ) : null}
               {entries.map((entry) => (
                 <article key={entry.id} className="overflow-hidden rounded-2xl border border-line bg-panel shadow-sm ring-1 ring-ink/[0.03]">
                   <div className="border-l-4 border-brand bg-paper px-4 py-4">
@@ -508,9 +524,23 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                           <span className="min-w-0 break-words text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span>
                         </div>
                       </div>
-                      <div className="rounded-2xl bg-panel px-3 py-2 text-left lg:text-right">
-                        <div className="whitespace-nowrap font-serif text-2xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
-                        <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+                        <div className="rounded-2xl bg-panel px-3 py-2 text-left lg:text-right">
+                          <div className="whitespace-nowrap font-serif text-2xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
+                          <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0 border-line bg-panel text-stone hover:text-destructive"
+                          onClick={() => removeEntry(entry.id)}
+                          disabled={committing || hasCommitted}
+                          title="删除这条候选交易"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          删除
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -590,7 +620,7 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
 }
 
 function ImportStats({ preview, entryCount }: { preview: ImportPreview; entryCount: number }) {
-  const stats = preview.provider === "cmb"
+  const stats = preview.provider === "cmb" || preview.provider === "cmb-checking"
     ? [
         ["PDF/CSV 明细", preview.rawRowCount],
         ["Web 前置过滤后", preview.filteredRowCount],

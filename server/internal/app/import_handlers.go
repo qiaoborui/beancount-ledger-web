@@ -20,7 +20,13 @@ func (s *Server) importsPreview(c *gin.Context) {
 		return
 	}
 	_ = file.Close()
-	result, err := s.createImportPreview(c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header)
+	originalFile, originalHeader, err := c.Request.FormFile("originalFile")
+	if err == nil {
+		_ = originalFile.Close()
+	} else {
+		originalHeader = nil
+	}
+	result, err := s.createImportPreview(c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header, originalHeader)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

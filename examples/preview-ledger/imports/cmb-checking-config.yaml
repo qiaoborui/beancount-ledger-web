@@ -1,0 +1,19 @@
+defaultDebitAccount: Expenses:Unknown
+defaultCreditAccount: Income:Other
+cashAccount: Assets:CN:Bank:PrimaryChecking
+defaultCurrency: CNY
+title: 招商银行储蓄卡流水示例
+cmbChecking:
+  rules:
+    - item: 掌上生活还款,信用卡还款
+      targetAccount: Liabilities:CN:CreditCard
+    - item: 代发款项,工资,薪资
+      targetAccount: Income:Salary
+    - item: 网联收款,转账汇款
+      targetAccount: Income:Other
+    - item: 零钱宝转出,代销理财快赎投资,朝朝宝转出
+      targetAccount: Assets:CN:Bank:MoneyMarket
+    - item: 岭南通,摩拜,共享单车,地铁,公交
+      targetAccount: Expenses:Transport:Public
+    - item: 银联快捷支付,快捷支付,银联线上有卡支付
+      targetAccount: Expenses:Unknown

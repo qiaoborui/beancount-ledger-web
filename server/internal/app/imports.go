@@ -51,7 +51,9 @@ type providerDetection struct {
 type importMeta struct {
 	Provider           string            `json:"provider"`
 	OriginalFilename   string            `json:"originalFilename"`
+	InputFilename      string            `json:"inputFilename,omitempty"`
 	InputFile          string            `json:"inputFile"`
+	DocumentFile       string            `json:"documentFile,omitempty"`
 	ProviderDetection  providerDetection `json:"providerDetection"`
 	StatementHash      string            `json:"statementHash"`
 	ExpectedEntryCount *int              `json:"expectedEntryCount,omitempty"`
@@ -72,14 +74,15 @@ type beanSummary struct {
 }
 
 var importProviderConfigs = map[string]importProviderConfig{
-	"alipay": {Config: "imports/alipay-config.yaml", Output: "alipay-output.bean", Extensions: []string{".csv"}, Label: "支付宝"},
-	"wechat": {Config: "imports/wechat-config.yaml", Output: "wechat-output.bean", Extensions: []string{".xlsx", ".xls"}, Label: "微信支付"},
-	"cmb":    {Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行信用卡"},
+	"alipay":       {Config: "imports/alipay-config.yaml", Output: "alipay-output.bean", Extensions: []string{".csv"}, Label: "支付宝"},
+	"wechat":       {Config: "imports/wechat-config.yaml", Output: "wechat-output.bean", Extensions: []string{".xlsx", ".xls"}, Label: "微信支付"},
+	"cmb":          {Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行信用卡"},
+	"cmb-checking": {Config: "imports/cmb-checking-config.yaml", Output: "cmb-checking-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行储蓄卡"},
 }
 
-func (s *Server) createImportPreview(providerOverride string, alipayFundRounding bool, header *multipart.FileHeader) (ginH, error) {
+func (s *Server) createImportPreview(providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
 	importID := randomID()
-	upload, err := s.saveImportUpload(header, providerOverride, importID)
+	upload, err := s.saveImportUpload(header, originalHeader, providerOverride, importID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +92,22 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 
 	generatedFile := previewPath(s.cfg, importID, importProviderConfigs[upload.Provider].Output)
 	dedupedFile := previewPath(s.cfg, importID, upload.Provider+"-preview-deduped.bean")
-	prepared, err := s.prepareProviderInput(upload.Provider, upload.InputFile, upload.OriginalFilename, importID)
+	inputFilename := upload.InputFilename
+	if inputFilename == "" {
+		inputFilename = upload.OriginalFilename
+	}
+	prepared, err := s.prepareProviderInput(upload.Provider, upload.InputFile, inputFilename, importID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.runTranslate(upload.Provider, prepared.InputFile, generatedFile); err != nil {
-		return nil, err
+	if upload.Provider == "cmb-checking" {
+		if err := s.generateCmbCheckingBean(prepared.InputFile, generatedFile); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := s.runTranslate(upload.Provider, prepared.InputFile, generatedFile); err != nil {
+			return nil, err
+		}
 	}
 	rawGeneratedBean, err := os.ReadFile(generatedFile)
 	if err != nil {
@@ -129,7 +142,7 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if err != nil {
 		return nil, err
 	}
-	if upload.Provider == "cmb" {
+	if upload.Provider == "cmb" || upload.Provider == "cmb-checking" {
 		for i := range entries {
 			if entries[i].Metadata == nil {
 				entries[i].Metadata = map[string]string{}
@@ -166,6 +179,9 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 		}
 		warnings = append(warnings, fmt.Sprintf("招商银行信用卡行数核对通过：PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generatedSummary.CandidateCount, summary.CandidateCount))
 	}
+	if upload.Provider == "cmb-checking" {
+		warnings = append(warnings, fmt.Sprintf("招商银行储蓄卡行数核对通过：CSV 明细 %d 条，生成 %d 条，去重后待写入 %d 条。", generatedSummary.CandidateCount, generatedSummary.CandidateCount, summary.CandidateCount))
+	}
 	expected := len(entries)
 	upload.ExpectedEntryCount = &expected
 	if err := s.writeImportMeta(importID, upload); err != nil {
@@ -178,6 +194,8 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	rawRowCount, filteredRowCount := generatedSummary.CandidateCount, generatedSummary.CandidateCount
 	if upload.Provider == "cmb" {
 		rawRowCount, filteredRowCount = prepared.RawRowCount, prepared.FilteredRowCount
+	} else if upload.Provider == "cmb-checking" {
+		rawRowCount, filteredRowCount = generatedSummary.CandidateCount, generatedSummary.CandidateCount
 	} else if sourceAnalysis.RawRowCount > 0 {
 		rawRowCount, filteredRowCount = sourceAnalysis.RawRowCount, sourceAnalysis.FilteredRowCount
 	}
@@ -253,13 +271,17 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry) 
 	documentFile := uniquePath(importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)]))
 	monthFile := transactionFileForDate(s.cfg, summary.DateStart)
 	documentAccount := providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
-	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, meta.InputFile, documentFile, documentAccount); err != nil {
+	sourceDocumentFile := meta.InputFile
+	if meta.DocumentFile != "" {
+		sourceDocumentFile = meta.DocumentFile
+	}
+	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount); err != nil {
 		return nil, err
 	}
 	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText}, nil
 }
 
-func (s *Server) saveImportUpload(header *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
+func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
 	if header.Size > 10*1024*1024 {
 		return importMeta{}, errors.New("账单文件超过 10MB")
 	}
@@ -288,7 +310,30 @@ func (s *Server) saveImportUpload(header *multipart.FileHeader, providerOverride
 	if err := os.WriteFile(inputFile, content, 0o600); err != nil {
 		return importMeta{}, err
 	}
-	meta := importMeta{Provider: detection.Provider, OriginalFilename: originalName, InputFile: inputFile, ProviderDetection: detection, StatementHash: sha256Hex(content)}
+	meta := importMeta{Provider: detection.Provider, OriginalFilename: originalName, InputFilename: originalName, InputFile: inputFile, ProviderDetection: detection, StatementHash: sha256Hex(content)}
+	if originalHeader != nil {
+		if originalHeader.Size > 10*1024*1024 {
+			return importMeta{}, errors.New("原始账单文件超过 10MB")
+		}
+		originalDocumentName := strings.TrimSpace(originalHeader.Filename)
+		if originalDocumentName == "" {
+			originalDocumentName = originalName
+		}
+		originalContent, err := readMultipartFile(originalHeader)
+		if err != nil {
+			return importMeta{}, err
+		}
+		originalExt := strings.ToLower(filepath.Ext(originalDocumentName))
+		if originalExt == "" {
+			originalExt = ".pdf"
+		}
+		documentFile := filepath.Join(dir, "document"+originalExt)
+		if err := os.WriteFile(documentFile, originalContent, 0o600); err != nil {
+			return importMeta{}, err
+		}
+		meta.OriginalFilename = originalDocumentName
+		meta.DocumentFile = documentFile
+	}
 	if err := s.writeImportMeta(importID, meta); err != nil {
 		return importMeta{}, err
 	}
@@ -298,7 +343,7 @@ func (s *Server) saveImportUpload(header *multipart.FileHeader, providerOverride
 func (s *Server) ensureImportRequirements(provider string) error {
 	cfg, ok := importProviderConfigs[provider]
 	if !ok {
-		return errors.New("provider must be alipay, wechat or cmb")
+		return errors.New("provider must be alipay, wechat, cmb or cmb-checking")
 	}
 	required := []string{"main.bean", cfg.Config, "scripts/dedup_import.py"}
 	for _, relative := range required {
@@ -312,6 +357,9 @@ func (s *Server) ensureImportRequirements(provider string) error {
 func (s *Server) prepareProviderInput(provider, inputFile, originalFilename, importID string) (preparedImportInput, error) {
 	if provider == "alipay" {
 		return s.prepareAlipayCSVForDEG(inputFile, importID)
+	}
+	if provider == "cmb-checking" {
+		return s.prepareCmbCheckingInput(inputFile, originalFilename, importID)
 	}
 	if provider != "cmb" {
 		return preparedImportInput{InputFile: inputFile}, nil
@@ -403,6 +451,9 @@ func (s *Server) runDedup(provider, generatedFile, outputFile string, alipayFund
 	args := []string{"scripts/dedup_import.py", generatedFile}
 	if provider == "cmb" {
 		args = append(args, "--credit-card")
+	}
+	if provider == "cmb-checking" {
+		args = append(args, "--bank-card")
 	}
 	if dryRun {
 		args = append(args, "--dry-run")

@@ -19,7 +19,7 @@ import (
 type ginH map[string]any
 
 func detectBillProvider(filename string, content []byte, override string) (providerDetection, error) {
-	if override == "alipay" || override == "wechat" || override == "cmb" {
+	if override == "alipay" || override == "wechat" || override == "cmb" || override == "cmb-checking" {
 		return providerDetection{Provider: override, Reason: "手动指定", Confidence: "high"}, nil
 	}
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -30,10 +30,16 @@ func detectBillProvider(filename string, content []byte, override string) (provi
 	if ext == ".xlsx" || ext == ".xls" {
 		return providerDetection{Provider: "wechat", Reason: "Excel 文件通常为微信支付账单", Confidence: "high"}, nil
 	}
+	if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") && strings.Contains(filename, "交易流水") {
+		return providerDetection{Provider: "cmb-checking", Reason: "PDF 文件名包含招商银行交易流水", Confidence: "medium"}, nil
+	}
 	if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") {
 		return providerDetection{Provider: "cmb", Reason: "PDF 文件将按招商银行信用卡账单解析", Confidence: "medium"}, nil
 	}
 	if ext == ".csv" {
+		if regexp.MustCompile(`记账日期,货币,交易金额,联机余额,交易摘要,对手信息`).MatchString(sample) {
+			return providerDetection{Provider: "cmb-checking", Reason: "CSV 内容包含招商银行储蓄卡流水字段", Confidence: "high"}, nil
+		}
 		if regexp.MustCompile(`招商银行信用卡对账单|交易日,记账日,交易摘要,人民币金额,卡号末四位,交易地金额`).MatchString(sample) {
 			return providerDetection{Provider: "cmb", Reason: "CSV 内容包含招商银行信用卡账单字段", Confidence: "high"}, nil
 		}
@@ -42,7 +48,7 @@ func detectBillProvider(filename string, content []byte, override string) (provi
 		}
 		return providerDetection{Provider: "alipay", Reason: "CSV 文件默认按支付宝账单处理", Confidence: "medium"}, nil
 	}
-	return providerDetection{}, errors.New("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS 或招商银行信用卡 PDF。需要时可使用手动覆盖。")
+	return providerDetection{}, errors.New("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS、招商银行信用卡 PDF/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func parsePreviewEntries(beanText string) ([]ImportEntry, error) {
@@ -350,7 +356,7 @@ func documentDirective(date, account, outputFile, documentFile string) string {
 }
 
 func providerDocumentAccount(provider string, accounts map[string]bool, fallback string) string {
-	preferred := map[string]string{"alipay": "Assets:CN:Alipay:Balance", "wechat": "Assets:CN:Wechat:Balance", "cmb": "Liabilities:CN:CMB:CreditCard"}[provider]
+	preferred := map[string]string{"alipay": "Assets:CN:Alipay:Balance", "wechat": "Assets:CN:Wechat:Balance", "cmb": "Liabilities:CN:CMB:CreditCard", "cmb-checking": "Assets:CN:CMB:Checking"}[provider]
 	if accounts[preferred] {
 		return preferred
 	}
@@ -491,6 +497,8 @@ func importProviderTitle(provider string) string {
 		return "WeChat Pay"
 	case "cmb":
 		return "CMB Credit Card"
+	case "cmb-checking":
+		return "CMB Checking"
 	default:
 		return provider
 	}
