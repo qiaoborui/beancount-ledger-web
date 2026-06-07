@@ -50,6 +50,7 @@ def main() -> int:
   parser.add_argument("--dry-run", action="store_true")
   parser.add_argument("--alipay-fund-rounding", action="store_true")
   parser.add_argument("--credit-card", action="store_true")
+  parser.add_argument("--bank-card", action="store_true")
   args = parser.parse_args()
 
   root = Path.cwd()
@@ -64,6 +65,9 @@ def main() -> int:
   for block in transaction_blocks(import_text):
     ids = order_ids(block)
     if ids and ids <= existing_order_ids:
+      skipped += 1
+      continue
+    if args.bank_card and fallback_identity(block) in existing_fallbacks:
       skipped += 1
       continue
     if not ids and fallback_identity(block) in existing_fallbacks:
