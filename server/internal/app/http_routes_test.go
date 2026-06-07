@@ -197,6 +197,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/insights":             true,
 		"GET /api/ledger/notifications":        true,
 		"PATCH /api/ledger/notifications":      true,
+		"GET /api/ledger/imports/providers":    true,
 		"POST /api/ledger/imports/preview":     true,
 		"POST /api/ledger/imports/commit":      true,
 		"POST /api/ai/parse":                   true,

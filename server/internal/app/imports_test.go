@@ -156,6 +156,96 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestImportProvidersEndpoint(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	recorder := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/providers", "", cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("providers status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Providers []importProviderOption `json:"providers"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Providers) != 4 {
+		t.Fatalf("providers = %#v", response.Providers)
+	}
+	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "wechat" || response.Providers[2].ID != "cmb" || response.Providers[3].ID != "cmb-checking" {
+		t.Fatalf("unexpected provider order: %#v", response.Providers)
+	}
+	if response.Providers[3].Label != "招商银行储蓄卡" || response.Providers[3].Accept != ".pdf / .csv" {
+		t.Fatalf("unexpected checking metadata: %#v", response.Providers[3])
+	}
+}
+
+func TestImportCommitAllowsRemovedPreviewEntries(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), "alipay: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+
+	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
+	server.writer = NewLedgerWriter(cfg, server.cache)
+
+	importID := "removeentry1"
+	sourceFile := filepath.Join(importRuntimeDir(cfg, importID), "original.csv")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sourceRaw := []byte("交易创建时间,交易对方,金额\n2026-05-03,便利店,6.50\n")
+	if err := os.WriteFile(sourceFile, sourceRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expected := 2
+	meta := importMeta{
+		Provider:           "alipay",
+		OriginalFilename:   "alipay.csv",
+		InputFile:          sourceFile,
+		ProviderDetection:  providerDetection{Provider: "alipay", Reason: "test", Confidence: "high"},
+		StatementHash:      sha256Hex(sourceRaw),
+		ExpectedEntryCount: &expected,
+	}
+	if err := server.writeImportMeta(importID, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ImportEntry{{
+		ID:              "alipay-1",
+		Date:            "2026-05-03",
+		Flag:            "*",
+		Payee:           "便利店",
+		Narration:       "便利店",
+		Source:          "alipay",
+		OrderID:         "alipay-1",
+		CategoryAccount: "Expenses:Food",
+		FundingAccount:  "Assets:Cash",
+		Amount:          6.50,
+		Currency:        "CNY",
+		Metadata:        map[string]string{"orderId": "alipay-1", "source": "alipay"},
+	}}
+	result, err := server.commitImport(importID, "alipay", entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["count"] != 1 {
+		t.Fatalf("count = %#v", result["count"])
+	}
+	beanText := result["beanText"].(string)
+	if !strings.Contains(beanText, `orderId: "alipay-1"`) {
+		t.Fatalf("committed bean missing kept entry:\n%s", beanText)
+	}
+}
+
 func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

@@ -34,6 +34,13 @@ func (s *Server) importsPreview(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (s *Server) importsProviders(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"providers": importProviderOptions()})
+}
+
 func (s *Server) importsCommit(c *gin.Context) {
 	if !s.limiter.Check(c, "imports.commit", 10, time.Minute) {
 		return

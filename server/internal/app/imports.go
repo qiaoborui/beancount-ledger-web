@@ -40,6 +40,7 @@ type importProviderConfig struct {
 	Output     string
 	Extensions []string
 	Label      string
+	Detail     string
 }
 
 type providerDetection struct {
@@ -73,60 +74,41 @@ type beanSummary struct {
 	DateEnd        string
 }
 
-var importProviderConfigs = map[string]importProviderConfig{
-	"alipay":       {Config: "imports/alipay-config.yaml", Output: "alipay-output.bean", Extensions: []string{".csv"}, Label: "支付宝"},
-	"wechat":       {Config: "imports/wechat-config.yaml", Output: "wechat-output.bean", Extensions: []string{".xlsx", ".xls"}, Label: "微信支付"},
-	"cmb":          {Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行信用卡"},
-	"cmb-checking": {Config: "imports/cmb-checking-config.yaml", Output: "cmb-checking-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行储蓄卡"},
-}
-
 func (s *Server) createImportPreview(providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
 	importID := randomID()
 	upload, err := s.saveImportUpload(header, originalHeader, providerOverride, importID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ensureImportRequirements(upload.Provider); err != nil {
+	importer, err := s.ensureImportRequirements(upload.Provider)
+	if err != nil {
 		return nil, err
 	}
 
-	generatedFile := previewPath(s.cfg, importID, importProviderConfigs[upload.Provider].Output)
+	generatedFile := previewPath(s.cfg, importID, importer.ProviderConfig().Output)
 	dedupedFile := previewPath(s.cfg, importID, upload.Provider+"-preview-deduped.bean")
 	inputFilename := upload.InputFilename
 	if inputFilename == "" {
 		inputFilename = upload.OriginalFilename
 	}
-	prepared, err := s.prepareProviderInput(upload.Provider, upload.InputFile, inputFilename, importID)
+	prepared, err := importer.Prepare(s, importFileInput{InputFile: upload.InputFile, OriginalFilename: inputFilename, ImportID: importID})
 	if err != nil {
 		return nil, err
 	}
-	if upload.Provider == "cmb-checking" {
-		if err := s.generateCmbCheckingBean(prepared.InputFile, generatedFile); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := s.runTranslate(upload.Provider, prepared.InputFile, generatedFile); err != nil {
-			return nil, err
-		}
+	if err := importer.Generate(s, prepared, generatedFile); err != nil {
+		return nil, err
 	}
 	rawGeneratedBean, err := os.ReadFile(generatedFile)
 	if err != nil {
 		return nil, err
 	}
-	sourceAnalysis := providerSourceAnalysis{}
-	if upload.Provider == "alipay" {
-		sourceAnalysis, err = s.analyzeAlipayImportSource(prepared.InputFile, string(rawGeneratedBean))
-		if err != nil {
-			prepared.Warnings = append(prepared.Warnings, "支付宝原始明细核对失败："+err.Error())
-		} else {
-			prepared.Warnings = append(prepared.Warnings, sourceAnalysis.Warnings...)
-		}
-	}
-	dedupReport, err := s.runDedup(upload.Provider, generatedFile, "", alipayFundRounding, true)
+	sourceAnalysis, sourceWarnings := importer.AnalyzeSource(s, prepared, string(rawGeneratedBean))
+	prepared.Warnings = append(prepared.Warnings, sourceWarnings...)
+	dedupReport, err := s.runDedup(importer, generatedFile, "", alipayFundRounding, true)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.runDedupToFile(upload.Provider, generatedFile, dedupedFile, alipayFundRounding); err != nil {
+	if err := s.runDedupToFile(importer, generatedFile, dedupedFile, alipayFundRounding); err != nil {
 		return nil, err
 	}
 	dedupedRaw := []byte{}
@@ -142,30 +124,14 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if err != nil {
 		return nil, err
 	}
-	if upload.Provider == "cmb" || upload.Provider == "cmb-checking" {
-		for i := range entries {
-			if entries[i].Metadata == nil {
-				entries[i].Metadata = map[string]string{}
-			}
-			entries[i].Metadata["statementHash"] = upload.StatementHash
-		}
-	}
+	importer.DecorateEntries(upload, entries)
 	summary := parseBeanSummary(dedupedBean)
 	generatedSummary := parseBeanSummary(generatedBean)
 	skippedDuplicateCount := generatedSummary.CandidateCount - summary.CandidateCount
 	if skippedDuplicateCount < 0 {
 		skippedDuplicateCount = 0
 	}
-	excludedRowCount := 0
-	if upload.Provider == "alipay" {
-		excludedRowCount = sourceAnalysis.ExcludedRowCount
-	}
-	if upload.Provider == "cmb" {
-		excludedRowCount = prepared.FilteredRowCount - generatedSummary.CandidateCount
-		if excludedRowCount < 0 {
-			excludedRowCount = 0
-		}
-	}
+	excludedRowCount := importer.ExcludedRowCount(prepared, sourceAnalysis, generatedSummary)
 	warnings := append([]string{}, prepared.Warnings...)
 	if summary.CandidateCount == 0 {
 		warnings = append(warnings, "去重后没有发现可写入的新交易。")
@@ -173,15 +139,11 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if !strings.Contains(generatedBean, "orderId") {
 		warnings = append(warnings, "生成结果中没有发现 orderId，将只能使用 fallback 去重。")
 	}
-	if upload.Provider == "cmb" {
-		if generatedSummary.CandidateCount != prepared.FilteredRowCount {
-			return nil, fmt.Errorf("招商银行信用卡行数核对失败：PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，但 DEG 生成 %d 条。已停止导入，请检查 PDF 解析或 DEG 配置", prepared.RawRowCount, prepared.FilteredRowCount, generatedSummary.CandidateCount)
-		}
-		warnings = append(warnings, fmt.Sprintf("招商银行信用卡行数核对通过：PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generatedSummary.CandidateCount, summary.CandidateCount))
+	providerWarnings, err := importer.PreviewWarnings(prepared, sourceAnalysis, generatedSummary, summary, generatedBean)
+	if err != nil {
+		return nil, err
 	}
-	if upload.Provider == "cmb-checking" {
-		warnings = append(warnings, fmt.Sprintf("招商银行储蓄卡行数核对通过：CSV 明细 %d 条，生成 %d 条，去重后待写入 %d 条。", generatedSummary.CandidateCount, generatedSummary.CandidateCount, summary.CandidateCount))
-	}
+	warnings = append(warnings, providerWarnings...)
 	expected := len(entries)
 	upload.ExpectedEntryCount = &expected
 	if err := s.writeImportMeta(importID, upload); err != nil {
@@ -191,14 +153,7 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if err != nil {
 		return nil, err
 	}
-	rawRowCount, filteredRowCount := generatedSummary.CandidateCount, generatedSummary.CandidateCount
-	if upload.Provider == "cmb" {
-		rawRowCount, filteredRowCount = prepared.RawRowCount, prepared.FilteredRowCount
-	} else if upload.Provider == "cmb-checking" {
-		rawRowCount, filteredRowCount = generatedSummary.CandidateCount, generatedSummary.CandidateCount
-	} else if sourceAnalysis.RawRowCount > 0 {
-		rawRowCount, filteredRowCount = sourceAnalysis.RawRowCount, sourceAnalysis.FilteredRowCount
-	}
+	rawRowCount, filteredRowCount := importer.RowCounts(prepared, sourceAnalysis, generatedSummary)
 	return ginH{
 		"importId":              importID,
 		"provider":              upload.Provider,
@@ -221,7 +176,7 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 }
 
 func (s *Server) commitImport(importID, provider string, entries []ImportEntry) (ginH, error) {
-	if err := s.ensureImportRequirements(provider); err != nil {
+	if _, err := s.ensureImportRequirements(provider); err != nil {
 		return nil, err
 	}
 	meta, err := s.readImportMeta(importID)
@@ -238,8 +193,8 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry) 
 	if meta.StatementHash != "" && hash != meta.StatementHash {
 		return nil, errors.New("原始账单文件哈希与预览不一致，请重新上传账单")
 	}
-	if meta.ExpectedEntryCount != nil && len(entries) != *meta.ExpectedEntryCount {
-		return nil, fmt.Errorf("待写入交易数量与预览不一致：预览 %d 条，提交 %d 条，请重新生成预览", *meta.ExpectedEntryCount, len(entries))
+	if meta.ExpectedEntryCount != nil && len(entries) > *meta.ExpectedEntryCount {
+		return nil, fmt.Errorf("待写入交易数量超过预览数量：预览 %d 条，提交 %d 条，请重新生成预览", *meta.ExpectedEntryCount, len(entries))
 	}
 	if len(entries) == 0 {
 		return nil, errors.New("没有可写入的交易")
@@ -340,30 +295,22 @@ func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, 
 	return meta, nil
 }
 
-func (s *Server) ensureImportRequirements(provider string) error {
-	cfg, ok := importProviderConfigs[provider]
+func (s *Server) ensureImportRequirements(provider string) (billImporter, error) {
+	importer, ok := importProvider(provider)
 	if !ok {
-		return errors.New("provider must be alipay, wechat, cmb or cmb-checking")
+		return nil, fmt.Errorf("provider must be %s", strings.Join(importProviderIDs(), ", "))
 	}
+	cfg := importer.ProviderConfig()
 	required := []string{"main.bean", cfg.Config, "scripts/dedup_import.py"}
 	for _, relative := range required {
 		if _, err := os.Stat(filepath.Join(s.cfg.LedgerRoot, relative)); err != nil {
-			return fmt.Errorf("账本缺少必要文件: %s", relative)
+			return nil, fmt.Errorf("账本缺少必要文件: %s", relative)
 		}
 	}
-	return nil
+	return importer, nil
 }
 
-func (s *Server) prepareProviderInput(provider, inputFile, originalFilename, importID string) (preparedImportInput, error) {
-	if provider == "alipay" {
-		return s.prepareAlipayCSVForDEG(inputFile, importID)
-	}
-	if provider == "cmb-checking" {
-		return s.prepareCmbCheckingInput(inputFile, originalFilename, importID)
-	}
-	if provider != "cmb" {
-		return preparedImportInput{InputFile: inputFile}, nil
-	}
+func (s *Server) prepareCmbInput(inputFile, originalFilename, importID string) (preparedImportInput, error) {
 	ext := strings.ToLower(filepath.Ext(originalFilename))
 	warnings := []string{}
 	normalizedFile := inputFile
@@ -447,28 +394,20 @@ func (s *Server) runTranslate(provider, inputFile, outputFile string) error {
 	return err
 }
 
-func (s *Server) runDedup(provider, generatedFile, outputFile string, alipayFundRounding bool, dryRun bool) (string, error) {
+func (s *Server) runDedup(importer billImporter, generatedFile, outputFile string, alipayFundRounding bool, dryRun bool) (string, error) {
 	args := []string{"scripts/dedup_import.py", generatedFile}
-	if provider == "cmb" {
-		args = append(args, "--credit-card")
-	}
-	if provider == "cmb-checking" {
-		args = append(args, "--bank-card")
-	}
+	args = append(args, importer.DedupArgs(importDedupOptions{AlipayFundRounding: alipayFundRounding})...)
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
 	if outputFile != "" {
 		args = append(args, "-o", outputFile)
 	}
-	if alipayFundRounding {
-		args = append(args, "--alipay-fund-rounding")
-	}
 	return s.runCommand(env("PYTHON_BIN", "python3"), args)
 }
 
-func (s *Server) runDedupToFile(provider, generatedFile, outputFile string, alipayFundRounding bool) error {
-	_, err := s.runDedup(provider, generatedFile, outputFile, alipayFundRounding, false)
+func (s *Server) runDedupToFile(importer billImporter, generatedFile, outputFile string, alipayFundRounding bool) error {
+	_, err := s.runDedup(importer, generatedFile, outputFile, alipayFundRounding, false)
 	return err
 }
 

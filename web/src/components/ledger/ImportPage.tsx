@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
-import { readJson } from "@/lib/clientFetch";
+import { fetchJson, readJson } from "@/lib/clientFetch";
 import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
 import { formatCny } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
+type ProviderChoice = { value: ProviderOverride; label: string; detail: string; accept: string };
+type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string };
 
 type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
 type ImportPosting = { account: string; amount: string; currency: string };
@@ -83,7 +85,7 @@ type ImportDraft = {
 
 const importDraftKey = "ledger_import_review_draft";
 
-const providerChoices: { value: ProviderOverride; label: string; detail: string; accept: string }[] = [
+const fallbackProviderChoices: ProviderChoice[] = [
   { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
   { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
   { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
@@ -91,11 +93,21 @@ const providerChoices: { value: ProviderOverride; label: string; detail: string;
   { value: "cmb-checking", label: "招商银行储蓄卡", detail: "储蓄卡交易流水 CSV，PDF 可尝试", accept: ".csv / .pdf" },
 ];
 
-function providerLabel(provider: Provider) {
-  if (provider === "alipay") return "支付宝";
-  if (provider === "wechat") return "微信支付";
-  if (provider === "cmb-checking") return "招商银行储蓄卡";
-  return "招商银行信用卡";
+function providerChoicesFromAPI(providers: ImportProviderInfo[]): ProviderChoice[] {
+  if (!providers.length) return fallbackProviderChoices;
+  return [
+    fallbackProviderChoices[0],
+    ...providers.map((provider) => ({
+      value: provider.id,
+      label: provider.label,
+      detail: provider.detail,
+      accept: provider.accept || provider.extensions.join(" / "),
+    })),
+  ];
+}
+
+function providerLabel(provider: Provider, choices: ProviderChoice[]) {
+  return choices.find((choice) => choice.value === provider)?.label ?? fallbackProviderChoices.find((choice) => choice.value === provider)?.label ?? provider;
 }
 
 function confidenceLabel(confidence: ImportPreview["providerDetection"]["confidence"]) {
@@ -156,11 +168,14 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
+  const [selectedEntryId, setSelectedEntryId] = useState("");
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
     return accounts.filter((account) => account.active);
   }, [preview]);
+  const selectedEntry = useMemo(() => entries.find((entry) => entry.id === selectedEntryId) ?? entries[0] ?? null, [entries, selectedEntryId]);
 
   const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
   const hasCommitted = commitResult?.ok === true;
@@ -173,13 +188,38 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setAlipayFundRounding(draft.alipayFundRounding);
     setPreview(draft.preview);
     setEntries(draft.entries);
+    setSelectedEntryId(draft.entries[0]?.id ?? "");
     setReviewOpen(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<{ providers: ImportProviderInfo[] }>("/api/ledger/imports/providers", undefined, { providers: [] })
+      .then((data) => {
+        if (!cancelled) setProviderChoices(providerChoicesFromAPI(data.providers ?? []));
+      })
+      .catch(() => {
+        if (!cancelled) setProviderChoices(fallbackProviderChoices);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!preview || hasCommitted) return;
     writeImportDraft({ savedAt: Date.now(), providerOverride, alipayFundRounding, preview, entries });
   }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
+
+  useEffect(() => {
+    if (entries.length === 0) {
+      if (selectedEntryId) setSelectedEntryId("");
+      return;
+    }
+    if (!selectedEntryId || !entries.some((entry) => entry.id === selectedEntryId)) {
+      setSelectedEntryId(entries[0].id);
+    }
+  }, [entries, selectedEntryId]);
 
   function editableAccountLabel(entry: ImportEntry) {
     if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
@@ -196,6 +236,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setFile(next);
     setPreview(null);
     setEntries([]);
+    setSelectedEntryId("");
     setCommitResult(null);
     setResultOpen(false);
     setReviewOpen(false);
@@ -212,6 +253,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setError("");
     setPreview(null);
     setEntries([]);
+    setSelectedEntryId("");
     setCommitResult(null);
     setResultOpen(false);
     try {
@@ -228,6 +270,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
       setPreview(data);
       setEntries(data.entries);
+      setSelectedEntryId(data.entries[0]?.id ?? "");
       setReviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -267,7 +310,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   }
 
   function removeEntry(id: string) {
-    setEntries((current) => current.filter((entry) => entry.id !== id));
+    setEntries((current) => {
+      const next = current.filter((entry) => entry.id !== id);
+      if (selectedEntryId === id) setSelectedEntryId(next[0]?.id ?? "");
+      return next;
+    });
   }
 
   function updateMetadata(id: string, key: string, value: string) {
@@ -424,7 +471,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
-                <Badge variant="secondary">{providerLabel(preview.provider)}</Badge>
+                <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
                 <span className="text-sm text-stone">{entries.length} 条交易</span>
               </div>
               <div className="mt-2 line-clamp-2 break-all font-medium text-ink">{preview.originalFilename}</div>
@@ -441,7 +488,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       {preview ? (
         <MobileSheet
           open={reviewOpen}
-          title={`${providerLabel(preview.provider)}导入审核`}
+          title={`${providerLabel(preview.provider, providerChoices)}导入审核`}
           onClose={() => setReviewOpen(false)}
           shouldClose={() => !committing}
           size="xl"
@@ -449,8 +496,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           closeLabel={committing ? "写入中" : "关闭"}
           footer={
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 text-xs leading-5 text-stone">
-                {hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条交易` : `确认后将写入 ${entries.length} 条交易，写入前仍可修改标题、分类和 metadata。`}
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
+                <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
+                  {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
+                </Badge>
+                <span className="min-w-0 break-words">{hasCommitted ? "写入结果已归档，可以继续保存到 Git。" : "写入前可继续修改标题、分类和 metadata。"}</span>
               </div>
               <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
                 <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
@@ -462,23 +512,24 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           }
         >
-          <div className="-mx-4 -my-4 min-w-0 space-y-4 bg-sand/45 px-3 py-4 sm:-mx-5 sm:px-5">
-            <div className="rounded-2xl border border-line bg-panel p-4 shadow-sm">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="-mx-4 -my-4 min-w-0 space-y-3 bg-paper px-3 py-3 sm:-mx-5 sm:px-5">
+            <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+              <div className="grid min-w-0 gap-3 border-b border-line bg-paper px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <Badge variant="outline">{confidenceLabel(preview.providerDetection.confidence)}</Badge>
-                    <Badge variant="secondary" className="max-w-full break-all leading-5 sm:max-w-xl">{preview.originalFilename}</Badge>
+                    <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
+                    <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{preview.originalFilename}</span>
                   </div>
-                  <div className="mt-2 text-sm leading-6 text-olive">{preview.providerDetection.reason}</div>
+                  <div className="mt-1 text-xs leading-5 text-stone">{preview.providerDetection.reason}</div>
                 </div>
-                <div className="shrink-0 rounded-2xl border border-line bg-paper px-4 py-3 text-sm text-stone">
-                  {preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}
+                <div className="grid grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone">
+                  <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
+                  <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
+              <ImportStats preview={preview} entryCount={entries.length} />
             </div>
-
-            <ImportStats preview={preview} entryCount={entries.length} />
 
             {commitResult?.ok ? (
               <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
@@ -507,85 +558,126 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               </Alert>
             ) : null}
 
-            <div className="space-y-4">
+            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:items-start">
               {entries.length === 0 ? (
-                <Alert className="text-sm text-stone">
+                <Alert className="text-sm text-stone xl:col-span-2">
                   已删除所有候选交易。
                 </Alert>
               ) : null}
-              {entries.map((entry) => (
-                <article key={entry.id} className="overflow-hidden rounded-2xl border border-line bg-panel shadow-sm ring-1 ring-ink/[0.03]">
-                  <div className="border-l-4 border-brand bg-paper px-4 py-4">
-                    <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+              <div className="min-w-0 space-y-2">
+                {entries.map((entry, index) => {
+                  const selected = selectedEntry?.id === entry.id;
+                  return (
+                    <article
+                      key={entry.id}
+                      className={cn(
+                        "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border bg-panel shadow-sm transition",
+                        selected ? "border-brand ring-2 ring-[var(--focus-ring)]" : "border-line hover:border-brand/50",
+                      )}
+                    >
+                      <button type="button" className="min-w-0 px-3 py-3 text-left" onClick={() => setSelectedEntryId(entry.id)}>
+                        <div className="grid min-w-0 gap-3 md:grid-cols-[5.75rem_minmax(0,1fr)_7rem] md:items-center">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:block">
+                            <Badge variant={selected ? "default" : "secondary"} className={cn("text-xs", selected ? "" : "bg-tag text-warm")}>{entry.date}</Badge>
+                            {entry.source ? <Badge variant="outline" className="mt-0 border-brand/45 text-brand md:mt-2">{entry.source}</Badge> : null}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-baseline gap-2">
+                              <span className="shrink-0 font-mono text-xs text-stone">{String(index + 1).padStart(2, "0")}</span>
+                              <span className="min-w-0 truncate text-base font-medium text-ink">{entry.payee || "未命名商户"}</span>
+                            </div>
+                            <div className="mt-1 truncate text-xs text-stone">{entry.narration || "未填写标题"}</div>
+                          </div>
+                          <div className="text-left md:text-right">
+                            <div className="font-serif text-xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
+                            <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+                          </div>
+                        </div>
+                      </button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="mr-2 h-9 w-9 shrink-0 text-stone hover:text-destructive"
+                        onClick={() => removeEntry(entry.id)}
+                        disabled={committing || hasCommitted}
+                        title="删除这条候选交易"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </article>
+                  );
+                })}
+              </div>
+
+              {selectedEntry ? (
+                <aside className="min-w-0 rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3">
+                  <div className="border-b border-line bg-paper px-4 py-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="bg-tag text-warm">{entry.date}</Badge>
-                          {entry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{entry.source}</Badge> : null}
-                          <span className="min-w-0 break-words text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</span>
+                          <Badge variant="secondary" className="bg-tag text-warm">{selectedEntry.date}</Badge>
+                          {selectedEntry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{selectedEntry.source}</Badge> : null}
                         </div>
+                        <div className="mt-2 truncate text-xl font-medium leading-7 text-ink" title={selectedEntry.payee || "未命名商户"}>{selectedEntry.payee || "未命名商户"}</div>
                       </div>
-                      <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-                        <div className="rounded-2xl bg-panel px-3 py-2 text-left lg:text-right">
-                          <div className="whitespace-nowrap font-serif text-2xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
-                          <div className="mt-1 text-xs text-stone">{entry.currency}</div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0 border-line bg-panel text-stone hover:text-destructive"
-                          onClick={() => removeEntry(entry.id)}
-                          disabled={committing || hasCommitted}
-                          title="删除这条候选交易"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          删除
-                        </Button>
+                      <div className="shrink-0 text-right">
+                        <div className="font-serif text-2xl font-medium leading-none text-warm">{formatCny(selectedEntry.amount)}</div>
+                        <div className="mt-1 text-xs text-stone">{selectedEntry.currency}</div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-4 p-4">
-                    <div className="grid min-w-0 items-end gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
-                      <Label className="block min-w-0">
-                        <span className="mb-1.5 block text-stone">标题</span>
-                        <Input className="min-w-0 border-line bg-paper shadow-sm" value={entry.narration} onChange={(event) => updateEntry(entry.id, { narration: event.target.value })} />
-                      </Label>
-                      <Label className="block min-w-0">
-                        <span className="mb-1.5 block text-stone">{editableAccountLabel(entry)}</span>
-                        <Select value={entry.categoryAccount} onValueChange={(value) => updateEntry(entry.id, { categoryAccount: value })}>
-                          <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-80">
-                            {categoryAccountOptions(entry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </Label>
+                  <div className="space-y-3 p-4">
+                    <Label className="block min-w-0">
+                      <span className="mb-1.5 block text-xs text-stone">标题</span>
+                      <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={selectedEntry.narration} onChange={(event) => updateEntry(selectedEntry.id, { narration: event.target.value })} />
+                    </Label>
+                    <Label className="block min-w-0">
+                      <span className="mb-1.5 block text-xs text-stone">{editableAccountLabel(selectedEntry)}</span>
+                      <Select value={selectedEntry.categoryAccount} onValueChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}>
+                        <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-80">
+                          {categoryAccountOptions(selectedEntry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </Label>
+
+                    <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
+                      <div className="min-w-0 break-words"><span className="text-olive">支付方式：</span>{selectedEntry.method || "-"}</div>
+                      <div className="min-w-0 break-words"><span className="text-olive">资金账户：</span>{selectedEntry.fundingAccount || "-"}</div>
+                      <div className="min-w-0 break-all"><span className="text-olive">订单号：</span>{selectedEntry.orderId || "-"}</div>
                     </div>
 
-                    <div className="grid min-w-0 gap-2 rounded-2xl border border-line bg-paper px-3 py-3 text-xs leading-5 text-stone md:grid-cols-3">
-                      <div className="min-w-0 break-words"><span className="text-olive">支付方式：</span>{entry.method || "-"}</div>
-                      <div className="min-w-0 break-words"><span className="text-olive">资金账户：</span>{entry.fundingAccount || "-"}</div>
-                      <div className="min-w-0 break-all"><span className="text-olive">订单号：</span>{entry.orderId || "-"}</div>
-                    </div>
-
-                    <details>
+                    <details open>
                       <summary className="cursor-pointer text-xs text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <div className="mt-3 grid gap-2">
                         <Label className="block">
                           <span className="mb-1.5 block">note</span>
-                          <Input className="border-line bg-paper shadow-sm" value={entry.metadata.note ?? ""} onChange={(event) => updateMetadata(entry.id, "note", event.target.value)} placeholder="添加备注" />
+                          <Input className="h-10 border-line bg-paper shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" />
                         </Label>
                         <Label className="block">
                           <span className="mb-1.5 block">purpose</span>
-                          <Input className="border-line bg-paper shadow-sm" value={entry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(entry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
+                          <Input className="h-10 border-line bg-paper shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
                         </Label>
                       </div>
                     </details>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-line bg-panel text-stone hover:text-destructive"
+                      onClick={() => removeEntry(selectedEntry.id)}
+                      disabled={committing || hasCommitted}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      删除当前交易
+                    </Button>
                   </div>
-                </article>
-              ))}
+                </aside>
+              ) : null}
             </div>
 
             <Button variant="ghost" className="px-0 text-stone underline" onClick={() => setRawOpen((value) => !value)}>
@@ -637,11 +729,11 @@ function ImportStats({ preview, entryCount }: { preview: ImportPreview; entryCou
       ];
 
   return (
-    <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid min-w-0 grid-cols-2 gap-px bg-line sm:grid-cols-5">
       {stats.map(([label, value]) => (
-        <div key={label} className="rounded-2xl border border-line bg-panel p-4 shadow-sm">
-          <div className="text-xs text-stone">{label}</div>
-          <div className="mt-2 font-serif text-xl font-medium text-ink">{value}</div>
+        <div key={label} className="min-w-0 bg-panel px-4 py-3">
+          <div className="truncate text-xs text-stone">{label}</div>
+          <div className="mt-1 font-serif text-xl font-medium leading-none text-ink">{value}</div>
         </div>
       ))}
     </div>

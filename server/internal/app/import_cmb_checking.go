@@ -96,7 +96,7 @@ func (s *Server) loadCmbCheckingConfig() (cmbCheckingConfig, error) {
 		DefaultCurrency:      "CNY",
 		Title:                "招商银行储蓄卡流水",
 	}
-	raw, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, importProviderConfigs["cmb-checking"].Config))
+	raw, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, "imports/cmb-checking-config.yaml"))
 	if err != nil {
 		return config, err
 	}
