@@ -75,6 +75,11 @@ func TestImportPreviewAndCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = part.Write([]byte("交易创建时间,交易对方,金额\n2026-05-03,便利店,6.50\n"))
+	originalPart, err := writer.CreateFormFile("originalFile", "statement.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = originalPart.Write([]byte("%PDF original statement"))
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +146,13 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 	if len(documents) == 0 {
 		t.Fatal("expected archived import document")
+	}
+	if filepath.Ext(documents[0].Name()) != ".pdf" {
+		t.Fatalf("expected archived original PDF, got %s", documents[0].Name())
+	}
+	documentText := string(mustRead(t, filepath.Join(documentsDir, documents[0].Name())))
+	if documentText != "%PDF original statement" {
+		t.Fatalf("archived document content = %q", documentText)
 	}
 }
 
@@ -291,6 +303,63 @@ func TestCmbImportHelpers(t *testing.T) {
 
 	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard": true}
 	if got := providerDocumentAccount("cmb", accounts, "Assets:CN:CMB:Checking"); got != "Liabilities:CN:CMB:CreditCard" {
+		t.Fatalf("document account = %s", got)
+	}
+}
+
+func TestCmbCheckingImportHelpers(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-checking-config.yaml"), strings.Join([]string{
+		"defaultDebitAccount: Expenses:Food",
+		"defaultCreditAccount: Income:Salary",
+		"cashAccount: Assets:Cash",
+		"defaultCurrency: CNY",
+		"cmbChecking:",
+		"  rules:",
+		"    - item: 掌上生活还款",
+		"      targetAccount: Liabilities:CN:CMB:CreditCard",
+		"    - item: 摩拜,岭南通",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "cmb-checking.csv")
+	output := filepath.Join(t.TempDir(), "cmb-checking.bean")
+	mustWrite(t, input, strings.Join([]string{
+		"记账日期,货币,交易金额,联机余额,交易摘要,对手信息",
+		"2026-05-20,CNY,100.00,106.31,网联收款,乔博睿 10563996799",
+		"2026-05-20,CNY,-50.00,56.31,银联线上有卡支付,广东岭南通股份有限公司308999841110034",
+		"2026-06-05,CNY,\"-11,595.81\",\"1,459.63\",掌上生活还款,乔博睿 4514617564329813",
+	}, "\n"))
+
+	detection, err := detectBillProvider("招商银行交易流水.pdf.csv", []byte(mustRead(t, input)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.Provider != "cmb-checking" {
+		t.Fatalf("provider = %s", detection.Provider)
+	}
+
+	server := &Server{cfg: cfg}
+	if err := server.generateCmbCheckingBean(input, output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	if !strings.Contains(generated, `source: "cmb-checking"`) || !strings.Contains(generated, `Assets:Cash`) {
+		t.Fatalf("generated bean missing checking metadata or cash account:\n%s", generated)
+	}
+	if !strings.Contains(generated, `Liabilities:CN:CMB:CreditCard`) || !strings.Contains(generated, `11595.81 CNY`) {
+		t.Fatalf("generated bean missing credit-card repayment posting:\n%s", generated)
+	}
+	entries, err := parsePreviewEntries(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 || entries[0].Source != "cmb-checking" || entries[1].FundingAccount != "Assets:Cash" {
+		t.Fatalf("unexpected preview entries: %#v", entries)
+	}
+
+	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard": true}
+	if got := providerDocumentAccount("cmb-checking", accounts, "Liabilities:CN:CMB:CreditCard"); got != "Assets:CN:CMB:Checking" {
 		t.Fatalf("document account = %s", got)
 	}
 }
