@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { formatCny } from "@/lib/money";
 import {
@@ -26,21 +26,7 @@ import { MobileSheet } from "./MobileSheet";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountView, MetadataValue, Txn } from "./types";
-
-function transactionKey(txn: Txn): string {
-  return `${txn.source.file}:${txn.source.line}:${txn.source.hash ?? ""}`;
-}
-
-function metadataPairs(t: Txn): [string, MetadataValue][] {
-  return Object.entries(t.metadata ?? {}).filter(([, value]) => value !== "" && value != null);
-}
-
-function metadataText(t: Txn): string {
-  return [
-    ...metadataPairs(t).map(([key, value]) => `${key}:${String(value)}`),
-    ...(t.tags ?? []).map((tag) => `#${tag}`),
-  ].join(" ");
-}
+import { categoryAccounts, filterTransactions, metadataPairs, transactionKey, type TransactionFilterMatchMode } from "./transactionFilters";
 
 function useDebouncedValue<T>(value: T, delay = 160) {
   const [debounced, setDebounced] = useState(value);
@@ -52,21 +38,112 @@ function useDebouncedValue<T>(value: T, delay = 160) {
 }
 
 const ALL_FILTER_VALUE = "__all__";
+const FILTER_VIEW_STORAGE_KEY = "ledger.transactionList.filterViews.v1";
+const MAX_FILTER_VIEWS = 8;
 
-function matchesMetadataQuery(t: Txn, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const pairs = metadataPairs(t);
-  const tags = t.tags ?? [];
-  return q.split(/\s+/).every((word) => {
-    if (word.startsWith("#")) return tags.some((tag) => `#${tag}`.toLowerCase().includes(word));
-    const exact = word.match(/^([a-z][a-z0-9_-]*):(.+)$/i);
-    if (exact) {
-      const [, key, value] = exact;
-      return pairs.some(([k, v]) => k.toLowerCase() === key.toLowerCase() && String(v).toLowerCase().includes(value.toLowerCase()));
-    }
-    return metadataText(t).toLowerCase().includes(word);
+type TransactionFilterSnapshot = {
+  categoryQuery: string;
+  metadataQuery: string;
+  searchQuery: string;
+  matchMode: TransactionFilterMatchMode;
+  viewMode: "compact" | "full";
+};
+
+type StoredFilterView = {
+  id: string;
+  name: string;
+  filters: TransactionFilterSnapshot;
+  createdAt: number;
+  lastUsedAt: number;
+};
+
+type StoredFilterViews = {
+  saved: StoredFilterView[];
+  recent: StoredFilterView[];
+};
+
+function defaultFilterViews(): StoredFilterViews {
+  return { saved: [], recent: [] };
+}
+
+function filterSnapshotSignature(filters: TransactionFilterSnapshot): string {
+  return JSON.stringify({
+    categoryQuery: filters.categoryQuery.trim(),
+    metadataQuery: filters.metadataQuery.trim(),
+    searchQuery: filters.searchQuery.trim(),
+    matchMode: filters.matchMode,
+    viewMode: filters.viewMode,
   });
+}
+
+function hasFilterSnapshot(filters: TransactionFilterSnapshot): boolean {
+  return Boolean(filters.categoryQuery.trim() || filters.metadataQuery.trim() || filters.searchQuery.trim());
+}
+
+function filterSnapshotLabel(filters: TransactionFilterSnapshot): string {
+  const parts = [
+    filters.searchQuery.trim() && `搜索 ${filters.searchQuery.trim()}`,
+    filters.categoryQuery.trim() && `分类 ${filters.categoryQuery.trim()} ${filters.matchMode === "exact" ? "精确" : "前缀"}`,
+    filters.metadataQuery.trim() && `标签 ${filters.metadataQuery.trim()}`,
+    filters.viewMode === "full" && "完整视图",
+  ].filter(Boolean);
+  return parts.join(" · ") || "全部流水";
+}
+
+function loadFilterViews(): StoredFilterViews {
+  if (typeof window === "undefined") return defaultFilterViews();
+  try {
+    const raw = window.localStorage.getItem(FILTER_VIEW_STORAGE_KEY);
+    if (!raw) return defaultFilterViews();
+    const parsed = JSON.parse(raw) as Partial<StoredFilterViews>;
+    return {
+      saved: Array.isArray(parsed.saved) ? parsed.saved.slice(0, MAX_FILTER_VIEWS) : [],
+      recent: Array.isArray(parsed.recent) ? parsed.recent.slice(0, MAX_FILTER_VIEWS) : [],
+    };
+  } catch {
+    return defaultFilterViews();
+  }
+}
+
+function saveFilterViews(views: StoredFilterViews) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(FILTER_VIEW_STORAGE_KEY, JSON.stringify(views));
+  } catch {
+    // Local storage is an enhancement for the workbench, so unavailable storage should not break filtering.
+  }
+}
+
+function upsertRecentFilterView(views: StoredFilterViews, filters: TransactionFilterSnapshot, now = Date.now()): StoredFilterViews {
+  const signature = filterSnapshotSignature(filters);
+  const recent = views.recent.filter((view) => filterSnapshotSignature(view.filters) !== signature);
+  const saved = views.saved.map((view) => filterSnapshotSignature(view.filters) === signature ? { ...view, lastUsedAt: now } : view);
+  return {
+    saved,
+    recent: [{ id: `recent-${now}`, name: filterSnapshotLabel(filters), filters, createdAt: now, lastUsedAt: now }, ...recent].slice(0, MAX_FILTER_VIEWS),
+  };
+}
+
+function saveNamedFilterView(views: StoredFilterViews, filters: TransactionFilterSnapshot, now = Date.now()): StoredFilterViews {
+  const signature = filterSnapshotSignature(filters);
+  const existing = views.saved.find((view) => filterSnapshotSignature(view.filters) === signature);
+  const saved = views.saved.filter((view) => filterSnapshotSignature(view.filters) !== signature);
+  return {
+    recent: views.recent,
+    saved: [{
+      id: existing?.id ?? `saved-${now}`,
+      name: existing?.name ?? filterSnapshotLabel(filters),
+      filters,
+      createdAt: existing?.createdAt ?? now,
+      lastUsedAt: now,
+    }, ...saved].slice(0, MAX_FILTER_VIEWS),
+  };
+}
+
+function isKeyboardInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
 function MetadataBadges({ txn, limit }: { txn: Txn; limit?: number }) {
@@ -180,15 +257,17 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
   );
 }
 
-function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
+function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
   const amt = primaryAmount(txn);
-  const categoryAccounts = txn.postings.filter((posting) => posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:"));
+  const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
   const meta = metadataPairs(txn);
   return (
     <button
+      id={rowId}
+      ref={rowRef}
       type="button"
-      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
       onClick={onSelect}
     >
       <div className="text-xs tabular-nums text-stone">
@@ -205,7 +284,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect }: { txn: Txn; 
       </div>
       <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
       <div className="min-w-0">
-        <div className="truncate text-xs text-warm">{categoryAccounts.map((posting) => posting.account).join(" · ") || "未分类"}</div>
+        <div className="truncate text-xs text-warm">{categoryRows.join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
       </div>
       <div className="min-w-0">
@@ -225,78 +304,57 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const [activeTxnKey, setActiveTxnKey] = useState<string | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const categories = useMemo(() => Array.from(new Set(txns.flatMap((t) => t.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account)))).sort(), [txns]);
+  const [filterViews, setFilterViews] = useState<StoredFilterViews>(() => loadFilterViews());
+  const desktopRowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const categories = useMemo(() => Array.from(new Set(txns.flatMap(categoryAccounts))).sort(), [txns]);
   const accountOptionLabels = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
   const accountOptionLabel = (account: string) => accountOptionLabels[account] ?? account;
   const debouncedCategoryQuery = useDebouncedValue(categoryQuery ?? "");
   const debouncedSearchQuery = useDebouncedValue(searchQuery ?? "");
   const debouncedMetadataQuery = useDebouncedValue(metadataQuery ?? "");
   const query = debouncedCategoryQuery.trim().toLowerCase();
-  const searchWords = useMemo(() => debouncedSearchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean), [debouncedSearchQuery]);
   const metadataOptions = useMemo(() => Array.from(new Set(txns.flatMap((t) => [
     ...metadataPairs(t).map(([key, value]) => `${key}:${String(value)}`),
     ...(t.tags ?? []).map((tag) => `#${tag}`),
   ]))).sort(), [txns]);
-  const searchIndex = useMemo(() => new Map(txns.map((txn) => [
-    transactionKey(txn),
-    {
-      categoryAccounts: txn.postings.filter((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p) => p.account.toLowerCase()),
-      text: [
-        txn.payee,
-        txn.narration,
-        txn.date,
-        ...txn.postings.map((p) => p.account),
-        metadataText(txn),
-      ].join(" ").toLowerCase(),
-      metadata: metadataText(txn).toLowerCase(),
-    },
-  ])), [txns]);
-  const metadataQ = debouncedMetadataQuery.trim();
-
-  // 组合过滤：分类 AND 关键词搜索
-  const rows = useMemo(() => {
-    let filtered = txns;
-
-    // 分类筛选
-    if (query) {
-      if (matchMode === "prefix") {
-        filtered = filtered.filter((t) =>
-          searchIndex.get(transactionKey(t))?.categoryAccounts.some((account) => account.startsWith(query))
-        );
-      } else {
-        // 精确匹配（忽略大小写）
-        filtered = filtered.filter((t) =>
-          searchIndex.get(transactionKey(t))?.categoryAccounts.some((account) => account === query)
-        );
-      }
-    }
-
-    // 关键词搜索：payee / narration / posting.account
-    if (searchWords.length > 0) {
-      filtered = filtered.filter((t) =>
-        searchWords.every((word) => searchIndex.get(transactionKey(t))?.text.includes(word))
-      );
-    }
-
-    if (metadataQ) {
-      filtered = filtered.filter((t) => {
-        const index = searchIndex.get(transactionKey(t));
-        if (!index) return false;
-        const q = metadataQ.toLowerCase();
-        if (!/[#:]/.test(q)) return index.metadata.includes(q);
-        return matchesMetadataQuery(t, metadataQ);
-      });
-    }
-
-    return filtered;
-  }, [txns, query, searchWords, metadataQ, matchMode, searchIndex]);
+  const immediateFilterSnapshot = useMemo<TransactionFilterSnapshot>(() => ({
+    categoryQuery: (categoryQuery ?? "").trim(),
+    metadataQuery: (metadataQuery ?? "").trim(),
+    searchQuery: (searchQuery ?? "").trim(),
+    matchMode: matchMode ?? "prefix",
+    viewMode: viewMode ?? "compact",
+  }), [categoryQuery, metadataQuery, searchQuery, matchMode, viewMode]);
+  const currentFilterSnapshot = useMemo<TransactionFilterSnapshot>(() => ({
+    categoryQuery: debouncedCategoryQuery.trim(),
+    metadataQuery: debouncedMetadataQuery.trim(),
+    searchQuery: debouncedSearchQuery.trim(),
+    matchMode: matchMode ?? "prefix",
+    viewMode: viewMode ?? "compact",
+  }), [debouncedCategoryQuery, debouncedMetadataQuery, debouncedSearchQuery, matchMode, viewMode]);
+  const rows = useMemo(() => filterTransactions(txns, currentFilterSnapshot), [txns, currentFilterSnapshot]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
+  useEffect(() => { saveFilterViews(filterViews); }, [filterViews]);
+  useEffect(() => {
+    if (!searchable || !hasFilterSnapshot(currentFilterSnapshot)) return;
+    setFilterViews((views) => upsertRecentFilterView(views, currentFilterSnapshot));
+  }, [currentFilterSnapshot, searchable]);
+
+  useEffect(() => {
+    if (!pageRows.length) {
+      setActiveTxnKey(null);
+      return;
+    }
+    if (!activeTxnKey || !pageRows.some((txn) => transactionKey(txn) === activeTxnKey)) {
+      setActiveTxnKey(transactionKey(pageRows[0]));
+    }
+  }, [activeTxnKey, pageRows]);
 
   const activeFilterCount = [categoryQuery, metadataQuery, searchQuery].filter((value) => Boolean(value?.trim())).length;
   const hasFilters = activeFilterCount > 0;
@@ -305,7 +363,63 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     setMetadataQuery?.("");
     setSearchQuery?.("");
   };
-  const selectedMatches = (txn: Txn) => Boolean(selected && transactionKey(selected) === transactionKey(txn));
+  const applyFilterView = (filters: TransactionFilterSnapshot) => {
+    setCategoryQuery?.(filters.categoryQuery);
+    setMetadataQuery?.(filters.metadataQuery);
+    setSearchQuery?.(filters.searchQuery);
+    setMatchMode?.(filters.matchMode);
+    setViewMode?.(filters.viewMode);
+  };
+  const restoreFilterView = (view: StoredFilterView) => {
+    const now = Date.now();
+    applyFilterView(view.filters);
+    setFilterViews((views) => ({
+      saved: views.saved.map((item) => item.id === view.id ? { ...item, lastUsedAt: now } : item),
+      recent: views.recent.map((item) => item.id === view.id ? { ...item, lastUsedAt: now } : item),
+    }));
+  };
+  const saveCurrentFilterView = () => {
+    if (!hasFilterSnapshot(immediateFilterSnapshot)) return;
+    setFilterViews((views) => saveNamedFilterView(views, immediateFilterSnapshot));
+  };
+  const filterViewOptions = [
+    ...filterViews.saved.map((view) => ({ value: `saved:${view.id}`, label: `已保存 · ${view.name}`, view })),
+    ...filterViews.recent.map((view) => ({ value: `recent:${view.id}`, label: `最近 · ${view.name}`, view })),
+  ];
+  const selectedMatches = (txn: Txn) => {
+    const key = transactionKey(txn);
+    return activeTxnKey === key || Boolean(selected && transactionKey(selected) === key);
+  };
+  const desktopRowId = (txn: Txn) => `transaction-row-${transactionKey(txn).replace(/[^a-z0-9_-]+/gi, "-")}`;
+  const setDesktopRowRef = (key: string) => (node: HTMLButtonElement | null) => {
+    if (node) desktopRowRefs.current.set(key, node);
+    else desktopRowRefs.current.delete(key);
+  };
+  const focusDesktopRow = (key: string) => {
+    window.requestAnimationFrame(() => desktopRowRefs.current.get(key)?.focus());
+  };
+  const handleDesktopListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isKeyboardInputTarget(event.target) || pageRows.length === 0) return;
+    const activeIndex = activeTxnKey ? pageRows.findIndex((txn) => transactionKey(txn) === activeTxnKey) : -1;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+      const nextIndex = Math.min(pageRows.length - 1, Math.max(0, currentIndex + direction));
+      const nextKey = transactionKey(pageRows[nextIndex]);
+      setActiveTxnKey(nextKey);
+      focusDesktopRow(nextKey);
+      return;
+    }
+    if (event.key === "Enter") {
+      const targetIndex = activeIndex >= 0 ? activeIndex : 0;
+      const txn = pageRows[targetIndex];
+      if (!txn) return;
+      event.preventDefault();
+      setActiveTxnKey(transactionKey(txn));
+      setSelected(txn);
+    }
+  };
   const pager = rows.length > 0 && <TransactionPager safePage={safePage} totalPages={totalPages} rowsLength={rows.length} pageSize={pageSize} setPageSize={setPageSize} setPage={setPage} />;
   const renderFilterControls = (idPrefix: string) => (
     <>
@@ -343,6 +457,21 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <datalist id={`${idPrefix}-txn-metadata-options`}>{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {filterViewOptions.length > 0 && (
+            <Select value={ALL_FILTER_VALUE} onValueChange={(value) => {
+              const option = filterViewOptions.find((item) => item.value === value);
+              if (option) restoreFilterView(option.view);
+            }}>
+              <SelectTrigger className="h-8 w-[180px] rounded-xl bg-paper text-xs">
+                <SelectValue placeholder="恢复视图" />
+              </SelectTrigger>
+              <SelectContent className="max-h-80">
+                <SelectItem value={ALL_FILTER_VALUE}>恢复视图</SelectItem>
+                {filterViewOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-xl bg-paper text-stone" onClick={saveCurrentFilterView}>保存当前</Button>}
           {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
@@ -382,7 +511,14 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 
       {searchable && rows.length > 0 ? (
         <>
-          <div className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm lg:block">
+          <div
+            className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper lg:block"
+            tabIndex={0}
+            role="grid"
+            aria-label="交易流水"
+            aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
+            onKeyDown={handleDesktopListKeyDown}
+          >
             <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
               <span>日期</span>
               <span>交易</span>
@@ -391,15 +527,37 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               <span>标签</span>
             </div>
             <div className="divide-y divide-line">
-              {pageRows.map((txn) => <TransactionTableRow key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+              {pageRows.map((txn) => {
+                const key = transactionKey(txn);
+                return (
+                  <TransactionTableRow
+                    key={key}
+                    rowId={desktopRowId(txn)}
+                    rowRef={setDesktopRowRef(key)}
+                    txn={txn}
+                    selected={Boolean(selectedMatches(txn))}
+                    viewMode={viewMode}
+                    onSelect={() => {
+                      setActiveTxnKey(key);
+                      setSelected(txn);
+                    }}
+                  />
+                );
+              })}
             </div>
           </div>
           <div className="lg:hidden">
-            {pageRows.map((txn) => <TransactionCard key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)}
+            {pageRows.map((txn) => {
+              const key = transactionKey(txn);
+              return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); }} />;
+            })}
           </div>
         </>
       ) : (
-        pageRows.map((txn) => <TransactionCard key={transactionKey(txn)} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => setSelected(txn)} />)
+        pageRows.map((txn) => {
+          const key = transactionKey(txn);
+          return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); }} />;
+        })
       )}
 
       {pager}
