@@ -94,6 +94,7 @@ type AccountStatus struct {
 }
 
 type Summary struct {
+	Currency   string                    `json:"currency"`
 	Income     int                       `json:"income"`
 	Expense    int                       `json:"expense"`
 	Net        int                       `json:"net"`
@@ -490,15 +491,20 @@ func NativeAccountBalances(balances map[string]map[string]int, accounts []Accoun
 }
 
 func AccountBalanceRows(balances map[string]map[string]int, prices []Price, date string) []AccountBalance {
+	return AccountBalanceRowsInCurrency(balances, prices, date, "CNY")
+}
+
+func AccountBalanceRowsInCurrency(balances map[string]map[string]int, prices []Price, date, valuationCurrency string) []AccountBalance {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	rows := []AccountBalance{}
 	for account, byCurrency := range balances {
 		for currency, amount := range byCurrency {
-			valuation, ok := ValuationInCNY(amount, currency, prices, date)
+			valuation, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, date)
 			rows = append(rows, AccountBalance{
 				Account:           account,
 				Currency:          currency,
 				Amount:            amount,
-				ValuationCurrency: "CNY",
+				ValuationCurrency: valuationCurrency,
 				Valuation:         valuation,
 				ValuationMissing:  !ok,
 			})
@@ -514,13 +520,36 @@ func AccountBalanceRows(balances map[string]map[string]int, prices []Price, date
 }
 
 func ValuationInCNY(amount int, currency string, prices []Price, date string) (int, bool) {
-	if currency == "" || currency == "CNY" {
+	return ValuationInCurrency(amount, currency, "CNY", prices, date)
+}
+
+func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+	currency = normalizeValuationCurrency(currency)
+	targetCurrency = normalizeValuationCurrency(targetCurrency)
+	if currency == targetCurrency {
 		return amount, true
 	}
+	if price, ok := latestPrice(currency, targetCurrency, prices, date); ok {
+		return amount * price.Amount / 100, true
+	}
+	if price, ok := latestPrice(targetCurrency, currency, prices, date); ok && price.Amount != 0 {
+		return amount * 100 / price.Amount, true
+	}
+	if currency != "CNY" && targetCurrency != "CNY" {
+		cny, ok := ValuationInCurrency(amount, currency, "CNY", prices, date)
+		if !ok {
+			return 0, false
+		}
+		return ValuationInCurrency(cny, "CNY", targetCurrency, prices, date)
+	}
+	return 0, false
+}
+
+func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*Price, bool) {
 	var latest *Price
 	for i := range prices {
 		price := &prices[i]
-		if price.Currency != currency || price.QuoteCurrency != "CNY" {
+		if price.Currency != currency || price.QuoteCurrency != quoteCurrency {
 			continue
 		}
 		if date != "" && price.Date > date {
@@ -531,13 +560,35 @@ func ValuationInCNY(amount int, currency string, prices []Price, date string) (i
 		}
 	}
 	if latest == nil {
-		return 0, false
+		return nil, false
 	}
-	return amount * latest.Amount / 100, true
+	return latest, true
+}
+
+func normalizeValuationCurrency(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return "CNY"
+	}
+	return currency
+}
+
+func ValidValuationCurrency(raw string, commodities []string) string {
+	currency := normalizeValuationCurrency(raw)
+	for _, commodity := range commodities {
+		if currency == commodity {
+			return currency
+		}
+	}
+	return "CNY"
 }
 
 func postingValuationInCNY(posting Posting, prices []Price, date string) int {
-	value, ok := ValuationInCNY(posting.Amount, posting.Currency, prices, date)
+	return postingValuationInCurrency(posting, prices, date, "CNY")
+}
+
+func postingValuationInCurrency(posting Posting, prices []Price, date, valuationCurrency string) int {
+	value, ok := ValuationInCurrency(posting.Amount, posting.Currency, valuationCurrency, prices, date)
 	if !ok {
 		return 0
 	}
@@ -545,6 +596,11 @@ func postingValuationInCNY(posting Posting, prices []Price, date string) int {
 }
 
 func MonthSummary(start, end string, txns []Transaction, prices []Price) Summary {
+	return MonthSummaryInCurrency(start, end, txns, prices, "CNY")
+}
+
+func MonthSummaryInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) Summary {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	summary := Summary{Days: map[string]map[string]int{}, Categories: map[string]int{}}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -555,7 +611,7 @@ func MonthSummary(start, end string, txns []Transaction, prices []Price) Summary
 			summary.Days[day] = map[string]int{"income": 0, "expense": 0}
 		}
 		for _, posting := range txn.Postings {
-			amount := postingValuationInCNY(posting, prices, txn.Date)
+			amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
 			if strings.HasPrefix(posting.Account, "Income:") {
 				if amount < 0 {
 					amount = -amount
@@ -571,6 +627,7 @@ func MonthSummary(start, end string, txns []Transaction, prices []Price) Summary
 		}
 	}
 	summary.Net = summary.Income - summary.Expense
+	summary.Currency = valuationCurrency
 	return summary
 }
 
@@ -585,6 +642,10 @@ type incomeStatementBuildNode struct {
 }
 
 func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
+	return IncomeStatementTreeInCurrency(start, end, txns, nil, "CNY")
+}
+
+func IncomeStatementTreeInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
 	incomeMap := map[string]incomeStatementAggregate{}
 	expenseMap := map[string]incomeStatementAggregate{}
 
@@ -598,14 +659,14 @@ func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStateme
 		}
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Income:") {
-				amount := posting.Amount
+				amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
 				if amount < 0 {
 					amount = -amount
 				}
 				addIncomeStatementAmount(incomeMap, posting.Account, amount, txnID)
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				addIncomeStatementAmount(expenseMap, posting.Account, posting.Amount, txnID)
+				addIncomeStatementAmount(expenseMap, posting.Account, postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency), txnID)
 			}
 		}
 	}
@@ -712,6 +773,11 @@ func publicIncomeStatementNodes(nodes []incomeStatementBuildNode) []IncomeStatem
 }
 
 func NetWorthHistory(txns []Transaction, prices []Price) []NetWorthPoint {
+	return NetWorthHistoryInCurrency(txns, prices, "CNY")
+}
+
+func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
 	balances := map[string]map[string]int{}
@@ -735,7 +801,7 @@ func NetWorthHistory(txns []Transaction, prices []Price) []NetWorthPoint {
 		for account, byCurrency := range balances {
 			valuation := 0
 			for currency, amount := range byCurrency {
-				value, ok := ValuationInCNY(amount, currency, prices, txn.Date)
+				value, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, txn.Date)
 				if ok {
 					valuation += value
 				}

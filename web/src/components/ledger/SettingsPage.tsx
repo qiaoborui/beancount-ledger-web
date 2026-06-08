@@ -11,6 +11,7 @@ const themeOptions: { value: ThemeMode; label: string; description: string }[] =
 
 export function SettingsPage({
   settings,
+  commodities,
   onChange,
   themeMode,
   resolvedTheme,
@@ -19,6 +20,7 @@ export function SettingsPage({
   onMobileTabHrefsChange,
 }: {
   settings: PrivacySettings;
+  commodities: string[];
   onChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void;
   themeMode: ThemeMode;
   resolvedTheme: ResolvedTheme;
@@ -30,8 +32,23 @@ export function SettingsPage({
     if (checked) onMobileTabHrefsChange(Array.from(new Set([...mobileTabHrefs, href])).slice(0, 5));
     else onMobileTabHrefsChange(mobileTabHrefs.filter((item) => item !== href));
   }
+  const currencyOptions = Array.from(new Set(["CNY", ...commodities, settings.valuationCurrency].filter(Boolean))).sort();
 
   return <div className="space-y-6">
+    <section className="card p-5 md:p-6">
+      <div className="border-l-4 border-brand pl-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">valuation</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">汇总估值</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">用于首页、趋势看板、净资产和预算汇总。单个账户余额仍显示账户原币。</p>
+      </div>
+      <label className="mt-6 block max-w-xs">
+        <span className="mb-2 block text-sm font-medium text-olive">估值币种</span>
+        <select className="h-12 w-full rounded-xl border border-line bg-panel px-3 text-ink" value={settings.valuationCurrency} onChange={(event) => onChange("valuationCurrency", event.target.value.toUpperCase())}>
+          {currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+        </select>
+      </label>
+    </section>
+
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">appearance</div>

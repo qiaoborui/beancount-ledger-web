@@ -11,9 +11,10 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "commodities.bean"), strings.Join([]string{
 		"2026-01-01 commodity CNY",
 		"2026-01-01 commodity HKD",
+		"2026-01-01 commodity USD",
 		"",
 	}, "\n"))
-	mustWrite(t, filepath.Join(cfg.LedgerRoot, "prices.bean"), "2026-05-15 price HKD 0.92 CNY\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "prices.bean"), "2026-01-01 price HKD 0.92 CNY\n2026-01-01 price USD 7.10 CNY\n")
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
 		"2026-01-01 open Assets:Cash CNY",
 		`  alias: "现金"`,
@@ -71,6 +72,23 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 	summary := BuildDashboardSummary(snapshot, "2026-05-01", "2026-06-01")
 	if summary.KPIs.Assets != 107080 || summary.KPIs.NetWorth != 107080 || summary.KPIs.Expense != 2120 {
 		t.Fatalf("dashboard valuation KPIs = %#v, want assets/netWorth 107080 and expense 2120", summary.KPIs)
+	}
+	usdSummary := BuildDashboardSummaryWithFiltersInCurrency(snapshot, "2026-05-01", "2026-06-01", DashboardFilters{}, "USD")
+	if usdSummary.Currency != "USD" || usdSummary.KPIs.Assets != 15081 || usdSummary.KPIs.NetWorth != 15081 || usdSummary.KPIs.Expense != 298 {
+		t.Fatalf("USD dashboard valuation KPIs = %#v currency=%s, want assets/netWorth 15081 and expense 298", usdSummary.KPIs, usdSummary.Currency)
+	}
+	usdBalances := AccountBalanceRowsInCurrency(CurrentBalances(snapshot.Transactions), snapshot.Prices, "", "USD")
+	foundUSDValuation := false
+	for _, row := range usdBalances {
+		if row.Account == "Assets:HK:HSBC:HKD" && row.Currency == "HKD" {
+			foundUSDValuation = true
+			if row.Valuation != 1166 || row.ValuationCurrency != "USD" || row.ValuationMissing {
+				t.Fatalf("unexpected USD HSBC valuation row: %#v", row)
+			}
+		}
+	}
+	if !foundUSDValuation {
+		t.Fatalf("HSBC USD valuation row not found: %#v", usdBalances)
 	}
 }
 

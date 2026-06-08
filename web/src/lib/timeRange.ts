@@ -223,25 +223,26 @@ export function parseApiTimeParams(searchParams: URLSearchParams): { start: stri
 }
 
 /** 生成 localStorage 缓存键 */
-export function timeRangeCacheKey(range: TimeRange): string {
+export function timeRangeCacheKey(range: TimeRange, valuationCurrency = "CNY"): string {
+  const suffix = `_valuation_${valuationCurrency}`;
   switch (range.preset) {
     case "week": {
       const { year, week } = weekLabel(range.start);
-      return `ledger_cache_${year}-W${week}`;
+      return `ledger_cache_${year}-W${week}${suffix}`;
     }
     case "month":
-      return `ledger_cache_${range.start.slice(0, 7)}`;
+      return `ledger_cache_${range.start.slice(0, 7)}${suffix}`;
     case "quarter": {
       const d = new Date(range.start);
       const y = d.getFullYear();
       const q = Math.ceil((d.getMonth() + 1) / 3);
-      return `ledger_cache_${y}-Q${q}`;
+      return `ledger_cache_${y}-Q${q}${suffix}`;
     }
     case "year":
-      return `ledger_cache_${range.start.slice(0, 4)}`;
+      return `ledger_cache_${range.start.slice(0, 4)}${suffix}`;
     case "all":
-      return "ledger_cache_all";
+      return `ledger_cache_all${suffix}`;
     case "custom":
-      return `ledger_cache_${range.start}_${range.end}`;
+      return `ledger_cache_${range.start}_${range.end}${suffix}`;
   }
 }

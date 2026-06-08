@@ -67,8 +67,10 @@ export function dashboardFiltersToSearchParams(filters: DashboardFilterState, ba
   return params;
 }
 
-export function dashboardFiltersToApiQuery(timeRange: TimeRange, filters: DashboardFilterState) {
-  return dashboardFiltersToSearchParams(filters, new URLSearchParams(timeRangeToParams(timeRange))).toString();
+export function dashboardFiltersToApiQuery(timeRange: TimeRange, filters: DashboardFilterState, valuationCurrency = "CNY") {
+  const params = dashboardFiltersToSearchParams(filters, new URLSearchParams(timeRangeToParams(timeRange)));
+  params.set("valuationCurrency", valuationCurrency);
+  return params.toString();
 }
 
 export function hasActiveDashboardFilters(filters: DashboardFilterState) {

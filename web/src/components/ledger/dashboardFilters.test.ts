@@ -46,7 +46,7 @@ describe("dashboard filter query params", () => {
       maxAmount: "20",
     });
 
-    expect(query).toBe("start=2026-05-01&end=2026-06-01&type=expense%2Cincome&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20");
+    expect(query).toBe("start=2026-05-01&end=2026-06-01&type=expense%2Cincome&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20&valuationCurrency=CNY");
   });
 
   it("detects active filters after normalization", () => {
