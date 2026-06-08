@@ -81,6 +81,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		"reconciliationRows": reconciliationRows,
 		"accounts":           snapshot.Accounts,
 		"commodities":        snapshot.Commodities,
+		"prices":             snapshot.Prices,
 		"valuationCurrency":  valuationCurrency,
 		"incomeStatement":    incomeStatement,
 		"accountStatuses":    accountStatuses,
@@ -94,7 +95,7 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
 	accountBalances := AccountBalanceRowsInCurrency(CurrentBalances(snapshot.Transactions), snapshot.Prices, "", valuationCurrency)
-	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
+	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
 }
 
 func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
