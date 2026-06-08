@@ -287,7 +287,8 @@ find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 \
   | tail -n +6 \
   | xargs -r rm -rf
 
-echo "==> Deployed $APP_NAME at http://127.0.0.1:$PORT_EFFECTIVE"
+echo "==> Deployed $APP_NAME"
+echo "    Port: $PORT_EFFECTIVE"
 echo "    Release: $RELEASE_DIR"
 echo "    LEDGER_ROOT: $LEDGER_ROOT_EFFECTIVE"
 echo "    RUNTIME_DIR: $RUNTIME_DIR_EFFECTIVE"

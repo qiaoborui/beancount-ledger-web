@@ -51,7 +51,6 @@ jobs:
       target: ${{ steps.target.outputs.target }}
       short_target: ${{ steps.target.outputs.short_target }}
       backend_port: ${{ steps.target.outputs.backend_port }}
-      environment_url: ${{ steps.target.outputs.environment_url }}
       deploy_backend: ${{ steps.changes.outputs.deploy_backend }}
       deploy_frontend: ${{ steps.changes.outputs.deploy_frontend }}
     steps:
@@ -70,12 +69,10 @@ jobs:
             echo "target=production" >> "$GITHUB_OUTPUT"
             echo "short_target=prod" >> "$GITHUB_OUTPUT"
             echo "backend_port=${{ vars.DEPLOY_PROD_PORT || vars.RASPI_PROD_PORT || '3001' }}" >> "$GITHUB_OUTPUT"
-            echo "environment_url=${{ vars.PRODUCTION_URL }}" >> "$GITHUB_OUTPUT"
           else
             echo "target=preview" >> "$GITHUB_OUTPUT"
             echo "short_target=preview" >> "$GITHUB_OUTPUT"
             echo "backend_port=${{ vars.DEPLOY_PREVIEW_PORT || vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
-            echo "environment_url=${{ vars.PREVIEW_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout
@@ -251,7 +248,6 @@ jobs:
     if: ${{ needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
-      url: ${{ needs.plan.outputs.environment_url }}
     steps:
       - name: Checkout deployment scripts
         uses: actions/checkout@v4
@@ -288,7 +284,6 @@ jobs:
 
           - Environment: `${{ needs.plan.outputs.target }}`
           - Commit: `${{ github.sha }}`
-          - URL: ${{ needs.plan.outputs.environment_url }}
           EOF
 
   deploy_backend:
@@ -298,7 +293,6 @@ jobs:
     if: ${{ always() && needs.plan.outputs.deploy_backend == 'true' && needs.build_backend.result == 'success' && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success' || needs.deploy_frontend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
-      url: ${{ needs.plan.outputs.environment_url }}
     steps:
       - name: Checkout deployment scripts
         uses: actions/checkout@v4
@@ -337,5 +331,4 @@ jobs:
           - Environment: `${{ needs.plan.outputs.target }}`
           - Port: `${{ needs.plan.outputs.backend_port }}`
           - Commit: `${{ github.sha }}`
-          - URL: ${{ needs.plan.outputs.environment_url }}
           EOF
