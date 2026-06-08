@@ -118,7 +118,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
   const showingRouteProgress = routePending || Boolean(navPendingHref);
 
   return (
-    <div className="app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
+    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
       {showingRouteProgress && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
         <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
@@ -183,8 +183,8 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
         </aside>
       </div>}
 
-      <div className="min-w-0 max-w-full md:flex">
-        <aside className={`desktop-sidebar hidden min-h-[calc(100vh-64px)] shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 md:block ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
+      <div className="app-shell-frame min-w-0 max-w-full md:flex">
+        <aside className={`app-shell-sidebar desktop-sidebar hidden shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 md:block ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
           <div className="desktop-sidebar-header mb-3">
             <div className="desktop-sidebar-heading min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium uppercase tracking-[0.24em] text-stone">本月账页</div>
             <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
@@ -205,7 +205,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
           </nav>
         </aside>
 
-        <main className="min-w-0 max-w-full flex-1 [overflow-x:clip] px-4 py-5 md:px-8 md:py-10">
+        <main data-ledger-main-scroll className="app-shell-main min-w-0 max-w-full flex-1 [overflow-x:clip] px-4 py-5 md:px-8 md:py-10">
           <div className="mx-auto min-w-0 max-w-[1500px]">{children}</div>
         </main>
       </div>

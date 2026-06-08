@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { getLedgerScrollTop } from "@/lib/scrollTarget";
 import { haptic } from "../haptics";
 
 const PULL_THRESHOLD = 92;
@@ -6,7 +7,7 @@ const MAX_PULL = 128;
 const INTERACTIVE_SELECTOR = "button,a,input,textarea,select,[role='button'],[contenteditable='true']";
 
 function isAtPageTop() {
-  return (document.scrollingElement?.scrollTop ?? window.scrollY) <= 0;
+  return getLedgerScrollTop() <= 0;
 }
 
 function startedFromInteractiveTarget(target: EventTarget | null) {

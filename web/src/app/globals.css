@@ -352,6 +352,35 @@ button.card:active, a.card:active { transform: scale(0.992); }
 }
 
 @media (min-width: 768px) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .app-shell-frame {
+    height: calc(100dvh - 4rem - env(safe-area-inset-top));
+    min-height: 0;
+  }
+
+  .app-shell-sidebar,
+  .app-shell-main {
+    height: 100%;
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
+
+  .app-shell-sidebar {
+    overflow-y: auto;
+  }
+
+  .app-shell-main {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (min-width: 768px) {
   .mobile-bottom-nav {
     display: none;
   }
