@@ -192,3 +192,34 @@ func TestCreditCardAnalyticsUsePostingCurrencyWhenAccountCurrencyIsUnconstrained
 		t.Fatalf("credit card analytics used wrong currency: %#v", card)
 	}
 }
+
+func TestValuationUsesLatestPriceOutsideHistoricalNetWorth(t *testing.T) {
+	prices := []Price{
+		{Date: "2026-06-01", Currency: "USD", Amount: 720, QuoteCurrency: "CNY"},
+		{Date: "2026-06-08", Currency: "USD", Amount: 680, QuoteCurrency: "CNY"},
+	}
+	value, ok := ValuationInCurrency(680, "CNY", "USD", prices, "2026-06-01")
+	if !ok || value != 100 {
+		t.Fatalf("latest valuation = %d ok=%v, want 100 true", value, ok)
+	}
+	summary := MonthSummaryInCurrency("2026-06-01", "2026-06-02", []Transaction{{
+		Date: "2026-06-01",
+		Postings: []Posting{
+			{Account: "Expenses:Food", Amount: 680, Currency: "CNY"},
+			{Account: "Assets:Cash", Amount: -680, Currency: "CNY"},
+		},
+	}}, prices, "USD")
+	if summary.Currency != "USD" || summary.Expense != 100 {
+		t.Fatalf("summary with latest valuation = %#v, want USD expense=100", summary)
+	}
+	history := NetWorthHistoryInCurrency([]Transaction{{
+		Date: "2026-06-01",
+		Postings: []Posting{
+			{Account: "Assets:USD", Amount: 10000, Currency: "USD"},
+			{Account: "Equity:Opening-Balances", Amount: -10000, Currency: "USD"},
+		},
+	}}, prices, "CNY")
+	if len(history) != 1 || history[0].Assets != 72000 {
+		t.Fatalf("net worth history = %#v, want 2026-06-01 assets valued at historical price 72000", history)
+	}
+}
