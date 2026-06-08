@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
-import { formatCny } from "@/lib/money";
+import { formatCny, formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -758,7 +758,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                                   <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || "未填写标题"}</div>
                                 </div>
                                 <div className="text-left md:text-right">
-                                  <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
+                                  <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
                                   <div className="mt-1 truncate text-[11px] text-stone">{accountDisplayName(importFlowForEntry(entry).to)}</div>
                                 </div>
                               </div>
@@ -942,7 +942,7 @@ function ImportFlowPanel({
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
+          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
           <div className="mt-1 text-xs text-stone">{entry.currency}</div>
         </div>
       </div>

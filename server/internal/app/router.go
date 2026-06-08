@@ -104,7 +104,7 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 			}
 		}
 	}
-	actual := MonthSummary(start, end, snapshot.Transactions).Categories
+	actual := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices).Categories
 	accounts := map[string]bool{}
 	for account := range latest {
 		accounts[account] = true
@@ -290,7 +290,7 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 				status = "asserted"
 			}
 		}
-		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
+		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "currency": account.Currency, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
 	}
 	return rows
 }
@@ -442,6 +442,12 @@ func statusMap(ok bool, value map[string]int) map[string]int {
 		return value
 	}
 	return map[string]int{}
+}
+func statusAccountBalances(ok bool, value []AccountBalance) []AccountBalance {
+	if ok {
+		return value
+	}
+	return []AccountBalance{}
 }
 func statusInt(ok bool, value int) int {
 	if ok {

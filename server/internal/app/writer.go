@@ -170,6 +170,9 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 }
 
 func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEntry) ([]string, error) {
+	if err := w.validateEntryCommodities(entries); err != nil {
+		return nil, err
+	}
 	items := make([]appendItem, 0, len(entries))
 	texts := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -191,6 +194,13 @@ func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEn
 }
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
+	currency := input.Currency
+	if currency == "" {
+		currency = "CNY"
+	}
+	if err := w.validateCurrencies([]string{currency}); err != nil {
+		return err
+	}
 	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
@@ -207,6 +217,17 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 }
 
 func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
+	currencies := []string{}
+	for _, operation := range operations {
+		if operation.Currency != "" {
+			currencies = append(currencies, operation.Currency)
+		} else if operation.Kind == "create" {
+			currencies = append(currencies, "CNY")
+		}
+	}
+	if err := w.validateCurrencies(currencies); err != nil {
+		return nil, err
+	}
 	texts := []string{}
 	if err := w.RunTransactionWithSource(ledgerWriteSourceAccountOperations, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
@@ -254,6 +275,9 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
+	if err := w.validateEntryCommodities([]LedgerEntry{entry}); err != nil {
+		return err
+	}
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionUpdate, func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
@@ -274,6 +298,50 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
 		return tx.WriteFile(file, []byte(next), 0o644)
 	})
+}
+
+func (w *LedgerWriter) validateEntryCommodities(entries []LedgerEntry) error {
+	currencies := []string{}
+	for _, entry := range entries {
+		if entry.Kind == "balance" {
+			currencies = append(currencies, entry.Currency)
+		}
+		for _, posting := range entry.Postings {
+			currencies = append(currencies, posting.Currency)
+		}
+	}
+	return w.validateCurrencies(currencies)
+}
+
+func (w *LedgerWriter) validateCurrencies(currencies []string) error {
+	if len(currencies) == 0 {
+		return nil
+	}
+	commodities, err := w.knownCommodities()
+	if err != nil {
+		return err
+	}
+	for _, currency := range currencies {
+		if err := validateKnownCurrency("currency", currency, commodities); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *LedgerWriter) knownCommodities() ([]string, error) {
+	if w.cache != nil {
+		snapshot, err := w.cache.Snapshot()
+		if err != nil {
+			return nil, err
+		}
+		return snapshot.Commodities, nil
+	}
+	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	return ParseCommodities(lines), nil
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {

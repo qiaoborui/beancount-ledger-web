@@ -77,6 +77,7 @@ var (
 	datePattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	amountPattern      = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
 	accountNamePattern = regexp.MustCompile(`^(Assets|Liabilities|Equity|Income|Expenses)(:[A-Za-z0-9][A-Za-z0-9_-]*)+$`)
+	currencyPattern    = regexp.MustCompile(`^` + commodityPattern + `$`)
 	tagPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	metadataKeyPattern = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*$`)
 )
@@ -205,8 +206,10 @@ func (i AccountInput) Validate() error {
 	if err := validateAccount("account", i.Account); err != nil {
 		return err
 	}
-	if i.Currency != "" && i.Currency != "CNY" {
-		return fmt.Errorf("currency must be CNY")
+	if i.Currency != "" {
+		if err := validateCurrency("currency", i.Currency); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -223,8 +226,10 @@ func (o AccountOperation) Validate() error {
 	if err := validateAccount("account", o.Account); err != nil {
 		return err
 	}
-	if o.Currency != "" && o.Currency != "CNY" {
-		return fmt.Errorf("currency must be CNY")
+	if o.Currency != "" {
+		if err := validateCurrency("currency", o.Currency); err != nil {
+			return err
+		}
 	}
 	if o.Group != "" && normalizeGroup(o.Group) == "" {
 		return fmt.Errorf("group is not supported")
@@ -275,8 +280,8 @@ func (e LedgerEntry) Validate() error {
 		if err := validateAmount("amount", e.Amount); err != nil {
 			return err
 		}
-		if e.Currency != "CNY" {
-			return fmt.Errorf("currency must be CNY")
+		if err := validateCurrency("currency", e.Currency); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("kind must be transaction or balance")
@@ -291,8 +296,8 @@ func (p EntryPosting) Validate() error {
 	if err := validateAmount("amount", p.Amount); err != nil {
 		return err
 	}
-	if p.Currency != "CNY" {
-		return fmt.Errorf("currency must be CNY")
+	if err := validateCurrency("currency", p.Currency); err != nil {
+		return err
 	}
 	return nil
 }
@@ -317,8 +322,8 @@ func (e ImportEntry) Validate() error {
 	if err := validateAccount("fundingAccount", e.FundingAccount); err != nil {
 		return err
 	}
-	if e.Currency != "CNY" {
-		return fmt.Errorf("currency must be CNY")
+	if err := validateCurrency("currency", e.Currency); err != nil {
+		return err
 	}
 	return nil
 }
@@ -345,4 +350,23 @@ func validateAccount(field, value string) error {
 		return fmt.Errorf("%s is not a valid account", field)
 	}
 	return nil
+}
+
+func validateCurrency(field, value string) error {
+	if !currencyPattern.MatchString(strings.TrimSpace(value)) {
+		return fmt.Errorf("%s is not a valid commodity", field)
+	}
+	return nil
+}
+
+func validateKnownCurrency(field, value string, commodities []string) error {
+	if err := validateCurrency(field, value); err != nil {
+		return err
+	}
+	for _, commodity := range commodities {
+		if commodity == value {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s commodity %s is not defined in ledger", field, value)
 }

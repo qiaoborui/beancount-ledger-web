@@ -23,9 +23,12 @@ type LedgerSnapshot struct {
 	Lines             []BeanLine         `json:"lines"`
 	Transactions      []Transaction      `json:"transactions"`
 	Balances          map[string]int     `json:"balances"`
+	AccountBalances   []AccountBalance   `json:"accountBalances"`
 	BalanceAssertions []BalanceAssertion `json:"balanceAssertions"`
 	Budgets           []Budget           `json:"budgets"`
 	Accounts          []Account          `json:"accounts"`
+	Commodities       []string           `json:"commodities"`
+	Prices            []Price            `json:"prices"`
 	ParsedAt          int64              `json:"parsedAt"`
 }
 
@@ -62,14 +65,19 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	rawBalances := CurrentBalances(txns)
+	prices := ParsePrices(lines)
 	snapshot := &LedgerSnapshot{
 		LedgerVersion:     version,
 		Lines:             lines,
 		Transactions:      txns,
-		Balances:          CurrentBalances(txns),
+		Balances:          NativeAccountBalances(rawBalances, accounts),
+		AccountBalances:   AccountBalanceRows(rawBalances, prices, ""),
 		BalanceAssertions: ParseBalances(lines),
 		Budgets:           ParseBudgets(lines),
 		Accounts:          accounts,
+		Commodities:       ParseCommodities(lines),
+		Prices:            prices,
 		ParsedAt:          time.Now().UnixMilli(),
 	}
 	c.snapshot = snapshot

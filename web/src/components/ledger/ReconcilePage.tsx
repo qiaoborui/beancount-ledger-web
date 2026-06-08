@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, CheckCircle, Info } from "lucide-react";
-import { formatCny } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { TimeRange } from "@/lib/timeRange";
@@ -114,10 +114,10 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
       {/* book balance info */}
       <div className="grid grid-cols-2 gap-3 border-t border-line px-4 py-3 text-sm">
         <div>
-          账本余额：<strong>{formatCny(row.ledgerBalance / 100)}</strong>
+          账本余额：<strong>{formatMoney(row.ledgerBalance / 100, row.currency)}</strong>
         </div>
         <div>
-          最近断言：{row.lastAssertion ? <>{row.lastAssertion.date} {formatCny(row.lastAssertion.amount / 100)}</> : <span className="text-stone">无</span>}
+          最近断言：{row.lastAssertion ? <>{row.lastAssertion.date} {formatMoney(row.lastAssertion.amount / 100, row.lastAssertion.currency)}</> : <span className="text-stone">无</span>}
         </div>
       </div>
 
@@ -165,7 +165,7 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
                 <AlertTriangle className="mt-0.5 h-4 w-4 text-[var(--warning)]" />
                 <div>
                   <p className="text-sm font-medium text-warm">
-                    差额 <span className="tabular-nums text-brand">{formatCny(diff / 100)}</span>
+                    差额 <span className="tabular-nums text-brand">{formatMoney(diff / 100, row.currency)}</span>
                   </p>
                   <p className="mt-0.5 text-xs text-stone">{meta.hint}</p>
                 </div>
@@ -182,13 +182,13 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
                     <div className="flex gap-2 pl-3">
                       <span className="text-warm">{preview.debitLabel}</span>
                       <span className="amount-gold ml-auto">
-                        {preview.debitAmount > 0 ? "+" : ""}{formatCny(preview.debitAmount / 100)}
+                        {preview.debitAmount > 0 ? "+" : ""}{formatMoney(preview.debitAmount / 100, row.currency)}
                       </span>
                     </div>
                     <div className="flex gap-2 pl-3">
                       <span className="text-warm">{preview.creditLabel}</span>
                       <span className="amount-income ml-auto">
-                        {preview.creditAmount > 0 ? "+" : ""}{formatCny(preview.creditAmount / 100)}
+                        {preview.creditAmount > 0 ? "+" : ""}{formatMoney(preview.creditAmount / 100, row.currency)}
                       </span>
                     </div>
                   </div>

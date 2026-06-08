@@ -62,6 +62,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		"end":                end,
 		"summary":            summary,
 		"balances":           statusMap(unlocked, snapshot.Balances),
+		"accountBalances":    statusAccountBalances(unlocked, snapshot.AccountBalances),
 		"netWorthHistory":    netWorthRows,
 		"monthEndNetWorth":   monthEndRows,
 		"netWorthWindows":    windows,
@@ -80,7 +81,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked)
-	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "sensitiveUnlocked": unlocked}
+	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, snapshot.AccountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "sensitiveUnlocked": unlocked}
 }
 
 func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
@@ -133,7 +134,7 @@ func transactionHasIncome(txn Transaction) bool {
 }
 
 func scopedLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool) Summary {
-	summary := MonthSummary(start, end, snapshot.Transactions)
+	summary := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices)
 	if unlocked {
 		return summary
 	}
@@ -153,7 +154,7 @@ func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked
 	if !unlocked {
 		return netWorthRows, monthEndRows, windows, creditCards
 	}
-	allRows := NetWorthHistory(snapshot.Transactions)
+	allRows := NetWorthHistory(snapshot.Transactions, snapshot.Prices)
 	for _, row := range allRows {
 		if row.Date >= start && row.Date < end {
 			netWorthRows = append(netWorthRows, row)

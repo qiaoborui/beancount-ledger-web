@@ -2,12 +2,12 @@ export type TimePreset = "week" | "month" | "quarter" | "year" | "all" | "custom
 export type TimeRange = { start: string; end: string; preset: TimePreset };
 export type Summary = { income: number; expense: number; net: number; days: Record<string, { income: number; expense: number }>; categories: Record<string, number> };
 export type MetadataValue = string | number | boolean;
-export type Txn = { date: string; payee: string; narration: string; metadata?: Record<string, MetadataValue>; tags?: string[]; postings: { account: string; amount: number; currency?: "CNY" }[]; source: { file: string; line: number; hash?: string }; pending?: { kind: "update-transaction"; operationId: string } };
+export type Txn = { date: string; payee: string; narration: string; metadata?: Record<string, MetadataValue>; tags?: string[]; postings: { account: string; amount: number; currency?: string }[]; source: { file: string; line: number; hash?: string }; pending?: { kind: "update-transaction"; operationId: string } };
 export type AccountDetailRow = { date: string; payee: string; narration: string; change: number; balance: number; txn: Txn };
 export type BudgetRow = { account: string; alias?: string | null; label?: string; budget: number; spent: number; remaining: number; ratio: number | null };
-export type ReconcileRow = { account: string; alias?: string | null; label: string; ledgerBalance: number; status: "asserted" | "pending"; lastAssertion: { date: string; amount: number; currency: "CNY" } | null };
+export type ReconcileRow = { account: string; alias?: string | null; label: string; currency: string; ledgerBalance: number; status: "asserted" | "pending"; lastAssertion: { date: string; amount: number; currency: string } | null };
 export type AccountGroup = "cash" | "credit" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";
-export type AccountOperation = { kind: "create" | "update" | "disable"; date: string; account: string; alias?: string; currency?: "CNY"; group?: AccountGroup };
+export type AccountOperation = { kind: "create" | "update" | "disable"; date: string; account: string; alias?: string; currency?: string; group?: AccountGroup };
 export type AccountStatus = {
   account: string;
   status: "green" | "red" | "yellow" | "grey";
@@ -16,7 +16,8 @@ export type AccountStatus = {
   assertionAmount: number | null;
   computedBalance: number | null;
 };
-export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: "CNY"; alias: string | null; label: string; group: AccountGroup; active: boolean; metadata?: Record<string, MetadataValue> };
+export type AccountView = { account: string; openDate: string; closeDate: string | null; currency: string; alias: string | null; label: string; group: AccountGroup; active: boolean; metadata?: Record<string, MetadataValue> };
+export type AccountBalance = { account: string; currency: string; amount: number; valuationCurrency: string; valuation: number; valuationMissing?: boolean };
 export type LedgerNotification = { id: string; insightId: string; month: string; severity: "info" | "warning" | "critical"; title: string; detail: string; amount?: number; account?: string; date?: string; status: "unread" | "read" | "dismissed" | "resolved"; createdAt: string; readAt: string | null; dismissedAt: string | null; resolvedAt: string | null; updatedAt: string };
 export type PayeeAnalytics = { payee: string; amount: number; txCount: number };
 export type AccountAnalytics = { account: string; alias?: string | null; label?: string; amount: number; txCount: number };
@@ -40,8 +41,8 @@ export type DashboardCategorySeries = { account: string; alias?: string | null; 
 export type DashboardAccountSeries = { account: string; alias?: string | null; label: string; group: string; values: DashboardSeriesPoint[] };
 export type DashboardBudgetPressure = { account: string; alias?: string | null; label: string; budget: number; spent: number; remaining: number; ratio: number | null };
 export type DashboardAnomaly = { date: string; payee: string; narration: string; account: string; amount: number; source: string };
-export type DashboardSummary = { start: string; end: string; currency: "CNY"; kpis: DashboardKPI; netWorthSeries: NetWorthPoint[]; cashflowSeries: DashboardCashflowPoint[]; dailyExpenseSeries: DashboardDailyExpense[]; weekdayExpense: DashboardWeekdayExpense[]; categorySeries: DashboardCategorySeries[]; accountBalanceSeries: DashboardAccountSeries[]; budgetPressure: DashboardBudgetPressure[]; anomalies: DashboardAnomaly[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; filters: DashboardFilters; filterOptions: DashboardFilterOptions; annotations: DashboardAnnotation[]; generatedAt: string };
-export type LedgerCache = { summary: Summary | null; balances: Record<string, number>; txns: Txn[]; budgetRows: BudgetRow[]; netWorthRows: NetWorthPoint[]; monthEndNetWorthRows?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[]; reconciliationRows: ReconcileRow[]; accounts: AccountView[]; notifications?: LedgerNotification[]; incomeStatement: IncomeStatementCache; accountStatuses: AccountStatus[]; ledgerVersion?: LedgerVersion; savedAt: number };
+export type DashboardSummary = { start: string; end: string; currency: string; kpis: DashboardKPI; netWorthSeries: NetWorthPoint[]; cashflowSeries: DashboardCashflowPoint[]; dailyExpenseSeries: DashboardDailyExpense[]; weekdayExpense: DashboardWeekdayExpense[]; categorySeries: DashboardCategorySeries[]; accountBalanceSeries: DashboardAccountSeries[]; budgetPressure: DashboardBudgetPressure[]; anomalies: DashboardAnomaly[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; filters: DashboardFilters; filterOptions: DashboardFilterOptions; annotations: DashboardAnnotation[]; generatedAt: string };
+export type LedgerCache = { summary: Summary | null; balances: Record<string, number>; accountBalances?: AccountBalance[]; txns: Txn[]; budgetRows: BudgetRow[]; netWorthRows: NetWorthPoint[]; monthEndNetWorthRows?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[]; reconciliationRows: ReconcileRow[]; accounts: AccountView[]; notifications?: LedgerNotification[]; incomeStatement: IncomeStatementCache; accountStatuses: AccountStatus[]; ledgerVersion?: LedgerVersion; savedAt: number };
 export type ManualKind = "expense" | "income" | "transfer";
 export type ManualForm = { kind: ManualKind; date: string; payee: string; narration: string; amount: string; fromAccount: string; toAccount: string; category: string };
 export type LedgerPage = "home" | "dashboard" | "net-worth" | "transactions" | "accounts" | "budgets" | "imports" | "reconcile" | "settings" | "income-statement";

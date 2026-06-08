@@ -15,7 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { formatCny } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { formatTimeRangeLabel, makeTimeRange, navigateTimeRange, type TimePreset, type TimeRange } from "@/lib/timeRange";
 import type { AccountDetailRow } from "./types";
 
@@ -38,7 +38,7 @@ function chartMoney(value: number) {
   }).format(value);
 }
 
-function AmountCell({ amount }: { amount: number }) {
+function AmountCell({ amount, currency }: { amount: number; currency: string }) {
   const sign = amount >= 0 ? "+" : "";
   const cls =
     amount > 0
@@ -49,7 +49,7 @@ function AmountCell({ amount }: { amount: number }) {
   return (
     <span className={`whitespace-nowrap tabular-nums font-medium ${cls}`}>
       {sign}
-      {formatCny(amount / 100)}
+      {formatMoney(amount / 100, currency)}
     </span>
   );
 }
@@ -240,7 +240,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                 : "amount-gold"
             }`}
           >
-            {formatCny(data.currentBalance / 100)}
+            {formatMoney(data.currentBalance / 100, data.currency)}
           </div>
         </div>
       </section>
@@ -289,7 +289,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
               </p>
             </div>
             <div className={`shrink-0 text-sm font-medium tabular-nums ${periodSummary.netChange >= 0 ? "amount-income" : "amount-expense"}`}>
-              {periodSummary.netChange >= 0 ? "+" : ""}{formatCny(periodSummary.netChange / 100)}
+              {periodSummary.netChange >= 0 ? "+" : ""}{formatMoney(periodSummary.netChange / 100, data.currency)}
             </div>
           </div>
           <div className="account-balance-chart ledger-chart mt-4 h-72 min-w-0 max-w-full overflow-hidden md:h-80 xl:h-[360px]">
@@ -306,7 +306,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                   fontSize={10}
                 />
                 <Tooltip
-                  formatter={(value: number) => [formatCny(value), "余额"]}
+                  formatter={(value: number) => [formatMoney(value, data.currency), "余额"]}
                 />
                 <Area
                   type="monotone"
@@ -326,16 +326,16 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
 
       <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:min-h-0 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)] xl:items-start">
         <div className="min-w-0 max-w-full xl:sticky xl:top-4 xl:max-h-[calc(100dvh-8rem)] xl:overflow-y-auto xl:pr-1">
-          <AccountPeriodSummaryCard summary={periodSummary} rows={filteredRows} />
+          <AccountPeriodSummaryCard summary={periodSummary} rows={filteredRows} currency={data.currency} />
         </div>
 
-        <AccountTransactionHistory account={account} rows={filteredRows} totalRows={data.rows.length} />
+        <AccountTransactionHistory account={account} rows={filteredRows} totalRows={data.rows.length} currency={data.currency} />
       </div>
     </div>
   );
 }
 
-function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSummary; rows: AccountDetailRow[] }) {
+function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: AccountPeriodSummary; rows: AccountDetailRow[]; currency: string }) {
   const hasRows = rows.length > 0;
   return (
     <section className="card min-w-0 max-w-full overflow-hidden p-4">
@@ -346,13 +346,13 @@ function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSum
         </div>
       </div>
       <div className="mt-4 grid min-w-0 grid-cols-3 divide-x divide-line overflow-hidden rounded-xl border border-line bg-panel text-center">
-        <SummaryMetric label="流入" value={formatCny(summary.inflow / 100)} cls="amount-income" />
-        <SummaryMetric label="流出" value={formatCny(summary.outflow / 100)} cls="amount-expense" />
-        <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatCny(summary.netChange / 100)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
+        <SummaryMetric label="流入" value={formatMoney(summary.inflow / 100, currency)} cls="amount-income" />
+        <SummaryMetric label="流出" value={formatMoney(summary.outflow / 100, currency)} cls="amount-expense" />
+        <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatMoney(summary.netChange / 100, currency)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
       </div>
       <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
-        <ExtremeRow label="最大流入" row={summary.maxInflow} />
-        <ExtremeRow label="最大流出" row={summary.maxOutflow} />
+        <ExtremeRow label="最大流入" row={summary.maxInflow} currency={currency} />
+        <ExtremeRow label="最大流出" row={summary.maxOutflow} currency={currency} />
       </div>
       <div className="mt-4">
         <div className="text-xs uppercase tracking-[0.18em] text-stone">主要对方账户</div>
@@ -362,7 +362,7 @@ function AccountPeriodSummaryCard({ summary, rows }: { summary: AccountPeriodSum
               <div key={item.account} className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel px-3 py-2">
                 <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
                   <span className="min-w-0 truncate text-olive">{item.account}</span>
-                  <strong className="shrink-0 whitespace-nowrap tabular-nums text-warm">{formatCny(item.amount / 100)}</strong>
+                  <strong className="shrink-0 whitespace-nowrap tabular-nums text-warm">{formatMoney(item.amount / 100, currency)}</strong>
                 </div>
                 <div className="mt-0.5 text-xs text-stone">{item.count} 笔相关变动</div>
               </div>
@@ -380,7 +380,7 @@ function SummaryMetric({ label, value, cls }: { label: string; value: string; cl
   return <div className="min-w-0 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-sm font-semibold tabular-nums sm:text-base ${cls}`}>{value}</div></div>;
 }
 
-function ExtremeRow({ label, row }: { label: string; row: AccountDetailRow | null }) {
+function ExtremeRow({ label, row, currency }: { label: string; row: AccountDetailRow | null; currency: string }) {
   return (
     <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel p-3">
       <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
@@ -388,7 +388,7 @@ function ExtremeRow({ label, row }: { label: string; row: AccountDetailRow | nul
         <>
           <div className="mt-1 flex min-w-0 items-baseline justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || "（无对手）"}</span>
-            <AmountCell amount={row.change} />
+            <AmountCell amount={row.change} currency={currency} />
           </div>
           <div className="mt-0.5 min-w-0 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
         </>
@@ -399,7 +399,7 @@ function ExtremeRow({ label, row }: { label: string; row: AccountDetailRow | nul
   );
 }
 
-function AccountTransactionHistory({ account, rows, totalRows }: { account: string; rows: AccountDetailRow[]; totalRows: number }) {
+function AccountTransactionHistory({ account, rows, totalRows, currency }: { account: string; rows: AccountDetailRow[]; totalRows: number; currency: string }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const displayRows = useMemo(() => [...rows].reverse(), [rows]);
@@ -492,7 +492,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-sm">
-                        <AmountCell amount={row.change} />
+                        <AmountCell amount={row.change} currency={currency} />
                       </div>
                       <div className="mt-0.5 text-xs tabular-nums text-stone">
                         {row.date}
@@ -503,7 +503,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                     <span className="shrink-0 whitespace-nowrap text-xs text-stone">
                       余额{" "}
                       <span className="font-medium tabular-nums text-warm">
-                        {formatCny(row.balance / 100)}
+                        {formatMoney(row.balance / 100, currency)}
                       </span>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-right text-xs text-stone/60">
@@ -543,7 +543,7 @@ function AccountTransactionHistory({ account, rows, totalRows }: { account: stri
                                     : "text-stone"
                               }`}
                             >
-                              {formatCny(p.amount / 100)}
+                              {formatMoney(p.amount / 100, p.currency ?? currency)}
                             </span>
                           </div>
                         );

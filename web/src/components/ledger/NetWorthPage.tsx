@@ -3,7 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCny, formatCompactCny } from "@/lib/money";
 import { Metric } from "./shared";
-import type { AccountView, IncomeStatementCache, NetWorthPoint, NetWorthWindows } from "./types";
+import type { AccountBalance, AccountView, IncomeStatementCache, NetWorthPoint, NetWorthWindows } from "./types";
 
 const COLORS = [
   "var(--chart-palette-1)",
@@ -17,10 +17,11 @@ const COLORS = [
 type ChartRow = { date: string; 资产: number; 负债: number; 净资产: number };
 type ViewMode = "daily" | "month-end";
 
-export function NetWorthPage({ rows, monthEndRows, windows, balances, accounts, incomeStatement, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; balances: Record<string, number>; accounts: AccountView[]; incomeStatement: IncomeStatementCache; visible: boolean; onToggleVisible: () => void }) {
+export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, accounts, incomeStatement, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; accountBalances: AccountBalance[]; accounts: AccountView[]; incomeStatement: IncomeStatementCache; visible: boolean; onToggleVisible: () => void }) {
   const [viewMode, setViewMode] = useState<ViewMode>("month-end");
-  const assets = Object.entries(balances).filter(([a]) => a.startsWith("Assets:")).reduce((s, [, v]) => s + v, 0);
-  const liabilities = Object.entries(balances).filter(([a]) => a.startsWith("Liabilities:")).reduce((s, [, v]) => s + Math.abs(v), 0);
+  const valuationBalances = useMemo(() => valuationByAccount(accountBalances), [accountBalances]);
+  const assets = Object.entries(valuationBalances).filter(([a]) => a.startsWith("Assets:")).reduce((s, [, v]) => s + v, 0);
+  const liabilities = Object.entries(valuationBalances).filter(([a]) => a.startsWith("Liabilities:")).reduce((s, [, v]) => s + Math.abs(v), 0);
   const currentNetWorth = assets - liabilities;
   const income = Math.abs(incomeStatement?.totalIncome ?? 0);
   const netIncome = incomeStatement?.netIncome ?? 0;
@@ -50,10 +51,19 @@ export function NetWorthPage({ rows, monthEndRows, windows, balances, accounts, 
     </section>
 
     <section className="mt-3 grid gap-3 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatCny(investmentIncome / 100))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
-    <AssetAllocation accounts={accounts} balances={balances} visible={visible} />
-    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={balances} visible={visible} /><LiabilitiesTrend rows={rows} visible={visible} /></section>
+    <AssetAllocation accounts={accounts} balances={valuationBalances} visible={visible} />
+    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} /><LiabilitiesTrend rows={rows} visible={visible} /></section>
     <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} onModeChange={setViewMode} />
   </>;
+}
+
+function valuationByAccount(rows: AccountBalance[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.valuationMissing) continue;
+    out[row.account] = (out[row.account] ?? 0) + row.valuation;
+  }
+  return out;
 }
 
 function InsightCard({ label, value, tone, detail }: { label: string; value: string; tone: string; detail?: string }) {

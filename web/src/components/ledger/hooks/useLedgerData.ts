@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountBalance, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -33,6 +33,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
 type LedgerBootstrapResponse = {
   summary?: Summary;
   balances?: Record<string, number>;
+  accountBalances?: AccountBalance[];
   netWorthHistory?: NetWorthPoint[];
   monthEndNetWorth?: NetWorthPoint[];
   netWorthWindows?: NetWorthWindows | null;
@@ -51,6 +52,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
   const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked);
   const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
   const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialRuntimeCache?.accountBalances ?? []);
   const [txns, setTxns] = useState<Txn[]>(() => initialRuntimeCache?.txns ?? []);
   const [budgetRows, setBudgetRows] = useState<BudgetRow[]>(() => initialRuntimeCache?.budgetRows ?? []);
   const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.netWorthRows ?? []);
@@ -70,6 +72,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
   const clearLedgerData = useCallback(() => {
     setSummary(null);
     setBalances({});
+    setAccountBalances([]);
     setNetWorthRows([]);
     setMonthEndNetWorthRows([]);
     setNetWorthWindows(null);
@@ -88,6 +91,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     writeRuntimeLedgerCache(timeRange, cacheUnlocked, cache);
     setSummary(cache.summary);
     setBalances(cache.balances);
+    setAccountBalances(cache.accountBalances ?? []);
     setNetWorthRows(cache.netWorthRows);
     setMonthEndNetWorthRows(cache.monthEndNetWorthRows ?? []);
     setNetWorthWindows(cache.netWorthWindows ?? null);
@@ -104,6 +108,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
 
   const clearSensitiveData = useCallback(() => {
     setBalances({});
+    setAccountBalances([]);
     setNetWorthRows([]);
     setMonthEndNetWorthRows([]);
     setNetWorthWindows(null);
@@ -136,6 +141,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
         const fresh: LedgerCache = {
           summary: data.summary ?? null,
           balances: sensitiveUnlocked ? (data.balances ?? {}) : {},
+          accountBalances: sensitiveUnlocked ? (data.accountBalances ?? []) : [],
           netWorthRows: sensitiveUnlocked ? (data.netWorthHistory ?? []) : [],
           monthEndNetWorthRows: sensitiveUnlocked ? (data.monthEndNetWorth ?? []) : [],
           netWorthWindows: sensitiveUnlocked ? (data.netWorthWindows ?? null) : null,
@@ -239,6 +245,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
   return {
     summary,
     balances,
+    accountBalances,
     txns,
     budgetRows,
     netWorthRows,

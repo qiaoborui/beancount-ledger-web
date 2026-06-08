@@ -21,7 +21,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows
 
   const visibleBalances = balanceAccounts
     .filter(({ account }) => balances[account] !== undefined || page === "accounts")
-    .map((item) => ({ account: item.account, label: item.label, value: balances[item.account] ?? 0, active: item.active, group: item.group }));
+    .map((item) => ({ account: item.account, label: item.label, value: balances[item.account] ?? 0, currency: item.currency, active: item.active, group: item.group }));
 
   const netWorthChart = netWorthRows.map((row) => ({
     date: row.date.slice(5),
