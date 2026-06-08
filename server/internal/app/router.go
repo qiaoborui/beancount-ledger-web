@@ -290,7 +290,7 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 				status = "asserted"
 			}
 		}
-		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "currency": account.Currency, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
+		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "currency": defaultAccountCurrency(account.Account, account.Currency), "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
 	}
 	return rows
 }

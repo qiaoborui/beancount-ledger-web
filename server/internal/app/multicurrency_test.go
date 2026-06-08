@@ -18,7 +18,7 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 		"2026-01-01 open Assets:Cash CNY",
 		`  alias: "现金"`,
 		"2026-01-01 open Assets:HK:HSBC:HKD HKD",
-		"2026-01-01 open Expenses:Food CNY",
+		"2026-01-01 open Expenses:Food",
 		"2026-01-01 open Income:Salary CNY",
 		"2026-01-01 open Equity:Opening-Balances CNY",
 		"",
@@ -33,6 +33,10 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 		"  Assets:HK:HSBC:HKD 100.00 HKD",
 		"  Equity:Opening-Balances -100.00 HKD",
 		"",
+		`2026-05-16 * "Cha Chaan Teng" "Lunch"`,
+		"  Expenses:Food 10.00 HKD",
+		"  Assets:HK:HSBC:HKD -10.00 HKD",
+		"",
 		`2026-05-31 * "Employer" "Salary"`,
 		"  Assets:Cash 1000.00 CNY",
 		"  Income:Salary -1000.00 CNY",
@@ -46,14 +50,17 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 	if got := snapshot.Transactions[1].Postings[0].Currency; got != "HKD" {
 		t.Fatalf("posting currency = %q, want HKD", got)
 	}
-	if got := snapshot.Balances["Assets:HK:HSBC:HKD"]; got != 10000 {
-		t.Fatalf("native HSBC balance = %d, want 10000", got)
+	if account := FindAccount(snapshot.Accounts, "Expenses:Food"); account == nil || account.Currency != "" {
+		t.Fatalf("expense account currency = %#v, want unconstrained", account)
+	}
+	if got := snapshot.Balances["Assets:HK:HSBC:HKD"]; got != 9000 {
+		t.Fatalf("native HSBC balance = %d, want 9000", got)
 	}
 	foundValuation := false
 	for _, row := range snapshot.AccountBalances {
 		if row.Account == "Assets:HK:HSBC:HKD" && row.Currency == "HKD" {
 			foundValuation = true
-			if row.Amount != 10000 || row.Valuation != 9200 || row.ValuationCurrency != "CNY" || row.ValuationMissing {
+			if row.Amount != 9000 || row.Valuation != 8280 || row.ValuationCurrency != "CNY" || row.ValuationMissing {
 				t.Fatalf("unexpected HSBC balance row: %#v", row)
 			}
 		}
@@ -62,8 +69,18 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 		t.Fatalf("HSBC account balance row not found: %#v", snapshot.AccountBalances)
 	}
 	summary := BuildDashboardSummary(snapshot, "2026-05-01", "2026-06-01")
-	if summary.KPIs.Assets != 108000 || summary.KPIs.NetWorth != 108000 {
-		t.Fatalf("dashboard valuation KPIs = %#v, want assets/netWorth 108000", summary.KPIs)
+	if summary.KPIs.Assets != 107080 || summary.KPIs.NetWorth != 107080 || summary.KPIs.Expense != 2120 {
+		t.Fatalf("dashboard valuation KPIs = %#v, want assets/netWorth 107080 and expense 2120", summary.KPIs)
+	}
+}
+
+func TestAccountToBeanCanCreateUnconstrainedCategoryAccount(t *testing.T) {
+	text := AccountToBean("2026-01-01", "Expenses:Travel", "旅行", "")
+	if !strings.Contains(text, "2026-01-01 open Expenses:Travel\n") {
+		t.Fatalf("account should be opened without currency constraint:\n%s", text)
+	}
+	if strings.Contains(text, "open Expenses:Travel CNY") {
+		t.Fatalf("category account unexpectedly constrained to CNY:\n%s", text)
 	}
 }
 

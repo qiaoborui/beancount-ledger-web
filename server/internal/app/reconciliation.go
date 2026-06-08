@@ -45,7 +45,8 @@ func BuildReconciliation(snapshot *LedgerSnapshot, input ReconcileRequest) (Reco
 	if accountInfo == nil {
 		return ReconciliationResult{}, errors.New("不支持的对账账户")
 	}
-	ledgerBalance := balanceBefore(input.Account, accountInfo.Currency, snapshot.Transactions, input.BalanceDate)
+	currency := defaultAccountCurrency(accountInfo.Account, accountInfo.Currency)
+	ledgerBalance := balanceBefore(input.Account, currency, snapshot.Transactions, input.BalanceDate)
 	actual := cents(input.ActualAmount)
 	diff := actual - ledgerBalance
 	adjustmentDate := input.AdjustmentDate
@@ -55,11 +56,11 @@ func BuildReconciliation(snapshot *LedgerSnapshot, input ReconcileRequest) (Reco
 	beanText := ""
 	var adjustment *LedgerEntry
 	if diff != 0 {
-		entry := reconciliationAdjustment(*accountInfo, input.Account, diff, adjustmentDate)
+		entry := reconciliationAdjustment(*accountInfo, input.Account, diff, adjustmentDate, currency)
 		adjustment = &entry
 		beanText += TransactionToBean(entry) + "\n"
 	}
-	balance := LedgerEntry{Kind: "balance", Date: input.BalanceDate, Account: input.Account, Amount: fromCents(actual), Currency: accountInfo.Currency}
+	balance := LedgerEntry{Kind: "balance", Date: input.BalanceDate, Account: input.Account, Amount: fromCents(actual), Currency: currency}
 	beanText += BalanceToBean(balance)
 	return ReconciliationResult{LedgerBalance: ledgerBalance, Actual: actual, Diff: diff, Adjustment: adjustment, Balance: balance, BeanText: beanText}, nil
 }
@@ -74,7 +75,7 @@ func reconciliationAccount(snapshot *LedgerSnapshot, account string) *Account {
 	return nil
 }
 
-func reconciliationAdjustment(accountInfo Account, account string, diff int, date string) LedgerEntry {
+func reconciliationAdjustment(accountInfo Account, account string, diff int, date, currency string) LedgerEntry {
 	other := "Equity:Balance-Adjustments"
 	if accountInfo.Group == "wealth" && diff > 0 {
 		other = "Income:Other"
@@ -88,12 +89,12 @@ func reconciliationAdjustment(accountInfo Account, account string, diff int, dat
 		Narration:   "余额差额调整",
 		Metadata:    map[string]MetadataValue{"purpose": "reconciliation"},
 		Tags:        []string{},
-		Currency:    accountInfo.Currency,
+		Currency:    currency,
 		Confidence:  1,
 		NeedsReview: false,
 		Postings: []EntryPosting{
-			{Account: account, Amount: fromCents(diff), Currency: accountInfo.Currency},
-			{Account: other, Amount: fromCents(-diff), Currency: accountInfo.Currency},
+			{Account: account, Amount: fromCents(diff), Currency: currency},
+			{Account: other, Amount: fromCents(-diff), Currency: currency},
 		},
 	}
 }

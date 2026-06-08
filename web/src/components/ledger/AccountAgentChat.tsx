@@ -214,7 +214,7 @@ function OperationCard({ operation, busy, onRemove }: { operation: AccountOperat
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
-      {operation.kind !== "disable" && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"><Check className="h-3 w-3" />{operation.kind === "create" ? "open CNY" : "metadata"}</div>}
+      {operation.kind !== "disable" && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone"><Check className="h-3 w-3" />{operation.kind === "create" ? `open ${operation.currency || "多币种"}` : "metadata"}</div>}
     </div>
   );
 }

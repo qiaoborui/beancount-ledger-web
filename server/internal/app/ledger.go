@@ -148,7 +148,7 @@ var (
 	metaRe           = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
 	balanceRe        = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
 	budgetRe         = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	openRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+(` + commodityPattern + `)\b`)
+	openRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)(?:\s+(` + commodityPattern + `(?:\s*,\s*` + commodityPattern + `)*))?\b`)
 	closeRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
 	commodityRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+commodity\s+(` + commodityPattern + `)\b`)
 	priceRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+price\s+(` + commodityPattern + `)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
@@ -339,7 +339,7 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 	for _, line := range strings.Split(string(text), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if m := openRe.FindStringSubmatch(line); m != nil {
-			acct := &Account{Account: m[2], OpenDate: m[1], Currency: m[3], Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
+			acct := &Account{Account: m[2], OpenDate: m[1], Currency: primaryOpenCurrency(m[3]), Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
 			accounts[m[2]] = acct
 			current = m[2]
 			continue
@@ -382,6 +382,25 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Account < out[j].Account })
 	return out, nil
+}
+
+func primaryOpenCurrency(raw string) string {
+	parts := strings.Split(raw, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func defaultAccountCurrency(account, currency string) string {
+	currency = strings.TrimSpace(currency)
+	if currency != "" {
+		return currency
+	}
+	if strings.HasPrefix(account, "Assets:") || strings.HasPrefix(account, "Liabilities:") {
+		return "CNY"
+	}
+	return ""
 }
 
 func accountGroup(account string, metadata map[string]MetadataValue, alias *string) string {
