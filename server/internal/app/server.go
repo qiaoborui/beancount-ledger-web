@@ -74,6 +74,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.GET("/insights", s.insights)
 	ledger.GET("/notifications", s.notifications)
 	ledger.PATCH("/notifications", s.updateNotifications)
+	ledger.GET("/imports/providers", s.importsProviders)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)
 
