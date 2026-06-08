@@ -7,6 +7,16 @@ import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/c
 import { formatCny } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -122,6 +132,11 @@ function fileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatDraftSavedAt(savedAt: number | null) {
+  if (!savedAt) return "";
+  return new Date(savedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 function readImportDraft(): ImportDraft | null {
   if (typeof window === "undefined") return null;
   try {
@@ -154,6 +169,7 @@ function writeImportDraft(draft: ImportDraft | null) {
 export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const reviewDetailRef = useRef<HTMLElement | null>(null);
+  const draftHydratedRef = useRef(false);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -169,8 +185,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
   const [selectedEntryId, setSelectedEntryId] = useState("");
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
@@ -185,6 +203,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
   const reviewTotalAmount = useMemo(() => entries.reduce((total, entry) => total + entry.amount, 0), [entries]);
+  const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -194,7 +213,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setPreview(draft.preview);
     setEntries(draft.entries);
     setSelectedEntryId(draft.entries[0]?.id ?? "");
-    setReviewOpen(true);
+    setDraftSavedAt(draft.savedAt);
+    draftHydratedRef.current = true;
   }, []);
 
   useEffect(() => {
@@ -213,7 +233,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   useEffect(() => {
     if (!preview || hasCommitted) return;
-    writeImportDraft({ savedAt: Date.now(), providerOverride, alipayFundRounding, preview, entries });
+    if (draftHydratedRef.current) {
+      draftHydratedRef.current = false;
+      return;
+    }
+    const savedAt = Date.now();
+    setDraftSavedAt(savedAt);
+    writeImportDraft({ savedAt, providerOverride, alipayFundRounding, preview, entries });
   }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
 
   useEffect(() => {
@@ -251,7 +277,24 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     setReviewOpen(false);
+    setDraftSavedAt(null);
     setError("");
+    writeImportDraft(null);
+  }
+
+  function clearImportState() {
+    setFile(null);
+    if (inputRef.current) inputRef.current.value = "";
+    setPreview(null);
+    setEntries([]);
+    setSelectedEntryId("");
+    setCommitResult(null);
+    setResultOpen(false);
+    setReviewOpen(false);
+    setRawOpen(false);
+    setDraftSavedAt(null);
+    setError("");
+    setDiscardDialogOpen(false);
     writeImportDraft(null);
   }
 
@@ -282,6 +325,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setPreview(data);
       setEntries(data.entries);
       setSelectedEntryId(data.entries[0]?.id ?? "");
+      setDraftSavedAt(Date.now());
       setReviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -308,6 +352,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setResultOpen(true);
       setReviewOpen(true);
       writeImportDraft(null);
+      setDraftSavedAt(null);
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -496,16 +541,33 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
+                {isRestoredDraft ? <Badge variant="secondary">已恢复草稿</Badge> : null}
                 <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
                 <span className="text-sm text-stone">{entries.length} 条交易</span>
               </div>
               <div className="mt-2 line-clamp-2 break-all font-medium text-ink">{preview.originalFilename}</div>
-              <div className="mt-1 text-sm text-stone">{preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}</div>
+              <div className="mt-1 text-sm text-stone">
+                {preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}
+                {draftSavedAt && !hasCommitted ? <span> · 草稿保存于 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+              </div>
             </div>
-            <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
-              {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-              {hasCommitted ? "查看写入结果" : "打开审核"}
-            </Button>
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
+              {hasCommitted ? (
+                <Button variant="outline" onClick={clearImportState}>
+                  <FileUp className="h-4 w-4" />
+                  导入新账单
+                </Button>
+              ) : (
+                <Button variant="outline" className="border-line text-stone hover:text-destructive" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                  <Trash2 className="h-4 w-4" />
+                  丢弃草稿
+                </Button>
+              )}
+              <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
+                {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                {hasCommitted ? "查看结果" : "继续审核"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -530,8 +592,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
                 <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
               </div>
-              <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
-                <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
+              <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
+                <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
+                {hasCommitted ? (
+                  <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
+                    <FileUp className="h-4 w-4" />
+                    导入新账单
+                  </Button>
+                ) : (
+                  <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                    <Trash2 className="h-4 w-4" />
+                    丢弃草稿
+                  </Button>
+                )}
                 <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
                   {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                   {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
@@ -758,6 +831,21 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           </div>
         </MobileSheet>
       ) : null}
+
+      <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>丢弃这份导入草稿？</AlertDialogTitle>
+            <AlertDialogDescription>
+              这只会删除浏览器里保存的导入审核状态，不会改动账本，也不会删除原始账单文件。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续审核</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={clearImportState}>确认丢弃</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
