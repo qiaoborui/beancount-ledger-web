@@ -127,6 +127,7 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 
 func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts []Account, start, end string, prices []Price, valuationCurrency string) []CreditCardAnalytics {
 	cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycle(time.Now().Format("2006-01-02"))
+	rawBalances := CurrentBalances(txns)
 	var out []CreditCardAnalytics
 	for _, account := range accounts {
 		if account.Group != "credit" || !strings.HasPrefix(account.Account, "Liabilities:") {
@@ -134,41 +135,57 @@ func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts
 		}
 		row := CreditCardAnalytics{Account: account.Account, Alias: account.Alias, Label: accountDisplayLabel(account.Account, account.Label), BillCycleStart: cycleStart, BillCycleEnd: cycleEnd, StatementDate: statementDate, DueDate: dueDate}
 		for _, txn := range txns {
-			var cardTotal, expenseAmount, assetOutflow int
+			cardTotals := map[string]int{}
+			expenseAmounts := map[string]int{}
+			assetOutflows := map[string]int{}
 			for _, posting := range txn.Postings {
 				if posting.Account == account.Account {
-					cardTotal += posting.Amount
+					cardTotals[postingCurrency(posting)] += posting.Amount
 				}
 				if strings.HasPrefix(posting.Account, "Expenses:") {
-					expenseAmount += posting.Amount
+					expenseAmounts[postingCurrency(posting)] += posting.Amount
 				}
 				if strings.HasPrefix(posting.Account, "Assets:") && posting.Amount < 0 {
-					assetOutflow += -posting.Amount
+					assetOutflows[postingCurrency(posting)] += -posting.Amount
 				}
 			}
-			if cardTotal != 0 && (row.LastActivityDate == nil || txn.Date > *row.LastActivityDate) {
+			if len(cardTotals) > 0 && (row.LastActivityDate == nil || txn.Date > *row.LastActivityDate) {
 				date := txn.Date
 				row.LastActivityDate = &date
 			}
-			cardSpend := 0
-			if expenseAmount > 0 && cardTotal < 0 {
-				cardSpend = min(expenseAmount, -cardTotal)
+			var txnSpend, txnRepayment int
+			for currency, cardTotal := range cardTotals {
+				expenseAmount := expenseAmounts[currency]
+				cardSpend := 0
+				if expenseAmount > 0 && cardTotal < 0 {
+					cardSpend = min(expenseAmount, -cardTotal)
+				}
+				if txn.Date >= cycleStart && txn.Date < cycleEnd && cardSpend > 0 {
+					row.BillCycleSpend += valuationOrZero(cardSpend, currency, prices, txn.Date, valuationCurrency)
+				}
+				if txn.Date < start || txn.Date >= end {
+					continue
+				}
+				if cardSpend > 0 {
+					txnSpend += valuationOrZero(cardSpend, currency, prices, txn.Date, valuationCurrency)
+					continue
+				}
+				if assetOutflow := assetOutflows[currency]; assetOutflow > 0 && cardTotal > 0 {
+					txnRepayment += valuationOrZero(min(assetOutflow, cardTotal), currency, prices, txn.Date, valuationCurrency)
+				}
 			}
-			if txn.Date >= cycleStart && txn.Date < cycleEnd && cardSpend > 0 {
-				row.BillCycleSpend += valuationOrZero(cardSpend, account.Currency, prices, txn.Date, valuationCurrency)
-			}
-			if txn.Date < start || txn.Date >= end || cardTotal == 0 {
-				continue
-			}
-			if cardSpend > 0 {
-				row.PeriodSpend += valuationOrZero(cardSpend, account.Currency, prices, txn.Date, valuationCurrency)
+			if txnSpend > 0 {
+				row.PeriodSpend += txnSpend
 				row.TxCount++
-			} else if assetOutflow > 0 && cardTotal > 0 {
-				row.PeriodRepayments += valuationOrZero(min(assetOutflow, cardTotal), account.Currency, prices, txn.Date, valuationCurrency)
+			} else if txnRepayment > 0 {
+				row.PeriodRepayments += txnRepayment
 				row.RepaymentCount++
 			}
 		}
-		row.Balance = valuationOrZero(balances[account.Account], account.Currency, prices, end, valuationCurrency)
+		row.Balance = accountBalanceValuation(rawBalances[account.Account], prices, end, valuationCurrency)
+		if row.Balance == 0 && rawBalances[account.Account] == nil {
+			row.Balance = valuationOrZero(balances[account.Account], defaultAccountCurrency(account.Account, account.Currency), prices, end, valuationCurrency)
+		}
 		row.Outstanding = max(0, abs(min(row.Balance, 0)))
 		out = append(out, row)
 	}
@@ -182,6 +199,21 @@ func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts
 		return out[i].Label < out[j].Label
 	})
 	return out
+}
+
+func postingCurrency(posting Posting) string {
+	if posting.Currency == "" {
+		return "CNY"
+	}
+	return posting.Currency
+}
+
+func accountBalanceValuation(balance map[string]int, prices []Price, date, valuationCurrency string) int {
+	total := 0
+	for currency, amount := range balance {
+		total += valuationOrZero(amount, currency, prices, date, valuationCurrency)
+	}
+	return total
 }
 
 func valuationOrZero(amount int, currency string, prices []Price, date, valuationCurrency string) int {

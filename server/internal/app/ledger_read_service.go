@@ -46,12 +46,12 @@ func firstValuationCurrency(values []string) string {
 	return values[0]
 }
 
-func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool) (gin.H, error) {
+func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
 	snapshot, err := s.cache.Snapshot()
 	if err != nil {
 		return nil, err
 	}
-	return BuildLedgerIncomeStatement(snapshot, start, end, unlocked), nil
+	return BuildLedgerIncomeStatement(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
 func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
@@ -101,10 +101,12 @@ func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlock
 	return gin.H{"start": start, "end": end, "transactions": FilterLedgerTransactions(snapshot.Transactions, start, end, unlocked), "sensitiveUnlocked": unlocked}
 }
 
-func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
-	payload := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, "CNY")
+func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) gin.H {
+	valuationCurrency := ValidValuationCurrency(firstValuationCurrency(rawValuationCurrency), snapshot.Commodities)
+	payload := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	payload["start"] = start
 	payload["end"] = end
+	payload["valuationCurrency"] = valuationCurrency
 	payload["sensitiveUnlocked"] = unlocked
 	return payload
 }
@@ -118,7 +120,7 @@ func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end strin
 	if unlocked {
 		incomeNodes = allIncomeNodes
 	}
-	return gin.H{"income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome)}
+	return gin.H{"income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "valuationCurrency": valuationCurrency}
 }
 
 func FilterLedgerTransactions(txns []Transaction, start, end string, unlocked bool) []Transaction {

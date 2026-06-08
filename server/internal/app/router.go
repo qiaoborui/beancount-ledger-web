@@ -139,7 +139,7 @@ func (s *Server) incomeStatement(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.IncomeStatement(start, end, isSensitiveUnlocked(c))
+	payload, err := s.readService.IncomeStatement(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

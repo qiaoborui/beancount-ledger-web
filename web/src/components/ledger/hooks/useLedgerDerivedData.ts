@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import type { AccountView, Summary } from "../types";
+import type { AccountBalance, AccountView, Summary } from "../types";
 import { formatAccountOptionLabel } from "../accountDisplay";
 
-export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows, page }: { summary: Summary | null; accounts: AccountView[]; balances: Record<string, number>; netWorthRows: { date: string; assets: number; liabilities: number; netWorth: number }[]; page: string }) {
+export function useLedgerDerivedData({ summary, accounts, balances, accountBalances, netWorthRows, page, valuationCurrency }: { summary: Summary | null; accounts: AccountView[]; balances: Record<string, number>; accountBalances: AccountBalance[]; netWorthRows: { date: string; assets: number; liabilities: number; netWorth: number }[]; page: string; valuationCurrency: string }) {
   const chart = useMemo(() => {
     const days = summary?.days ?? {};
     return Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")).map((day) => ({
@@ -19,9 +19,19 @@ export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows
   const incomeAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "income").map((account) => account.account), [activeAccounts]);
   const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);
 
+  const balancesByAccount = useMemo(() => {
+    const out = new Map<string, AccountBalance[]>();
+    for (const row of accountBalances) {
+      const rows = out.get(row.account) ?? [];
+      rows.push(row);
+      out.set(row.account, rows);
+    }
+    return out;
+  }, [accountBalances]);
+
   const visibleBalances = balanceAccounts
-    .filter(({ account }) => balances[account] !== undefined || page === "accounts")
-    .map((item) => ({ account: item.account, label: item.label, value: balances[item.account] ?? 0, currency: item.currency, active: item.active, group: item.group }));
+    .filter(({ account }) => balances[account] !== undefined || balancesByAccount.has(account) || page === "accounts")
+    .map((item) => accountBalanceDisplayRow(item, balances[item.account], balancesByAccount.get(item.account) ?? [], valuationCurrency));
 
   const netWorthChart = netWorthRows.map((row) => ({
     date: row.date.slice(5),
@@ -31,4 +41,18 @@ export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows
   }));
 
   return { chart, accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart };
+}
+
+function accountBalanceDisplayRow(account: AccountView, nativeBalance: number | undefined, rows: AccountBalance[], fallbackValuationCurrency: string) {
+  const usableRows = rows.filter((row) => row.amount !== 0 || row.valuation !== 0);
+  if (usableRows.length === 1) {
+    const row = usableRows[0];
+    return { account: account.account, label: account.label, value: row.amount, currency: row.currency, active: account.active, group: account.group };
+  }
+  if (usableRows.length > 1) {
+    const valuedRows = usableRows.filter((row) => !row.valuationMissing);
+    const valuationCurrency = valuedRows[0]?.valuationCurrency ?? usableRows[0]?.valuationCurrency ?? fallbackValuationCurrency;
+    return { account: account.account, label: account.label, value: valuedRows.reduce((sum, row) => sum + row.valuation, 0), currency: valuationCurrency, active: account.active, group: account.group, valuation: true };
+  }
+  return { account: account.account, label: account.label, value: nativeBalance ?? 0, currency: account.currency || fallbackValuationCurrency, active: account.active, group: account.group };
 }

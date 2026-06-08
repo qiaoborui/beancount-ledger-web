@@ -77,6 +77,9 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	if _, ok := incomeStatement["start"]; ok {
 		t.Fatalf("nested income statement should not include top-level date fields: %#v", incomeStatement)
 	}
+	if incomeStatement["valuationCurrency"].(string) != "CNY" {
+		t.Fatalf("nested income statement should include valuation currency: %#v", incomeStatement)
+	}
 	if incomeStatement["totalIncome"].(int) != 100000 || incomeStatement["netIncome"].(int) != 98800 {
 		t.Fatalf("nested income statement totals changed: %#v", incomeStatement)
 	}
