@@ -890,19 +890,22 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
   );
 }
 
-function importFlowForEntry(entry: ImportEntry) {
+export function importFlowForEntry(entry: ImportEntry) {
   const category = entry.categoryAccount;
   const funding = entry.fundingAccount;
-  if (category.startsWith("Income:")) return { from: category, to: funding || category, kind: "收入流入" };
-  if (category.startsWith("Expenses:")) return { from: funding || category, to: category, kind: "支出流向" };
-
   const postings = entry.postings.map((posting) => ({
     account: posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:") ? category : posting.account,
     amount: Number(posting.amount),
   }));
   const outflow = postings.find((posting) => posting.amount < 0);
   const inflow = postings.find((posting) => posting.amount > 0);
-  if (outflow && inflow) return { from: outflow.account, to: inflow.account, kind: "账户转移" };
+  if (outflow && inflow) {
+    if (category.startsWith("Income:")) return { from: outflow.account, to: inflow.account, kind: "收入流入" };
+    if (category.startsWith("Expenses:")) return { from: outflow.account, to: inflow.account, kind: outflow.account === category ? "退款流入" : "支出流向" };
+    return { from: outflow.account, to: inflow.account, kind: "账户转移" };
+  }
+  if (category.startsWith("Income:")) return { from: category, to: funding || category, kind: "收入流入" };
+  if (category.startsWith("Expenses:")) return { from: funding || category, to: category, kind: "支出流向" };
   return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
 }
 
