@@ -53,7 +53,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
 
     <section className="mt-3 grid gap-3 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatValuation(investmentIncome / 100, displayCurrency))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
     <AssetAllocation accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} />
-    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} /><LiabilitiesTrend rows={rows} visible={visible} valuationCurrency={displayCurrency} /></section>
+    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} /><LiabilitiesTrend rows={chartRows} visible={visible} valuationCurrency={displayCurrency} /></section>
     <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} valuationCurrency={displayCurrency} onModeChange={setViewMode} />
   </>;
 }

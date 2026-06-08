@@ -50,7 +50,9 @@ The validation layer covers:
 - Beancount account names rooted at `Assets`, `Liabilities`, `Equity`, `Income`,
   or `Expenses`.
 - Decimal amounts with at most two places.
-- CNY-only mutation currency, matching the frontend Zod schemas.
+- Mutation currencies must be valid Beancount commodity tokens; write paths also
+  validate them against the ledger commodities when the current snapshot is
+  available.
 - Transaction posting count, metadata keys, tags, confidence, and source identity.
 
 Frontend Zod schemas remain useful for client UX, but the Go schemas are the

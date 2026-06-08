@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,6 +79,29 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 	if usdSummary.Currency != "USD" || usdSummary.KPIs.Assets != 15081 || usdSummary.KPIs.NetWorth != 15081 || usdSummary.KPIs.Expense != 298 {
 		t.Fatalf("USD dashboard valuation KPIs = %#v currency=%s, want assets/netWorth 15081 and expense 298", usdSummary.KPIs, usdSummary.Currency)
 	}
+	incomePayload := BuildLedgerIncomeStatement(snapshot, "2026-05-01", "2026-06-01", true, "USD")
+	if incomePayload["valuationCurrency"] != "USD" || incomePayload["totalIncome"] != 14084 || incomePayload["totalExpense"] != 298 || incomePayload["netIncome"] != 13786 {
+		t.Fatalf("USD income statement payload = %#v, want USD totals income=14084 expense=298 net=13786", incomePayload)
+	}
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/income-statement?start=2026-05-01&end=2026-06-01&valuationCurrency=USD", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("USD income statement status=%d body=%s", res.Code, res.Body.String())
+	}
+	var incomeBody struct {
+		ValuationCurrency string `json:"valuationCurrency"`
+		TotalIncome       int    `json:"totalIncome"`
+		TotalExpense      int    `json:"totalExpense"`
+		NetIncome         int    `json:"netIncome"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &incomeBody); err != nil {
+		t.Fatal(err)
+	}
+	if incomeBody.ValuationCurrency != "USD" || incomeBody.TotalIncome != 14084 || incomeBody.TotalExpense != 298 || incomeBody.NetIncome != 13786 {
+		t.Fatalf("USD income statement response = %#v, want USD totals income=14084 expense=298 net=13786", incomeBody)
+	}
 	usdBalances := AccountBalanceRowsInCurrency(CurrentBalances(snapshot.Transactions), snapshot.Prices, "", "USD")
 	foundUSDValuation := false
 	for _, row := range usdBalances {
@@ -133,5 +158,37 @@ func TestReconciliationUsesAccountCurrency(t *testing.T) {
 	}
 	if !strings.Contains(result.BeanText, "balance Assets:HK:HSBC:HKD 90.00 HKD") {
 		t.Fatalf("bean text did not contain HKD balance:\n%s", result.BeanText)
+	}
+}
+
+func TestCreditCardAnalyticsUsePostingCurrencyWhenAccountCurrencyIsUnconstrained(t *testing.T) {
+	txns := []Transaction{
+		{
+			Date: "2026-05-10",
+			Postings: []Posting{
+				{Account: "Expenses:Travel", Amount: 1000, Currency: "USD"},
+				{Account: "Liabilities:Card", Amount: -1000, Currency: "USD"},
+			},
+		},
+		{
+			Date: "2026-05-12",
+			Postings: []Posting{
+				{Account: "Assets:USD", Amount: -500, Currency: "USD"},
+				{Account: "Liabilities:Card", Amount: 500, Currency: "USD"},
+			},
+		},
+	}
+	accounts := []Account{
+		{Account: "Liabilities:Card", Label: "USD Card", Group: "credit"},
+	}
+	prices := []Price{{Date: "2026-01-01", Currency: "USD", Amount: 710, QuoteCurrency: "CNY"}}
+
+	cards := CreditCardsInCurrency(txns, nil, accounts, "2026-05-01", "2026-06-01", prices, "CNY")
+	if len(cards) != 1 {
+		t.Fatalf("expected one card, got %#v", cards)
+	}
+	card := cards[0]
+	if card.PeriodSpend != 7100 || card.PeriodRepayments != 3550 || card.Balance != -3550 || card.Outstanding != 3550 {
+		t.Fatalf("credit card analytics used wrong currency: %#v", card)
 	}
 }

@@ -21,6 +21,10 @@ function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationC
   runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked, valuationCurrency), cache };
 }
 
+function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
+  return runtimeCacheKey(range, unlocked, valuationCurrency);
+}
+
 async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   try {
     const data = await fetchJson<{ version?: LedgerVersion }>("/api/ledger/version", undefined, {});
@@ -73,6 +77,9 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialRuntimeCache?.savedAt ?? null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
+
+  latestContextRef.current = { range: timeRange, unlocked, valuationCurrency };
 
   const clearLedgerData = useCallback(() => {
     setSummary(null);
@@ -94,8 +101,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setLastSyncedAt(null);
   }, []);
 
-  const applyCache = useCallback((cache: LedgerCache, cacheUnlocked = unlocked) => {
-    writeRuntimeLedgerCache(timeRange, cacheUnlocked, valuationCurrency, cache);
+  const applyCache = useCallback((cache: LedgerCache, cacheUnlocked = unlocked, cacheRange = timeRange, cacheValuationCurrency = valuationCurrency, contextValuationCurrency = cacheValuationCurrency) => {
+    writeRuntimeLedgerCache(cacheRange, cacheUnlocked, cacheValuationCurrency, cache);
+    const latest = latestContextRef.current;
+    if (ledgerContextKey(cacheRange, cacheUnlocked, contextValuationCurrency) !== ledgerContextKey(latest.range, latest.unlocked, latest.valuationCurrency)) {
+      return;
+    }
     setSummary(cache.summary);
     setBalances(cache.balances);
     setAccountBalances(cache.accountBalances ?? []);
@@ -148,7 +159,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         const sensitiveUnlocked = Boolean(data.sensitiveUnlocked);
         const responseValuationCurrency = data.valuationCurrency ?? valuationCurrency;
         if (unlocked && !sensitiveUnlocked) onSensitiveLocked();
-        const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
+        const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, valuationCurrency: responseValuationCurrency, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
         const version = data.ledgerVersion ?? await fetchLedgerVersion();
         const fresh: LedgerCache = {
           summary: data.summary ?? null,
@@ -166,11 +177,11 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
           prices: data.prices ?? [],
           valuationCurrency: responseValuationCurrency,
           accountStatuses: sensitiveUnlocked ? (data.accountStatuses ?? []) : [],
-          incomeStatement: { income: sensitiveUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: sensitiveUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: sensitiveUnlocked ? (inc.netIncome ?? 0) : 0, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
+          incomeStatement: { income: sensitiveUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: sensitiveUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: sensitiveUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
           ledgerVersion: version ?? undefined,
           savedAt: Date.now(),
         };
-        applyCache(fresh, sensitiveUnlocked);
+        applyCache(fresh, sensitiveUnlocked, range, responseValuationCurrency, valuationCurrency);
         if (sensitiveUnlocked) {
           writeLedgerCache(range, fresh, responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);

@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
-import { formatCny } from "@/lib/money";
+import { formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import type { ExpenseCategoryAnalytics, IncomeStatementNode } from "./types";
 
 type CashFlowNode = { name: string; color: string; value?: number; label?: string; side: "source" | "center" | "target" };
 type CashFlowData = { nodes: CashFlowNode[]; links: { source: number; target: number; value: number }[] };
 type CashFlowSelection = { kind: "node" | "link"; key: string; label: string; value: number; detail: string };
-type SankeyNodeProps = { x: number; y: number; width: number; height: number; payload: CashFlowNode & { value?: number }; activeKey?: string | null; onSelect?: (selection: CashFlowSelection) => void };
+type SankeyNodeProps = { x: number; y: number; width: number; height: number; payload: CashFlowNode & { value?: number }; activeKey?: string | null; valuationCurrency?: string; onSelect?: (selection: CashFlowSelection) => void };
 type SankeyLinkProps = { sourceX: number; sourceY: number; sourceControlX: number; targetX: number; targetY: number; targetControlX: number; linkWidth: number; index: number; nodes?: CashFlowNode[]; links?: CashFlowData["links"]; activeKey?: string | null; onSelect?: (selection: CashFlowSelection) => void };
 
 type CashFlowCardProps = {
@@ -18,13 +18,14 @@ type CashFlowCardProps = {
   expenseAnalytics: ExpenseCategoryAnalytics[];
   totalIncome: number;
   totalExpense: number;
+  valuationCurrency?: string;
   sensitiveUnlocked: boolean;
   title?: string;
   description?: string;
   className?: string;
 };
 
-export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, totalExpense, sensitiveUnlocked, title = "现金流向", description = "收入进入本期现金流，再分配到支出分类和结余；还信用卡不重复计入损益。", className = "mt-4" }: CashFlowCardProps) {
+export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, totalExpense, valuationCurrency = "CNY", sensitiveUnlocked, title = "现金流向", description = "收入进入本期现金流，再分配到支出分类和结余；还信用卡不重复计入损益。", className = "mt-4" }: CashFlowCardProps) {
   const data = buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, totalExpense, sensitiveUnlocked });
   const [selection, setSelection] = useState<CashFlowSelection | null>(null);
 
@@ -39,7 +40,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
       <div className="text-left sm:text-right">
         {selection ? <div className="rounded-xl border border-line bg-panel px-3 py-2 text-xs text-stone">
           <div className="font-medium text-warm">{selection.label}</div>
-          <div className="mt-0.5 tabular-nums">{formatCny(selection.value / 100)} · {selection.detail}</div>
+          <div className="mt-0.5 tabular-nums">{formatValuation(selection.value / 100, valuationCurrency)} · {selection.detail}</div>
         </div> : !sensitiveUnlocked && <span className="text-xs text-stone">收入来源需解锁后显示明细</span>}
       </div>
     </div>
@@ -51,7 +52,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
             data={data}
             dataKey="value"
             nameKey="name"
-            node={<CashFlowNodeShape activeKey={selection?.key ?? null} onSelect={setSelection} />}
+            node={<CashFlowNodeShape activeKey={selection?.key ?? null} valuationCurrency={valuationCurrency} onSelect={setSelection} />}
             link={<CashFlowLinkShape nodes={data.nodes} links={data.links} activeKey={selection?.key ?? null} onSelect={setSelection} />}
             nodePadding={10}
             nodeWidth={14}
@@ -59,7 +60,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
             margin={{ top: 8, right: 112, bottom: 8, left: 104 }}
             sort={false}
           >
-            <Tooltip formatter={(value) => formatCny(Number(value) / 100)} />
+            <Tooltip formatter={(value) => formatValuation(Number(value) / 100, valuationCurrency)} />
           </Sankey>
         </ResponsiveContainer>
       </div>
@@ -68,7 +69,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, totalIncome, t
 }
 
 function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
-  const { x = 0, y = 0, width = 0, height = 0, payload, activeKey, onSelect } = props;
+  const { x = 0, y = 0, width = 0, height = 0, payload, activeKey, valuationCurrency = "CNY", onSelect } = props;
   const name = payload?.name ?? "";
   const label = payload?.label ?? name;
   const key = `node-${name}`;
@@ -76,7 +77,7 @@ function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
   const labelOnRight = payload?.side === "target";
   const labelX = labelOnRight ? x + width + 8 : x - 8;
   const select = () => onSelect?.({ kind: "node", key, label: name, value: payload?.value ?? 0, detail: "节点合计" });
-  return <g className="cursor-pointer" onMouseEnter={select} onFocus={select} onTouchStart={select} tabIndex={0} role="button" aria-label={`${name} ${formatCny((payload?.value ?? 0) / 100)}`}>
+  return <g className="cursor-pointer" onMouseEnter={select} onFocus={select} onTouchStart={select} tabIndex={0} role="button" aria-label={`${name} ${formatValuation((payload?.value ?? 0) / 100, valuationCurrency)}`}>
     <rect x={x} y={y} width={Math.max(width, 8)} height={Math.max(height, 6)} rx={2} fill={payload?.color ?? "var(--chart-primary)"} stroke={active ? "var(--brand)" : "transparent"} strokeWidth={active ? 2 : 0} filter={active ? "drop-shadow(0 2px 6px rgba(20, 20, 19, 0.22))" : undefined} />
     <text x={labelX} y={y + height / 2} textAnchor={labelOnRight ? "start" : "end"} dominantBaseline="middle" fill="var(--ink)" fontSize={11} fontWeight={active ? 700 : 400}>{label}</text>
   </g>;

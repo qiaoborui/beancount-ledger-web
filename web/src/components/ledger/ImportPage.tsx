@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
-import { formatCny, formatMoney } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -120,6 +120,17 @@ function providerLabel(provider: Provider, choices: ProviderChoice[]) {
   return choices.find((choice) => choice.value === provider)?.label ?? fallbackProviderChoices.find((choice) => choice.value === provider)?.label ?? provider;
 }
 
+function formatImportTotals(entries: ImportEntry[]) {
+  const totals = new Map<string, number>();
+  for (const entry of entries) {
+    totals.set(entry.currency, (totals.get(entry.currency) ?? 0) + entry.amount);
+  }
+  const parts = Array.from(totals.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, amount]) => formatMoney(amount, currency));
+  return parts.length ? parts.join(" / ") : formatMoney(0, "CNY");
+}
+
 function confidenceLabel(confidence: ImportPreview["providerDetection"]["confidence"]) {
   if (confidence === "high") return "高置信";
   if (confidence === "medium") return "中置信";
@@ -202,7 +213,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const originalEntryCount = preview?.entries.length ?? 0;
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
-  const reviewTotalAmount = useMemo(() => entries.reduce((total, entry) => total + entry.amount, 0), [entries]);
+  const reviewTotalAmount = useMemo(() => formatImportTotals(entries), [entries]);
   const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
   const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
 
@@ -642,7 +653,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
                 </Badge>
                 <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
-                <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
+                <span className="tabular-nums">{reviewTotalAmount} 合计</span>
               </div>
               <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
                 <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
@@ -685,7 +696,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
                 <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
                 <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
-                <ReviewMetric label="待写入合计" value={formatCny(reviewTotalAmount)} detail={`${entries.length} 条候选交易`} tone="brand" />
+                <ReviewMetric label="待写入合计" value={reviewTotalAmount} detail={`${entries.length} 条候选交易`} tone="brand" />
               </div>
             </div>
 
