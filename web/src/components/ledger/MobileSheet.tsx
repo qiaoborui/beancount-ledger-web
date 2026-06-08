@@ -74,7 +74,7 @@ export function MobileSheet({ open, title, children, footer, onClose, shouldClos
 
   if (!mounted || !open) return null;
 
-  const maxWidth = size === "xl" ? "sm:max-w-5xl" : size === "md" ? "sm:max-w-2xl" : "sm:max-w-xl";
+  const maxWidth = size === "xl" ? "sm:max-w-6xl" : size === "md" ? "sm:max-w-2xl" : "sm:max-w-xl";
   const desktopAlign = align === "center" ? "sm:items-center sm:justify-center sm:p-4" : "sm:items-stretch sm:justify-end";
   const desktopRadius = align === "center" ? "sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl" : "sm:h-full sm:rounded-none";
 

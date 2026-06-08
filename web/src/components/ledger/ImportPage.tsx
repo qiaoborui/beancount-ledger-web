@@ -180,6 +180,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
   const hasCommitted = commitResult?.ok === true;
   const canCommit = Boolean(preview) && entries.length > 0 && !committing && !hasCommitted;
+  const originalEntryCount = preview?.entries.length ?? 0;
+  const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
+  const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
+  const reviewTotalAmount = useMemo(() => entries.reduce((total, entry) => total + entry.amount, 0), [entries]);
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -315,6 +319,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (selectedEntryId === id) setSelectedEntryId(next[0]?.id ?? "");
       return next;
     });
+  }
+
+  function selectEntryOffset(offset: number) {
+    if (!entries.length) return;
+    const index = selectedEntryIndex < 0 ? 0 : selectedEntryIndex;
+    const next = entries[(index + offset + entries.length) % entries.length];
+    if (next) setSelectedEntryId(next.id);
   }
 
   function updateMetadata(id: string, key: string, value: string) {
@@ -500,7 +511,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
                   {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
                 </Badge>
-                <span className="min-w-0 break-words">{hasCommitted ? "写入结果已归档，可以继续保存到 Git。" : "写入前可继续修改标题、分类和 metadata。"}</span>
+                <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
+                <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
               </div>
               <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
                 <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
@@ -512,9 +524,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           }
         >
-          <div className="-mx-4 -my-4 min-w-0 space-y-3 bg-paper px-3 py-3 sm:-mx-5 sm:px-5">
-            <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
-              <div className="grid min-w-0 gap-3 border-b border-line bg-paper px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="-mx-4 -my-4 min-w-0 bg-paper sm:-mx-5">
+            <div className="border-b border-line bg-panel px-4 py-4 sm:px-5">
+              <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <Badge variant="outline">{confidenceLabel(preview.providerDetection.confidence)}</Badge>
@@ -528,168 +540,203 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
-              <ImportStats preview={preview} entryCount={entries.length} />
+              <div className="mt-4 grid min-w-0 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+                <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
+                <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
+                <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
+                <ReviewMetric label="待写入合计" value={formatCny(reviewTotalAmount)} detail={`${entries.length} 条候选交易`} tone="brand" />
+              </div>
             </div>
 
-            {commitResult?.ok ? (
-              <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
-                    <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+            <div className="min-w-0 space-y-3 px-3 py-3 sm:px-5">
+              {commitResult?.ok ? (
+                <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
+                      <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
+                      {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      {resultOpen ? "收起结果" : "查看写入结果"}
+                    </Button>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
-                    {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    {resultOpen ? "收起结果" : "查看写入结果"}
-                  </Button>
-                </div>
-                {resultOpen ? <CommitResultDetails result={commitResult} /> : null}
-              </Alert>
-            ) : null}
-
-            {preview.warnings.length > 0 ? (
-              <Alert className="grid-cols-1 space-y-2">
-                {preview.warnings.map((warning) => (
-                  <div key={warning} className="flex min-w-0 items-start gap-2">
-                    <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
-                    <span className="min-w-0 break-words leading-6">{warning}</span>
-                  </div>
-                ))}
-              </Alert>
-            ) : null}
-
-            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:items-start">
-              {entries.length === 0 ? (
-                <Alert className="text-sm text-stone xl:col-span-2">
-                  已删除所有候选交易。
+                  {resultOpen ? <CommitResultDetails result={commitResult} /> : null}
                 </Alert>
               ) : null}
-              <div className="min-w-0 space-y-2">
-                {entries.map((entry, index) => {
-                  const selected = selectedEntry?.id === entry.id;
-                  return (
-                    <article
-                      key={entry.id}
-                      className={cn(
-                        "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border bg-panel shadow-sm transition",
-                        selected ? "border-brand ring-2 ring-[var(--focus-ring)]" : "border-line hover:border-brand/50",
-                      )}
-                    >
-                      <button type="button" className="min-w-0 px-3 py-3 text-left" onClick={() => setSelectedEntryId(entry.id)}>
-                        <div className="grid min-w-0 gap-3 md:grid-cols-[5.75rem_minmax(0,1fr)_7rem] md:items-center">
-                          <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:block">
-                            <Badge variant={selected ? "default" : "secondary"} className={cn("text-xs", selected ? "" : "bg-tag text-warm")}>{entry.date}</Badge>
-                            {entry.source ? <Badge variant="outline" className="mt-0 border-brand/45 text-brand md:mt-2">{entry.source}</Badge> : null}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-baseline gap-2">
-                              <span className="shrink-0 font-mono text-xs text-stone">{String(index + 1).padStart(2, "0")}</span>
-                              <span className="min-w-0 truncate text-base font-medium text-ink">{entry.payee || "未命名商户"}</span>
-                            </div>
-                            <div className="mt-1 truncate text-xs text-stone">{entry.narration || "未填写标题"}</div>
-                          </div>
-                          <div className="text-left md:text-right">
-                            <div className="font-serif text-xl font-medium leading-none text-warm">{formatCny(entry.amount)}</div>
-                            <div className="mt-1 text-xs text-stone">{entry.currency}</div>
-                          </div>
-                        </div>
-                      </button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="mr-2 h-9 w-9 shrink-0 text-stone hover:text-destructive"
-                        onClick={() => removeEntry(entry.id)}
-                        disabled={committing || hasCommitted}
-                        title="删除这条候选交易"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </article>
-                  );
-                })}
-              </div>
 
-              {selectedEntry ? (
-                <aside className="min-w-0 rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3">
-                  <div className="border-b border-line bg-paper px-4 py-3">
-                    <div className="flex min-w-0 items-start justify-between gap-3">
-                      <div className="min-w-0">
+              {preview.warnings.length > 0 ? (
+                <Alert className="grid-cols-1 space-y-2">
+                  {preview.warnings.map((warning) => (
+                    <div key={warning} className="flex min-w-0 items-start gap-2">
+                      <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
+                      <span className="min-w-0 break-words leading-6">{warning}</span>
+                    </div>
+                  ))}
+                </Alert>
+              ) : null}
+
+              <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] xl:items-start">
+                <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+                  <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-ink">候选交易</div>
+                      <div className="mt-0.5 text-xs text-stone">逐条核对，删除后只提交剩余交易。</div>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
+                      <span className="rounded-full bg-tag px-2 py-1">{entries.length} 待写入</span>
+                      <span className="rounded-full bg-tag px-2 py-1">{removedEntryCount} 已移除</span>
+                    </div>
+                  </div>
+                  {entries.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-sm text-stone">已删除所有候选交易。</div>
+                  ) : (
+                    <div className="divide-y divide-line">
+                      {entries.map((entry, index) => {
+                        const selected = selectedEntry?.id === entry.id;
+                        return (
+                          <article
+                            key={entry.id}
+                            className={cn(
+                              "relative grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-center transition",
+                              selected ? "bg-[var(--selected-bg)]" : "bg-panel hover:bg-paper",
+                            )}
+                          >
+                            {selected ? <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-brand" aria-hidden="true" /> : null}
+                            <button type="button" className="min-w-0 px-3 py-2.5 pl-4 text-left" onClick={() => setSelectedEntryId(entry.id)}>
+                              <div className="grid min-w-0 gap-2 md:grid-cols-[5rem_minmax(0,1fr)_8rem] md:items-center">
+                                <div className="flex min-w-0 items-center gap-2 md:block">
+                                  <span className="font-mono text-[11px] text-stone">{String(index + 1).padStart(2, "0")}</span>
+                                  <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", selected ? "bg-brand text-paper" : "bg-tag text-warm")}>{entry.date}</span>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || "未命名商户"}</span>
+                                    {entry.source ? <span className="shrink-0 rounded-full border border-brand/35 px-1.5 py-0.5 text-[10px] text-brand">{entry.source}</span> : null}
+                                  </div>
+                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || "未填写标题"}</div>
+                                </div>
+                                <div className="text-left md:text-right">
+                                  <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
+                                  <div className="mt-1 truncate text-[11px] text-stone">{entry.categoryAccount}</div>
+                                </div>
+                              </div>
+                            </button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="mr-1 h-9 w-9 shrink-0 text-stone hover:text-destructive"
+                              onClick={() => removeEntry(entry.id)}
+                              disabled={committing || hasCommitted}
+                              title="删除这条候选交易"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                {selectedEntry ? (
+                  <aside className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3 xl:max-h-[calc(90dvh-9rem)] xl:overflow-y-auto">
+                    <div className="border-b border-line bg-paper px-4 py-3">
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑 {selectedEntryIndex + 1}/{entries.length}</div>
+                          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={selectedEntry.payee || "未命名商户"}>{selectedEntry.payee || "未命名商户"}</div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(-1)} disabled={entries.length <= 1} title="上一条">
+                            <ChevronUp className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(1)} disabled={entries.length <= 1} title="下一条">
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <Badge variant="secondary" className="bg-tag text-warm">{selectedEntry.date}</Badge>
                           {selectedEntry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{selectedEntry.source}</Badge> : null}
                         </div>
-                        <div className="mt-2 truncate text-xl font-medium leading-7 text-ink" title={selectedEntry.payee || "未命名商户"}>{selectedEntry.payee || "未命名商户"}</div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div className="font-serif text-2xl font-medium leading-none text-warm">{formatCny(selectedEntry.amount)}</div>
-                        <div className="mt-1 text-xs text-stone">{selectedEntry.currency}</div>
+                        <div className="shrink-0 text-right">
+                          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(selectedEntry.amount)}</div>
+                          <div className="mt-1 text-xs text-stone">{selectedEntry.currency}</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-3 p-4">
-                    <Label className="block min-w-0">
-                      <span className="mb-1.5 block text-xs text-stone">标题</span>
-                      <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={selectedEntry.narration} onChange={(event) => updateEntry(selectedEntry.id, { narration: event.target.value })} />
-                    </Label>
-                    <Label className="block min-w-0">
-                      <span className="mb-1.5 block text-xs text-stone">{editableAccountLabel(selectedEntry)}</span>
-                      <Select value={selectedEntry.categoryAccount} onValueChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}>
-                        <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-80">
-                          {categoryAccountOptions(selectedEntry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </Label>
+                    <div className="space-y-4 p-4">
+                      <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
+                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">标题</span><span className="min-w-0 break-words">{selectedEntry.narration || "-"}</span></div>
+                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">方式</span><span className="min-w-0 break-words">{selectedEntry.method || "-"}</span></div>
+                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">资金账户</span><span className="min-w-0 break-words">{selectedEntry.fundingAccount || "-"}</span></div>
+                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">订单号</span><span className="min-w-0 break-all">{selectedEntry.orderId || "-"}</span></div>
+                      </div>
 
-                    <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
-                      <div className="min-w-0 break-words"><span className="text-olive">支付方式：</span>{selectedEntry.method || "-"}</div>
-                      <div className="min-w-0 break-words"><span className="text-olive">资金账户：</span>{selectedEntry.fundingAccount || "-"}</div>
-                      <div className="min-w-0 break-all"><span className="text-olive">订单号：</span>{selectedEntry.orderId || "-"}</div>
-                    </div>
-
-                    <details open>
-                      <summary className="cursor-pointer text-xs text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
-                      <div className="mt-3 grid gap-2">
-                        <Label className="block">
-                          <span className="mb-1.5 block">note</span>
-                          <Input className="h-10 border-line bg-paper shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" />
+                      <div className="space-y-3">
+                        <Label className="block min-w-0">
+                          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
+                          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={selectedEntry.narration} onChange={(event) => updateEntry(selectedEntry.id, { narration: event.target.value })} />
                         </Label>
-                        <Label className="block">
-                          <span className="mb-1.5 block">purpose</span>
-                          <Input className="h-10 border-line bg-paper shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
+                        <Label className="block min-w-0">
+                          <span className="mb-1.5 block text-xs font-medium text-stone">{editableAccountLabel(selectedEntry)}</span>
+                          <Select value={selectedEntry.categoryAccount} onValueChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}>
+                            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-80">
+                              {categoryAccountOptions(selectedEntry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
                         </Label>
                       </div>
-                    </details>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full border-line bg-panel text-stone hover:text-destructive"
-                      onClick={() => removeEntry(selectedEntry.id)}
-                      disabled={committing || hasCommitted}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      删除当前交易
-                    </Button>
-                  </div>
-                </aside>
-              ) : null}
-            </div>
+                      <details open className="rounded-xl border border-line bg-paper px-3 py-2.5">
+                        <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
+                        <div className="mt-3 grid gap-2">
+                          <Label className="block">
+                            <span className="mb-1.5 block text-xs text-stone">note</span>
+                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" />
+                          </Label>
+                          <Label className="block">
+                            <span className="mb-1.5 block text-xs text-stone">purpose</span>
+                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
+                          </Label>
+                        </div>
+                      </details>
 
-            <Button variant="ghost" className="px-0 text-stone underline" onClick={() => setRawOpen((value) => !value)}>
-              {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              查看原始输出 / dedup 报告
-            </Button>
-            {rawOpen ? (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre>
-                <pre className="max-h-96 overflow-auto rounded-2xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-line bg-panel text-stone hover:text-destructive"
+                        onClick={() => removeEntry(selectedEntry.id)}
+                        disabled={committing || hasCommitted}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        删除当前交易
+                      </Button>
+                    </div>
+                  </aside>
+                ) : null}
               </div>
-            ) : null}
+
+              <div className="overflow-hidden rounded-xl border border-line bg-panel">
+                <Button variant="ghost" className="flex h-11 w-full justify-start rounded-none px-3 text-stone" onClick={() => setRawOpen((value) => !value)}>
+                  {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  查看原始输出 / dedup 报告
+                </Button>
+                {rawOpen ? (
+                  <div className="grid gap-3 border-t border-line p-3 lg:grid-cols-2">
+                    <pre className="max-h-96 overflow-auto rounded-xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.dedupReport}</pre>
+                    <pre className="max-h-96 overflow-auto rounded-xl border border-line bg-ink p-4 text-xs leading-5 text-paper">{preview.generatedBean}</pre>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </MobileSheet>
       ) : null}
@@ -711,31 +758,12 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
   );
 }
 
-function ImportStats({ preview, entryCount }: { preview: ImportPreview; entryCount: number }) {
-  const stats = preview.provider === "cmb" || preview.provider === "cmb-checking"
-    ? [
-        ["PDF/CSV 明细", preview.rawRowCount],
-        ["Web 前置过滤后", preview.filteredRowCount],
-        ["DEG 生成", preview.generatedCount],
-        ["已去重跳过", preview.skippedDuplicateCount],
-        ["待确认写入", entryCount],
-      ]
-    : [
-        ["候选交易", preview.candidateCount],
-        ["生成分录", preview.generatedCount],
-        ["已去重跳过", preview.skippedDuplicateCount],
-        ["排除记录", preview.excludedRowCount],
-        ["待确认写入", entryCount],
-      ];
-
+function ReviewMetric({ label, value, detail, tone = "default" }: { label: string; value: string | number; detail: string; tone?: "default" | "brand" | "warn" | "muted" }) {
   return (
-    <div className="grid min-w-0 grid-cols-2 gap-px bg-line sm:grid-cols-5">
-      {stats.map(([label, value]) => (
-        <div key={label} className="min-w-0 bg-panel px-4 py-3">
-          <div className="truncate text-xs text-stone">{label}</div>
-          <div className="mt-1 font-serif text-xl font-medium leading-none text-ink">{value}</div>
-        </div>
-      ))}
+    <div className="min-w-0 bg-panel px-4 py-3">
+      <div className="truncate text-xs text-stone">{label}</div>
+      <div className={cn("mt-1 truncate font-serif text-xl font-medium leading-none tabular-nums", tone === "brand" ? "text-brand" : tone === "warn" ? "text-[var(--warning)]" : tone === "muted" ? "text-stone" : "text-ink")}>{value}</div>
+      <div className="mt-1 truncate text-[11px] text-stone">{detail}</div>
     </div>
   );
 }
