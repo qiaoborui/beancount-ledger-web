@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatAccountOptionLabel } from "./accountDisplay";
+import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "wechat" | "cmb" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
@@ -167,7 +168,6 @@ function writeImportDraft(draft: ImportDraft | null) {
 
 export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const reviewSectionRef = useRef<HTMLElement | null>(null);
   const reviewDetailRef = useRef<HTMLElement | null>(null);
   const draftHydratedRef = useRef(false);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
@@ -327,7 +327,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setEntries(data.entries);
       setSelectedEntryId(data.entries[0]?.id ?? "");
       setDraftSavedAt(Date.now());
-      startReview();
+      setReviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -351,7 +351,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
       setCommitResult(data);
       setResultOpen(true);
-      startReview();
+      setReviewOpen(true);
       writeImportDraft(null);
       setDraftSavedAt(null);
       onImported?.();
@@ -392,18 +392,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry)));
   }
 
-  function startReview() {
-    setReviewOpen(true);
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(() => reviewSectionRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
-    }
-  }
-
   function renderPrimaryActions() {
     if (hasCommitted) {
       return (
         <div className="grid gap-2">
-          <Button className="w-full" size="lg" onClick={startReview}>
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
             <CheckCircle className="h-4 w-4" />
             查看写入结果
           </Button>
@@ -417,9 +410,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     if (preview) {
       return (
         <div className="grid gap-2">
-          <Button className="w-full" size="lg" onClick={startReview}>
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
             <ShieldCheck className="h-4 w-4" />
-            {reviewOpen ? "回到审核区" : "开始审核"}
+            继续审核
           </Button>
           <div className="grid grid-cols-2 gap-2">
             <Button className="min-w-0" variant="outline" onClick={generatePreview} disabled={loading || !file}>
@@ -440,38 +433,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
         生成预览
       </Button>
-    );
-  }
-
-  function renderReviewActions() {
-    return (
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
-          <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
-            {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
-          </Badge>
-          <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
-          <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
-        </div>
-        <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
-          <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "收起结果" : "稍后处理"}</Button>
-          {hasCommitted ? (
-            <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
-              <FileUp className="h-4 w-4" />
-              导入新账单
-            </Button>
-          ) : (
-            <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
-              <Trash2 className="h-4 w-4" />
-              丢弃草稿
-            </Button>
-          )}
-          <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
-            {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-            {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
-          </Button>
-        </div>
-      </div>
     );
   }
 
@@ -654,52 +615,81 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   丢弃草稿
                 </Button>
               )}
-              <Button onClick={startReview} variant={hasCommitted ? "secondary" : "default"}>
+              <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
                 {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                {hasCommitted ? "查看结果" : reviewOpen ? "回到审核区" : "开始审核"}
+                {hasCommitted ? "查看结果" : "继续审核"}
               </Button>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      {preview && reviewOpen ? (
-        <section ref={reviewSectionRef} className="scroll-mt-4">
-          <Card className="min-w-0 border-line bg-panel shadow-sm xl:min-h-[calc(100dvh-8rem)]">
-            <CardContent className="flex min-w-0 flex-col p-0 xl:min-h-[calc(100dvh-8rem)]">
-              <div className="border-b border-line bg-panel px-4 py-4 sm:px-5">
-                <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="font-serif text-2xl font-medium leading-tight text-ink">{providerLabel(preview.provider, providerChoices)}导入审核</div>
-                    <div className="mt-1 text-sm leading-6 text-stone">在页面内核对候选交易，确认无误后写入账本。</div>
-                  </div>
-                  <Button className="shrink-0" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>
-                    {hasCommitted ? "收起结果" : "收起审核"}
+      {preview ? (
+        <MobileSheet
+          open={reviewOpen}
+          title={`${providerLabel(preview.provider, providerChoices)}导入审核`}
+          onClose={() => setReviewOpen(false)}
+          shouldClose={() => !committing}
+          size="xl"
+          align="center"
+          bodyClassName="!p-0 xl:!overflow-hidden"
+          panelClassName="xl:!h-[90dvh]"
+          closeLabel={committing ? "写入中" : "关闭"}
+          footer={
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
+                <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
+                  {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
+                </Badge>
+                <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
+                <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
+              </div>
+              <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
+                <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
+                {hasCommitted ? (
+                  <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
+                    <FileUp className="h-4 w-4" />
+                    导入新账单
                   </Button>
-                </div>
-                <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Badge variant="outline">{confidenceLabel(preview.providerDetection.confidence)}</Badge>
-                      <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
-                      <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{preview.originalFilename}</span>
-                    </div>
-                    <div className="mt-1 text-xs leading-5 text-stone">{preview.providerDetection.reason}</div>
+                ) : (
+                  <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                    <Trash2 className="h-4 w-4" />
+                    丢弃草稿
+                  </Button>
+                )}
+                <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
+                  {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                  {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="flex min-h-full min-w-0 flex-col bg-paper xl:h-full xl:min-h-0">
+            <div className="border-b border-line bg-panel px-4 py-4 sm:px-5">
+              <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Badge variant="outline">{confidenceLabel(preview.providerDetection.confidence)}</Badge>
+                    <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
+                    <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{preview.originalFilename}</span>
                   </div>
-                  <div className="grid grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone">
-                    <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
-                    <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
-                  </div>
+                  <div className="mt-1 text-xs leading-5 text-stone">{preview.providerDetection.reason}</div>
                 </div>
-                <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
-                  <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
-                  <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
-                  <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
-                  <ReviewMetric label="待写入合计" value={formatCny(reviewTotalAmount)} detail={`${entries.length} 条候选交易`} tone="brand" />
+                <div className="grid grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone">
+                  <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
+                  <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
+              <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+                <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
+                <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
+                <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
+                <ReviewMetric label="待写入合计" value={formatCny(reviewTotalAmount)} detail={`${entries.length} 条候选交易`} tone="brand" />
+              </div>
+            </div>
 
-              <div className="flex min-w-0 flex-1 flex-col gap-3 bg-paper px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden">
+            <div className="flex min-w-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden">
               {commitResult?.ok ? (
                 <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -740,7 +730,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                     </div>
                   </div>
                   {entries.length === 0 ? (
-                    <div className="px-4 py-10 text-center text-sm text-stone">已移除所有候选交易。</div>
+                    <div className="px-4 py-10 text-center text-sm text-stone">已删除所有候选交易。</div>
                   ) : (
                     <div className="divide-y divide-line xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                       {entries.map((entry, index) => {
@@ -889,13 +879,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   </div>
                 ) : null}
               </div>
-              <div className="sticky bottom-0 z-10 border-t border-line bg-paper/95 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur sm:px-5">
-                {renderReviewActions()}
-              </div>
             </div>
-            </CardContent>
-          </Card>
-        </section>
+          </div>
+        </MobileSheet>
       ) : null}
 
       <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
