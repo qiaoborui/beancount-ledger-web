@@ -2,13 +2,12 @@
 
 import { useState } from "react";
 import { ResponsiveContainer, Sankey, Tooltip } from "recharts";
-import { formatCny, formatCompactCny } from "@/lib/money";
+import { formatCny } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import type { CreditCardAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode } from "./types";
 
 type CashFlowNode = { name: string; color: string; value?: number; label?: string; side: "source" | "center" | "target" };
 type CashFlowData = { nodes: CashFlowNode[]; links: { source: number; target: number; value: number }[] };
-type CashFlowRow = { key: string; name: string; label: string; value: number; color: string; detail: string };
 type CashFlowSelection = { kind: "node" | "link"; key: string; label: string; value: number; detail: string };
 type SankeyNodeProps = { x: number; y: number; width: number; height: number; payload: CashFlowNode & { value?: number }; activeKey?: string | null; onSelect?: (selection: CashFlowSelection) => void };
 type SankeyLinkProps = { sourceX: number; sourceY: number; sourceControlX: number; targetX: number; targetY: number; targetControlX: number; linkWidth: number; index: number; nodes?: CashFlowNode[]; links?: CashFlowData["links"]; activeKey?: string | null; onSelect?: (selection: CashFlowSelection) => void };
@@ -31,9 +30,9 @@ export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = 
   const data = buildCashFlowData({ income, expense, expenseAnalytics, creditCards, totalIncome, totalExpense, netIncome, sensitiveUnlocked });
   const [selection, setSelection] = useState<CashFlowSelection | null>(null);
 
-  if (data.links.length === 0) return <section className={`card p-4 ${className}`}><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前周期暂无可视化现金流。</div></section>;
+  if (data.links.length === 0) return <section className={`card hidden p-4 lg:block ${className}`}><h2 className="font-serif text-xl">{title}</h2><div className="mt-3 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前周期暂无可视化现金流。</div></section>;
 
-  return <section className={`card overflow-hidden p-3 md:p-4 ${className}`}>
+  return <section className={`card hidden overflow-hidden p-4 lg:block ${className}`}>
     <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between md:mb-3">
       <div>
         <h2 className="font-serif text-lg md:text-2xl">{title}</h2>
@@ -47,9 +46,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = 
       </div>
     </div>
 
-    <CashFlowCompactView data={data} onSelect={setSelection} />
-
-    <div className="cash-flow-chart -mx-1 hidden overflow-x-auto px-1 pb-1 [scrollbar-width:thin] lg:block lg:-mx-2 lg:px-2">
+    <div className="cash-flow-chart -mx-2 overflow-x-auto px-2 pb-1 [scrollbar-width:thin]">
       <div className="h-[390px] min-w-[560px] md:h-[380px] md:min-w-0 xl:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
           <Sankey
@@ -69,49 +66,7 @@ export function CashFlowCard({ income, expense, expenseAnalytics, creditCards = 
         </ResponsiveContainer>
       </div>
     </div>
-    <p className="mt-2 text-[10px] text-stone lg:hidden">点按条目查看完整分类和金额。</p>
   </section>;
-}
-
-function CashFlowCompactView({ data, onSelect }: { data: CashFlowData; onSelect: (selection: CashFlowSelection) => void }) {
-  const incomeRows = cashFlowRows(data, "source");
-  const allocationRows = cashFlowRows(data, "target");
-  const center = data.nodes.find((node) => node.side === "center");
-  return <div className="mt-3 lg:hidden">
-    <div className="rounded-2xl border border-line bg-panel p-3">
-      <CashFlowRowGroup title="进入" rows={incomeRows} tone="income" onSelect={onSelect} />
-      <button type="button" className="my-3 flex w-full items-center justify-between gap-3 rounded-xl border border-line bg-paper px-3 py-2 text-left" onClick={() => onSelect({ kind: "node", key: `node-${center?.name ?? "本期现金流"}`, label: center?.name ?? "本期现金流", value: center?.value ?? 0, detail: "节点合计" })}>
-        <span className="min-w-0 text-sm font-medium text-warm">本期现金流</span>
-        <strong className="shrink-0 text-sm tabular-nums amount-gold">{formatCompactCny((center?.value ?? 0) / 100)}</strong>
-      </button>
-      <CashFlowRowGroup title="分配" rows={allocationRows} tone="expense" onSelect={onSelect} />
-    </div>
-  </div>;
-}
-
-function CashFlowRowGroup({ title, rows, tone, onSelect }: { title: string; rows: CashFlowRow[]; tone: "income" | "expense"; onSelect: (selection: CashFlowSelection) => void }) {
-  if (rows.length === 0) return null;
-  const maxValue = Math.max(...rows.map((row) => row.value), 1);
-  return <div>
-    <div className="mb-2 flex items-center justify-between text-xs text-stone">
-      <span>{title}</span>
-      <span>{rows.length} 项</span>
-    </div>
-    <div className="grid gap-1.5">
-      {rows.map((row) => {
-        const width = `${Math.max(8, Math.round(row.value / maxValue * 100))}%`;
-        return <button key={row.key} type="button" className="group rounded-xl border border-line bg-paper px-3 py-2 text-left transition-colors hover:bg-tag" onClick={() => onSelect({ kind: "node", key: row.key, label: row.name, value: row.value, detail: row.detail })}>
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-sm text-warm">{row.label}</span>
-            <strong className={`shrink-0 text-xs tabular-nums ${tone === "income" ? "amount-income" : "amount-expense"}`}>{formatCompactCny(row.value / 100)}</strong>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
-            <div className="h-full rounded-full" style={{ width, backgroundColor: row.color }} />
-          </div>
-        </button>;
-      })}
-    </div>
-  </div>;
 }
 
 function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
@@ -139,22 +94,6 @@ function CashFlowLinkShape(props: Partial<SankeyLinkProps>) {
   const active = activeKey === key;
   const select = () => link && onSelect?.({ kind: "link", key, label: `${source} → ${target}`, value: link.value, detail: "现金流向" });
   return <path className="cursor-pointer" d={`M${sourceX},${sourceY} C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`} fill="none" stroke={active ? "var(--brand)" : palette[index % palette.length]} strokeWidth={Math.max(2, active ? linkWidth + 2 : linkWidth)} strokeOpacity={active ? 0.82 : 0.95} onMouseEnter={select} onTouchStart={select} />;
-}
-
-function cashFlowRows(data: CashFlowData, side: "source" | "target"): CashFlowRow[] {
-  return data.links.flatMap((link, index) => {
-    const nodeIndex = side === "source" ? link.source : link.target;
-    const node = data.nodes[nodeIndex];
-    if (!node || node.side !== side) return [];
-    return [{
-      key: `node-${node.name}`,
-      name: node.name,
-      label: node.label ?? node.name,
-      value: link.value,
-      color: node.color,
-      detail: side === "source" ? "进入现金流" : "现金流分配",
-    }];
-  }).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "zh-CN"));
 }
 
 function buildCashFlowData({ income, expense, expenseAnalytics, creditCards, totalIncome, totalExpense, netIncome, sensitiveUnlocked }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; creditCards: CreditCardAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; sensitiveUnlocked: boolean }): CashFlowData {
