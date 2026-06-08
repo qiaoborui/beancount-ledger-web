@@ -113,14 +113,14 @@ migration.
 Configure Actions variables:
 
 ```text
-PRODUCTION_URL=https://your-production-domain.example
-PREVIEW_URL=https://your-preview-domain.example
 DEPLOY_PROD_PORT=3001
 DEPLOY_PREVIEW_PORT=3002
 ```
 
-These ports are the public app ports routed from the outside world. The backend
-deploy script stops the legacy `beancount-web-*` service before starting the
+The workflow intentionally does not configure GitHub environment URLs, so
+deployment pages and summaries do not expose the public app addresses. These
+ports are the public app ports routed from the outside world. The backend deploy
+script stops the legacy `beancount-web-*` service before starting the
 `beancount-ledger-api-*` service on the same port.
 
 ## Backend systemd services
