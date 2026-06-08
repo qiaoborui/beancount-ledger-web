@@ -523,7 +523,15 @@ func ValuationInCNY(amount int, currency string, prices []Price, date string) (i
 	return ValuationInCurrency(amount, currency, "CNY", prices, date)
 }
 
-func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, _ string) (int, bool) {
+	return valuationInCurrencyAt(amount, currency, targetCurrency, prices, "")
+}
+
+func ValuationInCurrencyAt(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+	return valuationInCurrencyAt(amount, currency, targetCurrency, prices, date)
+}
+
+func valuationInCurrencyAt(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
 	currency = normalizeValuationCurrency(currency)
 	targetCurrency = normalizeValuationCurrency(targetCurrency)
 	if currency == targetCurrency {
@@ -536,23 +544,27 @@ func ValuationInCurrency(amount int, currency, targetCurrency string, prices []P
 		return amount * 100 / price.Amount, true
 	}
 	if currency != "CNY" && targetCurrency != "CNY" {
-		cny, ok := ValuationInCurrency(amount, currency, "CNY", prices, date)
+		cny, ok := valuationInCurrencyAt(amount, currency, "CNY", prices, date)
 		if !ok {
 			return 0, false
 		}
-		return ValuationInCurrency(cny, "CNY", targetCurrency, prices, date)
+		return valuationInCurrencyAt(cny, "CNY", targetCurrency, prices, date)
 	}
 	return 0, false
 }
 
 func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*Price, bool) {
 	var latest *Price
+	var earliestFuture *Price
 	for i := range prices {
 		price := &prices[i]
 		if price.Currency != currency || price.QuoteCurrency != quoteCurrency {
 			continue
 		}
 		if date != "" && price.Date > date {
+			if earliestFuture == nil || price.Date < earliestFuture.Date {
+				earliestFuture = price
+			}
 			continue
 		}
 		if latest == nil || price.Date >= latest.Date {
@@ -560,7 +572,10 @@ func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*
 		}
 	}
 	if latest == nil {
-		return nil, false
+		if earliestFuture == nil {
+			return nil, false
+		}
+		return earliestFuture, true
 	}
 	return latest, true
 }
@@ -801,7 +816,7 @@ func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurr
 		for account, byCurrency := range balances {
 			valuation := 0
 			for currency, amount := range byCurrency {
-				value, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, txn.Date)
+				value, ok := ValuationInCurrencyAt(amount, currency, valuationCurrency, prices, txn.Date)
 				if ok {
 					valuation += value
 				}
