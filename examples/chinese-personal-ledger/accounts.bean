@@ -1,5 +1,11 @@
 2026-01-01 open Assets:CN:Bank:Checking CNY
   alias: "储蓄卡 / 工资卡"
+2026-01-01 open Assets:HK:HSBC:HKD HKD
+  alias: "汇丰香港港币账户"
+  group: "cash"
+2026-01-01 open Assets:HK:HSBC:USD USD
+  alias: "汇丰香港美元账户"
+  group: "cash"
 2026-01-01 open Assets:CN:Wechat:Balance CNY
   alias: "微信零钱"
 2026-01-01 open Assets:CN:Alipay:Balance CNY
@@ -12,23 +18,23 @@
 2026-01-01 open Liabilities:Payable:Friends CNY
   alias: "欠朋友的钱"
 
-2026-01-01 open Income:Salary CNY
-2026-01-01 open Income:Bonus CNY
-2026-01-01 open Income:Interest CNY
-2026-01-01 open Income:Reimbursement CNY
-2026-01-01 open Income:Other CNY
+2026-01-01 open Income:Salary
+2026-01-01 open Income:Bonus
+2026-01-01 open Income:Interest
+2026-01-01 open Income:Reimbursement
+2026-01-01 open Income:Other
 
-2026-01-01 open Expenses:Food:Meals CNY
-2026-01-01 open Expenses:Food:Drinks CNY
-2026-01-01 open Expenses:Food:Groceries CNY
-2026-01-01 open Expenses:Transport:Public CNY
-2026-01-01 open Expenses:Transport:Taxi CNY
-2026-01-01 open Expenses:Shopping:Daily CNY
-2026-01-01 open Expenses:Shopping:Other CNY
-2026-01-01 open Expenses:Digital:Subscription CNY
-2026-01-01 open Expenses:Housing:Rent CNY
-2026-01-01 open Expenses:Social:Gift CNY
-2026-01-01 open Expenses:Unknown CNY
+2026-01-01 open Expenses:Food:Meals
+2026-01-01 open Expenses:Food:Drinks
+2026-01-01 open Expenses:Food:Groceries
+2026-01-01 open Expenses:Transport:Public
+2026-01-01 open Expenses:Transport:Taxi
+2026-01-01 open Expenses:Shopping:Daily
+2026-01-01 open Expenses:Shopping:Other
+2026-01-01 open Expenses:Digital:Subscription
+2026-01-01 open Expenses:Housing:Rent
+2026-01-01 open Expenses:Social:Gift
+2026-01-01 open Expenses:Unknown
 
-2026-01-01 open Equity:Opening-Balances CNY
-2026-01-01 open Equity:Balance-Adjustments CNY
+2026-01-01 open Equity:Opening-Balances
+2026-01-01 open Equity:Balance-Adjustments
