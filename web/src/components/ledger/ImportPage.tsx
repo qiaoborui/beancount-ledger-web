@@ -475,7 +475,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           </div>
 
-          <div className="grid min-w-0 max-w-full gap-4 overflow-hidden">
+          <div className="grid min-w-0 max-w-full content-start gap-4 overflow-hidden">
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
