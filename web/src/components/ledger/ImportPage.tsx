@@ -518,6 +518,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           shouldClose={() => !committing}
           size="xl"
           align="center"
+          bodyClassName="!p-0 xl:!overflow-hidden"
+          panelClassName="xl:!h-[90dvh]"
           closeLabel={committing ? "写入中" : "关闭"}
           footer={
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -538,7 +540,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           }
         >
-          <div className="-mx-4 -my-4 min-w-0 bg-paper sm:-mx-5">
+          <div className="flex min-h-full min-w-0 flex-col bg-paper xl:h-full xl:min-h-0">
             <div className="border-b border-line bg-panel px-4 py-4 sm:px-5">
               <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                 <div className="min-w-0">
@@ -562,7 +564,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               </div>
             </div>
 
-            <div className="min-w-0 space-y-3 px-3 py-3 sm:px-5">
+            <div className="flex min-w-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden">
               {commitResult?.ok ? (
                 <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -590,8 +592,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 </Alert>
               ) : null}
 
-              <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] xl:items-start">
-                <section className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1">
+              <div className="grid min-w-0 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] xl:items-stretch xl:overflow-hidden">
+                <section className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
@@ -605,7 +607,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   {entries.length === 0 ? (
                     <div className="px-4 py-10 text-center text-sm text-stone">已删除所有候选交易。</div>
                   ) : (
-                    <div className="divide-y divide-line">
+                    <div className="divide-y divide-line xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                       {entries.map((entry, index) => {
                         const selected = selectedEntry?.id === entry.id;
                         return (
@@ -655,7 +657,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 </section>
 
                 {selectedEntry ? (
-                  <aside ref={reviewDetailRef} className="order-1 min-w-0 scroll-mt-3 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3 xl:order-2 xl:max-h-[calc(90dvh-9rem)] xl:overflow-y-auto">
+                  <aside ref={reviewDetailRef} className="order-1 min-w-0 scroll-mt-3 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-2 xl:min-h-0 xl:overflow-y-auto">
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -740,7 +742,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 ) : null}
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-line bg-panel">
+              <div className="shrink-0 overflow-hidden rounded-xl border border-line bg-panel">
                 <Button variant="ghost" className="flex h-11 w-full justify-start rounded-none px-3 text-stone" onClick={() => setRawOpen((value) => !value)}>
                   {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   查看原始输出 / dedup 报告

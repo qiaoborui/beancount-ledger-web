@@ -324,8 +324,8 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         <section className="card min-w-0 max-w-full overflow-hidden p-4 text-sm text-stone">暂无可绘制的余额变化。</section>
       )}
 
-      <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)] xl:items-start">
-        <div className="min-w-0 max-w-full xl:sticky xl:top-24">
+      <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:min-h-0 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)] xl:items-start">
+        <div className="min-w-0 max-w-full xl:sticky xl:top-4 xl:max-h-[calc(100dvh-8rem)] xl:overflow-y-auto xl:pr-1">
           <AccountPeriodSummaryCard summary={periodSummary} rows={filteredRows} />
         </div>
 

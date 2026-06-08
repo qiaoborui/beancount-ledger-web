@@ -123,7 +123,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [customEnd, setCustomEnd] = useState(timeRange.end);
   const { toast, setToast, showToast } = useToast();
   const online = useNetworkStatus();
-  const { scrollToTop } = useRouteScrollMemory(pathname);
+  const { getScrollTop, scrollToTop } = useRouteScrollMemory(pathname);
   const { themeMode, resolvedTheme, setThemeMode } = useThemeMode();
   const { gitDirty, changedFileCount, gitChanges, gitStatusLoading, gitCommitting, refreshGitStatus, applyGitStatus, gitCommit } = useGitStatus(showToast);
   const {
@@ -398,7 +398,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   function handleActiveRouteTap() {
-    if (window.scrollY > 8) {
+    if (getScrollTop() > 8) {
       scrollToTop(pathname);
       return;
     }

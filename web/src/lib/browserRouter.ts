@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { scrollLedgerTo } from "./scrollTarget";
 
 type NavigateOptions = { scroll?: boolean };
+
+export const ledgerBeforeNavigateEvent = "ledger-before-navigate";
 
 function emitLocationChange() {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function navigate(href: string, replace = false, options?: NavigateOptions) {
+  window.dispatchEvent(new Event(ledgerBeforeNavigateEvent));
   if (replace) window.history.replaceState(null, "", href);
   else window.history.pushState(null, "", href);
-  if (options?.scroll !== false) window.scrollTo({ top: 0, left: 0 });
+  if (options?.scroll !== false) scrollLedgerTo(0);
   emitLocationChange();
 }
 
