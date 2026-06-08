@@ -204,6 +204,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
   const reviewTotalAmount = useMemo(() => entries.reduce((total, entry) => total + entry.amount, 0), [entries]);
   const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
+  const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -391,6 +392,50 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry)));
   }
 
+  function renderPrimaryActions() {
+    if (hasCommitted) {
+      return (
+        <div className="grid gap-2">
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
+            <CheckCircle className="h-4 w-4" />
+            查看写入结果
+          </Button>
+          <Button className="w-full" variant="outline" onClick={clearImportState}>
+            <FileUp className="h-4 w-4" />
+            导入新账单
+          </Button>
+        </div>
+      );
+    }
+    if (preview) {
+      return (
+        <div className="grid gap-2">
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
+            <ShieldCheck className="h-4 w-4" />
+            继续审核
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button className="min-w-0" variant="outline" onClick={generatePreview} disabled={loading || !file}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+              重新预览
+            </Button>
+            <Button className="min-w-0 border-line text-stone hover:text-destructive" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={loading || committing}>
+              <Trash2 className="h-4 w-4" />
+              丢弃草稿
+            </Button>
+          </div>
+          {!file ? <div className="text-center text-xs leading-5 text-stone">如需重新预览，请先选择原始账单文件。</div> : null}
+        </div>
+      );
+    }
+    return (
+      <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+        生成预览
+      </Button>
+    );
+  }
+
   return (
     <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
       <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
@@ -441,12 +486,16 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
-                  <span className="block truncate font-medium text-ink">来源设置：{selectedProvider.label}</span>
-                  <span className="mt-1 block truncate text-xs text-stone">{selectedProvider.detail}</span>
+                  <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
+                  <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? "草稿已恢复，重新预览需要重新选择文件。" : selectedProvider.detail}</span>
                 </span>
                 {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
               </button>
-              {providerOpen ? (
+              {providerOpen && isRestoredDraft ? (
+                <div className="border-t border-line p-3 text-xs leading-5 text-stone">
+                  当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
+                </div>
+              ) : providerOpen ? (
                 <div className="grid min-w-0 gap-2 border-t border-line p-3">
                   {providerChoices.map((choice) => (
                     <button
@@ -481,8 +530,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <FileArchive className="h-5 w-5 text-brand" />
               </div>
               <Separator className="my-4" />
-              <ImportStep index={1} title="选择来源" active done={Boolean(file)} detail={file ? file.name : "等待上传账单文件"} />
-              <ImportStep index={2} title="生成预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
+              <ImportStep index={1} title="选择账单" active done={Boolean(file) || Boolean(preview)} detail={isRestoredDraft ? `已恢复 ${preview?.originalFilename ?? "导入草稿"}` : file ? file.name : "等待上传账单文件"} />
+              <ImportStep index={2} title="审核预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
               <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
             </div>
 
@@ -519,10 +568,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
-              <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-                生成预览
-              </Button>
+              <div className="mb-3 flex min-w-0 items-center justify-between gap-3 px-1 text-xs text-stone">
+                <span className="truncate">
+                  {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
+                </span>
+                {draftSavedAt && !hasCommitted ? <span className="shrink-0">草稿 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+              </div>
+              {renderPrimaryActions()}
             </div>
           </div>
         </CardContent>
@@ -670,7 +722,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
-                      <div className="mt-0.5 text-xs text-stone">逐条核对，删除后只提交剩余交易。</div>
+                      <div className="mt-0.5 text-xs text-stone">逐条核对，移除后只提交剩余交易。</div>
                     </div>
                     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
                       <span className="rounded-full bg-tag px-2 py-1">{entries.length} 待写入</span>
@@ -718,7 +770,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                               className="mr-1 h-9 w-9 shrink-0 text-stone hover:text-destructive"
                               onClick={() => removeEntry(entry.id)}
                               disabled={committing || hasCommitted}
-                              title="删除这条候选交易"
+                              title="移除这条候选交易"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -808,7 +860,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                         disabled={committing || hasCommitted}
                       >
                         <Trash2 className="h-4 w-4" />
-                        删除当前交易
+                        移除当前候选
                       </Button>
                     </div>
                   </aside>
