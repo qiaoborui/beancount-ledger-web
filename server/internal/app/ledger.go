@@ -547,12 +547,16 @@ func ValuationInCurrency(amount int, currency, targetCurrency string, prices []P
 
 func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*Price, bool) {
 	var latest *Price
+	var earliestFuture *Price
 	for i := range prices {
 		price := &prices[i]
 		if price.Currency != currency || price.QuoteCurrency != quoteCurrency {
 			continue
 		}
 		if date != "" && price.Date > date {
+			if earliestFuture == nil || price.Date < earliestFuture.Date {
+				earliestFuture = price
+			}
 			continue
 		}
 		if latest == nil || price.Date >= latest.Date {
@@ -560,7 +564,10 @@ func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*
 		}
 	}
 	if latest == nil {
-		return nil, false
+		if earliestFuture == nil {
+			return nil, false
+		}
+		return earliestFuture, true
 	}
 	return latest, true
 }

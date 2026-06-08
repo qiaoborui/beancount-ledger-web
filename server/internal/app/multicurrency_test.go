@@ -192,3 +192,21 @@ func TestCreditCardAnalyticsUsePostingCurrencyWhenAccountCurrencyIsUnconstrained
 		t.Fatalf("credit card analytics used wrong currency: %#v", card)
 	}
 }
+
+func TestValuationUsesEarliestFuturePriceWhenNoHistoricalPriceExists(t *testing.T) {
+	prices := []Price{{Date: "2026-06-08", Currency: "USD", Amount: 677, QuoteCurrency: "CNY"}}
+	value, ok := ValuationInCurrency(677, "CNY", "USD", prices, "2026-06-01")
+	if !ok || value != 100 {
+		t.Fatalf("future fallback valuation = %d ok=%v, want 100 true", value, ok)
+	}
+	summary := MonthSummaryInCurrency("2026-06-01", "2026-06-02", []Transaction{{
+		Date: "2026-06-01",
+		Postings: []Posting{
+			{Account: "Expenses:Food", Amount: 677, Currency: "CNY"},
+			{Account: "Assets:Cash", Amount: -677, Currency: "CNY"},
+		},
+	}}, prices, "USD")
+	if summary.Currency != "USD" || summary.Expense != 100 {
+		t.Fatalf("summary with future fallback = %#v, want USD expense=100", summary)
+	}
+}
