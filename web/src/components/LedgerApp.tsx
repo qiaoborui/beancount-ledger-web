@@ -35,6 +35,7 @@ import { ImportPage } from "./ledger/ImportPage";
 import { Toast } from "./ledger/shared";
 import { AccountManager, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
 import { AccountDetailPage } from "./ledger/AccountDetailPage";
+import { CurrencyPage } from "./ledger/CurrencyPage";
 
 import { ReconcilePage } from "./ledger/ReconcilePage";
 import { SettingsPage } from "./ledger/SettingsPage";
@@ -69,6 +70,7 @@ function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/reconcile")) return "reconcile";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/income-statement")) return "income-statement";
+  if (pathname.startsWith("/currencies")) return "currencies";
   if (pathname.startsWith("/accounts")) return "accounts";
   return "home";
 }
@@ -192,6 +194,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     netWorthWindows,
     creditCards,
     commodities,
+    prices,
     loadingFresh,
     refreshing,
     lastSyncedAt,
@@ -580,6 +583,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
+      {page === "currencies" && <CurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={loginWithPasskey} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
       {page === "budgets" && <BudgetPanel rows={budgetRows} valuationCurrency={dataValuationCurrency} full />}
@@ -642,7 +646,7 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "currencies";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
@@ -653,6 +657,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     accounts: { eyebrow: "account book", title: "账户与余额" },
     "net-worth": { eyebrow: "net worth range", title: `${label} 净资产` },
     "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
+    currencies: { eyebrow: "currencies and fx", title: "货币与汇率" },
     settings: { eyebrow: "preferences", title: "设置" },
   };
   return { ...headers[page], monthScoped: isMonthScoped };

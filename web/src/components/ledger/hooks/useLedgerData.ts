@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountBalance, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountBalance, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -47,6 +47,7 @@ type LedgerBootstrapResponse = {
   reconciliationRows?: ReconcileRow[];
   accounts?: AccountView[];
   commodities?: string[];
+  prices?: Price[];
   valuationCurrency?: string;
   incomeStatement?: NonNullable<IncomeStatementCache>;
   accountStatuses?: AccountStatus[];
@@ -68,6 +69,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialRuntimeCache?.reconciliationRows ?? []);
   const [accounts, setAccounts] = useState<AccountView[]>(() => initialRuntimeCache?.accounts ?? []);
   const [commodities, setCommodities] = useState<string[]>(() => initialRuntimeCache?.commodities ?? ["CNY"]);
+  const [prices, setPrices] = useState<Price[]>(() => initialRuntimeCache?.prices ?? []);
   const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialRuntimeCache?.incomeStatement ?? null);
   const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialRuntimeCache?.accountStatuses ?? []);
   const [loadingFresh, setLoadingFresh] = useState(false);
@@ -92,6 +94,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setReconciliationRows([]);
     setAccounts([]);
     setCommodities(["CNY"]);
+    setPrices([]);
     setIncomeStatement(null);
     setAccountStatuses([]);
     setLedgerVersion(null);
@@ -116,6 +119,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setReconciliationRows(cache.reconciliationRows ?? []);
     setAccounts(cache.accounts ?? []);
     setCommodities(cache.commodities?.length ? cache.commodities : ["CNY"]);
+    setPrices(cache.prices ?? []);
     setIncomeStatement(cache.incomeStatement ?? null);
     setAccountStatuses(cache.accountStatuses ?? []);
     setLedgerVersion(cache.ledgerVersion ?? null);
@@ -170,6 +174,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
           reconciliationRows: sensitiveUnlocked ? (data.reconciliationRows ?? []) : [],
           accounts: data.accounts ?? [],
           commodities: data.commodities ?? ["CNY"],
+          prices: data.prices ?? [],
           valuationCurrency: responseValuationCurrency,
           accountStatuses: sensitiveUnlocked ? (data.accountStatuses ?? []) : [],
           incomeStatement: { income: sensitiveUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: sensitiveUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: sensitiveUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
@@ -276,6 +281,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     reconciliationRows,
     accounts,
     commodities,
+    prices,
     incomeStatement,
     loadingFresh,
     refreshing,
