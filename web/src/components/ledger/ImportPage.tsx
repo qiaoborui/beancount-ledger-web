@@ -786,8 +786,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑 {selectedEntryIndex + 1}/{entries.length}</div>
-                          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={selectedEntry.payee || "未命名商户"}>{selectedEntry.payee || "未命名商户"}</div>
+                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑</div>
+                          <div className="mt-1 text-lg font-medium leading-7 text-ink">{selectedEntryIndex + 1}/{entries.length}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                           <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(-1)} disabled={entries.length <= 1} title="上一条">
@@ -798,45 +798,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                           </Button>
                         </div>
                       </div>
-                      <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="bg-tag text-warm">{selectedEntry.date}</Badge>
-                          {selectedEntry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{selectedEntry.source}</Badge> : null}
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(selectedEntry.amount)}</div>
-                          <div className="mt-1 text-xs text-stone">{selectedEntry.currency}</div>
-                        </div>
-                      </div>
                     </div>
 
                     <div className="space-y-4 p-4">
-                      <ImportFlowPanel entry={selectedEntry} fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)} toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)} />
-
-                      <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">标题</span><span className="min-w-0 break-words">{selectedEntry.narration || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">方式</span><span className="min-w-0 break-words">{selectedEntry.method || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">资金账户</span><span className="min-w-0 break-words">{selectedEntry.fundingAccount || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">订单号</span><span className="min-w-0 break-all">{selectedEntry.orderId || "-"}</span></div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label className="block min-w-0">
-                          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
-                          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={selectedEntry.narration} onChange={(event) => updateEntry(selectedEntry.id, { narration: event.target.value })} />
-                        </Label>
-                        <Label className="block min-w-0">
-                          <span className="mb-1.5 block text-xs font-medium text-stone">{editableAccountLabel(selectedEntry)}</span>
-                          <Select value={selectedEntry.categoryAccount} onValueChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}>
-                            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-80">
-                              {categoryAccountOptions(selectedEntry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </Label>
-                      </div>
+                      <ImportFlowPanel
+                        entry={selectedEntry}
+                        fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)}
+                        toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)}
+                        accountLabel={editableAccountLabel(selectedEntry)}
+                        accountOptions={categoryAccountOptions(selectedEntry)}
+                        disabled={committing || hasCommitted}
+                        onNarrationChange={(value) => updateEntry(selectedEntry.id, { narration: value })}
+                        onCategoryAccountChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}
+                      />
 
                       <details open className="rounded-xl border border-line bg-paper px-3 py-2.5">
                         <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
@@ -932,13 +906,45 @@ function importFlowForEntry(entry: ImportEntry) {
   return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
 }
 
-function ImportFlowPanel({ entry, fromLabel, toLabel }: { entry: ImportEntry; fromLabel: string; toLabel: string }) {
+function ImportFlowPanel({
+  entry,
+  fromLabel,
+  toLabel,
+  accountLabel,
+  accountOptions,
+  disabled,
+  onNarrationChange,
+  onCategoryAccountChange,
+}: {
+  entry: ImportEntry;
+  fromLabel: string;
+  toLabel: string;
+  accountLabel: string;
+  accountOptions: AccountOption[];
+  disabled: boolean;
+  onNarrationChange: (value: string) => void;
+  onCategoryAccountChange: (value: string) => void;
+}) {
   const flow = importFlowForEntry(entry);
+  const metaItems = [
+    { label: "方式", value: entry.method || "-" },
+    { label: "订单号", value: entry.orderId || "-" },
+  ];
   return (
     <div className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-medium text-brand">{flow.kind}</div>
-        <div className="font-serif text-lg font-medium text-warm tabular-nums">{formatCny(entry.amount)}</div>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-brand">{flow.kind}</div>
+          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="bg-panel text-warm">{entry.date}</Badge>
+            {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
+          <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+        </div>
       </div>
       <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
         <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
@@ -946,6 +952,31 @@ function ImportFlowPanel({ entry, fromLabel, toLabel }: { entry: ImportEntry; fr
           <ArrowRight className="h-4 w-4" />
         </span>
         <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
+      </div>
+      <div className="mt-4 space-y-3 rounded-xl border border-brand/15 bg-panel/70 p-3">
+        <Label className="block min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
+          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={entry.narration} onChange={(event) => onNarrationChange(event.target.value)} disabled={disabled} />
+        </Label>
+        <Label className="block min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-stone">{accountLabel}</span>
+          <Select value={entry.categoryAccount} onValueChange={onCategoryAccountChange} disabled={disabled}>
+            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-80">
+              {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Label>
+        <div className="grid min-w-0 gap-2 border-t border-brand/15 pt-3 text-xs leading-5 text-stone">
+          {metaItems.map((item) => (
+            <div key={item.label} className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+              <span className="text-olive">{item.label}</span>
+              <span className={cn("min-w-0", item.label === "订单号" ? "break-all" : "break-words")}>{item.value}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
