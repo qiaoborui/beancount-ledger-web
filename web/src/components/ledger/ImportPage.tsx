@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
 import { formatCny } from "@/lib/money";
@@ -153,6 +153,7 @@ function writeImportDraft(draft: ImportDraft | null) {
 
 export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const reviewDetailRef = useRef<HTMLElement | null>(null);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -234,6 +235,12 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
     const previewAccount = preview?.accountOptions.find((account) => account.account === entry.categoryAccount);
     return [previewAccount ?? { account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
+  }
+
+  function accountDisplayName(account: string) {
+    if (!account) return "-";
+    const option = preview?.accountOptions.find((item) => item.account === account);
+    return option ? formatAccountOptionLabel(option.account, option.label, option.alias) : account;
   }
 
   function resetForFile(next: File | null) {
@@ -326,6 +333,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     const index = selectedEntryIndex < 0 ? 0 : selectedEntryIndex;
     const next = entries[(index + offset + entries.length) % entries.length];
     if (next) setSelectedEntryId(next.id);
+  }
+
+  function selectReviewEntry(id: string) {
+    setSelectedEntryId(id);
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      window.requestAnimationFrame(() => reviewDetailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    }
   }
 
   function updateMetadata(id: string, key: string, value: string) {
@@ -540,7 +554,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
-              <div className="mt-4 grid min-w-0 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+              <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
                 <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
                 <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
                 <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
@@ -577,7 +591,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               ) : null}
 
               <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] xl:items-start">
-                <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm">
+                <section className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
@@ -603,7 +617,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                             )}
                           >
                             {selected ? <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-brand" aria-hidden="true" /> : null}
-                            <button type="button" className="min-w-0 px-3 py-2.5 pl-4 text-left" onClick={() => setSelectedEntryId(entry.id)}>
+                            <button type="button" className="min-w-0 px-3 py-2.5 pl-4 text-left" onClick={() => selectReviewEntry(entry.id)}>
                               <div className="grid min-w-0 gap-2 md:grid-cols-[5rem_minmax(0,1fr)_8rem] md:items-center">
                                 <div className="flex min-w-0 items-center gap-2 md:block">
                                   <span className="font-mono text-[11px] text-stone">{String(index + 1).padStart(2, "0")}</span>
@@ -618,7 +632,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                                 </div>
                                 <div className="text-left md:text-right">
                                   <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
-                                  <div className="mt-1 truncate text-[11px] text-stone">{entry.categoryAccount}</div>
+                                  <div className="mt-1 truncate text-[11px] text-stone">{accountDisplayName(importFlowForEntry(entry).to)}</div>
                                 </div>
                               </div>
                             </button>
@@ -641,7 +655,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 </section>
 
                 {selectedEntry ? (
-                  <aside className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3 xl:max-h-[calc(90dvh-9rem)] xl:overflow-y-auto">
+                  <aside ref={reviewDetailRef} className="order-1 min-w-0 scroll-mt-3 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:sticky xl:top-3 xl:order-2 xl:max-h-[calc(90dvh-9rem)] xl:overflow-y-auto">
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -670,6 +684,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                     </div>
 
                     <div className="space-y-4 p-4">
+                      <ImportFlowPanel entry={selectedEntry} fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)} toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)} />
+
                       <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
                         <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">标题</span><span className="min-w-0 break-words">{selectedEntry.narration || "-"}</span></div>
                         <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">方式</span><span className="min-w-0 break-words">{selectedEntry.method || "-"}</span></div>
@@ -754,6 +770,51 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
         <div className="truncate text-sm font-medium text-ink">{title}</div>
         <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
       </div>
+    </div>
+  );
+}
+
+function importFlowForEntry(entry: ImportEntry) {
+  const category = entry.categoryAccount;
+  const funding = entry.fundingAccount;
+  if (category.startsWith("Income:")) return { from: category, to: funding || category, kind: "收入流入" };
+  if (category.startsWith("Expenses:")) return { from: funding || category, to: category, kind: "支出流向" };
+
+  const postings = entry.postings.map((posting) => ({
+    account: posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:") ? category : posting.account,
+    amount: Number(posting.amount),
+  }));
+  const outflow = postings.find((posting) => posting.amount < 0);
+  const inflow = postings.find((posting) => posting.amount > 0);
+  if (outflow && inflow) return { from: outflow.account, to: inflow.account, kind: "账户转移" };
+  return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
+}
+
+function ImportFlowPanel({ entry, fromLabel, toLabel }: { entry: ImportEntry; fromLabel: string; toLabel: string }) {
+  const flow = importFlowForEntry(entry);
+  return (
+    <div className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-medium text-brand">{flow.kind}</div>
+        <div className="font-serif text-lg font-medium text-warm tabular-nums">{formatCny(entry.amount)}</div>
+      </div>
+      <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+        <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
+        <span className="grid h-8 w-8 place-items-center rounded-full border border-brand/25 bg-panel text-brand" aria-hidden="true">
+          <ArrowRight className="h-4 w-4" />
+        </span>
+        <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
+      </div>
+    </div>
+  );
+}
+
+function FlowEndpoint({ label, account, raw, align = "left" }: { label: string; account: string; raw: string; align?: "left" | "right" }) {
+  return (
+    <div className={cn("min-w-0", align === "right" ? "text-right" : "text-left")}>
+      <div className="text-[11px] text-stone">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-ink" title={account}>{account}</div>
+      <div className="mt-0.5 truncate text-[11px] text-stone" title={raw}>{raw}</div>
     </div>
   );
 }
