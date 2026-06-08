@@ -1,7 +1,8 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useFocusTrap } from "./hooks/useFocusTrap";
 
 export type CommandAction = {
   id: string;
@@ -15,6 +16,9 @@ export type CommandAction = {
 export function CommandPalette({ open, actions, onOpenChange }: { open: boolean; actions: CommandAction[]; onOpenChange: (open: boolean) => void }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const titleId = useId();
+  const listboxId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const results = useMemo(() => {
@@ -30,9 +34,9 @@ export function CommandPalette({ open, actions, onOpenChange }: { open: boolean;
     if (!open) return;
     setQuery("");
     setActiveIndex(0);
-    const id = window.setTimeout(() => inputRef.current?.focus(), 20);
-    return () => window.clearTimeout(id);
   }, [open]);
+
+  useFocusTrap({ open, containerRef: panelRef, initialFocusRef: inputRef });
 
   useEffect(() => {
     if (!open) return;
@@ -57,10 +61,12 @@ export function CommandPalette({ open, actions, onOpenChange }: { open: boolean;
     action.run();
     onOpenChange(false);
   };
+  const activeOptionId = results[activeIndex] ? `${listboxId}-option-${activeIndex}` : undefined;
 
   return (
     <div className="fixed inset-0 z-[130] flex items-start justify-center bg-ink/35 px-3 pt-[calc(env(safe-area-inset-top)+5rem)] backdrop-blur-sm" onMouseDown={() => onOpenChange(false)}>
-      <div className="kami-float w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-paper shadow-xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="命令面板">
+      <div ref={panelRef} className="kami-float w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-paper shadow-xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+        <h2 id={titleId} className="sr-only">命令面板</h2>
         <div className="flex items-center gap-3 border-b border-line px-4 py-3">
           <Search className="h-5 w-5 shrink-0 text-brand" />
           <input
@@ -68,6 +74,12 @@ export function CommandPalette({ open, actions, onOpenChange }: { open: boolean;
             className="min-w-0 flex-1 border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:shadow-none"
             value={query}
             placeholder="搜索命令、页面或常用视图"
+            role="combobox"
+            aria-label="搜索命令"
+            aria-autocomplete="list"
+            aria-controls={listboxId}
+            aria-expanded="true"
+            aria-activedescendant={activeOptionId}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown") {
@@ -88,11 +100,14 @@ export function CommandPalette({ open, actions, onOpenChange }: { open: boolean;
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="max-h-[55dvh] overflow-y-auto p-2">
+        <div id={listboxId} className="max-h-[55dvh] overflow-y-auto p-2" role="listbox" aria-label="命令结果">
           {results.length ? results.map((action, index) => (
             <button
               key={action.id}
+              id={`${listboxId}-option-${index}`}
               type="button"
+              role="option"
+              aria-selected={index === activeIndex}
               className={`flex w-full items-center justify-between gap-4 rounded-xl px-3 py-3 text-left ${index === activeIndex ? "bg-[var(--selected-bg)] text-ink" : "text-olive hover:bg-tag"}`}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => runAction(action)}
