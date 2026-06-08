@@ -440,12 +440,12 @@ func commandEnv() []string {
 }
 
 func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, error) {
-	accounts, err := ParseAccounts(s.cfg)
+	snapshot, err := s.cache.Snapshot()
 	if err != nil {
 		return "", err
 	}
 	accountSet := map[string]bool{}
-	for _, account := range accounts {
+	for _, account := range snapshot.Accounts {
 		accountSet[account.Account] = true
 	}
 	blocks := make([]string, 0, len(entries))
@@ -477,6 +477,9 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 		for _, posting := range postings {
 			if !accountSet[posting.Account] {
 				return "", fmt.Errorf("账户不存在: %s", posting.Account)
+			}
+			if err := validateKnownCurrency("currency", posting.Currency, snapshot.Commodities); err != nil {
+				return "", fmt.Errorf("第 %d 条: %w", index+1, err)
 			}
 		}
 		metadata := map[string]MetadataValue{}

@@ -170,6 +170,9 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 }
 
 func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEntry) ([]string, error) {
+	if err := w.validateEntryCommodities(entries); err != nil {
+		return nil, err
+	}
 	items := make([]appendItem, 0, len(entries))
 	texts := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -191,6 +194,10 @@ func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEn
 }
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
+	input.Currency = defaultAccountCurrency(input.Account, input.Currency)
+	if err := w.validateCurrencies([]string{input.Currency}); err != nil {
+		return err
+	}
 	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
 		before, err := os.ReadFile(file)
@@ -207,6 +214,20 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 }
 
 func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]string, error) {
+	normalized := append([]AccountOperation(nil), operations...)
+	currencies := []string{}
+	for i := range normalized {
+		if normalized[i].Kind == "create" {
+			normalized[i].Currency = defaultAccountCurrency(normalized[i].Account, normalized[i].Currency)
+		}
+		operation := normalized[i]
+		if operation.Currency != "" {
+			currencies = append(currencies, operation.Currency)
+		}
+	}
+	if err := w.validateCurrencies(currencies); err != nil {
+		return nil, err
+	}
 	texts := []string{}
 	if err := w.RunTransactionWithSource(ledgerWriteSourceAccountOperations, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
@@ -218,18 +239,15 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 		if err != nil {
 			return err
 		}
-		if err := validateAccountOperations(operations, accounts); err != nil {
+		if err := validateAccountOperations(normalized, accounts); err != nil {
 			return err
 		}
 		next := string(before)
 		texts = []string{}
-		for _, operation := range operations {
+		for _, operation := range normalized {
 			var text string
 			switch operation.Kind {
 			case "create":
-				if operation.Currency == "" {
-					operation.Currency = "CNY"
-				}
 				text = AccountToBeanWithMetadata(operation.Date, operation.Account, operation.Alias, operation.Currency, accountOperationMetadata(operation))
 				next = appendText(next, text)
 			case "update":
@@ -254,6 +272,9 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
+	if err := w.validateEntryCommodities([]LedgerEntry{entry}); err != nil {
+		return err
+	}
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionUpdate, func(tx *LedgerWriteTransaction) error {
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
@@ -274,6 +295,53 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
 		return tx.WriteFile(file, []byte(next), 0o644)
 	})
+}
+
+func (w *LedgerWriter) validateEntryCommodities(entries []LedgerEntry) error {
+	currencies := []string{}
+	for _, entry := range entries {
+		if entry.Kind == "balance" {
+			currencies = append(currencies, entry.Currency)
+		}
+		for _, posting := range entry.Postings {
+			currencies = append(currencies, posting.Currency)
+		}
+	}
+	return w.validateCurrencies(currencies)
+}
+
+func (w *LedgerWriter) validateCurrencies(currencies []string) error {
+	if len(currencies) == 0 {
+		return nil
+	}
+	commodities, err := w.knownCommodities()
+	if err != nil {
+		return err
+	}
+	for _, currency := range currencies {
+		if strings.TrimSpace(currency) == "" {
+			continue
+		}
+		if err := validateKnownCurrency("currency", currency, commodities); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *LedgerWriter) knownCommodities() ([]string, error) {
+	if w.cache != nil {
+		snapshot, err := w.cache.Snapshot()
+		if err != nil {
+			return nil, err
+		}
+		return snapshot.Commodities, nil
+	}
+	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	return ParseCommodities(lines), nil
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {
@@ -524,10 +592,12 @@ func AccountToBean(date, account, alias, currency string) string {
 }
 
 func AccountToBeanWithMetadata(date, account, alias, currency string, metadata map[string]MetadataValue) string {
-	if currency == "" {
-		currency = "CNY"
+	currency = defaultAccountCurrency(account, currency)
+	openLine := fmt.Sprintf("%s open %s", date, account)
+	if strings.TrimSpace(currency) != "" {
+		openLine += " " + strings.TrimSpace(currency)
 	}
-	lines := []string{fmt.Sprintf("%s open %s %s", date, account, currency)}
+	lines := []string{openLine}
 	if strings.TrimSpace(alias) != "" {
 		lines = append(lines, fmt.Sprintf(`  alias: "%s"`, escapeBean(strings.TrimSpace(alias))))
 	}
@@ -606,7 +676,7 @@ func updateAccountMetadata(text string, operation AccountOperation) (string, err
 
 func accountBlock(text, account string) ([]string, int, int, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	openPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+open\s+` + regexp.QuoteMeta(account) + `\s+\w+\b`)
+	openPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+open\s+` + regexp.QuoteMeta(account) + `(?:\s|$)`)
 	directivePattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
 	for start, line := range lines {
 		if !openPattern.MatchString(line) {

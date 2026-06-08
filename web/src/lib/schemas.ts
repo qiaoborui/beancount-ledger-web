@@ -14,7 +14,7 @@ const AmountSchema = z.preprocess((value) => {
 export const PostingSchema = z.object({
   account: z.string().min(1),
   amount: AmountSchema,
-  currency: z.literal("CNY"),
+  currency: z.string().regex(/^[A-Z][A-Z0-9._-]*$/),
 });
 
 export const MetadataValueSchema = z.union([z.string(), z.number(), z.boolean()]);
@@ -42,7 +42,7 @@ export const BalanceAssertionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   account: z.string().min(1),
   amount: AmountSchema,
-  currency: z.literal("CNY"),
+  currency: z.string().regex(/^[A-Z][A-Z0-9._-]*$/),
 });
 
 export const LedgerEntrySchema = z.discriminatedUnion("kind", [

@@ -2,18 +2,24 @@
   alias: "Cash"
 2026-01-01 open Assets:Bank:Checking CNY
   alias: "Checking Account"
+2026-01-01 open Assets:HK:HSBC:HKD HKD
+  alias: "HSBC HKD Account"
+  group: "cash"
+2026-01-01 open Assets:HK:HSBC:USD USD
+  alias: "HSBC USD Account"
+  group: "cash"
 2026-01-01 open Liabilities:CreditCard CNY
   alias: "Credit Card"
 
-2026-01-01 open Income:Salary CNY
-2026-01-01 open Income:Other CNY
+2026-01-01 open Income:Salary
+2026-01-01 open Income:Other
 
-2026-01-01 open Expenses:Food:Meals CNY
-2026-01-01 open Expenses:Food:Drinks CNY
-2026-01-01 open Expenses:Transport CNY
-2026-01-01 open Expenses:Shopping CNY
-2026-01-01 open Expenses:Digital:Subscription CNY
-2026-01-01 open Expenses:Unknown CNY
+2026-01-01 open Expenses:Food:Meals
+2026-01-01 open Expenses:Food:Drinks
+2026-01-01 open Expenses:Transport
+2026-01-01 open Expenses:Shopping
+2026-01-01 open Expenses:Digital:Subscription
+2026-01-01 open Expenses:Unknown
 
-2026-01-01 open Equity:Opening-Balances CNY
-2026-01-01 open Equity:Balance-Adjustments CNY
+2026-01-01 open Equity:Opening-Balances
+2026-01-01 open Equity:Balance-Adjustments

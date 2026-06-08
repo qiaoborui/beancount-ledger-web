@@ -1,1 +1,3 @@
-; Price records can be added here.
+; FX prices for CNY valuation in tests and local previews.
+2026-01-01 price HKD 0.920000 CNY
+2026-01-01 price USD 7.100000 CNY

@@ -56,6 +56,22 @@ type Budget struct {
 	Currency string `json:"currency"`
 }
 
+type Price struct {
+	Date          string `json:"date"`
+	Currency      string `json:"currency"`
+	Amount        int    `json:"amount"`
+	QuoteCurrency string `json:"quoteCurrency"`
+}
+
+type AccountBalance struct {
+	Account           string `json:"account"`
+	Currency          string `json:"currency"`
+	Amount            int    `json:"amount"`
+	ValuationCurrency string `json:"valuationCurrency"`
+	Valuation         int    `json:"valuation"`
+	ValuationMissing  bool   `json:"valuationMissing,omitempty"`
+}
+
 type Account struct {
 	Account   string                   `json:"account"`
 	OpenDate  string                   `json:"openDate"`
@@ -78,6 +94,7 @@ type AccountStatus struct {
 }
 
 type Summary struct {
+	Currency   string                    `json:"currency"`
 	Income     int                       `json:"income"`
 	Expense    int                       `json:"expense"`
 	Net        int                       `json:"net"`
@@ -125,14 +142,17 @@ type AccountDetailRow struct {
 }
 
 var (
-	includeRe = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
-	txnRe     = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
-	postRe    = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b`)
-	metaRe    = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
-	balanceRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b`)
-	budgetRe  = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b`)
-	openRe    = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+(CNY)\b`)
-	closeRe   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
+	commodityPattern = `[A-Z][A-Z0-9._-]*`
+	includeRe        = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
+	txnRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
+	postRe           = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	metaRe           = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
+	balanceRe        = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	budgetRe         = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	openRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)(?:\s+(` + commodityPattern + `(?:\s*,\s*` + commodityPattern + `)*))?\b`)
+	closeRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
+	commodityRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+commodity\s+(` + commodityPattern + `)\b`)
+	priceRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+price\s+(` + commodityPattern + `)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
 )
 
 func mainBeanPath(cfg Config) string     { return filepath.Join(cfg.LedgerRoot, "main.bean") }
@@ -229,7 +249,7 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 			continue
 		}
 		if m := postRe.FindStringSubmatch(line.Text); m != nil {
-			current.Postings = append(current.Postings, Posting{Account: m[1], Amount: cents(m[2]), Currency: "CNY"})
+			current.Postings = append(current.Postings, Posting{Account: m[1], Amount: cents(m[2]), Currency: m[3]})
 		}
 	}
 	finish()
@@ -276,6 +296,40 @@ func ParseBudgets(lines []BeanLine) []Budget {
 	return out
 }
 
+func ParseCommodities(lines []BeanLine) []string {
+	seen := map[string]bool{}
+	for _, line := range lines {
+		if m := commodityRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
+			seen[m[1]] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for commodity := range seen {
+		out = append(out, commodity)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func ParsePrices(lines []BeanLine) []Price {
+	var out []Price
+	for _, line := range lines {
+		if m := priceRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
+			out = append(out, Price{Date: m[1], Currency: m[2], Amount: cents(m[3]), QuoteCurrency: m[4]})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Date == out[j].Date {
+			if out[i].Currency == out[j].Currency {
+				return out[i].QuoteCurrency < out[j].QuoteCurrency
+			}
+			return out[i].Currency < out[j].Currency
+		}
+		return out[i].Date < out[j].Date
+	})
+	return out
+}
+
 func ParseAccounts(cfg Config) ([]Account, error) {
 	text, err := os.ReadFile(accountsBeanPath(cfg))
 	if err != nil {
@@ -286,7 +340,7 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 	for _, line := range strings.Split(string(text), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if m := openRe.FindStringSubmatch(line); m != nil {
-			acct := &Account{Account: m[2], OpenDate: m[1], Currency: m[3], Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
+			acct := &Account{Account: m[2], OpenDate: m[1], Currency: primaryOpenCurrency(m[3]), Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
 			accounts[m[2]] = acct
 			current = m[2]
 			continue
@@ -329,6 +383,25 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Account < out[j].Account })
 	return out, nil
+}
+
+func primaryOpenCurrency(raw string) string {
+	parts := strings.Split(raw, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func defaultAccountCurrency(account, currency string) string {
+	currency = strings.TrimSpace(currency)
+	if currency != "" {
+		return currency
+	}
+	if strings.HasPrefix(account, "Assets:") || strings.HasPrefix(account, "Liabilities:") {
+		return "CNY"
+	}
+	return ""
 }
 
 func accountGroup(account string, metadata map[string]MetadataValue, alias *string) string {
@@ -383,17 +456,151 @@ func normalizeGroup(value string) string {
 	return aliases[strings.TrimSpace(value)]
 }
 
-func CurrentBalances(txns []Transaction) map[string]int {
-	balances := map[string]int{}
+func CurrentBalances(txns []Transaction) map[string]map[string]int {
+	balances := map[string]map[string]int{}
 	for _, txn := range txns {
 		for _, posting := range txn.Postings {
-			balances[posting.Account] += posting.Amount
+			currency := posting.Currency
+			if currency == "" {
+				currency = "CNY"
+			}
+			if balances[posting.Account] == nil {
+				balances[posting.Account] = map[string]int{}
+			}
+			balances[posting.Account][currency] += posting.Amount
 		}
 	}
 	return balances
 }
 
-func MonthSummary(start, end string, txns []Transaction) Summary {
+func NativeAccountBalances(balances map[string]map[string]int, accounts []Account) map[string]int {
+	accountMap := accountByName(accounts)
+	out := map[string]int{}
+	for account, byCurrency := range balances {
+		if acct, ok := accountMap[account]; ok && acct.Currency != "" {
+			out[account] = byCurrency[acct.Currency]
+			continue
+		}
+		if len(byCurrency) == 1 {
+			for _, amount := range byCurrency {
+				out[account] = amount
+			}
+		}
+	}
+	return out
+}
+
+func AccountBalanceRows(balances map[string]map[string]int, prices []Price, date string) []AccountBalance {
+	return AccountBalanceRowsInCurrency(balances, prices, date, "CNY")
+}
+
+func AccountBalanceRowsInCurrency(balances map[string]map[string]int, prices []Price, date, valuationCurrency string) []AccountBalance {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
+	rows := []AccountBalance{}
+	for account, byCurrency := range balances {
+		for currency, amount := range byCurrency {
+			valuation, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, date)
+			rows = append(rows, AccountBalance{
+				Account:           account,
+				Currency:          currency,
+				Amount:            amount,
+				ValuationCurrency: valuationCurrency,
+				Valuation:         valuation,
+				ValuationMissing:  !ok,
+			})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Account == rows[j].Account {
+			return rows[i].Currency < rows[j].Currency
+		}
+		return rows[i].Account < rows[j].Account
+	})
+	return rows
+}
+
+func ValuationInCNY(amount int, currency string, prices []Price, date string) (int, bool) {
+	return ValuationInCurrency(amount, currency, "CNY", prices, date)
+}
+
+func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+	currency = normalizeValuationCurrency(currency)
+	targetCurrency = normalizeValuationCurrency(targetCurrency)
+	if currency == targetCurrency {
+		return amount, true
+	}
+	if price, ok := latestPrice(currency, targetCurrency, prices, date); ok {
+		return amount * price.Amount / 100, true
+	}
+	if price, ok := latestPrice(targetCurrency, currency, prices, date); ok && price.Amount != 0 {
+		return amount * 100 / price.Amount, true
+	}
+	if currency != "CNY" && targetCurrency != "CNY" {
+		cny, ok := ValuationInCurrency(amount, currency, "CNY", prices, date)
+		if !ok {
+			return 0, false
+		}
+		return ValuationInCurrency(cny, "CNY", targetCurrency, prices, date)
+	}
+	return 0, false
+}
+
+func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*Price, bool) {
+	var latest *Price
+	for i := range prices {
+		price := &prices[i]
+		if price.Currency != currency || price.QuoteCurrency != quoteCurrency {
+			continue
+		}
+		if date != "" && price.Date > date {
+			continue
+		}
+		if latest == nil || price.Date >= latest.Date {
+			latest = price
+		}
+	}
+	if latest == nil {
+		return nil, false
+	}
+	return latest, true
+}
+
+func normalizeValuationCurrency(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return "CNY"
+	}
+	return currency
+}
+
+func ValidValuationCurrency(raw string, commodities []string) string {
+	currency := normalizeValuationCurrency(raw)
+	for _, commodity := range commodities {
+		if currency == commodity {
+			return currency
+		}
+	}
+	return "CNY"
+}
+
+func postingValuationInCNY(posting Posting, prices []Price, date string) int {
+	return postingValuationInCurrency(posting, prices, date, "CNY")
+}
+
+func postingValuationInCurrency(posting Posting, prices []Price, date, valuationCurrency string) int {
+	value, ok := ValuationInCurrency(posting.Amount, posting.Currency, valuationCurrency, prices, date)
+	if !ok {
+		return 0
+	}
+	return value
+}
+
+func MonthSummary(start, end string, txns []Transaction, prices []Price) Summary {
+	return MonthSummaryInCurrency(start, end, txns, prices, "CNY")
+}
+
+func MonthSummaryInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) Summary {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	summary := Summary{Days: map[string]map[string]int{}, Categories: map[string]int{}}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -404,8 +611,8 @@ func MonthSummary(start, end string, txns []Transaction) Summary {
 			summary.Days[day] = map[string]int{"income": 0, "expense": 0}
 		}
 		for _, posting := range txn.Postings {
+			amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
 			if strings.HasPrefix(posting.Account, "Income:") {
-				amount := posting.Amount
 				if amount < 0 {
 					amount = -amount
 				}
@@ -413,13 +620,14 @@ func MonthSummary(start, end string, txns []Transaction) Summary {
 				summary.Days[day]["income"] += amount
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				summary.Expense += posting.Amount
-				summary.Days[day]["expense"] += posting.Amount
-				summary.Categories[posting.Account] += posting.Amount
+				summary.Expense += amount
+				summary.Days[day]["expense"] += amount
+				summary.Categories[posting.Account] += amount
 			}
 		}
 	}
 	summary.Net = summary.Income - summary.Expense
+	summary.Currency = valuationCurrency
 	return summary
 }
 
@@ -434,6 +642,10 @@ type incomeStatementBuildNode struct {
 }
 
 func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
+	return IncomeStatementTreeInCurrency(start, end, txns, nil, "CNY")
+}
+
+func IncomeStatementTreeInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
 	incomeMap := map[string]incomeStatementAggregate{}
 	expenseMap := map[string]incomeStatementAggregate{}
 
@@ -447,14 +659,14 @@ func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStateme
 		}
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Income:") {
-				amount := posting.Amount
+				amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
 				if amount < 0 {
 					amount = -amount
 				}
 				addIncomeStatementAmount(incomeMap, posting.Account, amount, txnID)
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				addIncomeStatementAmount(expenseMap, posting.Account, posting.Amount, txnID)
+				addIncomeStatementAmount(expenseMap, posting.Account, postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency), txnID)
 			}
 		}
 	}
@@ -560,29 +772,48 @@ func publicIncomeStatementNodes(nodes []incomeStatementBuildNode) []IncomeStatem
 	return public
 }
 
-func NetWorthHistory(txns []Transaction) []NetWorthPoint {
+func NetWorthHistory(txns []Transaction, prices []Price) []NetWorthPoint {
+	return NetWorthHistoryInCurrency(txns, prices, "CNY")
+}
+
+func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
-	balances := map[string]int{}
+	balances := map[string]map[string]int{}
 	var rows []NetWorthPoint
 	lastDate := ""
 	for _, txn := range sorted {
 		for _, posting := range txn.Postings {
-			balances[posting.Account] += posting.Amount
+			currency := posting.Currency
+			if currency == "" {
+				currency = "CNY"
+			}
+			if balances[posting.Account] == nil {
+				balances[posting.Account] = map[string]int{}
+			}
+			balances[posting.Account][currency] += posting.Amount
 		}
 		if txn.Date == lastDate && len(rows) > 0 {
 			rows = rows[:len(rows)-1]
 		}
 		var assets, liabilities int
-		for account, amount := range balances {
+		for account, byCurrency := range balances {
+			valuation := 0
+			for currency, amount := range byCurrency {
+				value, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, txn.Date)
+				if ok {
+					valuation += value
+				}
+			}
 			if strings.HasPrefix(account, "Assets:") {
-				assets += amount
+				assets += valuation
 			}
 			if strings.HasPrefix(account, "Liabilities:") {
-				if amount < 0 {
-					liabilities += -amount
+				if valuation < 0 {
+					liabilities += -valuation
 				} else {
-					liabilities += amount
+					liabilities += valuation
 				}
 			}
 		}
@@ -675,7 +906,7 @@ func AccountStatusIndicators(txns []Transaction, assertions []BalanceAssertion, 
 			continue
 		}
 		if lastType != nil && *lastType == "balance" && lastAssertion != nil {
-			computed := balanceBefore(account, txns, lastAssertion.Date)
+			computed := balanceBefore(account, acct.Currency, txns, lastAssertion.Date)
 			assertion := lastAssertion.Amount
 			status := "red"
 			if computed == assertion {
@@ -689,14 +920,18 @@ func AccountStatusIndicators(txns []Transaction, assertions []BalanceAssertion, 
 	return out
 }
 
-func balanceBefore(account string, txns []Transaction, date string) int {
+func balanceBefore(account, currency string, txns []Transaction, date string) int {
 	var balance int
 	for _, txn := range txns {
 		if txn.Date >= date {
 			continue
 		}
 		for _, posting := range txn.Postings {
-			if posting.Account == account {
+			postingCurrency := posting.Currency
+			if postingCurrency == "" {
+				postingCurrency = "CNY"
+			}
+			if posting.Account == account && (currency == "" || postingCurrency == currency) {
 				balance += posting.Amount
 			}
 		}

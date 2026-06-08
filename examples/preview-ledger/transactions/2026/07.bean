@@ -131,3 +131,19 @@
 2026-07-31 * "视频会员" "月度订阅"
   Assets:CN:Alipay:Balance                -35.00 CNY
   Expenses:Digital:Subscription            35.00 CNY
+
+2026-07-31 * "汇丰香港" "港币账户期初余额"
+  Assets:HK:HSBC:HKD                      1500.00 HKD
+  Equity:Opening-Balances                -1500.00 HKD
+
+2026-07-31 * "汇丰香港" "美元账户期初余额"
+  Assets:HK:HSBC:USD                       200.00 USD
+  Equity:Opening-Balances                 -200.00 USD
+
+2026-07-31 * "港式茶餐厅" "港币晚餐"
+  Assets:HK:HSBC:HKD                       -98.00 HKD
+  Expenses:Food:Meals                       98.00 HKD
+
+2026-07-31 * "Cloud Service" "美元订阅"
+  Assets:HK:HSBC:USD                       -18.00 USD
+  Expenses:Digital:Subscription             18.00 USD

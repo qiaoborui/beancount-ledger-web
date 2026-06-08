@@ -122,6 +122,10 @@ func deltaFromMonthly(monthly []NetWorthPoint, latest *NetWorthPoint, months int
 }
 
 func CreditCards(txns []Transaction, balances map[string]int, accounts []Account, start, end string) []CreditCardAnalytics {
+	return CreditCardsInCurrency(txns, balances, accounts, start, end, nil, "CNY")
+}
+
+func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts []Account, start, end string, prices []Price, valuationCurrency string) []CreditCardAnalytics {
 	cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycle(time.Now().Format("2006-01-02"))
 	var out []CreditCardAnalytics
 	for _, account := range accounts {
@@ -151,20 +155,20 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 				cardSpend = min(expenseAmount, -cardTotal)
 			}
 			if txn.Date >= cycleStart && txn.Date < cycleEnd && cardSpend > 0 {
-				row.BillCycleSpend += cardSpend
+				row.BillCycleSpend += valuationOrZero(cardSpend, account.Currency, prices, txn.Date, valuationCurrency)
 			}
 			if txn.Date < start || txn.Date >= end || cardTotal == 0 {
 				continue
 			}
 			if cardSpend > 0 {
-				row.PeriodSpend += cardSpend
+				row.PeriodSpend += valuationOrZero(cardSpend, account.Currency, prices, txn.Date, valuationCurrency)
 				row.TxCount++
 			} else if assetOutflow > 0 && cardTotal > 0 {
-				row.PeriodRepayments += min(assetOutflow, cardTotal)
+				row.PeriodRepayments += valuationOrZero(min(assetOutflow, cardTotal), account.Currency, prices, txn.Date, valuationCurrency)
 				row.RepaymentCount++
 			}
 		}
-		row.Balance = balances[account.Account]
+		row.Balance = valuationOrZero(balances[account.Account], account.Currency, prices, end, valuationCurrency)
 		row.Outstanding = max(0, abs(min(row.Balance, 0)))
 		out = append(out, row)
 	}
@@ -180,10 +184,22 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 	return out
 }
 
+func valuationOrZero(amount int, currency string, prices []Price, date, valuationCurrency string) int {
+	value, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, date)
+	if !ok {
+		return 0
+	}
+	return value
+}
+
 func ExpenseAnalytics(txns []Transaction, start, end string, accounts []Account) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
-	current := collectExpenseCategories(txns, start, end)
+	return ExpenseAnalyticsInCurrency(txns, start, end, accounts, nil, "CNY")
+}
+
+func ExpenseAnalyticsInCurrency(txns []Transaction, start, end string, accounts []Account, prices []Price, valuationCurrency string) ([]ExpenseCategoryAnalytics, []PayeeAnalytics, []AccountAnalytics) {
+	current := collectExpenseCategories(txns, start, end, prices, valuationCurrency)
 	prevStart, prevEnd := previousRange(start, end)
-	previous := collectExpenseCategories(txns, prevStart, prevEnd)
+	previous := collectExpenseCategories(txns, prevStart, prevEnd, prices, valuationCurrency)
 	accountMap := accountByName(accounts)
 	totalExpense := 0
 	for _, row := range current {
@@ -227,7 +243,7 @@ func ExpenseAnalytics(txns []Transaction, start, end string, accounts []Account)
 		}
 		return categories[i].Amount > categories[j].Amount
 	})
-	return categories, summarizePayees(txns, start, end), summarizePaymentAccounts(txns, start, end, accountMap)
+	return categories, summarizePayees(txns, start, end, prices, valuationCurrency), summarizePaymentAccounts(txns, start, end, accountMap, prices, valuationCurrency)
 }
 
 type expenseCategoryAccumulator struct {
@@ -241,7 +257,7 @@ type expensePayeeAccumulator struct {
 	txns   map[string]bool
 }
 
-func collectExpenseCategories(txns []Transaction, start, end string) map[string]expenseCategoryAccumulator {
+func collectExpenseCategories(txns []Transaction, start, end string, prices []Price, valuationCurrency string) map[string]expenseCategoryAccumulator {
 	categories := map[string]expenseCategoryAccumulator{}
 	for index, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -259,7 +275,8 @@ func collectExpenseCategories(txns []Transaction, start, end string) map[string]
 			if row.payees == nil {
 				row.payees = map[string]expensePayeeAccumulator{}
 			}
-			row.amount += posting.Amount
+			amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+			row.amount += amount
 			row.txns[id] = true
 
 			payeeName := txn.Payee
@@ -270,7 +287,7 @@ func collectExpenseCategories(txns []Transaction, start, end string) map[string]
 			if payee.txns == nil {
 				payee.txns = map[string]bool{}
 			}
-			payee.amount += posting.Amount
+			payee.amount += amount
 			payee.txns[id] = true
 			row.payees[payeeName] = payee
 			categories[posting.Account] = row
@@ -317,7 +334,7 @@ func transactionID(txn Transaction, index int) string {
 	return id
 }
 
-func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
+func summarizePayees(txns []Transaction, start, end string, prices []Price, valuationCurrency string) []PayeeAnalytics {
 	type acc struct {
 		amount int
 		txns   map[string]bool
@@ -330,7 +347,7 @@ func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
 		var expense int
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				expense += posting.Amount
+				expense += postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
 			}
 		}
 		if expense <= 0 {
@@ -359,7 +376,7 @@ func summarizePayees(txns []Transaction, start, end string) []PayeeAnalytics {
 	return out
 }
 
-func summarizePaymentAccounts(txns []Transaction, start, end string, accounts map[string]Account) []AccountAnalytics {
+func summarizePaymentAccounts(txns []Transaction, start, end string, accounts map[string]Account, prices []Price, valuationCurrency string) []AccountAnalytics {
 	type acc struct {
 		amount int
 		txns   map[string]bool
@@ -385,6 +402,10 @@ func summarizePaymentAccounts(txns []Transaction, start, end string, accounts ma
 			}
 			outflow := -posting.Amount
 			if outflow <= 0 {
+				continue
+			}
+			outflow, ok := ValuationInCurrency(outflow, posting.Currency, valuationCurrency, prices, txn.Date)
+			if !ok {
 				continue
 			}
 			row := rows[posting.Account]

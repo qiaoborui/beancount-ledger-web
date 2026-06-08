@@ -6,6 +6,22 @@
   Liabilities:CN:CreditCard          -28.00 CNY
   Expenses:Food:Drinks                28.00 CNY
 
+2026-01-04 * "汇丰香港" "港币账户期初余额"
+  Assets:HK:HSBC:HKD                2000.00 HKD
+  Equity:Opening-Balances          -2000.00 HKD
+
+2026-01-04 * "汇丰香港" "美元账户期初余额"
+  Assets:HK:HSBC:USD                 300.00 USD
+  Equity:Opening-Balances           -300.00 USD
+
 2026-01-05 * "示例公司" "工资"
   Assets:CN:Bank:Checking          15000.00 CNY
   Income:Salary                   -15000.00 CNY
+
+2026-01-06 * "港式茶餐厅" "午餐"
+  Assets:HK:HSBC:HKD                 -86.00 HKD
+  Expenses:Food:Meals                 86.00 HKD
+
+2026-01-07 * "Cloud Service" "美元订阅"
+  Assets:HK:HSBC:USD                 -15.00 USD
+  Expenses:Digital:Subscription       15.00 USD

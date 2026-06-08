@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
-import { formatCny } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -163,11 +163,11 @@ function shortAccount(account: string): string {
 }
 
 /** 从一笔交易中提取最关键的金额（优先支出/收入，其次资产变动） */
-function primaryAmount(t: Txn): number | null {
+function primaryPosting(t: Txn): Txn["postings"][number] | null {
   const cat = t.postings.find((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:"));
-  if (cat) return cat.amount;
+  if (cat) return cat;
   const asset = t.postings.find((p) => p.account.startsWith("Assets:") || p.account.startsWith("Liabilities:"));
-  return asset?.amount ?? null;
+  return asset ?? null;
 }
 
 /** 金额颜色：支出(借方)=expense红，收入(贷方)=income绿，零或其他=品牌色 */
@@ -178,15 +178,15 @@ function amountColor(amount: number): string {
 }
 
 /** 格式化流水主金额：支出显示为负，收入显示为正 */
-function fmtTxnAmount(amount: number): string {
+function fmtTxnAmount(amount: number, currency?: string): string {
   const sign = amount <= 0 ? "+" : "-";
-  return `${sign}${formatCny(Math.abs(amount) / 100)}`;
+  return `${sign}${formatMoney(Math.abs(amount) / 100, currency ?? "CNY")}`;
 }
 
 /** 格式化 posting 金额（带符号，正=借/支出方向，负=贷/收入方向） */
-function fmtPostingAmount(amount: number): string {
+function fmtPostingAmount(amount: number, currency?: string): string {
   const sign = amount >= 0 ? "+" : "-";
-  return `${sign}${formatCny(Math.abs(amount) / 100)}`;
+  return `${sign}${formatMoney(Math.abs(amount) / 100, currency ?? "CNY")}`;
 }
 
 /** 紧凑借贷方流向：贷记(贷方) → 借记(借方) */
@@ -195,9 +195,9 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   const credits = postings.filter(p => p.amount < 0);
 
   // 合并展示：先贷记(负数)，后借记(正数)，中间用箭头分隔
-  const allItems: { account: string; amount: number; side: "credit" | "debit" }[] = [
-    ...credits.map(p => ({ account: p.account, amount: p.amount, side: "credit" as const })),
-    ...debits.map(p => ({ account: p.account, amount: p.amount, side: "debit" as const })),
+  const allItems: { account: string; amount: number; currency?: string; side: "credit" | "debit" }[] = [
+    ...credits.map(p => ({ account: p.account, amount: p.amount, currency: p.currency, side: "credit" as const })),
+    ...debits.map(p => ({ account: p.account, amount: p.amount, currency: p.currency, side: "debit" as const })),
   ];
 
   // 截断：保留所有贷记 + 最多 maxShow-creditCount 个借记
@@ -213,7 +213,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
       {shownCredits.map((p, i) => (
         <span key={`c-${i}`} className="amount-income min-w-0 [overflow-wrap:anywhere]">
-          {shortAccount(p.account)} {fmtPostingAmount(p.amount)}
+          {shortAccount(p.account)} {fmtPostingAmount(p.amount, p.currency)}
         </span>
       ))}
       {shownCredits.length > 0 && shownDebits.length > 0 && (
@@ -221,7 +221,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
       )}
       {shownDebits.map((p, i) => (
         <span key={`d-${i}`} className="amount-expense min-w-0 [overflow-wrap:anywhere]">
-          {shortAccount(p.account)} {fmtPostingAmount(p.amount)}
+          {shortAccount(p.account)} {fmtPostingAmount(p.amount, p.currency)}
         </span>
       ))}
       {remaining > 0 && <span className="text-stone/40">… +{remaining}</span>}
@@ -230,7 +230,8 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
 }
 
 function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
-  const amt = primaryAmount(txn);
+  const primary = primaryPosting(txn);
+  const amt = primary?.amount ?? null;
   return (
     <button type="button" className={`transaction-list-card card mb-1.5 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-3">
@@ -238,7 +239,7 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
           <strong className="block truncate">{txn.payee}</strong>
           {txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
         </div>
-        {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt)}</span>}
+        {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt, primary?.currency)}</span>}
       </div>
       <div className="mt-0.5 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration}</div>
       {viewMode === "full" ? (
@@ -258,7 +259,8 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
 }
 
 function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
-  const amt = primaryAmount(txn);
+  const primary = primaryPosting(txn);
+  const amt = primary?.amount ?? null;
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
   const meta = metadataPairs(txn);
@@ -282,7 +284,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
         <div className="mt-0.5 truncate text-xs text-olive">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
-      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt)}</div>
+      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt, primary?.currency)}</div>
       <div className="min-w-0">
         <div className="truncate text-xs text-warm">{categoryRows.join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
@@ -606,7 +608,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
   const [narration, setNarration] = useState(txn.narration);
-  const [postings, setPostings] = useState(() => txn.postings.map((p) => ({ account: p.account, amount: (p.amount / 100).toFixed(2) })));
+  const [postings, setPostings] = useState(() => txn.postings.map((p) => ({ account: p.account, amount: (p.amount / 100).toFixed(2), currency: p.currency ?? "CNY" })));
   const [metadata, setMetadata] = useState(() => JSON.stringify(txn.metadata ?? {}, null, 2));
   const [tags, setTags] = useState(() => (txn.tags ?? []).join(" "));
   const [formError, setFormError] = useState<string | null>(null);
@@ -621,7 +623,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     narration !== txn.narration ||
     metadata !== JSON.stringify(txn.metadata ?? {}, null, 2) ||
     tags !== (txn.tags ?? []).join(" ") ||
-    postings.some((posting, index) => posting.account !== txn.postings[index]?.account || posting.amount !== ((txn.postings[index]?.amount ?? 0) / 100).toFixed(2))
+    postings.some((posting, index) => posting.account !== txn.postings[index]?.account || posting.amount !== ((txn.postings[index]?.amount ?? 0) / 100).toFixed(2) || posting.currency !== (txn.postings[index]?.currency ?? "CNY"))
   );
   const shouldClose = () => {
     if (!hasUnsavedChanges) return true;
@@ -641,7 +643,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       setFormError("metadata 必须是 JSON 对象");
       return;
     }
-    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: "CNY" })) });
+    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: p.currency.trim().toUpperCase() || "CNY" })) });
     setEditing(false);
     onClose();
   }
@@ -664,7 +666,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
           <Input className="h-11 bg-panel" value={narration} onChange={(e) => setNarration(e.target.value)} />
           <Textarea className="min-h-28 bg-panel font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} />
           <Input className="h-11 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />
-          {postings.map((p, i) => <div key={i} className="grid gap-2 sm:grid-cols-[1fr_140px]">
+          {postings.map((p, i) => <div key={i} className="grid gap-2 sm:grid-cols-[1fr_140px_96px]">
             <div>
               <Select value={accountOptions.some((account) => account.account === p.account) ? p.account : ALL_FILTER_VALUE} onValueChange={(value) => value !== ALL_FILTER_VALUE && setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: value } : row))}>
                 <SelectTrigger className="h-11 w-full bg-panel">
@@ -679,12 +681,13 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
               <datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account} label={optionLabel(account)} />)}</datalist>
             </div>
             <Input className="h-11 bg-panel" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
+            <Input className="h-11 bg-panel uppercase" value={p.currency} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, currency: e.target.value.toUpperCase() } : row))} />
           </div>)}
     </div> : <div>
       <div className="text-lg font-medium">{txn.date} {txn.payee}</div>
       <div className="text-olive">{txn.narration}</div>
       <MetadataBadges txn={txn} />
-      <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatCny(p.amount / 100)}</strong></div>)}</div>
+      <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatMoney(p.amount / 100, p.currency ?? "CNY")}</strong></div>)}</div>
     </div>}
   </>;
 

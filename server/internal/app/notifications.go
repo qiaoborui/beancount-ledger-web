@@ -120,7 +120,7 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 	}
 	insights := []Insight{}
 	for _, txn := range current {
-		expense := txnExpense(txn, "Expenses:")
+		expense := txnExpense(txn, "Expenses:", snapshot.Prices)
 		if expense >= 30000 {
 			severity := "warning"
 			if expense >= 100000 {
@@ -140,7 +140,7 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 			latestBudgets[budget.Account] = budget
 		}
 	}
-	actual := MonthSummary(start, end, snapshot.Transactions).Categories
+	actual := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices).Categories
 	for account, budget := range latestBudgets {
 		spent := actual[account]
 		if budget.Amount == 0 {
@@ -157,10 +157,10 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 		}
 	}
 
-	currentExpense := MonthSummary(start, end, snapshot.Transactions).Expense
+	currentExpense := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices).Expense
 	previous := []int{}
 	for _, offset := range []int{-1, -2, -3} {
-		expense := MonthSummary(prevMonth(month, offset)+"-01", monthEnd(prevMonth(month, offset)), snapshot.Transactions).Expense
+		expense := MonthSummary(prevMonth(month, offset)+"-01", monthEnd(prevMonth(month, offset)), snapshot.Transactions, snapshot.Prices).Expense
 		if expense > 0 {
 			previous = append(previous, expense)
 		}
@@ -188,7 +188,7 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 		}
 	}
 	for _, txn := range current {
-		expense := txnExpense(txn, "Expenses:")
+		expense := txnExpense(txn, "Expenses:", snapshot.Prices)
 		if expense >= 10000 && pastPayeeCounts[txn.Payee] <= 1 {
 			amount := expense
 			insights = append(insights, Insight{ID: "rare-" + s.sourceID(txn.Source), Severity: "info", Title: "不常见商户", Detail: txn.Payee + " 过去很少出现，本次支出 " + formatCNY(expense) + "。", Amount: &amount, Date: txn.Date})
@@ -200,7 +200,7 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 		for _, posting := range txn.Postings {
 			if posting.Account == "Expenses:Unknown" {
 				unknownCount++
-				unknownAmount += posting.Amount
+				unknownAmount += postingValuationInCNY(posting, snapshot.Prices, txn.Date)
 			}
 		}
 	}
@@ -402,11 +402,11 @@ func notificationDetailHash(insight Insight) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-func txnExpense(txn Transaction, prefix string) int {
+func txnExpense(txn Transaction, prefix string, prices []Price) int {
 	total := 0
 	for _, posting := range txn.Postings {
 		if strings.HasPrefix(posting.Account, prefix) {
-			total += posting.Amount
+			total += postingValuationInCNY(posting, prices, txn.Date)
 		}
 	}
 	return total

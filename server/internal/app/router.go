@@ -44,7 +44,7 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c))
+	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -57,7 +57,7 @@ func (s *Server) summary(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Summary(start, end, isSensitiveUnlocked(c))
+	payload, err := s.readService.Summary(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -92,10 +92,11 @@ func (s *Server) budget(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "rows": buildBudgetRows(snapshot, start, end)})
+	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "valuationCurrency": ValidValuationCurrency(c.Query("valuationCurrency"), snapshot.Commodities), "rows": buildBudgetRows(snapshot, start, end, c.Query("valuationCurrency"))})
 }
 
-func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
+func buildBudgetRows(snapshot *LedgerSnapshot, start, end, rawValuationCurrency string) []gin.H {
+	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	latest := map[string]Budget{}
 	for _, budget := range snapshot.Budgets {
 		if budget.Date <= end {
@@ -104,7 +105,7 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 			}
 		}
 	}
-	actual := MonthSummary(start, end, snapshot.Transactions).Categories
+	actual := MonthSummaryInCurrency(start, end, snapshot.Transactions, snapshot.Prices, valuationCurrency).Categories
 	accounts := map[string]bool{}
 	for account := range latest {
 		accounts[account] = true
@@ -121,7 +122,7 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
 	accountMap := accountByName(snapshot.Accounts)
 	for _, account := range keys {
 		label, alias := accountLabelAlias(account, accountMap)
-		budget := latest[account].Amount
+		budget := budgetValuation(latest[account], snapshot.Prices, end, valuationCurrency)
 		spent := actual[account]
 		var ratio *float64
 		if budget != 0 {
@@ -152,7 +153,7 @@ func (s *Server) dashboard(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	c.JSON(http.StatusOK, BuildDashboardSummaryWithFilters(snapshot, start, end, parseDashboardFilters(c)))
+	c.JSON(http.StatusOK, BuildDashboardSummaryWithFiltersInCurrency(snapshot, start, end, parseDashboardFilters(c), c.Query("valuationCurrency")))
 }
 
 func parseDashboardFilters(c *gin.Context) DashboardFilters {
@@ -290,7 +291,7 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 				status = "asserted"
 			}
 		}
-		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
+		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "currency": defaultAccountCurrency(account.Account, account.Currency), "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
 	}
 	return rows
 }
@@ -442,6 +443,12 @@ func statusMap(ok bool, value map[string]int) map[string]int {
 		return value
 	}
 	return map[string]int{}
+}
+func statusAccountBalances(ok bool, value []AccountBalance) []AccountBalance {
+	if ok {
+		return value
+	}
+	return []AccountBalance{}
 }
 func statusInt(ok bool, value int) int {
 	if ok {

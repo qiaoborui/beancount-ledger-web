@@ -6,6 +6,22 @@
   Assets:Cash                       -18.00 CNY
   Expenses:Food:Drinks               18.00 CNY
 
+2026-01-03 * "HSBC" "Open HKD balance"
+  Assets:HK:HSBC:HKD               1000.00 HKD
+  Equity:Opening-Balances         -1000.00 HKD
+
+2026-01-04 * "HSBC" "Open USD balance"
+  Assets:HK:HSBC:USD                100.00 USD
+  Equity:Opening-Balances          -100.00 USD
+
 2026-01-05 * "Example Company" "Salary"
   Assets:Bank:Checking             8000.00 CNY
   Income:Salary                   -8000.00 CNY
+
+2026-01-06 * "Cha Chaan Teng" "HKD lunch"
+  Assets:HK:HSBC:HKD                -68.00 HKD
+  Expenses:Food:Meals                68.00 HKD
+
+2026-01-07 * "Cloud Service" "USD subscription"
+  Assets:HK:HSBC:USD                -12.00 USD
+  Expenses:Digital:Subscription      12.00 USD

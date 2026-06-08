@@ -1,12 +1,13 @@
 import { Eye, EyeOff } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatCny } from "@/lib/money";
+import { formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { Metric } from "./shared";
 import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
-export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; valuationCurrency: string; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
+  const displayCurrency = summary?.currency ?? valuationCurrency;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
   const mask = (value: string, sensitive = true) => sensitive ? canShowSensitive ? value : "••••••" : showAmounts ? value : "••••••";
   const cardOutstanding = creditCards.reduce((sum, card) => sum + card.outstanding, 0);
@@ -35,30 +36,30 @@ export function HomePage({ summary, privacySettings, sensitiveUnlocked, creditCa
             </div>
           </div>
           <div className="grid grid-cols-3 divide-x divide-line border-t border-line p-3 text-center md:p-4">
-            <Metric label="收入" value={mask(formatCny((summary?.income ?? 0) / 100))} cls="amount-income text-base sm:text-xl" />
-            <Metric label="支出" value={mask(formatCny((summary?.expense ?? 0) / 100), false)} cls="amount-expense text-base sm:text-xl" />
-            <Metric label="结余" value={mask(formatCny((summary?.net ?? 0) / 100))} cls="amount-gold text-base sm:text-xl" />
+            <Metric label="收入" value={mask(formatValuation((summary?.income ?? 0) / 100, displayCurrency))} cls="amount-income text-base sm:text-xl" />
+            <Metric label="支出" value={mask(formatValuation((summary?.expense ?? 0) / 100, displayCurrency), false)} cls="amount-expense text-base sm:text-xl" />
+            <Metric label="结余" value={mask(formatValuation((summary?.net ?? 0) / 100, displayCurrency))} cls="amount-gold text-base sm:text-xl" />
           </div>
         </section>
         <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-rows-2 xl:flex-1">
-          <DashboardCard label="信用卡未还" value={mask(formatCny(cardOutstanding / 100))} tone="amount-expense" detail={`账单周期消费 ${mask(formatCny(cardSpend / 100))}`} />
+          <DashboardCard label="信用卡未还" value={mask(formatValuation(cardOutstanding / 100, displayCurrency))} tone="amount-expense" detail={`账单周期消费 ${mask(formatValuation(cardSpend / 100, displayCurrency))}`} />
           <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0] ? formatAccountOptionLabel(budgetPressure[0].account, budgetPressure[0].label, budgetPressure[0].alias) : "暂无预算数据"} />
           <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
-          <DashboardCard label="待整理" value={unknown ? formatCny(unknown.amount / 100) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
+          <DashboardCard label="待整理" value={unknown ? formatValuation(unknown.amount / 100, displayCurrency) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
         </section>
       </div>
-      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} />
+      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} valuationCurrency={displayCurrency} />
     </div>
 
     <div className={`${dashboardGridClass} mt-4 items-start`}>
-      <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: formatCny(row.amount / 100), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
-      <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatCny(row.remaining / 100)}` : "金额已隐藏" }))} empty="暂无预算数据" />
+      <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: formatValuation(row.amount / 100, displayCurrency), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
+      <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatValuation(row.remaining / 100, displayCurrency)}` : "金额已隐藏" }))} empty="暂无预算数据" />
     </div>
 
   </>;
 }
 
-function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean }) {
+function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
   const label = rows.length ? `${rows[0][0].slice(5)} ~ ${rows.at(-1)?.[0].slice(5)}` : "本期";
   const data = rows.map(([date, value]) => ({
     date,
@@ -88,7 +89,7 @@ function DailyTrendCard({ rows, showAmounts }: { rows: [string, { income: number
             cursor={{ fill: "var(--selected-bg)" }}
             contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
             labelFormatter={(label) => String(label)}
-            formatter={(value, name) => [formatCny(Number(value)), name === "收入" ? "收入" : "支出"]}
+            formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name === "收入" ? "收入" : "支出"]}
           />
           <Bar yAxisId="expense" dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
           <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />

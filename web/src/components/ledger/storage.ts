@@ -8,6 +8,7 @@ export const defaultPrivacySettings: PrivacySettings = {
   showAccountBalancesByDefault: false,
   showNetWorthByDefault: false,
   showIncomeStatementByDefault: false,
+  valuationCurrency: "CNY",
 };
 
 export const defaultMobileTabHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts"];
@@ -27,12 +28,12 @@ function readLocalLedgerCache(key: string): LedgerCache | null {
   }
 }
 
-export function readLedgerCache(timeRange: TimeRange): LedgerCache | null {
-  return readLocalLedgerCache(timeRangeCacheKey(timeRange));
+export function readLedgerCache(timeRange: TimeRange, valuationCurrency = "CNY"): LedgerCache | null {
+  return readLocalLedgerCache(timeRangeCacheKey(timeRange, valuationCurrency));
 }
 
-export async function readLedgerCacheAsync(timeRange: TimeRange): Promise<LedgerCache | null> {
-  const key = timeRangeCacheKey(timeRange);
+export async function readLedgerCacheAsync(timeRange: TimeRange, valuationCurrency = "CNY"): Promise<LedgerCache | null> {
+  const key = timeRangeCacheKey(timeRange, valuationCurrency);
   return await readIndexedCache<LedgerCache>(key) ?? readLocalLedgerCache(key);
 }
 
@@ -46,9 +47,9 @@ function runWhenIdle(task: () => void) {
   window.setTimeout(task, 0);
 }
 
-export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache) {
+export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache, valuationCurrency = "CNY") {
   if (typeof window === "undefined") return;
-  const key = timeRangeCacheKey(timeRange);
+  const key = timeRangeCacheKey(timeRange, valuationCurrency);
   void writeIndexedCache(key, cache);
   runWhenIdle(() => {
     try {

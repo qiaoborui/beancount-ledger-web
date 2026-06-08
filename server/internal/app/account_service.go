@@ -36,9 +36,7 @@ func (s *AccountService) List() ([]Account, error) {
 }
 
 func (s *AccountService) Append(input AccountInput) (AccountInput, error) {
-	if input.Currency == "" {
-		input.Currency = "CNY"
-	}
+	input.Currency = defaultAccountCurrency(input.Account, input.Currency)
 	if err := s.writer.AppendAccount(input); err != nil {
 		return AccountInput{}, err
 	}
