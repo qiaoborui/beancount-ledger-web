@@ -20,7 +20,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -88,7 +87,6 @@ type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; d
 type ImportDraft = {
   savedAt: number;
   providerOverride: ProviderOverride;
-  alipayFundRounding: boolean;
   preview: ImportPreview;
   entries: ImportEntry[];
 };
@@ -147,7 +145,6 @@ function readImportDraft(): ImportDraft | null {
     return {
       savedAt: typeof draft.savedAt === "number" ? draft.savedAt : Date.now(),
       providerOverride: draft.providerOverride ?? "auto",
-      alipayFundRounding: Boolean(draft.alipayFundRounding),
       preview: draft.preview,
       entries: draft.entries,
     };
@@ -173,7 +170,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [alipayFundRounding, setAlipayFundRounding] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [entries, setEntries] = useState<ImportEntry[]>([]);
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
@@ -182,7 +178,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
   const [providerOpen, setProviderOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
@@ -210,7 +205,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     const draft = readImportDraft();
     if (!draft) return;
     setProviderOverride(draft.providerOverride);
-    setAlipayFundRounding(draft.alipayFundRounding);
     setPreview(draft.preview);
     setEntries(draft.entries);
     setSelectedEntryId(draft.entries[0]?.id ?? "");
@@ -240,8 +234,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     }
     const savedAt = Date.now();
     setDraftSavedAt(savedAt);
-    writeImportDraft({ savedAt, providerOverride, alipayFundRounding, preview, entries });
-  }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
+    writeImportDraft({ savedAt, providerOverride, preview, entries });
+  }, [entries, hasCommitted, preview, providerOverride]);
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -319,7 +313,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (providerOverride !== "auto") form.set("provider", providerOverride);
       form.set("file", uploadFile);
       if (uploadFile !== file) form.set("originalFile", file);
-      form.set("alipayFundRounding", String(alipayFundRounding));
       const res = await fetch("/api/ledger/imports/preview", { method: "POST", body: form });
       const data = await readJson<ImportPreview>(res);
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
@@ -345,7 +338,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       const res = await fetch("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
+        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries }),
       });
       const data = await readJson<CommitResult>(res);
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
@@ -482,7 +475,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           </div>
 
-          <div className="grid min-w-0 max-w-full grid-rows-[auto_auto_auto_auto] gap-4 overflow-hidden">
+          <div className="grid min-w-0 max-w-full gap-4 overflow-hidden">
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
@@ -533,38 +526,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               <ImportStep index={1} title="选择账单" active done={Boolean(file) || Boolean(preview)} detail={isRestoredDraft ? `已恢复 ${preview?.originalFilename ?? "导入草稿"}` : file ? file.name : "等待上传账单文件"} />
               <ImportStep index={2} title="审核预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
               <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
-            </div>
-
-            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
-              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
-                <span className="min-w-0 flex-1 overflow-hidden">
-                  <span className="block text-sm font-medium text-ink">高级选项</span>
-                  <span className="mt-1 block truncate text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
-                </span>
-                {advancedOpen ? <ChevronUp className="h-4 w-4 text-stone" /> : <ChevronDown className="h-4 w-4 text-stone" />}
-              </button>
-              {advancedOpen ? (
-                <div className="mt-4 space-y-4">
-                  <Label className="block">
-                    <span className="mb-2 block">账单来源覆盖</span>
-                    <Select value={providerOverride} onValueChange={(value) => setProviderOverride(value as ProviderOverride)}>
-                      <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-panel text-sm text-ink">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {providerChoices.map((choice) => <SelectItem key={choice.value} value={choice.value}>{choice.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </Label>
-                  <div className="flex items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-sm">
-                    <Checkbox id="alipay-fund-rounding" className="mt-1" checked={alipayFundRounding} onCheckedChange={(value) => setAlipayFundRounding(value === true)} />
-                    <label htmlFor="alipay-fund-rounding" className="cursor-pointer">
-                      <span className="font-medium text-warm">支付宝基金 9.99 → 10.00 补差</span>
-                      <span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span>
-                    </label>
-                  </div>
-                </div>
-              ) : null}
             </div>
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
