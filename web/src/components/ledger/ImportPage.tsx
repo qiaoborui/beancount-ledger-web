@@ -7,6 +7,16 @@ import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/c
 import { formatCny } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -122,6 +132,11 @@ function fileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatDraftSavedAt(savedAt: number | null) {
+  if (!savedAt) return "";
+  return new Date(savedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 function readImportDraft(): ImportDraft | null {
   if (typeof window === "undefined") return null;
   try {
@@ -154,6 +169,7 @@ function writeImportDraft(draft: ImportDraft | null) {
 export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const reviewDetailRef = useRef<HTMLElement | null>(null);
+  const draftHydratedRef = useRef(false);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -169,8 +185,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
   const [selectedEntryId, setSelectedEntryId] = useState("");
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
@@ -185,6 +203,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
   const reviewTotalAmount = useMemo(() => entries.reduce((total, entry) => total + entry.amount, 0), [entries]);
+  const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
+  const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -194,7 +214,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setPreview(draft.preview);
     setEntries(draft.entries);
     setSelectedEntryId(draft.entries[0]?.id ?? "");
-    setReviewOpen(true);
+    setDraftSavedAt(draft.savedAt);
+    draftHydratedRef.current = true;
   }, []);
 
   useEffect(() => {
@@ -213,7 +234,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   useEffect(() => {
     if (!preview || hasCommitted) return;
-    writeImportDraft({ savedAt: Date.now(), providerOverride, alipayFundRounding, preview, entries });
+    if (draftHydratedRef.current) {
+      draftHydratedRef.current = false;
+      return;
+    }
+    const savedAt = Date.now();
+    setDraftSavedAt(savedAt);
+    writeImportDraft({ savedAt, providerOverride, alipayFundRounding, preview, entries });
   }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
 
   useEffect(() => {
@@ -251,7 +278,24 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     setReviewOpen(false);
+    setDraftSavedAt(null);
     setError("");
+    writeImportDraft(null);
+  }
+
+  function clearImportState() {
+    setFile(null);
+    if (inputRef.current) inputRef.current.value = "";
+    setPreview(null);
+    setEntries([]);
+    setSelectedEntryId("");
+    setCommitResult(null);
+    setResultOpen(false);
+    setReviewOpen(false);
+    setRawOpen(false);
+    setDraftSavedAt(null);
+    setError("");
+    setDiscardDialogOpen(false);
     writeImportDraft(null);
   }
 
@@ -282,6 +326,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setPreview(data);
       setEntries(data.entries);
       setSelectedEntryId(data.entries[0]?.id ?? "");
+      setDraftSavedAt(Date.now());
       setReviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -308,6 +353,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setResultOpen(true);
       setReviewOpen(true);
       writeImportDraft(null);
+      setDraftSavedAt(null);
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -344,6 +390,50 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function updateMetadata(id: string, key: string, value: string) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry)));
+  }
+
+  function renderPrimaryActions() {
+    if (hasCommitted) {
+      return (
+        <div className="grid gap-2">
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
+            <CheckCircle className="h-4 w-4" />
+            查看写入结果
+          </Button>
+          <Button className="w-full" variant="outline" onClick={clearImportState}>
+            <FileUp className="h-4 w-4" />
+            导入新账单
+          </Button>
+        </div>
+      );
+    }
+    if (preview) {
+      return (
+        <div className="grid gap-2">
+          <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
+            <ShieldCheck className="h-4 w-4" />
+            继续审核
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button className="min-w-0" variant="outline" onClick={generatePreview} disabled={loading || !file}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+              重新预览
+            </Button>
+            <Button className="min-w-0 border-line text-stone hover:text-destructive" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={loading || committing}>
+              <Trash2 className="h-4 w-4" />
+              丢弃草稿
+            </Button>
+          </div>
+          {!file ? <div className="text-center text-xs leading-5 text-stone">如需重新预览，请先选择原始账单文件。</div> : null}
+        </div>
+      );
+    }
+    return (
+      <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+        生成预览
+      </Button>
+    );
   }
 
   return (
@@ -396,12 +486,16 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
-                  <span className="block truncate font-medium text-ink">来源设置：{selectedProvider.label}</span>
-                  <span className="mt-1 block truncate text-xs text-stone">{selectedProvider.detail}</span>
+                  <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
+                  <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? "草稿已恢复，重新预览需要重新选择文件。" : selectedProvider.detail}</span>
                 </span>
                 {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
               </button>
-              {providerOpen ? (
+              {providerOpen && isRestoredDraft ? (
+                <div className="border-t border-line p-3 text-xs leading-5 text-stone">
+                  当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
+                </div>
+              ) : providerOpen ? (
                 <div className="grid min-w-0 gap-2 border-t border-line p-3">
                   {providerChoices.map((choice) => (
                     <button
@@ -436,8 +530,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <FileArchive className="h-5 w-5 text-brand" />
               </div>
               <Separator className="my-4" />
-              <ImportStep index={1} title="选择来源" active done={Boolean(file)} detail={file ? file.name : "等待上传账单文件"} />
-              <ImportStep index={2} title="生成预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
+              <ImportStep index={1} title="选择账单" active done={Boolean(file) || Boolean(preview)} detail={isRestoredDraft ? `已恢复 ${preview?.originalFilename ?? "导入草稿"}` : file ? file.name : "等待上传账单文件"} />
+              <ImportStep index={2} title="审核预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
               <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
             </div>
 
@@ -474,10 +568,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
-              <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-                生成预览
-              </Button>
+              <div className="mb-3 flex min-w-0 items-center justify-between gap-3 px-1 text-xs text-stone">
+                <span className="truncate">
+                  {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
+                </span>
+                {draftSavedAt && !hasCommitted ? <span className="shrink-0">草稿 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+              </div>
+              {renderPrimaryActions()}
             </div>
           </div>
         </CardContent>
@@ -496,16 +593,33 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
+                {isRestoredDraft ? <Badge variant="secondary">已恢复草稿</Badge> : null}
                 <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
                 <span className="text-sm text-stone">{entries.length} 条交易</span>
               </div>
               <div className="mt-2 line-clamp-2 break-all font-medium text-ink">{preview.originalFilename}</div>
-              <div className="mt-1 text-sm text-stone">{preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}</div>
+              <div className="mt-1 text-sm text-stone">
+                {preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}
+                {draftSavedAt && !hasCommitted ? <span> · 草稿保存于 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+              </div>
             </div>
-            <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
-              {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-              {hasCommitted ? "查看写入结果" : "打开审核"}
-            </Button>
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
+              {hasCommitted ? (
+                <Button variant="outline" onClick={clearImportState}>
+                  <FileUp className="h-4 w-4" />
+                  导入新账单
+                </Button>
+              ) : (
+                <Button variant="outline" className="border-line text-stone hover:text-destructive" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                  <Trash2 className="h-4 w-4" />
+                  丢弃草稿
+                </Button>
+              )}
+              <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
+                {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                {hasCommitted ? "查看结果" : "继续审核"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -530,8 +644,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
                 <span className="tabular-nums">{formatCny(reviewTotalAmount)} 合计</span>
               </div>
-              <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-[auto_auto]">
-                <Button className="min-w-0 sm:min-w-32" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>稍后处理</Button>
+              <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
+                <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
+                {hasCommitted ? (
+                  <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
+                    <FileUp className="h-4 w-4" />
+                    导入新账单
+                  </Button>
+                ) : (
+                  <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                    <Trash2 className="h-4 w-4" />
+                    丢弃草稿
+                  </Button>
+                )}
                 <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
                   {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                   {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
@@ -597,7 +722,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
-                      <div className="mt-0.5 text-xs text-stone">逐条核对，删除后只提交剩余交易。</div>
+                      <div className="mt-0.5 text-xs text-stone">逐条核对，移除后只提交剩余交易。</div>
                     </div>
                     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
                       <span className="rounded-full bg-tag px-2 py-1">{entries.length} 待写入</span>
@@ -645,7 +770,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                               className="mr-1 h-9 w-9 shrink-0 text-stone hover:text-destructive"
                               onClick={() => removeEntry(entry.id)}
                               disabled={committing || hasCommitted}
-                              title="删除这条候选交易"
+                              title="移除这条候选交易"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -661,8 +786,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑 {selectedEntryIndex + 1}/{entries.length}</div>
-                          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={selectedEntry.payee || "未命名商户"}>{selectedEntry.payee || "未命名商户"}</div>
+                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑</div>
+                          <div className="mt-1 text-lg font-medium leading-7 text-ink">{selectedEntryIndex + 1}/{entries.length}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                           <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(-1)} disabled={entries.length <= 1} title="上一条">
@@ -673,45 +798,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                           </Button>
                         </div>
                       </div>
-                      <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="bg-tag text-warm">{selectedEntry.date}</Badge>
-                          {selectedEntry.source ? <Badge variant="outline" className="border-brand/50 text-brand">{selectedEntry.source}</Badge> : null}
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(selectedEntry.amount)}</div>
-                          <div className="mt-1 text-xs text-stone">{selectedEntry.currency}</div>
-                        </div>
-                      </div>
                     </div>
 
                     <div className="space-y-4 p-4">
-                      <ImportFlowPanel entry={selectedEntry} fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)} toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)} />
-
-                      <div className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">标题</span><span className="min-w-0 break-words">{selectedEntry.narration || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">方式</span><span className="min-w-0 break-words">{selectedEntry.method || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">资金账户</span><span className="min-w-0 break-words">{selectedEntry.fundingAccount || "-"}</span></div>
-                        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2"><span className="text-olive">订单号</span><span className="min-w-0 break-all">{selectedEntry.orderId || "-"}</span></div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label className="block min-w-0">
-                          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
-                          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={selectedEntry.narration} onChange={(event) => updateEntry(selectedEntry.id, { narration: event.target.value })} />
-                        </Label>
-                        <Label className="block min-w-0">
-                          <span className="mb-1.5 block text-xs font-medium text-stone">{editableAccountLabel(selectedEntry)}</span>
-                          <Select value={selectedEntry.categoryAccount} onValueChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}>
-                            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-80">
-                              {categoryAccountOptions(selectedEntry).map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </Label>
-                      </div>
+                      <ImportFlowPanel
+                        entry={selectedEntry}
+                        fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)}
+                        toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)}
+                        accountLabel={editableAccountLabel(selectedEntry)}
+                        accountOptions={categoryAccountOptions(selectedEntry)}
+                        disabled={committing || hasCommitted}
+                        onNarrationChange={(value) => updateEntry(selectedEntry.id, { narration: value })}
+                        onCategoryAccountChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}
+                      />
 
                       <details open className="rounded-xl border border-line bg-paper px-3 py-2.5">
                         <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
@@ -735,7 +834,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                         disabled={committing || hasCommitted}
                       >
                         <Trash2 className="h-4 w-4" />
-                        删除当前交易
+                        移除当前候选
                       </Button>
                     </div>
                   </aside>
@@ -758,6 +857,21 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           </div>
         </MobileSheet>
       ) : null}
+
+      <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>丢弃这份导入草稿？</AlertDialogTitle>
+            <AlertDialogDescription>
+              这只会删除浏览器里保存的导入审核状态，不会改动账本，也不会删除原始账单文件。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续审核</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={clearImportState}>确认丢弃</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -792,13 +906,45 @@ function importFlowForEntry(entry: ImportEntry) {
   return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
 }
 
-function ImportFlowPanel({ entry, fromLabel, toLabel }: { entry: ImportEntry; fromLabel: string; toLabel: string }) {
+function ImportFlowPanel({
+  entry,
+  fromLabel,
+  toLabel,
+  accountLabel,
+  accountOptions,
+  disabled,
+  onNarrationChange,
+  onCategoryAccountChange,
+}: {
+  entry: ImportEntry;
+  fromLabel: string;
+  toLabel: string;
+  accountLabel: string;
+  accountOptions: AccountOption[];
+  disabled: boolean;
+  onNarrationChange: (value: string) => void;
+  onCategoryAccountChange: (value: string) => void;
+}) {
   const flow = importFlowForEntry(entry);
+  const metaItems = [
+    { label: "方式", value: entry.method || "-" },
+    { label: "订单号", value: entry.orderId || "-" },
+  ];
   return (
     <div className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-medium text-brand">{flow.kind}</div>
-        <div className="font-serif text-lg font-medium text-warm tabular-nums">{formatCny(entry.amount)}</div>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-brand">{flow.kind}</div>
+          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="bg-panel text-warm">{entry.date}</Badge>
+            {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatCny(entry.amount)}</div>
+          <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+        </div>
       </div>
       <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
         <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
@@ -806,6 +952,31 @@ function ImportFlowPanel({ entry, fromLabel, toLabel }: { entry: ImportEntry; fr
           <ArrowRight className="h-4 w-4" />
         </span>
         <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
+      </div>
+      <div className="mt-4 space-y-3 rounded-xl border border-brand/15 bg-panel/70 p-3">
+        <Label className="block min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
+          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={entry.narration} onChange={(event) => onNarrationChange(event.target.value)} disabled={disabled} />
+        </Label>
+        <Label className="block min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-stone">{accountLabel}</span>
+          <Select value={entry.categoryAccount} onValueChange={onCategoryAccountChange} disabled={disabled}>
+            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-80">
+              {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Label>
+        <div className="grid min-w-0 gap-2 border-t border-brand/15 pt-3 text-xs leading-5 text-stone">
+          {metaItems.map((item) => (
+            <div key={item.label} className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+              <span className="text-olive">{item.label}</span>
+              <span className={cn("min-w-0", item.label === "订单号" ? "break-all" : "break-words")}>{item.value}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
