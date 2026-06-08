@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, SlidersHorizontal, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { readJson } from "@/lib/clientFetch";
 import { formatCny, formatCompactCny } from "@/lib/money";
-import { timeRangeToParams } from "@/lib/timeRange";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { TimeRange } from "@/lib/timeRange";
 import { formatAccountOptionLabel, isLedgerAccount } from "./accountDisplay";
+import { DEFAULT_DASHBOARD_FILTERS, dashboardFiltersToApiQuery, dashboardFiltersToSearchParams, hasActiveDashboardFilters, normalizeDashboardFilters, parseDashboardFiltersFromSearch, type DashboardFilterKey, type DashboardFilterState } from "./dashboardFilters";
 import type { DashboardFilterOption, DashboardSummary } from "./types";
 
 const COLORS = [
@@ -21,16 +22,6 @@ const COLORS = [
   "var(--chart-primary)",
   "var(--chart-secondary)",
 ];
-
-type DashboardFilterState = {
-  category: string[];
-  account: string[];
-  payee: string[];
-  tag: string[];
-  type: string[];
-  minAmount: string;
-  maxAmount: string;
-};
 
 type DashboardPanelId =
   | "dailyExpense"
@@ -46,25 +37,35 @@ type DashboardPanelId =
   | "netWorth"
   | "accountTrend";
 
-const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
-  category: [],
-  account: [],
-  payee: [],
-  tag: [],
-  type: [],
-  minAmount: "",
-  maxAmount: "",
-};
-
 export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitiveLocked, onOpenTransactions }: { timeRange: TimeRange; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void; onOpenTransactions: (href: string) => void }) {
-  const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
-  const { data, loading, error } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
+  const router = useBrowserRouter();
+  const { pathname, search } = useBrowserLocation();
+  const filters = useMemo(() => parseDashboardFiltersFromSearch(search), [search]);
+  const searchKey = useMemo(() => new URLSearchParams(search).toString(), [search]);
+  const canonicalSearch = useMemo(() => dashboardFiltersToSearchParams(filters, new URLSearchParams(search)).toString(), [filters, search]);
+  const { data, loading, error, reload } = useDashboardSummary(timeRange, filters, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const [viewPanelId, setViewPanelId] = useState<DashboardPanelId | null>(null);
   const mask = (value: string) => visible ? value : "••••••";
-  const setFilter = (key: keyof DashboardFilterState, value: string | string[]) => setFilters((current) => ({ ...current, [key]: value }));
-  const clearFilter = (key: keyof DashboardFilterState) => setFilters((current) => ({ ...current, [key]: Array.isArray(current[key]) ? [] : "" }));
-  const clearFilters = () => setFilters(DEFAULT_DASHBOARD_FILTERS);
+  const replaceFilters = useCallback((nextFilters: DashboardFilterState) => {
+    const query = dashboardFiltersToSearchParams(nextFilters, new URLSearchParams(search)).toString();
+    if (query === searchKey) return;
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [pathname, router, search, searchKey]);
+  const setFilter = useCallback((key: DashboardFilterKey, value: string | string[]) => {
+    replaceFilters(normalizeDashboardFilters({ ...filters, [key]: value }));
+  }, [filters, replaceFilters]);
+  const clearFilter = useCallback((key: DashboardFilterKey) => {
+    replaceFilters(normalizeDashboardFilters({ ...filters, [key]: Array.isArray(filters[key]) ? [] : "" }));
+  }, [filters, replaceFilters]);
+  const clearFilters = useCallback(() => replaceFilters(DEFAULT_DASHBOARD_FILTERS), [replaceFilters]);
+  const activeFilters = hasActiveDashboardFilters(filters);
+  const dashboardEmpty = data ? isDashboardEmpty(data) : false;
+
+  useEffect(() => {
+    if (canonicalSearch === searchKey) return;
+    router.replace(canonicalSearch ? `${pathname}?${canonicalSearch}` : pathname, { scroll: false });
+  }, [canonicalSearch, pathname, router, searchKey]);
 
   useEffect(() => {
     if (!viewPanelId) return;
@@ -75,9 +76,9 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [viewPanelId]);
 
-  if (loading && !data) return <section className="card p-6 text-sm text-stone">正在加载看板…</section>;
-  if (error && !data) return <section className="card p-6 text-sm text-stone">{error}</section>;
-  if (!data) return <section className="card p-6 text-sm text-stone">暂无看板数据</section>;
+  if (loading && !data) return <DashboardStatusCard title="正在加载趋势看板" detail="正在读取当前时间范围、筛选条件和敏感资产数据。" icon={<RefreshCw className="h-4 w-4 animate-spin text-brand" />} />;
+  if (error && !data) return <DashboardStatusCard title="看板加载失败" detail={error} icon={<AlertTriangle className="h-4 w-4 amount-expense" />} actionLabel="重试" onAction={reload} />;
+  if (!data) return <DashboardStatusCard title="暂无看板数据" detail="服务端暂时没有返回可展示的汇总数据。" actionLabel="重新加载" onAction={reload} />;
 
   const maxExpense = data.anomalies[0]?.amount ?? 0;
   const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
@@ -149,6 +150,9 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
 
   return <div className="space-y-4">
     <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
+    {loading && <DashboardNotice tone="loading" title="正在刷新看板" detail="当前图表先保留，上方筛选或时间范围的数据回来后会自动更新。" />}
+    {error && <DashboardNotice tone="error" title="后台刷新失败" detail={error} actionLabel="重试" onAction={reload} />}
+    {dashboardEmpty ? <DashboardEmptyState filtered={activeFilters} onClearFilters={clearFilters} onRetry={reload} /> : <>
 
     <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(formatCompactCny(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
@@ -216,6 +220,7 @@ export function DashboardPage({ timeRange, visible, onToggleVisible, onSensitive
       </Panel>
     </div>
     </DashboardRow>
+    </>}
     {viewPanel && <DashboardPanelView panel={viewPanel} onClose={() => setViewPanelId(null)} />}
   </div>;
 }
@@ -268,7 +273,9 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const params = dashboardQueryParams(timeRange, filters);
+  const [reloadToken, setReloadToken] = useState(0);
+  const params = dashboardFiltersToApiQuery(timeRange, filters);
+  const reload = useCallback(() => setReloadToken((value) => value + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -294,21 +301,80 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
     }
     void load();
     return () => controller.abort();
-  }, [onSensitiveLocked, params]);
+  }, [onSensitiveLocked, params, reloadToken]);
 
-  return { data, loading, error };
+  return { data, loading, error, reload };
 }
 
-function dashboardQueryParams(timeRange: TimeRange, filters: DashboardFilterState) {
-  const params = new URLSearchParams(timeRangeToParams(timeRange));
-  for (const [key, value] of Object.entries(filters)) {
-    const trimmed = Array.isArray(value) ? value.join(",") : value.trim();
-    if (trimmed) params.set(key, trimmed);
-  }
-  return params.toString();
+function DashboardStatusCard({ title, detail, icon, actionLabel, onAction }: { title: string; detail: string; icon?: ReactNode; actionLabel?: string; onAction?: () => void }) {
+  return <section className="card p-5">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+        {icon && <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-panel">{icon}</span>}
+        <div className="min-w-0">
+          <h2 className="font-serif text-xl text-warm">{title}</h2>
+          <p className="mt-1 text-sm text-stone">{detail}</p>
+        </div>
+      </div>
+      {actionLabel && onAction && <button type="button" className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onAction}>
+        <RefreshCw className="h-4 w-4 text-brand" />
+        {actionLabel}
+      </button>}
+    </div>
+  </section>;
 }
 
-function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: keyof DashboardFilterState, value: string | string[]) => void; onClear: (key: keyof DashboardFilterState) => void; onClearAll: () => void }) {
+function DashboardNotice({ tone, title, detail, actionLabel, onAction }: { tone: "loading" | "error"; title: string; detail: string; actionLabel?: string; onAction?: () => void }) {
+  return <section className={`rounded-lg border border-line px-3 py-2 ${tone === "error" ? "bg-panel" : "bg-panel/80"}`}>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        {tone === "loading" ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-brand" /> : <AlertTriangle className="h-4 w-4 shrink-0 amount-expense" />}
+        <span className="font-medium text-olive">{title}</span>
+        <span className="min-w-0 text-stone">{detail}</span>
+      </div>
+      {actionLabel && onAction && <button type="button" className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 text-xs text-olive hover:bg-tag" onClick={onAction}>
+        <RefreshCw className="h-3.5 w-3.5 text-brand" />
+        {actionLabel}
+      </button>}
+    </div>
+  </section>;
+}
+
+function DashboardEmptyState({ filtered, onClearFilters, onRetry }: { filtered: boolean; onClearFilters: () => void; onRetry: () => void }) {
+  return <section className="card p-6">
+    <div className="mx-auto max-w-xl text-center">
+      <h2 className="font-serif text-2xl text-warm">{filtered ? "没有匹配当前筛选的交易" : "当前时间范围暂无看板数据"}</h2>
+      <p className="mt-2 text-sm text-stone">
+        {filtered ? "可以放宽分类、账户、商户、标签或金额条件，再查看趋势和排行。" : "这个时间范围还没有可汇总的收入、支出、资产或预算记录。"}
+      </p>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        {filtered && <button type="button" className="inline-flex h-9 items-center justify-center rounded-lg border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onClearFilters}>清空筛选</button>}
+        <button type="button" className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onRetry}>
+          <RefreshCw className="h-4 w-4 text-brand" />
+          重试加载
+        </button>
+      </div>
+    </div>
+  </section>;
+}
+
+function isDashboardEmpty(data: DashboardSummary) {
+  return data.kpis.income === 0
+    && data.kpis.expense === 0
+    && data.kpis.net === 0
+    && data.netWorthSeries.length === 0
+    && data.cashflowSeries.length === 0
+    && data.dailyExpenseSeries.length === 0
+    && data.categorySeries.length === 0
+    && data.accountBalanceSeries.length === 0
+    && data.budgetPressure.length === 0
+    && data.anomalies.length === 0
+    && data.topPayees.length === 0
+    && data.topPaymentAccounts.length === 0
+    && data.annotations.length === 0;
+}
+
+function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: DashboardFilterKey, value: string | string[]) => void; onClear: (key: DashboardFilterKey) => void; onClearAll: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const chips = activeFilterChips(data, filters);
   const Icon = expanded ? ChevronDown : ChevronRight;
@@ -346,7 +412,7 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
   </section>;
 }
 
-function FilterChip({ chip, onClear }: { chip: { key: keyof DashboardFilterState; label: string }; onClear: (key: keyof DashboardFilterState) => void }) {
+function FilterChip({ chip, onClear }: { chip: { key: DashboardFilterKey; label: string }; onClear: (key: DashboardFilterKey) => void }) {
   return <button type="button" className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-tag px-2.5 py-1 text-xs text-olive hover:bg-panel" onClick={() => onClear(chip.key)} title="移除此筛选">
     <span className="truncate">{chip.label}</span>
     <X className="h-3 w-3 shrink-0" />
@@ -385,8 +451,8 @@ function MoneyFilterInput({ label, value, onChange }: { label: string; value: st
 }
 
 function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState) {
-  const chips: { key: keyof DashboardFilterState; label: string }[] = [];
-  const add = (key: keyof DashboardFilterState, label: string, value: string) => {
+  const chips: { key: DashboardFilterKey; label: string }[] = [];
+  const add = (key: DashboardFilterKey, label: string, value: string) => {
     if (value.trim()) chips.push({ key, label: `${label}: ${value}` });
   };
   if (filters.type.length) chips.push({ key: "type", label: `类型: ${filters.type.map(typeLabel).join(" / ")}` });
