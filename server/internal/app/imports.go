@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type ImportEntry struct {
@@ -72,6 +73,18 @@ type beanSummary struct {
 	CandidateCount int
 	DateStart      string
 	DateEnd        string
+}
+
+type ImportDocument struct {
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	Year      string `json:"year"`
+	Ext       string `json:"ext"`
+	Provider  string `json:"provider,omitempty"`
+	DateStart string `json:"dateStart,omitempty"`
+	DateEnd   string `json:"dateEnd,omitempty"`
+	Size      int64  `json:"size"`
+	ModTime   string `json:"modTime"`
 }
 
 func (s *Server) createImportPreview(providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
@@ -234,6 +247,112 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry) 
 		return nil, err
 	}
 	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText}, nil
+}
+
+func (s *Server) listImportDocuments() ([]ImportDocument, error) {
+	root := transactionsDir(s.cfg)
+	documents := []ImportDocument{}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return documents, nil
+		}
+		return nil, err
+	}
+	for _, yearEntry := range entries {
+		if !yearEntry.IsDir() || !regexp.MustCompile(`^\d{4}$`).MatchString(yearEntry.Name()) {
+			continue
+		}
+		dir := filepath.Join(root, yearEntry.Name(), "documents", "imports")
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			info, err := file.Info()
+			if err != nil {
+				return nil, err
+			}
+			rel, err := filepath.Rel(s.cfg.LedgerRoot, filepath.Join(dir, file.Name()))
+			if err != nil {
+				return nil, err
+			}
+			document := importDocumentInfo(filepath.ToSlash(rel), yearEntry.Name(), info.Name(), info.Size(), info.ModTime())
+			documents = append(documents, document)
+		}
+	}
+	sort.Slice(documents, func(i, j int) bool {
+		if documents[i].ModTime == documents[j].ModTime {
+			return documents[i].Path > documents[j].Path
+		}
+		return documents[i].ModTime > documents[j].ModTime
+	})
+	return documents, nil
+}
+
+func importDocumentInfo(path, year, name string, size int64, modTime time.Time) ImportDocument {
+	document := ImportDocument{
+		Path:    path,
+		Name:    name,
+		Year:    year,
+		Ext:     strings.ToLower(filepath.Ext(name)),
+		Size:    size,
+		ModTime: modTime.Format(time.RFC3339),
+	}
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	if before, after, ok := strings.Cut(base, "_"); ok {
+		document.DateStart = before
+		if len(after) > len("2006-01-02-") && after[10] == '-' {
+			document.DateEnd = after[:10]
+			providerPart := after[11:]
+			providers := importProviderIDs()
+			sort.Slice(providers, func(i, j int) bool { return len(providers[i]) > len(providers[j]) })
+			for _, provider := range providers {
+				if providerPart == provider || strings.HasPrefix(providerPart, provider+"-") {
+					document.Provider = provider
+					break
+				}
+			}
+		}
+	}
+	return document
+}
+
+func cleanImportDocumentPath(cfg Config, rawPath string) (string, string, error) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", "", errors.New("path is required")
+	}
+	if strings.Contains(trimmed, "\x00") || filepath.IsAbs(trimmed) {
+		return "", "", errors.New("invalid import document path")
+	}
+	path := filepath.ToSlash(filepath.Clean(trimmed))
+	if path == "." || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
+		return "", "", errors.New("invalid import document path")
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) != 5 || parts[0] != "transactions" || !regexp.MustCompile(`^\d{4}$`).MatchString(parts[1]) || parts[2] != "documents" || parts[3] != "imports" || parts[4] == "" {
+		return "", "", errors.New("path is outside import documents")
+	}
+	full := filepath.Join(cfg.LedgerRoot, filepath.FromSlash(path))
+	rel, err := filepath.Rel(cfg.LedgerRoot, full)
+	if err != nil || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." || filepath.IsAbs(rel) {
+		return "", "", errors.New("invalid import document path")
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", "", err
+	}
+	if info.IsDir() {
+		return "", "", errors.New("import document path is a directory")
+	}
+	return path, full, nil
 }
 
 func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {

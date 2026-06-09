@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,31 @@ func (s *Server) importsProviders(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"providers": importProviderOptions()})
+}
+
+func (s *Server) importsDocuments(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	documents, err := s.listImportDocuments()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"documents": documents})
+}
+
+func (s *Server) importsDocumentFile(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	path, full, err := cleanImportDocumentPath(s.cfg, c.Query("path"))
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.Header("Content-Disposition", `inline; filename="`+filepath.Base(path)+`"`)
+	c.File(full)
 }
 
 func (s *Server) importsCommit(c *gin.Context) {

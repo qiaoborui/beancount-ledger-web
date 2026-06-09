@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,33 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	documentText := string(mustRead(t, filepath.Join(documentsDir, documents[0].Name())))
 	if documentText != "%PDF original statement" {
 		t.Fatalf("archived document content = %q", documentText)
+	}
+	list := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/documents", "", cookies)
+	if list.Code != http.StatusOK {
+		t.Fatalf("documents status=%d body=%s", list.Code, list.Body.String())
+	}
+	var history struct {
+		Documents []ImportDocument `json:"documents"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Documents) != 1 {
+		t.Fatalf("documents = %#v", history.Documents)
+	}
+	if history.Documents[0].Provider != "alipay" || history.Documents[0].DateStart != "2026-05-03" || history.Documents[0].Ext != ".pdf" {
+		t.Fatalf("unexpected document metadata: %#v", history.Documents[0])
+	}
+	fileRes := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/documents/file?path="+url.QueryEscape(history.Documents[0].Path), "", cookies)
+	if fileRes.Code != http.StatusOK {
+		t.Fatalf("document file status=%d body=%s", fileRes.Code, fileRes.Body.String())
+	}
+	if fileRes.Body.String() != "%PDF original statement" {
+		t.Fatalf("document file body = %q", fileRes.Body.String())
+	}
+	badPath := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/documents/file?path="+url.QueryEscape("../main.bean"), "", cookies)
+	if badPath.Code != http.StatusBadRequest {
+		t.Fatalf("bad document path status=%d body=%s", badPath.Code, badPath.Body.String())
 	}
 }
 
