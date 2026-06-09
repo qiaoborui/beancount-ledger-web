@@ -149,7 +149,7 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start, end string, filters DashboardFilters, valuationCurrency string) DashboardSummary {
 	valuationCurrency = ValidValuationCurrency(valuationCurrency, snapshot.Commodities)
 	txns := dashboardFilterTransactions(snapshot.Transactions, filters, snapshot.Prices, valuationCurrency)
-	rawBalances := CurrentBalances(snapshot.Transactions)
+	rawBalances := snapshotRawBalances(snapshot)
 	if !filters.Empty() {
 		rawBalances = CurrentBalances(txns)
 	}
@@ -175,7 +175,7 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 		End:                  end,
 		Currency:             valuationCurrency,
 		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
-		NetWorthSeries:       dashboardNetWorthSeries(txns, snapshot.Prices, start, end, valuationCurrency),
+		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), snapshot.Prices, start, end, valuationCurrency),
 		CashflowSeries:       dashboardCashflowSeries(txns, snapshot.Prices, start, end, valuationCurrency),
 		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, snapshot.Prices, start, end, valuationCurrency),
 		WeekdayExpense:       dashboardWeekdayExpense(txns, snapshot.Prices, start, end, valuationCurrency),
@@ -393,8 +393,10 @@ func balanceTotals(balances []AccountBalance) (int, int) {
 	return assets, liabilities
 }
 
-func dashboardNetWorthSeries(txns []Transaction, prices []Price, start, end, valuationCurrency string) []NetWorthPoint {
-	buckets := dashboardBuckets(start, end)
+func dashboardSortedTransactions(snapshot *LedgerSnapshot, txns []Transaction, filters DashboardFilters) []Transaction {
+	if filters.Empty() {
+		return snapshotTransactionsAsc(snapshot)
+	}
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].Date == sorted[j].Date {
@@ -402,6 +404,11 @@ func dashboardNetWorthSeries(txns []Transaction, prices []Price, start, end, val
 		}
 		return sorted[i].Date < sorted[j].Date
 	})
+	return sorted
+}
+
+func dashboardNetWorthSeries(sorted []Transaction, prices []Price, start, end, valuationCurrency string) []NetWorthPoint {
+	buckets := dashboardBuckets(start, end)
 	balances := map[string]map[string]int{}
 	out := make([]NetWorthPoint, 0, len(buckets))
 	index := 0

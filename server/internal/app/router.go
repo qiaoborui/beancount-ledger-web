@@ -397,10 +397,24 @@ func (s *Server) staticFallback(c *gin.Context) {
 		return
 	}
 	if path == "/" || !strings.Contains(filepath.Base(path), ".") {
+		setStaticCacheHeaders(c, "index.html")
 		c.File(filepath.Join(s.cfg.StaticDir, "index.html"))
 		return
 	}
-	c.File(filepath.Join(s.cfg.StaticDir, filepath.Clean(path)))
+	cleanPath := filepath.Clean(path)
+	setStaticCacheHeaders(c, cleanPath)
+	c.File(filepath.Join(s.cfg.StaticDir, cleanPath))
+}
+
+func setStaticCacheHeaders(c *gin.Context, path string) {
+	switch {
+	case path == "index.html", strings.HasSuffix(path, "/index.html"), strings.HasSuffix(path, "sw.js"):
+		c.Header("Cache-Control", "no-cache")
+	case strings.Contains(path, "/assets/"):
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	default:
+		c.Header("Cache-Control", "public, max-age=3600")
+	}
 }
 
 func parseTimeParams(c *gin.Context) (string, string) {
