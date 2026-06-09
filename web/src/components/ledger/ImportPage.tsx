@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdfDetection";
 import { formatMoney } from "@/lib/money";
@@ -85,6 +85,7 @@ type ImportPreview = {
 };
 
 type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
+type ImportDocument = { path: string; name: string; year: string; ext: string; provider?: string; dateStart?: string; dateEnd?: string; size: number; modTime: string };
 type ImportDraft = {
   savedAt: number;
   providerOverride: ProviderOverride;
@@ -200,6 +201,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [importDocuments, setImportDocuments] = useState<ImportDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState("");
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
@@ -241,6 +245,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    void loadImportDocuments();
   }, []);
 
   useEffect(() => {
@@ -365,6 +373,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setReviewOpen(true);
       writeImportDraft(null);
       setDraftSavedAt(null);
+      void loadImportDocuments();
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -396,6 +405,19 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setSelectedEntryId(id);
     if (typeof window !== "undefined" && window.innerWidth < 1280) {
       window.requestAnimationFrame(() => reviewDetailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    }
+  }
+
+  async function loadImportDocuments() {
+    setDocumentsLoading(true);
+    setDocumentsError("");
+    try {
+      const data = await fetchJson<{ documents: ImportDocument[] }>("/api/ledger/imports/documents", undefined, { documents: [] });
+      setImportDocuments(data.documents ?? []);
+    } catch (err) {
+      setDocumentsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDocumentsLoading(false);
     }
   }
 
@@ -869,6 +891,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         </MobileSheet>
       ) : null}
 
+      <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments()} />
+
       <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -899,6 +923,115 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
       </div>
     </div>
   );
+}
+
+function ImportHistoryPanel({
+  documents,
+  loading,
+  error,
+  providerChoices,
+  onRefresh,
+}: {
+  documents: ImportDocument[];
+  loading: boolean;
+  error: string;
+  providerChoices: ProviderChoice[];
+  onRefresh: () => void;
+}) {
+  const totalSize = documents.reduce((sum, document) => sum + document.size, 0);
+  return (
+    <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
+      <CardContent className="p-0">
+        <div className="flex min-w-0 flex-col gap-3 border-b border-line bg-paper px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileArchive className="h-4 w-4 shrink-0 text-brand" />
+              <h2 className="truncate text-sm font-medium text-ink">历史导入文件</h2>
+            </div>
+            <div className="mt-1 text-xs leading-5 text-stone">{documents.length ? `${documents.length} 个归档文件 · ${fileSize(totalSize)}` : "提交导入后，原始账单会显示在这里。"}</div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
+            刷新
+          </Button>
+        </div>
+
+        {error ? (
+          <Alert variant="destructive" className="m-4 flex items-start gap-2 sm:m-5">
+            <AlertTriangle className="mt-1 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </Alert>
+        ) : documents.length === 0 ? (
+          <div className="grid min-h-36 place-items-center px-4 py-8 text-center text-sm text-stone">
+            {loading ? "正在读取历史导入文件…" : "还没有归档的原始账单文件。"}
+          </div>
+        ) : (
+          <div className="divide-y divide-line">
+            {documents.map((document) => {
+              const href = importDocumentHref(document);
+              return (
+                <article key={document.path} className="grid min-w-0 gap-3 px-4 py-3 transition hover:bg-paper sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-paper text-brand">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{document.name}</span>
+                        <Badge variant="secondary">{importDocumentTypeLabel(document)}</Badge>
+                        {document.provider ? <Badge variant="outline">{providerLabel(document.provider as Provider, providerChoices)}</Badge> : null}
+                      </div>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-stone">
+                        <span>{formatImportDocumentRange(document)}</span>
+                        <span>{document.year}</span>
+                        <span>{fileSize(document.size)}</span>
+                        <span>{formatImportDocumentTime(document.modTime)}</span>
+                      </div>
+                      <div className="mt-1 break-all font-mono text-[11px] leading-5 text-stone">{document.path}</div>
+                    </div>
+                  </div>
+                  <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
+                    <Button asChild variant="outline" size="sm" className="min-w-0">
+                      <a href={href} target="_blank" rel="noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                        打开
+                      </a>
+                    </Button>
+                    <Button asChild variant="secondary" size="sm" className="min-w-0">
+                      <a href={href} download={document.name}>
+                        <Download className="h-4 w-4" />
+                        下载
+                      </a>
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function importDocumentHref(document: ImportDocument) {
+  return `/api/ledger/imports/documents/file?path=${encodeURIComponent(document.path)}`;
+}
+
+function importDocumentTypeLabel(document: ImportDocument) {
+  const ext = document.ext.replace(".", "").trim();
+  return ext ? ext.toUpperCase() : "FILE";
+}
+
+function formatImportDocumentRange(document: ImportDocument) {
+  if (document.dateStart && document.dateEnd) return `${document.dateStart} ~ ${document.dateEnd}`;
+  return "未知账期";
+}
+
+function formatImportDocumentTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "未知时间";
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export function importFlowForEntry(entry: ImportEntry) {
