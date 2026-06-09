@@ -1,7 +1,6 @@
 package app
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -58,7 +57,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsInCurrency(CurrentBalances(snapshot.Transactions), snapshot.Prices, "", valuationCurrency)
+	accountBalances := AccountBalanceRowsInCurrency(snapshotRawBalances(snapshot), snapshot.Prices, "", valuationCurrency)
 	reconciliationRows := []gin.H{}
 	accountStatuses := []AccountStatus{}
 	if unlocked {
@@ -76,7 +75,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		"monthEndNetWorth":   monthEndRows,
 		"netWorthWindows":    windows,
 		"creditCards":        creditCards,
-		"transactions":       FilterLedgerTransactions(snapshot.Transactions, start, end, unlocked),
+		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
 		"budgetRows":         buildBudgetRows(snapshot, start, end, valuationCurrency),
 		"reconciliationRows": reconciliationRows,
 		"accounts":           snapshot.Accounts,
@@ -94,12 +93,12 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsInCurrency(CurrentBalances(snapshot.Transactions), snapshot.Prices, "", valuationCurrency)
+	accountBalances := AccountBalanceRowsInCurrency(snapshotRawBalances(snapshot), snapshot.Prices, "", valuationCurrency)
 	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
 }
 
 func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
-	return gin.H{"start": start, "end": end, "transactions": FilterLedgerTransactions(snapshot.Transactions, start, end, unlocked), "sensitiveUnlocked": unlocked}
+	return gin.H{"start": start, "end": end, "transactions": filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked), "sensitiveUnlocked": unlocked}
 }
 
 func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) gin.H {
@@ -125,10 +124,13 @@ func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end strin
 }
 
 func FilterLedgerTransactions(txns []Transaction, start, end string, unlocked bool) []Transaction {
-	sorted := append([]Transaction(nil), txns...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date > sorted[j].Date })
-	filtered := []Transaction{}
-	for _, txn := range sorted {
+	_, desc := sortedTransactionViews(txns)
+	return filterLedgerTransactionsDesc(desc, start, end, unlocked)
+}
+
+func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocked bool) []Transaction {
+	filtered := make([]Transaction, 0, min(len(txns), 256))
+	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
 			continue
 		}
@@ -170,7 +172,7 @@ func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked
 	if !unlocked {
 		return netWorthRows, monthEndRows, windows, creditCards
 	}
-	allRows := NetWorthHistoryInCurrency(snapshot.Transactions, snapshot.Prices, valuationCurrency)
+	allRows := netWorthHistoryInCurrencyAsc(snapshotTransactionsAsc(snapshot), snapshot.Prices, valuationCurrency)
 	for _, row := range allRows {
 		if row.Date >= start && row.Date < end {
 			netWorthRows = append(netWorthRows, row)

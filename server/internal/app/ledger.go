@@ -145,6 +145,8 @@ var (
 	commodityPattern = `[A-Z][A-Z0-9._-]*`
 	includeRe        = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
 	txnRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
+	txnTagRe         = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
+	directiveRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
 	postRe           = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
 	metaRe           = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
 	balanceRe        = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
@@ -220,7 +222,7 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 			finish()
 			raw = []string{line.Text}
 			tags := []string{}
-			for _, tag := range regexp.MustCompile(`#([A-Za-z0-9_-]+)`).FindAllStringSubmatch(m[4], -1) {
+			for _, tag := range txnTagRe.FindAllStringSubmatch(m[4], -1) {
 				tags = append(tags, tag[1])
 			}
 			txns = append(txns, Transaction{
@@ -232,7 +234,7 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 			current = &txns[len(txns)-1]
 			continue
 		}
-		if regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`).MatchString(line.Text) {
+		if directiveRe.MatchString(line.Text) {
 			finish()
 			current = nil
 			continue
@@ -792,9 +794,13 @@ func NetWorthHistory(txns []Transaction, prices []Price) []NetWorthPoint {
 }
 
 func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
-	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date < sorted[j].Date })
+	return netWorthHistoryInCurrencyAsc(sorted, prices, valuationCurrency)
+}
+
+func netWorthHistoryInCurrencyAsc(sorted []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	balances := map[string]map[string]int{}
 	var rows []NetWorthPoint
 	lastDate := ""

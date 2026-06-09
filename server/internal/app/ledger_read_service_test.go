@@ -28,6 +28,36 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	}
 }
 
+func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
+	cache := NewLedgerCache(testLedger(t))
+	snapshot, err := cache.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RawBalances["Assets:Cash"]["CNY"] != 98800 {
+		t.Fatalf("raw balances not cached correctly: %#v", snapshot.RawBalances)
+	}
+	if len(snapshot.TransactionsAsc) != 2 || snapshot.TransactionsAsc[0].Payee != "Cafe" || snapshot.TransactionsAsc[1].Payee != "Employer" {
+		t.Fatalf("ascending transaction cache changed order: %#v", snapshot.TransactionsAsc)
+	}
+	if len(snapshot.TransactionsDesc) != 2 || snapshot.TransactionsDesc[0].Payee != "Employer" || snapshot.TransactionsDesc[1].Payee != "Cafe" {
+		t.Fatalf("descending transaction cache changed order: %#v", snapshot.TransactionsDesc)
+	}
+	_, sameDayDesc := sortedTransactionViews([]Transaction{
+		{Date: "2026-05-02", Payee: "Second line", Source: TransactionSource{Line: 20}},
+		{Date: "2026-05-02", Payee: "First line", Source: TransactionSource{Line: 10}},
+	})
+	if sameDayDesc[0].Payee != "First line" || sameDayDesc[1].Payee != "Second line" {
+		t.Fatalf("descending cache should keep same-day ledger order: %#v", sameDayDesc)
+	}
+
+	payload := BuildLedgerTransactions(snapshot, "2026-05-01", "2026-06-01", false)
+	txns := payload["transactions"].([]Transaction)
+	if len(txns) != 1 || txns[0].Payee != "Cafe" {
+		t.Fatalf("cached transaction filtering should preserve locked privacy: %#v", txns)
+	}
+}
+
 func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
@@ -83,4 +113,49 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	if incomeStatement["totalIncome"].(int) != 100000 || incomeStatement["netIncome"].(int) != 98800 {
 		t.Fatalf("nested income statement totals changed: %#v", incomeStatement)
 	}
+}
+
+func BenchmarkBuildLedgerTransactionsCached(b *testing.B) {
+	snapshot := benchmarkLedgerSnapshot(2000)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		payload := BuildLedgerTransactions(snapshot, "2026-05-01", "2026-06-01", true)
+		if len(payload["transactions"].([]Transaction)) != len(snapshot.Transactions) {
+			b.Fatal("missing transactions")
+		}
+	}
+}
+
+func BenchmarkFilterLedgerTransactionsSortEachCall(b *testing.B) {
+	snapshot := benchmarkLedgerSnapshot(2000)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		txns := FilterLedgerTransactions(snapshot.Transactions, "2026-05-01", "2026-06-01", true)
+		if len(txns) != len(snapshot.Transactions) {
+			b.Fatal("missing transactions")
+		}
+	}
+}
+
+func benchmarkLedgerSnapshot(count int) *LedgerSnapshot {
+	snapshot := &LedgerSnapshot{}
+	for i := 0; i < count; i++ {
+		date := "2026-05-01"
+		if i%2 == 0 {
+			date = "2026-05-31"
+		}
+		snapshot.Transactions = append(snapshot.Transactions, Transaction{
+			Date:  date,
+			Payee: "Cafe",
+			Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 1200, Currency: "CNY"},
+				{Account: "Assets:Cash", Amount: -1200, Currency: "CNY"},
+			},
+			Source: TransactionSource{Line: i + 1},
+		})
+	}
+	snapshot.TransactionsAsc, snapshot.TransactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	return snapshot
 }
