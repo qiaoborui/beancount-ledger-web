@@ -153,6 +153,42 @@ func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
 	}
 }
 
+func TestStaticFallbackCacheHeaders(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.ServeStatic = true
+	mustWrite(t, filepath.Join(cfg.StaticDir, "index.html"), "<!doctype html>")
+	mustWrite(t, filepath.Join(cfg.StaticDir, "assets", "app.123.js"), "console.log('ok')")
+	mustWrite(t, filepath.Join(cfg.StaticDir, "sw.js"), "")
+	router := NewRouter(cfg)
+
+	index := httptest.NewRecorder()
+	router.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	if index.Code != http.StatusOK {
+		t.Fatalf("index status=%d body=%s", index.Code, index.Body.String())
+	}
+	if got := index.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("index Cache-Control=%q", got)
+	}
+
+	asset := httptest.NewRecorder()
+	router.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/assets/app.123.js", nil))
+	if asset.Code != http.StatusOK {
+		t.Fatalf("asset status=%d body=%s", asset.Code, asset.Body.String())
+	}
+	if got := asset.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("asset Cache-Control=%q", got)
+	}
+
+	serviceWorker := httptest.NewRecorder()
+	router.ServeHTTP(serviceWorker, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+	if serviceWorker.Code != http.StatusOK {
+		t.Fatalf("sw status=%d body=%s", serviceWorker.Code, serviceWorker.Body.String())
+	}
+	if got := serviceWorker.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("sw Cache-Control=%q", got)
+	}
+}
+
 func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	cfg := testLedger(t)
 	router := NewRouter(cfg)
