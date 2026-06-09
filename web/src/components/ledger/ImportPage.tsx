@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, FileArchive, FileSpreadsheet, FileUp, Loader2, Pencil, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
-import { convertCmbCheckingPdfToCsv, shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdf";
+import { shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdfDetection";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
@@ -324,7 +324,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setResultOpen(false);
     try {
       const uploadFile = shouldConvertCmbCheckingPdf(file, providerOverride)
-        ? await convertCmbCheckingPdfToCsv(file)
+        ? await import("@/lib/cmbCheckingPdf").then((mod) => mod.convertCmbCheckingPdfToCsv(file))
         : file;
       const form = new FormData();
       if (providerOverride !== "auto") form.set("provider", providerOverride);

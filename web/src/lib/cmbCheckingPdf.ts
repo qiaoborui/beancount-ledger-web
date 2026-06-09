@@ -1,6 +1,7 @@
 import * as pdfjs from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import type { TextItem, TextMarkedContent } from "pdfjs-dist/types/src/display/api";
+export { shouldConvertCmbCheckingPdf } from "./cmbCheckingPdfDetection";
 
 const cmbCheckingHeaders = ["记账日期", "货币", "交易金额", "联机余额", "交易摘要", "对手信息", "客户摘要"];
 
@@ -95,12 +96,4 @@ export async function convertCmbCheckingPdfToCsv(file: File): Promise<File> {
   const headers = headerItems.map((item) => item.str);
   const csv = [csvLine(headers), ...allRows.map((row) => csvLine(tableRow(row, headers.length)))].join("\n");
   return new File([csv], `${file.name}.csv`, { type: "text/csv;charset=utf-8" });
-}
-
-export function shouldConvertCmbCheckingPdf(file: File, provider: "auto" | "cmb-checking" | string) {
-  const isPDF = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
-  if (!isPDF) {
-    return false;
-  }
-  return provider === "cmb-checking" || (provider === "auto" && file.name.includes("招商银行交易流水"));
 }

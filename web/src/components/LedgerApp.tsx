@@ -25,7 +25,6 @@ import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
-import { AiBookkeepingChat } from "./ledger/AiBookkeepingChat";
 import { CommandPalette, type CommandAction } from "./ledger/CommandPalette";
 import { EntryModal, EntryPanel } from "./ledger/EntryModal";
 import { GitSaveModal } from "./ledger/GitSaveModal";
@@ -49,6 +48,8 @@ const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage"
 
 const LazyDashboardPage = lazy(() => import("./ledger/DashboardPage").then((mod) => ({ default: mod.DashboardPage })));
 
+const LazyAiBookkeepingChat = lazy(() => import("./ledger/AiBookkeepingChat").then((mod) => ({ default: mod.AiBookkeepingChat })));
+
 function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
 }
@@ -59,6 +60,10 @@ function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPag
 
 function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备看板…</section>}><LazyDashboardPage {...props} /></Suspense>;
+}
+
+function AiBookkeepingChat(props: ComponentProps<typeof LazyAiBookkeepingChat>) {
+  return <Suspense fallback={null}><LazyAiBookkeepingChat {...props} /></Suspense>;
 }
 
 function pageFromPathname(pathname: string): LedgerPage {
@@ -155,6 +160,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [aiOpenSignal, setAiOpenSignal] = useState(0);
+  const [aiChatMounted, setAiChatMounted] = useState(false);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
@@ -311,7 +317,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (!authed || !shortcutAction) return;
     haptic(8);
     if (shortcutAction === "quick-entry" || shortcutAction === "new-entry") setEntryOpen(true);
-    if (shortcutAction === "ai-entry") setAiOpenSignal((value) => value + 1);
+    if (shortcutAction === "ai-entry") {
+      setAiChatMounted(true);
+      setAiOpenSignal((value) => value + 1);
+    }
     if (shortcutAction === "quick-actions") setQuickActionsOpen(true);
     if (shortcutAction === "sync-pending") void syncPendingWrites();
 
@@ -419,6 +428,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   function openAiEntry() {
+    setAiChatMounted(true);
     setAiOpenSignal((value) => value + 1);
   }
 
@@ -612,7 +622,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       )}
       </div>
 
-      <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} openSignal={aiOpenSignal} />
+      {aiChatMounted && <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} openSignal={aiOpenSignal} />}
 
       {entryOpen && <EntryModal onClose={() => setEntryOpen(false)}><EntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></EntryModal>}
     </AppShell>
