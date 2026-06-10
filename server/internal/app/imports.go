@@ -600,6 +600,11 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 			if err := validateKnownCurrency("currency", posting.Currency, snapshot.Commodities); err != nil {
 				return "", fmt.Errorf("第 %d 条: %w", index+1, err)
 			}
+			if posting.PriceCurrency != "" {
+				if err := validateKnownCurrency("priceCurrency", posting.PriceCurrency, snapshot.Commodities); err != nil {
+					return "", fmt.Errorf("第 %d 条: %w", index+1, err)
+				}
+			}
 		}
 		metadata := map[string]MetadataValue{}
 		for key, value := range entry.Metadata {
@@ -626,7 +631,8 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 			if currency == "" {
 				currency = "CNY"
 			}
-			lines = append(lines, fmt.Sprintf("  %-34s %12s %s", posting.Account, posting.Amount, currency))
+			posting.Currency = currency
+			lines = append(lines, renderEntryPosting(posting))
 		}
 		blocks = append(blocks, strings.Join(lines, "\n"))
 	}

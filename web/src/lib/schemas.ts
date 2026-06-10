@@ -15,6 +15,9 @@ export const PostingSchema = z.object({
   account: z.string().min(1),
   amount: AmountSchema,
   currency: z.string().regex(/^[A-Z][A-Z0-9._-]*$/),
+  priceKind: z.enum(["unit", "total"]).optional(),
+  priceAmount: z.string().regex(/^\d+(\.\d{1,6})?$/).optional(),
+  priceCurrency: z.string().regex(/^[A-Z][A-Z0-9._-]*$/).optional(),
 });
 
 export const MetadataValueSchema = z.union([z.string(), z.number(), z.boolean()]);

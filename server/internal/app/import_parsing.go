@@ -47,7 +47,7 @@ func parsePreviewEntry(block string, index int) (ImportEntry, error) {
 	metadata := map[string]string{}
 	postings := []EntryPosting{}
 	metaRe := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*):\s+(.+)$`)
-	postRe := regexp.MustCompile(`^([A-Za-z][A-Za-z0-9:_-]+)\s+(-?\d+(?:\.\d+)?)\s+([A-Z][A-Z0-9]*)$`)
+	postRe := regexp.MustCompile(`^([A-Za-z][A-Za-z0-9:_-]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)(?:\s+(@@?)\s+(\d+(?:\.\d+)?)\s+(` + commodityPattern + `))?$`)
 	for _, line := range lines[1:] {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -58,7 +58,13 @@ func parsePreviewEntry(block string, index int) (ImportEntry, error) {
 			continue
 		}
 		if m := postRe.FindStringSubmatch(trimmed); m != nil {
-			postings = append(postings, EntryPosting{Account: m[1], Amount: m[2], Currency: m[3]})
+			priceKind := ""
+			if m[4] == "@" {
+				priceKind = "unit"
+			} else if m[4] == "@@" {
+				priceKind = "total"
+			}
+			postings = append(postings, EntryPosting{Account: m[1], Amount: m[2], Currency: m[3], PriceKind: priceKind, PriceAmount: m[5], PriceCurrency: m[6]})
 		}
 	}
 	category, funding := choosePreviewAccounts(postings)

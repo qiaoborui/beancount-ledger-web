@@ -75,7 +75,6 @@ type ImportCommitRequest struct {
 
 var (
 	datePattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-	amountPattern      = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
 	accountNamePattern = regexp.MustCompile(`^(Assets|Liabilities|Equity|Income|Expenses)(:[A-Za-z0-9][A-Za-z0-9_-]*)+$`)
 	currencyPattern    = regexp.MustCompile(`^` + commodityPattern + `$`)
 	tagPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -299,6 +298,20 @@ func (p EntryPosting) Validate() error {
 	if err := validateCurrency("currency", p.Currency); err != nil {
 		return err
 	}
+	if p.PriceAmount != "" || p.PriceCurrency != "" {
+		if p.PriceAmount == "" || p.PriceCurrency == "" {
+			return fmt.Errorf("priceAmount and priceCurrency must be provided together")
+		}
+		if p.PriceKind != "" && p.PriceKind != "unit" && p.PriceKind != "total" {
+			return fmt.Errorf("priceKind must be unit or total")
+		}
+		if err := validateDecimalAmount("priceAmount", p.PriceAmount, 6); err != nil {
+			return err
+		}
+		if err := validateCurrency("priceCurrency", p.PriceCurrency); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -339,8 +352,13 @@ func validateDate(field, value string) error {
 }
 
 func validateAmount(field, value string) error {
-	if !amountPattern.MatchString(strings.TrimSpace(value)) {
-		return fmt.Errorf("%s must be a decimal amount with at most two places", field)
+	return validateDecimalAmount(field, value, 2)
+}
+
+func validateDecimalAmount(field, value string, places int) error {
+	pattern := regexp.MustCompile(fmt.Sprintf(`^-?\d+(\.\d{1,%d})?$`, places))
+	if !pattern.MatchString(strings.TrimSpace(value)) {
+		return fmt.Errorf("%s must be a decimal amount with at most %d places", field, places)
 	}
 	return nil
 }
