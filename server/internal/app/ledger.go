@@ -113,13 +113,16 @@ type IncomeStatementNode struct {
 }
 
 func ApplyIncomeStatementAccountLabels(nodes []IncomeStatementNode, accounts []Account) []IncomeStatementNode {
-	accountMap := accountByName(accounts)
+	return applyIncomeStatementAccountLabels(nodes, accountByName(accounts))
+}
+
+func applyIncomeStatementAccountLabels(nodes []IncomeStatementNode, accountMap map[string]Account) []IncomeStatementNode {
 	out := make([]IncomeStatementNode, len(nodes))
 	for i, node := range nodes {
 		label, alias := accountLabelAlias(node.Account, accountMap)
 		node.Label = label
 		node.Alias = alias
-		node.Children = ApplyIncomeStatementAccountLabels(node.Children, accounts)
+		node.Children = applyIncomeStatementAccountLabels(node.Children, accountMap)
 		out[i] = node
 	}
 	return out
@@ -476,7 +479,10 @@ func CurrentBalances(txns []Transaction) map[string]map[string]int {
 }
 
 func NativeAccountBalances(balances map[string]map[string]int, accounts []Account) map[string]int {
-	accountMap := accountByName(accounts)
+	return nativeAccountBalances(balances, accountByName(accounts))
+}
+
+func nativeAccountBalances(balances map[string]map[string]int, accountMap map[string]Account) map[string]int {
 	out := map[string]int{}
 	for account, byCurrency := range balances {
 		if acct, ok := accountMap[account]; ok && acct.Currency != "" {
@@ -497,11 +503,15 @@ func AccountBalanceRows(balances map[string]map[string]int, prices []Price, date
 }
 
 func AccountBalanceRowsInCurrency(balances map[string]map[string]int, prices []Price, date, valuationCurrency string) []AccountBalance {
-	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
+	return AccountBalanceRowsWithPriceIndex(balances, NewPriceIndex(prices), date, valuationCurrency)
+}
+
+func AccountBalanceRowsWithPriceIndex(balances map[string]map[string]int, priceIndex PriceIndex, date string, rawValuationCurrency ...string) []AccountBalance {
+	valuationCurrency := normalizeValuationCurrency(firstRawValuationCurrency(rawValuationCurrency))
 	rows := []AccountBalance{}
 	for account, byCurrency := range balances {
 		for currency, amount := range byCurrency {
-			valuation, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, date)
+			valuation, ok := priceIndex.Valuation(amount, currency, valuationCurrency, "")
 			rows = append(rows, AccountBalance{
 				Account:           account,
 				Currency:          currency,
@@ -521,65 +531,82 @@ func AccountBalanceRowsInCurrency(balances map[string]map[string]int, prices []P
 	return rows
 }
 
-func ValuationInCNY(amount int, currency string, prices []Price, date string) (int, bool) {
-	return ValuationInCurrency(amount, currency, "CNY", prices, date)
+func firstRawValuationCurrency(values []string) string {
+	if len(values) == 0 {
+		return "CNY"
+	}
+	return values[0]
 }
 
-func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, _ string) (int, bool) {
-	return valuationInCurrencyAt(amount, currency, targetCurrency, prices, "")
+type PriceIndex struct {
+	byPair map[string][]Price
 }
 
-func ValuationInCurrencyAt(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
-	return valuationInCurrencyAt(amount, currency, targetCurrency, prices, date)
+func NewPriceIndex(prices []Price) PriceIndex {
+	index := PriceIndex{byPair: map[string][]Price{}}
+	for _, price := range prices {
+		key := pricePairKey(price.Currency, price.QuoteCurrency)
+		index.byPair[key] = append(index.byPair[key], price)
+	}
+	for key := range index.byPair {
+		rows := index.byPair[key]
+		sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
+		index.byPair[key] = rows
+	}
+	return index
 }
 
-func valuationInCurrencyAt(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+func (index PriceIndex) Valuation(amount int, currency, targetCurrency string, date string) (int, bool) {
 	currency = normalizeValuationCurrency(currency)
 	targetCurrency = normalizeValuationCurrency(targetCurrency)
 	if currency == targetCurrency {
 		return amount, true
 	}
-	if price, ok := latestPrice(currency, targetCurrency, prices, date); ok {
+	if price, ok := index.latestPrice(currency, targetCurrency, date); ok {
 		return amount * price.Amount / 100, true
 	}
-	if price, ok := latestPrice(targetCurrency, currency, prices, date); ok && price.Amount != 0 {
+	if price, ok := index.latestPrice(targetCurrency, currency, date); ok && price.Amount != 0 {
 		return amount * 100 / price.Amount, true
 	}
 	if currency != "CNY" && targetCurrency != "CNY" {
-		cny, ok := valuationInCurrencyAt(amount, currency, "CNY", prices, date)
+		cny, ok := index.Valuation(amount, currency, "CNY", date)
 		if !ok {
 			return 0, false
 		}
-		return valuationInCurrencyAt(cny, "CNY", targetCurrency, prices, date)
+		return index.Valuation(cny, "CNY", targetCurrency, date)
 	}
 	return 0, false
 }
 
-func latestPrice(currency, quoteCurrency string, prices []Price, date string) (*Price, bool) {
-	var latest *Price
-	var earliestFuture *Price
-	for i := range prices {
-		price := &prices[i]
-		if price.Currency != currency || price.QuoteCurrency != quoteCurrency {
-			continue
-		}
-		if date != "" && price.Date > date {
-			if earliestFuture == nil || price.Date < earliestFuture.Date {
-				earliestFuture = price
-			}
-			continue
-		}
-		if latest == nil || price.Date >= latest.Date {
-			latest = price
-		}
+func (index PriceIndex) latestPrice(currency, quoteCurrency string, date string) (*Price, bool) {
+	prices := index.byPair[pricePairKey(currency, quoteCurrency)]
+	if len(prices) == 0 {
+		return nil, false
 	}
-	if latest == nil {
-		if earliestFuture == nil {
-			return nil, false
-		}
-		return earliestFuture, true
+	if date == "" {
+		return &prices[len(prices)-1], true
 	}
-	return latest, true
+	i := sort.Search(len(prices), func(i int) bool { return prices[i].Date > date })
+	if i > 0 {
+		return &prices[i-1], true
+	}
+	return &prices[0], true
+}
+
+func pricePairKey(currency, quoteCurrency string) string {
+	return normalizeValuationCurrency(currency) + "\x00" + normalizeValuationCurrency(quoteCurrency)
+}
+
+func ValuationInCNY(amount int, currency string, prices []Price, date string) (int, bool) {
+	return ValuationInCurrency(amount, currency, "CNY", prices, date)
+}
+
+func ValuationInCurrency(amount int, currency, targetCurrency string, prices []Price, _ string) (int, bool) {
+	return NewPriceIndex(prices).Valuation(amount, currency, targetCurrency, "")
+}
+
+func ValuationInCurrencyAt(amount int, currency, targetCurrency string, prices []Price, date string) (int, bool) {
+	return NewPriceIndex(prices).Valuation(amount, currency, targetCurrency, date)
 }
 
 func normalizeValuationCurrency(currency string) string {
@@ -605,7 +632,15 @@ func postingValuationInCNY(posting Posting, prices []Price, date string) int {
 }
 
 func postingValuationInCurrency(posting Posting, prices []Price, date, valuationCurrency string) int {
-	value, ok := ValuationInCurrency(posting.Amount, posting.Currency, valuationCurrency, prices, date)
+	value, ok := NewPriceIndex(prices).Valuation(posting.Amount, posting.Currency, valuationCurrency, "")
+	if !ok {
+		return 0
+	}
+	return value
+}
+
+func postingValuationWithPriceIndex(posting Posting, priceIndex PriceIndex, date, valuationCurrency string) int {
+	value, ok := priceIndex.Valuation(posting.Amount, posting.Currency, valuationCurrency, date)
 	if !ok {
 		return 0
 	}
@@ -617,6 +652,10 @@ func MonthSummary(start, end string, txns []Transaction, prices []Price) Summary
 }
 
 func MonthSummaryInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) Summary {
+	return MonthSummaryWithPriceIndex(start, end, txns, NewPriceIndex(prices), valuationCurrency)
+}
+
+func MonthSummaryWithPriceIndex(start, end string, txns []Transaction, priceIndex PriceIndex, valuationCurrency string) Summary {
 	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	summary := Summary{Days: map[string]map[string]int{}, Categories: map[string]int{}}
 	for _, txn := range txns {
@@ -628,7 +667,7 @@ func MonthSummaryInCurrency(start, end string, txns []Transaction, prices []Pric
 			summary.Days[day] = map[string]int{"income": 0, "expense": 0}
 		}
 		for _, posting := range txn.Postings {
-			amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+			amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			if strings.HasPrefix(posting.Account, "Income:") {
 				if amount < 0 {
 					amount = -amount
@@ -665,6 +704,7 @@ func IncomeStatementTree(start, end string, txns []Transaction) ([]IncomeStateme
 func IncomeStatementTreeInCurrency(start, end string, txns []Transaction, prices []Price, valuationCurrency string) ([]IncomeStatementNode, []IncomeStatementNode, int, int, int) {
 	incomeMap := map[string]incomeStatementAggregate{}
 	expenseMap := map[string]incomeStatementAggregate{}
+	priceIndex := NewPriceIndex(prices)
 
 	for i, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -676,14 +716,14 @@ func IncomeStatementTreeInCurrency(start, end string, txns []Transaction, prices
 		}
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Income:") {
-				amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+				amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 				if amount < 0 {
 					amount = -amount
 				}
 				addIncomeStatementAmount(incomeMap, posting.Account, amount, txnID)
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				addIncomeStatementAmount(expenseMap, posting.Account, postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency), txnID)
+				addIncomeStatementAmount(expenseMap, posting.Account, postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency), txnID)
 			}
 		}
 	}
@@ -801,6 +841,7 @@ func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurr
 
 func netWorthHistoryInCurrencyAsc(sorted []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
 	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
+	priceIndex := NewPriceIndex(prices)
 	balances := map[string]map[string]int{}
 	var rows []NetWorthPoint
 	lastDate := ""
@@ -822,7 +863,7 @@ func netWorthHistoryInCurrencyAsc(sorted []Transaction, prices []Price, valuatio
 		for account, byCurrency := range balances {
 			valuation := 0
 			for currency, amount := range byCurrency {
-				value, ok := ValuationInCurrencyAt(amount, currency, valuationCurrency, prices, txn.Date)
+				value, ok := priceIndex.Valuation(amount, currency, valuationCurrency, txn.Date)
 				if ok {
 					valuation += value
 				}
@@ -845,12 +886,23 @@ func netWorthHistoryInCurrencyAsc(sorted []Transaction, prices []Price, valuatio
 }
 
 func AccountDetail(account string, txns []Transaction) []AccountDetailRow {
+	sorted := append([]Transaction(nil), txns...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Date != sorted[j].Date {
+			return sorted[i].Date < sorted[j].Date
+		}
+		return sorted[i].Source.Line < sorted[j].Source.Line
+	})
+	return AccountDetailFromSorted(account, sorted)
+}
+
+func AccountDetailFromSorted(account string, sortedTxns []Transaction) []AccountDetailRow {
 	type relevant struct {
 		txn    Transaction
 		change int
 	}
 	var rows []relevant
-	for _, txn := range txns {
+	for _, txn := range sortedTxns {
 		for _, posting := range txn.Postings {
 			if posting.Account == account {
 				rows = append(rows, relevant{txn: txn, change: posting.Amount})
@@ -858,12 +910,6 @@ func AccountDetail(account string, txns []Transaction) []AccountDetailRow {
 			}
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].txn.Date != rows[j].txn.Date {
-			return rows[i].txn.Date < rows[j].txn.Date
-		}
-		return rows[i].txn.Source.Line < rows[j].txn.Source.Line
-	})
 	var balance int
 	out := make([]AccountDetailRow, 0, len(rows))
 	for _, row := range rows {

@@ -55,8 +55,8 @@ func (s *AccountService) Detail(account string) (AccountDetailResult, error) {
 	if err != nil {
 		return AccountDetailResult{}, err
 	}
-	acct := FindAccount(snapshot.Accounts, account)
-	if acct == nil {
+	acct, ok := snapshotAccountMap(snapshot)[account]
+	if !ok {
 		return AccountDetailResult{}, ErrAccountNotFound
 	}
 	return AccountDetailResult{
@@ -66,7 +66,7 @@ func (s *AccountService) Detail(account string) (AccountDetailResult, error) {
 		Group:          acct.Group,
 		Active:         acct.Active,
 		Currency:       acct.Currency,
-		Rows:           AccountDetail(account, snapshot.Transactions),
+		Rows:           AccountDetailFromSorted(account, snapshotTransactionsAsc(snapshot)),
 		CurrentBalance: snapshot.Balances[account],
 	}, nil
 }

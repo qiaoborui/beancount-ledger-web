@@ -105,7 +105,8 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end, rawValuationCurrency 
 			}
 		}
 	}
-	actual := MonthSummaryInCurrency(start, end, snapshot.Transactions, snapshot.Prices, valuationCurrency).Categories
+	priceIndex := snapshotPriceIndex(snapshot)
+	actual := MonthSummaryWithPriceIndex(start, end, snapshot.Transactions, priceIndex, valuationCurrency).Categories
 	accounts := map[string]bool{}
 	for account := range latest {
 		accounts[account] = true
@@ -119,10 +120,10 @@ func buildBudgetRows(snapshot *LedgerSnapshot, start, end, rawValuationCurrency 
 	}
 	sort.Strings(keys)
 	rows := []gin.H{}
-	accountMap := accountByName(snapshot.Accounts)
+	accountMap := snapshotAccountMap(snapshot)
 	for _, account := range keys {
 		label, alias := accountLabelAlias(account, accountMap)
-		budget := budgetValuation(latest[account], snapshot.Prices, end, valuationCurrency)
+		budget := budgetValuation(latest[account], priceIndex, end, valuationCurrency)
 		spent := actual[account]
 		var ratio *float64
 		if budget != 0 {
