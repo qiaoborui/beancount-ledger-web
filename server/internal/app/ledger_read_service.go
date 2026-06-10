@@ -57,7 +57,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsInCurrency(snapshotRawBalances(snapshot), snapshot.Prices, "", valuationCurrency)
+	accountBalances := AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
 	reconciliationRows := []gin.H{}
 	accountStatuses := []AccountStatus{}
 	if unlocked {
@@ -93,7 +93,7 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsInCurrency(snapshotRawBalances(snapshot), snapshot.Prices, "", valuationCurrency)
+	accountBalances := AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
 	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
 }
 
@@ -114,8 +114,9 @@ func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unl
 func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) gin.H {
 	expense, topPayees, topAccounts := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
 	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTreeInCurrency(start, end, snapshot.Transactions, snapshot.Prices, valuationCurrency)
-	allIncomeNodes = ApplyIncomeStatementAccountLabels(allIncomeNodes, snapshot.Accounts)
-	expenseNodes = ApplyIncomeStatementAccountLabels(expenseNodes, snapshot.Accounts)
+	accountMap := snapshotAccountMap(snapshot)
+	allIncomeNodes = applyIncomeStatementAccountLabels(allIncomeNodes, accountMap)
+	expenseNodes = applyIncomeStatementAccountLabels(expenseNodes, accountMap)
 	incomeNodes := []IncomeStatementNode{}
 	if unlocked {
 		incomeNodes = allIncomeNodes

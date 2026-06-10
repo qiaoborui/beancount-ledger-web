@@ -223,3 +223,31 @@ func TestValuationUsesLatestPriceOutsideHistoricalNetWorth(t *testing.T) {
 		t.Fatalf("net worth history = %#v, want 2026-06-01 assets valued at historical price 72000", history)
 	}
 }
+
+func TestPriceIndexMatchesLegacyValuationSemantics(t *testing.T) {
+	prices := []Price{
+		{Date: "2026-06-08", Currency: "USD", Amount: 680, QuoteCurrency: "CNY"},
+		{Date: "2026-06-01", Currency: "USD", Amount: 720, QuoteCurrency: "CNY"},
+		{Date: "2026-05-01", Currency: "HKD", Amount: 92, QuoteCurrency: "CNY"},
+	}
+	index := NewPriceIndex(prices)
+	cases := []struct {
+		amount int
+		from   string
+		to     string
+		date   string
+		want   int
+	}{
+		{amount: 100, from: "USD", to: "CNY", want: 680},
+		{amount: 680, from: "CNY", to: "USD", want: 100},
+		{amount: 100, from: "USD", to: "CNY", date: "2026-06-01", want: 720},
+		{amount: 100, from: "USD", to: "CNY", date: "2026-05-01", want: 720},
+		{amount: 920, from: "HKD", to: "USD", want: 124},
+	}
+	for _, tc := range cases {
+		got, ok := index.Valuation(tc.amount, tc.from, tc.to, tc.date)
+		if !ok || got != tc.want {
+			t.Fatalf("indexed valuation %d %s to %s at %q = %d ok=%v, want %d true", tc.amount, tc.from, tc.to, tc.date, got, ok, tc.want)
+		}
+	}
+}

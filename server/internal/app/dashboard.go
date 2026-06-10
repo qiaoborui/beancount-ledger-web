@@ -148,15 +148,16 @@ func BuildDashboardSummaryWithFilters(snapshot *LedgerSnapshot, start, end strin
 
 func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start, end string, filters DashboardFilters, valuationCurrency string) DashboardSummary {
 	valuationCurrency = ValidValuationCurrency(valuationCurrency, snapshot.Commodities)
-	txns := dashboardFilterTransactions(snapshot.Transactions, filters, snapshot.Prices, valuationCurrency)
+	priceIndex := snapshotPriceIndex(snapshot)
+	txns := dashboardFilterTransactions(snapshot.Transactions, filters, priceIndex, valuationCurrency)
 	rawBalances := snapshotRawBalances(snapshot)
 	if !filters.Empty() {
 		rawBalances = CurrentBalances(txns)
 	}
-	balanceRows := AccountBalanceRowsInCurrency(rawBalances, snapshot.Prices, end, valuationCurrency)
-	summary := MonthSummaryInCurrency(start, end, txns, snapshot.Prices, valuationCurrency)
-	accountMap := accountByName(snapshot.Accounts)
-	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, snapshot.Prices, end, accountMap, valuationCurrency)
+	balanceRows := AccountBalanceRowsWithPriceIndex(rawBalances, priceIndex, end, valuationCurrency)
+	summary := MonthSummaryWithPriceIndex(start, end, txns, priceIndex, valuationCurrency)
+	accountMap := snapshotAccountMap(snapshot)
+	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, priceIndex, end, accountMap, valuationCurrency)
 	assets, liabilities := balanceTotals(balanceRows)
 	var savingsRate *float64
 	if summary.Income > 0 {
@@ -175,19 +176,19 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 		End:                  end,
 		Currency:             valuationCurrency,
 		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
-		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), snapshot.Prices, start, end, valuationCurrency),
-		CashflowSeries:       dashboardCashflowSeries(txns, snapshot.Prices, start, end, valuationCurrency),
-		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, snapshot.Prices, start, end, valuationCurrency),
-		WeekdayExpense:       dashboardWeekdayExpense(txns, snapshot.Prices, start, end, valuationCurrency),
-		CategorySeries:       dashboardCategorySeries(txns, snapshot.Prices, start, end, 8, accountMap, valuationCurrency),
-		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balanceRows, snapshot.Prices, start, end, 6, valuationCurrency),
+		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), priceIndex, start, end, valuationCurrency),
+		CashflowSeries:       dashboardCashflowSeries(txns, priceIndex, start, end, valuationCurrency),
+		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, priceIndex, start, end, valuationCurrency),
+		WeekdayExpense:       dashboardWeekdayExpense(txns, priceIndex, start, end, valuationCurrency),
+		CategorySeries:       dashboardCategorySeries(txns, priceIndex, start, end, 8, accountMap, valuationCurrency),
+		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balanceRows, priceIndex, start, end, 6, valuationCurrency),
 		BudgetPressure:       budgetPressure,
-		Anomalies:            dashboardAnomalies(txns, snapshot.Prices, start, end, 10, valuationCurrency),
+		Anomalies:            dashboardAnomalies(txns, priceIndex, start, end, 10, valuationCurrency),
 		TopPayees:            topPayees,
 		TopPaymentAccounts:   topPaymentAccounts,
 		Filters:              filters,
 		FilterOptions:        dashboardFilterOptions(snapshot.Transactions, snapshot.Accounts, start, end),
-		Annotations:          dashboardAnnotations(txns, snapshot.Prices, start, end, 12, valuationCurrency),
+		Annotations:          dashboardAnnotations(txns, priceIndex, start, end, 12, valuationCurrency),
 		GeneratedAt:          time.Now().Format(time.RFC3339),
 	}
 }
@@ -196,20 +197,20 @@ func (f DashboardFilters) Empty() bool {
 	return len(f.Categories) == 0 && len(f.Accounts) == 0 && len(f.Payees) == 0 && len(f.Tags) == 0 && len(f.Types) == 0 && f.MinAmount == nil && f.MaxAmount == nil
 }
 
-func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters, prices []Price, valuationCurrency string) []Transaction {
+func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters, priceIndex PriceIndex, valuationCurrency string) []Transaction {
 	if filters.Empty() {
 		return txns
 	}
 	out := []Transaction{}
 	for _, txn := range txns {
-		if dashboardTransactionMatches(txn, filters, prices, valuationCurrency) {
+		if dashboardTransactionMatches(txn, filters, priceIndex, valuationCurrency) {
 			out = append(out, txn)
 		}
 	}
 	return out
 }
 
-func dashboardTransactionMatches(txn Transaction, filters DashboardFilters, prices []Price, valuationCurrency string) bool {
+func dashboardTransactionMatches(txn Transaction, filters DashboardFilters, priceIndex PriceIndex, valuationCurrency string) bool {
 	if len(filters.Payees) > 0 && !containsString(filters.Payees, txn.Payee) {
 		return false
 	}
@@ -225,7 +226,7 @@ func dashboardTransactionMatches(txn Transaction, filters DashboardFilters, pric
 	if len(filters.Accounts) > 0 && !transactionHasAnyAccountPrefix(txn, filters.Accounts) {
 		return false
 	}
-	amount := dashboardTransactionAmount(txn, prices, valuationCurrency)
+	amount := dashboardTransactionAmount(txn, priceIndex, valuationCurrency)
 	if filters.MinAmount != nil && amount < *filters.MinAmount {
 		return false
 	}
@@ -254,10 +255,10 @@ func dashboardTransactionType(txn Transaction) string {
 	return "transfer"
 }
 
-func dashboardTransactionAmount(txn Transaction, prices []Price, valuationCurrency string) int {
+func dashboardTransactionAmount(txn Transaction, priceIndex PriceIndex, valuationCurrency string) int {
 	var expense, income, movement int
 	for _, posting := range txn.Postings {
-		amount := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+		amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 		if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
 			expense += amount
 		}
@@ -407,7 +408,7 @@ func dashboardSortedTransactions(snapshot *LedgerSnapshot, txns []Transaction, f
 	return sorted
 }
 
-func dashboardNetWorthSeries(sorted []Transaction, prices []Price, start, end, valuationCurrency string) []NetWorthPoint {
+func dashboardNetWorthSeries(sorted []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []NetWorthPoint {
 	buckets := dashboardBuckets(start, end)
 	balances := map[string]map[string]int{}
 	out := make([]NetWorthPoint, 0, len(buckets))
@@ -426,23 +427,23 @@ func dashboardNetWorthSeries(sorted []Transaction, prices []Price, start, end, v
 			}
 			index++
 		}
-		assets, liabilities := balanceTotals(AccountBalanceRowsInCurrency(balances, prices, bucket.End, valuationCurrency))
+		assets, liabilities := balanceTotals(AccountBalanceRowsWithPriceIndex(balances, priceIndex, bucket.End, valuationCurrency))
 		out = append(out, NetWorthPoint{Date: bucket.Label, Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities})
 	}
 	return out
 }
 
-func dashboardCashflowSeries(txns []Transaction, prices []Price, start, end, valuationCurrency string) []DashboardCashflowPoint {
+func dashboardCashflowSeries(txns []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []DashboardCashflowPoint {
 	buckets := dashboardBuckets(start, end)
 	out := make([]DashboardCashflowPoint, 0, len(buckets))
 	for _, bucket := range buckets {
-		summary := MonthSummaryInCurrency(bucket.Start, bucket.End, txns, prices, valuationCurrency)
+		summary := MonthSummaryWithPriceIndex(bucket.Start, bucket.End, txns, priceIndex, valuationCurrency)
 		out = append(out, DashboardCashflowPoint{Month: bucket.Label, Income: summary.Income, Expense: summary.Expense, Net: summary.Net})
 	}
 	return out
 }
 
-func dashboardDailyExpenseSeries(txns []Transaction, prices []Price, start, end, valuationCurrency string) []DashboardDailyExpense {
+func dashboardDailyExpenseSeries(txns []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []DashboardDailyExpense {
 	byDate := map[string]*DashboardDailyExpense{}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -451,7 +452,7 @@ func dashboardDailyExpenseSeries(txns []Transaction, prices []Price, start, end,
 		var expense int
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
-				expense += postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
 		if expense <= 0 {
@@ -477,7 +478,7 @@ func dashboardDailyExpenseSeries(txns []Transaction, prices []Price, start, end,
 	return out
 }
 
-func dashboardWeekdayExpense(txns []Transaction, prices []Price, start, end, valuationCurrency string) []DashboardWeekdayExpense {
+func dashboardWeekdayExpense(txns []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []DashboardWeekdayExpense {
 	order := []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
 	rows := map[string]*DashboardWeekdayExpense{}
 	for _, label := range order {
@@ -490,7 +491,7 @@ func dashboardWeekdayExpense(txns []Transaction, prices []Price, start, end, val
 		var expense int
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
-				expense += postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
 		if expense <= 0 {
@@ -507,12 +508,12 @@ func dashboardWeekdayExpense(txns []Transaction, prices []Price, start, end, val
 	return out
 }
 
-func dashboardCategorySeries(txns []Transaction, prices []Price, start, end string, limit int, accountLookup map[string]Account, valuationCurrency string) []DashboardCategorySeries {
+func dashboardCategorySeries(txns []Transaction, priceIndex PriceIndex, start, end string, limit int, accountLookup map[string]Account, valuationCurrency string) []DashboardCategorySeries {
 	buckets := dashboardBuckets(start, end)
 	byAccount := map[string]map[string]int{}
 	totals := map[string]int{}
 	for _, bucket := range buckets {
-		for account, amount := range MonthSummaryInCurrency(bucket.Start, bucket.End, txns, prices, valuationCurrency).Categories {
+		for account, amount := range MonthSummaryWithPriceIndex(bucket.Start, bucket.End, txns, priceIndex, valuationCurrency).Categories {
 			if byAccount[account] == nil {
 				byAccount[account] = map[string]int{}
 			}
@@ -568,7 +569,7 @@ func weekdayLabel(date string) string {
 	}
 }
 
-func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balances []AccountBalance, prices []Price, start, end string, limit int, valuationCurrency string) []DashboardAccountSeries {
+func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balances []AccountBalance, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string) []DashboardAccountSeries {
 	labels := map[string]Account{}
 	for _, account := range accounts {
 		labels[account.Account] = account
@@ -598,7 +599,7 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 	}
 
 	buckets := dashboardBuckets(start, end)
-	seriesValues := accountBucketEndValuations(txns, selected, buckets, prices, valuationCurrency)
+	seriesValues := accountBucketEndValuations(txns, selected, buckets, priceIndex, valuationCurrency)
 	out := make([]DashboardAccountSeries, 0, len(selected))
 	for _, accountName := range selected {
 		acct := labels[accountName]
@@ -615,7 +616,7 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 	return out
 }
 
-func accountBucketEndValuations(txns []Transaction, accounts []string, buckets []dashboardBucket, prices []Price, valuationCurrency string) map[string][]DashboardSeriesPoint {
+func accountBucketEndValuations(txns []Transaction, accounts []string, buckets []dashboardBucket, priceIndex PriceIndex, valuationCurrency string) map[string][]DashboardSeriesPoint {
 	out := map[string][]DashboardSeriesPoint{}
 	for _, account := range accounts {
 		out[account] = make([]DashboardSeriesPoint, 0, len(buckets))
@@ -646,7 +647,7 @@ func accountBucketEndValuations(txns []Transaction, accounts []string, buckets [
 		for _, account := range accounts {
 			valuation := 0
 			for currency, amount := range balances[account] {
-				value, ok := ValuationInCurrency(amount, currency, valuationCurrency, prices, bucket.End)
+				value, ok := priceIndex.Valuation(amount, currency, valuationCurrency, "")
 				if ok {
 					valuation += value
 				}
@@ -657,7 +658,7 @@ func accountBucketEndValuations(txns []Transaction, accounts []string, buckets [
 	return out
 }
 
-func dashboardBudgetPressure(budgets []Budget, actual map[string]int, prices []Price, end string, accounts map[string]Account, valuationCurrency string) ([]DashboardBudgetPressure, int, int) {
+func dashboardBudgetPressure(budgets []Budget, actual map[string]int, priceIndex PriceIndex, end string, accounts map[string]Account, valuationCurrency string) ([]DashboardBudgetPressure, int, int) {
 	latest := map[string]Budget{}
 	for _, budget := range budgets {
 		if budget.Date <= end {
@@ -670,13 +671,13 @@ func dashboardBudgetPressure(budgets []Budget, actual map[string]int, prices []P
 	var totalBudget, totalSpent int
 	for account := range latest {
 		keys = append(keys, account)
-		totalBudget += budgetValuation(latest[account], prices, end, valuationCurrency)
+		totalBudget += budgetValuation(latest[account], priceIndex, end, valuationCurrency)
 		totalSpent += actual[account]
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		leftRatio, rightRatio := 0.0, 0.0
-		leftBudget := budgetValuation(latest[keys[i]], prices, end, valuationCurrency)
-		rightBudget := budgetValuation(latest[keys[j]], prices, end, valuationCurrency)
+		leftBudget := budgetValuation(latest[keys[i]], priceIndex, end, valuationCurrency)
+		rightBudget := budgetValuation(latest[keys[j]], priceIndex, end, valuationCurrency)
 		if leftBudget != 0 {
 			leftRatio = float64(actual[keys[i]]) / float64(leftBudget)
 		}
@@ -693,7 +694,7 @@ func dashboardBudgetPressure(budgets []Budget, actual map[string]int, prices []P
 	}
 	out := make([]DashboardBudgetPressure, 0, len(keys))
 	for _, account := range keys {
-		budget := budgetValuation(latest[account], prices, end, valuationCurrency)
+		budget := budgetValuation(latest[account], priceIndex, end, valuationCurrency)
 		spent := actual[account]
 		var ratio *float64
 		if budget != 0 {
@@ -706,15 +707,15 @@ func dashboardBudgetPressure(budgets []Budget, actual map[string]int, prices []P
 	return out, totalBudget, totalSpent
 }
 
-func budgetValuation(budget Budget, prices []Price, date, valuationCurrency string) int {
-	value, ok := ValuationInCurrency(budget.Amount, budget.Currency, valuationCurrency, prices, date)
+func budgetValuation(budget Budget, priceIndex PriceIndex, date, valuationCurrency string) int {
+	value, ok := priceIndex.Valuation(budget.Amount, budget.Currency, valuationCurrency, "")
 	if !ok {
 		return 0
 	}
 	return value
 }
 
-func dashboardAnomalies(txns []Transaction, prices []Price, start, end string, limit int, valuationCurrency string) []DashboardAnomaly {
+func dashboardAnomalies(txns []Transaction, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string) []DashboardAnomaly {
 	rows := []DashboardAnomaly{}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -728,7 +729,7 @@ func dashboardAnomalies(txns []Transaction, prices []Price, start, end string, l
 			if txn.Source.Line > 0 {
 				source += ":" + formatInt(txn.Source.Line)
 			}
-			rows = append(rows, DashboardAnomaly{Date: txn.Date, Payee: txn.Payee, Narration: txn.Narration, Account: posting.Account, Amount: postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency), Source: source})
+			rows = append(rows, DashboardAnomaly{Date: txn.Date, Payee: txn.Payee, Narration: txn.Narration, Account: posting.Account, Amount: postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency), Source: source})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -743,7 +744,7 @@ func dashboardAnomalies(txns []Transaction, prices []Price, start, end string, l
 	return rows
 }
 
-func dashboardAnnotations(txns []Transaction, prices []Price, start, end string, limit int, valuationCurrency string) []DashboardAnnotation {
+func dashboardAnnotations(txns []Transaction, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string) []DashboardAnnotation {
 	rows := []DashboardAnnotation{}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -752,9 +753,9 @@ func dashboardAnnotations(txns []Transaction, prices []Price, start, end string,
 		income := 0
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Income:") {
-				income += abs(postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency))
+				income += abs(postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency))
 			}
-			expense := postingValuationInCurrency(posting, prices, txn.Date, valuationCurrency)
+			expense := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			if strings.HasPrefix(posting.Account, "Expenses:") && expense >= 50000 {
 				rows = append(rows, DashboardAnnotation{
 					Date:      txn.Date,

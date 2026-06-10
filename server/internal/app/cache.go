@@ -25,6 +25,8 @@ type LedgerSnapshot struct {
 	TransactionsAsc   []Transaction             `json:"-"`
 	TransactionsDesc  []Transaction             `json:"-"`
 	RawBalances       map[string]map[string]int `json:"-"`
+	PriceIndex        PriceIndex                `json:"-"`
+	AccountMap        map[string]Account        `json:"-"`
 	Balances          map[string]int            `json:"balances"`
 	AccountBalances   []AccountBalance          `json:"accountBalances"`
 	BalanceAssertions []BalanceAssertion        `json:"balanceAssertions"`
@@ -36,9 +38,11 @@ type LedgerSnapshot struct {
 }
 
 type LedgerCache struct {
-	cfg      Config
-	mu       sync.Mutex
-	snapshot *LedgerSnapshot
+	cfg           Config
+	mu            sync.Mutex
+	snapshot      *LedgerSnapshot
+	version       LedgerVersion
+	versionReadAt time.Time
 }
 
 func NewLedgerCache(cfg Config) *LedgerCache {
@@ -46,11 +50,11 @@ func NewLedgerCache(cfg Config) *LedgerCache {
 }
 
 func (c *LedgerCache) Version() (LedgerVersion, error) {
-	return ledgerVersion(c.cfg)
+	return c.currentVersion()
 }
 
 func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
-	version, err := ledgerVersion(c.cfg)
+	version, err := c.currentVersion()
 	if err != nil {
 		return nil, err
 	}
@@ -63,14 +67,48 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	txns := ParseTransactions(lines)
-	accounts, err := ParseAccounts(c.cfg)
-	if err != nil {
-		return nil, err
+	var wg sync.WaitGroup
+	var txns []Transaction
+	var accounts []Account
+	var accountErr error
+	var prices []Price
+	var balanceAssertions []BalanceAssertion
+	var budgets []Budget
+	var commodities []string
+
+	wg.Add(6)
+	go func() {
+		defer wg.Done()
+		txns = ParseTransactions(lines)
+	}()
+	go func() {
+		defer wg.Done()
+		accounts, accountErr = ParseAccounts(c.cfg)
+	}()
+	go func() {
+		defer wg.Done()
+		prices = ParsePrices(lines)
+	}()
+	go func() {
+		defer wg.Done()
+		balanceAssertions = ParseBalances(lines)
+	}()
+	go func() {
+		defer wg.Done()
+		budgets = ParseBudgets(lines)
+	}()
+	go func() {
+		defer wg.Done()
+		commodities = ParseCommodities(lines)
+	}()
+	wg.Wait()
+	if accountErr != nil {
+		return nil, accountErr
 	}
 	rawBalances := CurrentBalances(txns)
 	transactionsAsc, transactionsDesc := sortedTransactionViews(txns)
-	prices := ParsePrices(lines)
+	priceIndex := NewPriceIndex(prices)
+	accountMap := accountByName(accounts)
 	snapshot := &LedgerSnapshot{
 		LedgerVersion:     version,
 		Lines:             lines,
@@ -78,12 +116,14 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 		TransactionsAsc:   transactionsAsc,
 		TransactionsDesc:  transactionsDesc,
 		RawBalances:       rawBalances,
-		Balances:          NativeAccountBalances(rawBalances, accounts),
-		AccountBalances:   AccountBalanceRows(rawBalances, prices, ""),
-		BalanceAssertions: ParseBalances(lines),
-		Budgets:           ParseBudgets(lines),
+		PriceIndex:        priceIndex,
+		AccountMap:        accountMap,
+		Balances:          nativeAccountBalances(rawBalances, accountMap),
+		AccountBalances:   AccountBalanceRowsWithPriceIndex(rawBalances, priceIndex, ""),
+		BalanceAssertions: balanceAssertions,
+		Budgets:           budgets,
 		Accounts:          accounts,
-		Commodities:       ParseCommodities(lines),
+		Commodities:       commodities,
 		Prices:            prices,
 		ParsedAt:          time.Now().UnixMilli(),
 	}
@@ -95,6 +135,31 @@ func (c *LedgerCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.snapshot = nil
+	c.version = LedgerVersion{}
+	c.versionReadAt = time.Time{}
+}
+
+const ledgerVersionCacheTTL = 250 * time.Millisecond
+
+func (c *LedgerCache) currentVersion() (LedgerVersion, error) {
+	c.mu.Lock()
+	if c.snapshot != nil && !c.versionReadAt.IsZero() && time.Since(c.versionReadAt) < ledgerVersionCacheTTL {
+		version := c.version
+		c.mu.Unlock()
+		return version, nil
+	}
+	c.mu.Unlock()
+
+	version, err := ledgerVersion(c.cfg)
+	if err != nil {
+		return LedgerVersion{}, err
+	}
+
+	c.mu.Lock()
+	c.version = version
+	c.versionReadAt = time.Now()
+	c.mu.Unlock()
+	return version, nil
 }
 
 func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {
@@ -120,6 +185,20 @@ func snapshotRawBalances(snapshot *LedgerSnapshot) map[string]map[string]int {
 		return snapshot.RawBalances
 	}
 	return CurrentBalances(snapshot.Transactions)
+}
+
+func snapshotPriceIndex(snapshot *LedgerSnapshot) PriceIndex {
+	if snapshot.PriceIndex.byPair != nil {
+		return snapshot.PriceIndex
+	}
+	return NewPriceIndex(snapshot.Prices)
+}
+
+func snapshotAccountMap(snapshot *LedgerSnapshot) map[string]Account {
+	if snapshot.AccountMap != nil {
+		return snapshot.AccountMap
+	}
+	return accountByName(snapshot.Accounts)
 }
 
 func snapshotTransactionsAsc(snapshot *LedgerSnapshot) []Transaction {
