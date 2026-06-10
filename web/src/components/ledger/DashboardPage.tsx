@@ -49,6 +49,7 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
   const { data, loading, error, reload } = useDashboardSummary(timeRange, filters, valuationCurrency, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const [viewPanelId, setViewPanelId] = useState<DashboardPanelId | null>(null);
+  const [overviewVisible, setOverviewVisible] = useState(false);
   const mask = (value: string) => visible ? value : "••••••";
   const replaceFilters = useCallback((nextFilters: DashboardFilterState) => {
     const query = dashboardFiltersToSearchParams(nextFilters, new URLSearchParams(search)).toString();
@@ -79,6 +80,10 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [viewPanelId]);
 
+  useEffect(() => {
+    if (!visible) setOverviewVisible(false);
+  }, [visible]);
+
   if (loading && !data) return <DashboardStatusCard title="正在加载趋势看板" detail="正在读取当前时间范围、筛选条件和敏感资产数据。" icon={<RefreshCw className="h-4 w-4 animate-spin text-brand" />} />;
   if (error && !data) return <DashboardStatusCard title="看板加载失败" detail={error} icon={<AlertTriangle className="h-4 w-4 amount-expense" />} actionLabel="重试" onAction={reload} />;
   if (!data) return <DashboardStatusCard title="暂无看板数据" detail="服务端暂时没有返回可展示的汇总数据。" actionLabel="重新加载" onAction={reload} />;
@@ -88,6 +93,9 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
   const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(compact(topCategory.total / 100))}` : "暂无";
+  const privateSummary = visible
+    ? `${compact(data.kpis.income / 100)} 收入 · ${compact(data.kpis.netWorth / 100)} 净资产`
+    : "金额已隐藏";
   const panels: Record<DashboardPanelId, DashboardPanelDefinition> = {
     dailyExpense: {
       title: "每日支出节奏",
@@ -158,6 +166,8 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     {error && <DashboardNotice tone="error" title="后台刷新失败" detail={error} actionLabel="重试" onAction={reload} />}
     {dashboardEmpty ? <DashboardEmptyState filtered={activeFilters} onClearFilters={clearFilters} onRetry={reload} /> : <>
 
+    <DashboardOverview data={data} visible={overviewVisible} onToggleVisible={() => setOverviewVisible((value) => !value)} />
+
     <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
@@ -208,7 +218,7 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     </div>
     </DashboardRow>
 
-    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
+    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{privateSummary}</RowSummary>}>
     <div className="dashboard-panel-grid">
       <Panel panelId="privateKpis" className="xl:col-span-4" onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
         {panels.privateKpis.render()}
@@ -552,11 +562,37 @@ function DashboardInlineRow({ rowId, title, subtitle, collapsed, onToggle, summa
 }
 
 function RowSummary({ children }: { children: ReactNode }) {
-  return <span className="inline-flex max-w-full items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0">{children}</span>;
+  return <span className="inline-flex max-w-full min-w-0 items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0"><span className="min-w-0 truncate">{children}</span></span>;
 }
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
   return <div className="min-w-0 bg-panel px-2 py-2 text-center"><div className="text-[10px] uppercase tracking-[0.12em] text-stone">{label}</div><div className={`mt-0.5 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
+}
+
+function DashboardOverview({ data, visible, onToggleVisible }: { data: DashboardSummary; visible: boolean; onToggleVisible: () => void }) {
+  const mask = (value: string) => visible ? value : "••••••";
+  const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
+  const toggleLabel = visible ? "隐藏首行金额" : "显示首行金额";
+  return <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <OverviewMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="amount-income" detail={`${data.cashflowSeries.length} 个趋势点`} action={<button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-paper text-stone hover:bg-tag hover:text-brand" onClick={onToggleVisible} title={toggleLabel} aria-label={toggleLabel} aria-pressed={visible}>{visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button>} />
+    <OverviewMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="amount-expense" detail={`${data.dailyExpenseSeries.length} 个支出日`} />
+    <OverviewMetric label="结余" value={mask(formatCompactValuation(data.kpis.net / 100, data.currency))} tone={tone(data.kpis.net)} detail={visible ? ratioLabel(data.kpis.savingsRate) : "金额已隐藏"} />
+    <OverviewMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} detail={data.netWorthSeries.at(-1)?.date ?? "暂无"} />
+    <OverviewMetric label="预算" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} detail={visible ? formatCompactValuation(data.kpis.budgetRemaining / 100, data.currency) : "金额已隐藏"} />
+  </section>;
+}
+
+function OverviewMetric({ label, value, tone, detail, action }: { label: string; value: string; tone: string; detail: string; action?: ReactNode }) {
+  return <div className="min-w-0 rounded-lg border border-line bg-panel px-3 py-2">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[11px] text-stone">{label}</span>
+      <span className="flex min-w-0 items-center justify-end gap-1.5">
+        <span className="min-w-0 truncate text-right text-[11px] text-stone">{detail}</span>
+        {action}
+      </span>
+    </div>
+    <div className={`mt-1 truncate text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
+  </div>;
 }
 
 function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinition; onClose: () => void }) {
@@ -605,7 +641,8 @@ function Panel({ panelId, title, subtitle, className, onView, children }: { pane
 }
 
 function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummary; onOpenTransactions: (href: string) => void }) {
-  const rows = data.dailyExpenseSeries.map((row) => ({ date: row.date.slice(5), fullDate: row.date, 支出: row.amount / 100, 笔数: row.txCount }));
+  const showFullDates = dashboardUsesFullDateLabels(data);
+  const rows = data.dailyExpenseSeries.map((row) => ({ date: dashboardDateLabel(row.date, showFullDates), fullDate: row.date, 支出: row.amount / 100, 笔数: row.txCount }));
   const annotations = data.annotations.filter((annotation) => annotation.date >= data.start && annotation.date < data.end);
   return <>
     <ChartBox empty={!rows.length}>
@@ -624,7 +661,7 @@ function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummar
         </ComposedChart>
       </ResponsiveContainer>
     </ChartBox>
-    <AnnotationStrip annotations={annotations} currency={data.currency} onOpenTransactions={onOpenTransactions} />
+    <AnnotationStrip annotations={annotations} currency={data.currency} showFullDates={showFullDates} onOpenTransactions={onOpenTransactions} />
   </>;
 }
 
@@ -874,11 +911,11 @@ function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean
   return <div className={`mt-4 grid place-items-center rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone ${compact ? "min-h-32" : "min-h-40"}`}>{text}</div>;
 }
 
-function AnnotationStrip({ annotations, currency, onOpenTransactions }: { annotations: DashboardSummary["annotations"]; currency: string; onOpenTransactions: (href: string) => void }) {
+function AnnotationStrip({ annotations, currency, showFullDates, onOpenTransactions }: { annotations: DashboardSummary["annotations"]; currency: string; showFullDates: boolean; onOpenTransactions: (href: string) => void }) {
   if (!annotations.length) return null;
   return <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
     {annotations.slice(0, 8).map((annotation) => <button key={`${annotation.date}-${annotation.kind}-${annotation.payee}`} className="shrink-0 rounded-full border border-line bg-panel px-3 py-1.5 text-left text-xs text-stone hover:bg-tag" onClick={() => onOpenTransactions(annotation.drilldown)}>
-      <span className={annotation.severity === "warning" ? "amount-expense" : "text-brand"}>{annotation.date.slice(5)} {annotation.label}</span>
+      <span className={annotation.severity === "warning" ? "amount-expense" : "text-brand"}>{dashboardDateLabel(annotation.date, showFullDates)} {annotation.label}</span>
       {annotation.payee && <span className="ml-1 text-olive">{annotation.payee}</span>}
       {annotation.amount ? <span className="ml-1 tabular-nums">{formatCompactValuation(annotation.amount / 100, currency)}</span> : null}
     </button>)}
@@ -899,10 +936,11 @@ function transactionHref({ category, q, metadata }: { category?: string; q?: str
 
 function seriesRows(series: { account: string; values: { month: string; value: number }[] }[]) {
   const months = bucketLabels(series);
+  const valuesByAccount = new Map(series.map((item) => [item.account, new Map(item.values.map((value) => [value.month, value.value]))]));
   return months.map((month) => {
     const row: Record<string, string | number> = { month };
     for (const item of series) {
-      row[item.account] = (item.values.find((value) => value.month === month)?.value ?? 0) / 100;
+      row[item.account] = (valuesByAccount.get(item.account)?.get(month) ?? 0) / 100;
     }
     return row;
   });
@@ -919,6 +957,22 @@ function bucketLabels(series: { values: { month: string }[] }[]) {
     }
   }
   return labels;
+}
+
+function dashboardUsesFullDateLabels(data: Pick<DashboardSummary, "start" | "end">) {
+  const start = dashboardDateMs(data.start);
+  const end = dashboardDateMs(data.end);
+  return start != null && end != null && (end - start) / 86400000 > 730;
+}
+
+function dashboardDateMs(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function dashboardDateLabel(value: string, showFullDate: boolean) {
+  return showFullDate ? value : value.slice(5);
 }
 
 function trendPointCount(series: { values: { month: string }[] }[]) {
