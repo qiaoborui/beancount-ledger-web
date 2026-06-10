@@ -88,6 +88,9 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
   const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(compact(topCategory.total / 100))}` : "暂无";
+  const privateSummary = visible
+    ? `${compact(data.kpis.income / 100)} 收入 · ${compact(data.kpis.netWorth / 100)} 净资产`
+    : "金额已隐藏";
   const panels: Record<DashboardPanelId, DashboardPanelDefinition> = {
     dailyExpense: {
       title: "每日支出节奏",
@@ -158,6 +161,8 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     {error && <DashboardNotice tone="error" title="后台刷新失败" detail={error} actionLabel="重试" onAction={reload} />}
     {dashboardEmpty ? <DashboardEmptyState filtered={activeFilters} onClearFilters={clearFilters} onRetry={reload} /> : <>
 
+    <DashboardOverview data={data} visible={visible} />
+
     <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
@@ -208,7 +213,7 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     </div>
     </DashboardRow>
 
-    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{collapsedRows.private ? "已收起" : "已展开"}</RowSummary>}>
+    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{privateSummary}</RowSummary>}>
     <div className="dashboard-panel-grid">
       <Panel panelId="privateKpis" className="xl:col-span-4" onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
         {panels.privateKpis.render()}
@@ -552,11 +557,33 @@ function DashboardInlineRow({ rowId, title, subtitle, collapsed, onToggle, summa
 }
 
 function RowSummary({ children }: { children: ReactNode }) {
-  return <span className="inline-flex max-w-full items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0">{children}</span>;
+  return <span className="inline-flex max-w-full min-w-0 items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0"><span className="min-w-0 truncate">{children}</span></span>;
 }
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
   return <div className="min-w-0 bg-panel px-2 py-2 text-center"><div className="text-[10px] uppercase tracking-[0.12em] text-stone">{label}</div><div className={`mt-0.5 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
+}
+
+function DashboardOverview({ data, visible }: { data: DashboardSummary; visible: boolean }) {
+  const mask = (value: string) => visible ? value : "••••••";
+  const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
+  return <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <OverviewMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="amount-income" detail={`${data.cashflowSeries.length} 个趋势点`} />
+    <OverviewMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="amount-expense" detail={`${data.dailyExpenseSeries.length} 个支出日`} />
+    <OverviewMetric label="结余" value={mask(formatCompactValuation(data.kpis.net / 100, data.currency))} tone={tone(data.kpis.net)} detail={visible ? ratioLabel(data.kpis.savingsRate) : "金额已隐藏"} />
+    <OverviewMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} detail={data.netWorthSeries.at(-1)?.date ?? "暂无"} />
+    <OverviewMetric label="预算" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} detail={visible ? formatCompactValuation(data.kpis.budgetRemaining / 100, data.currency) : "金额已隐藏"} />
+  </section>;
+}
+
+function OverviewMetric({ label, value, tone, detail }: { label: string; value: string; tone: string; detail: string }) {
+  return <div className="min-w-0 rounded-lg border border-line bg-panel px-3 py-2">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[11px] text-stone">{label}</span>
+      <span className="min-w-0 truncate text-right text-[11px] text-stone">{detail}</span>
+    </div>
+    <div className={`mt-1 truncate text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
+  </div>;
 }
 
 function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinition; onClose: () => void }) {
