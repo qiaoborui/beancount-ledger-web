@@ -899,10 +899,11 @@ function transactionHref({ category, q, metadata }: { category?: string; q?: str
 
 function seriesRows(series: { account: string; values: { month: string; value: number }[] }[]) {
   const months = bucketLabels(series);
+  const valuesByAccount = new Map(series.map((item) => [item.account, new Map(item.values.map((value) => [value.month, value.value]))]));
   return months.map((month) => {
     const row: Record<string, string | number> = { month };
     for (const item of series) {
-      row[item.account] = (item.values.find((value) => value.month === month)?.value ?? 0) / 100;
+      row[item.account] = (valuesByAccount.get(item.account)?.get(month) ?? 0) / 100;
     }
     return row;
   });

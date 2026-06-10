@@ -190,6 +190,30 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	if body.KPIs.Income != 100000 || body.KPIs.Expense != 0 || body.KPIs.Net != 100000 || len(body.CategorySeries) != 0 {
 		t.Fatalf("unexpected income filtered dashboard data: %#v", body)
 	}
+
+	res = requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2000-01-01&end=2099-12-31", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("all-time dashboard status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	gotAllLabels := make([]string, 0, len(body.CashflowSeries))
+	for _, point := range body.CashflowSeries {
+		gotAllLabels = append(gotAllLabels, point.Month)
+	}
+	if body.Start != "2000-01-01" || body.End != "2099-12-31" {
+		t.Fatalf("all-time dashboard should preserve requested range, got start=%s end=%s", body.Start, body.End)
+	}
+	if !reflect.DeepEqual(gotAllLabels, wantMonthLabels) || len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 {
+		t.Fatalf("all-time dashboard should trim chart buckets to ledger activity, got cashflow=%#v netWorth=%#v kpis=%#v", body.CashflowSeries, body.NetWorthSeries, body.KPIs)
+	}
+	if len(body.CategorySeries) != 1 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Month != "05-01" {
+		t.Fatalf("all-time dashboard should trim category trend buckets to ledger activity, got %#v", body.CategorySeries)
+	}
+	if len(body.AccountBalanceSeries) != 1 || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Month != "05-01" {
+		t.Fatalf("all-time dashboard should trim account trend buckets to ledger activity, got %#v", body.AccountBalanceSeries)
+	}
 }
 
 func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
