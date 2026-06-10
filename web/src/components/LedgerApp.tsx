@@ -25,30 +25,53 @@ import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
-import { CommandPalette, type CommandAction } from "./ledger/CommandPalette";
-import { EntryModal, EntryPanel } from "./ledger/EntryModal";
-import { GitSaveModal } from "./ledger/GitSaveModal";
+import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
-import { QuickActionsSheet } from "./ledger/QuickActionsSheet";
-import { ImportPage } from "./ledger/ImportPage";
 import { Toast } from "./ledger/shared";
-import { AccountManager, BalanceGrid, BudgetPanel, CreditCardPanel } from "./ledger/AccountPanels";
-import { AccountDetailPage } from "./ledger/AccountDetailPage";
-import { CurrencyPage } from "./ledger/CurrencyPage";
-
-import { ReconcilePage } from "./ledger/ReconcilePage";
-import { SettingsPage } from "./ledger/SettingsPage";
-import { TransactionList } from "./ledger/TransactionList";
 import { haptic } from "./ledger/haptics";
+import {
+  loadAccountDetailPage,
+  loadAccountPanels,
+  loadAiBookkeepingChat,
+  loadCommandPalette,
+  loadCurrencyPage,
+  loadDashboardPage,
+  loadEntryModal,
+  loadGitSaveModal,
+  loadImportPage,
+  loadIncomeStatementPage,
+  loadNetWorthPage,
+  loadQuickActionsSheet,
+  loadReconcilePage,
+  loadSettingsPage,
+  loadTransactionList,
+  preloadLedgerRoute,
+} from "./ledger/routePreload";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 
-const LazyNetWorthPage = lazy(() => import("./ledger/NetWorthPage").then((mod) => ({ default: mod.NetWorthPage })));
+const LazyNetWorthPage = lazy(() => loadNetWorthPage().then((mod) => ({ default: mod.NetWorthPage })));
 
-const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage").then((mod) => ({ default: mod.IncomeStatementPage })));
+const LazyIncomeStatementPage = lazy(() => loadIncomeStatementPage().then((mod) => ({ default: mod.IncomeStatementPage })));
 
-const LazyDashboardPage = lazy(() => import("./ledger/DashboardPage").then((mod) => ({ default: mod.DashboardPage })));
+const LazyDashboardPage = lazy(() => loadDashboardPage().then((mod) => ({ default: mod.DashboardPage })));
 
-const LazyAiBookkeepingChat = lazy(() => import("./ledger/AiBookkeepingChat").then((mod) => ({ default: mod.AiBookkeepingChat })));
+const LazyAiBookkeepingChat = lazy(() => loadAiBookkeepingChat().then((mod) => ({ default: mod.AiBookkeepingChat })));
+
+const LazyCommandPalette = lazy(() => loadCommandPalette().then((mod) => ({ default: mod.CommandPalette })));
+const LazyEntryModal = lazy(() => loadEntryModal().then((mod) => ({ default: mod.EntryModal })));
+const LazyEntryPanel = lazy(() => loadEntryModal().then((mod) => ({ default: mod.EntryPanel })));
+const LazyGitSaveModal = lazy(() => loadGitSaveModal().then((mod) => ({ default: mod.GitSaveModal })));
+const LazyQuickActionsSheet = lazy(() => loadQuickActionsSheet().then((mod) => ({ default: mod.QuickActionsSheet })));
+const LazyImportPage = lazy(() => loadImportPage().then((mod) => ({ default: mod.ImportPage })));
+const LazyAccountDetailPage = lazy(() => loadAccountDetailPage().then((mod) => ({ default: mod.AccountDetailPage })));
+const LazyCurrencyPage = lazy(() => loadCurrencyPage().then((mod) => ({ default: mod.CurrencyPage })));
+const LazyReconcilePage = lazy(() => loadReconcilePage().then((mod) => ({ default: mod.ReconcilePage })));
+const LazySettingsPage = lazy(() => loadSettingsPage().then((mod) => ({ default: mod.SettingsPage })));
+const LazyTransactionList = lazy(() => loadTransactionList().then((mod) => ({ default: mod.TransactionList })));
+const LazyAccountManager = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.AccountManager })));
+const LazyBalanceGrid = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.BalanceGrid })));
+const LazyBudgetPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.BudgetPanel })));
+const LazyCreditCardPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.CreditCardPanel })));
 
 function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
@@ -64,6 +87,10 @@ function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
 
 function AiBookkeepingChat(props: ComponentProps<typeof LazyAiBookkeepingChat>) {
   return <Suspense fallback={null}><LazyAiBookkeepingChat {...props} /></Suspense>;
+}
+
+function RouteFallback({ label }: { label: string }) {
+  return <section className="card p-6 text-sm text-stone">{label}</section>;
 }
 
 function pageFromPathname(pathname: string): LedgerPage {
@@ -321,7 +348,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       setAiChatMounted(true);
       setAiOpenSignal((value) => value + 1);
     }
-    if (shortcutAction === "quick-actions") setQuickActionsOpen(true);
+    if (shortcutAction === "quick-actions") {
+      void loadQuickActionsSheet();
+      setQuickActionsOpen(true);
+    }
     if (shortcutAction === "sync-pending") void syncPendingWrites();
 
     const params = new URLSearchParams(searchParams.toString());
@@ -334,12 +364,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     const params = new URLSearchParams();
     params.set("category", account);
     if (mode === "exact") params.set("mode", "exact");
+    preloadLedgerRoute("/transactions");
     startRouteTransition(() => {
       router.push(`/transactions?${params.toString()}`);
     });
   }
 
   function openTransactionsHref(href: string) {
+    preloadLedgerRoute(href);
     startRouteTransition(() => {
       router.push(href);
     });
@@ -360,6 +392,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (search) params.set("q", search);
     if (mode === "exact") params.set("mode", "exact");
     const query = params.toString();
+    preloadLedgerRoute("/transactions");
     startRouteTransition(() => {
       router.push(query ? `/transactions?${query}` : "/transactions");
     });
@@ -367,6 +400,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   function focusTransactionSearch() {
     if (page !== "transactions") {
+      preloadLedgerRoute("/transactions");
       startRouteTransition(() => router.push("/transactions"));
       window.setTimeout(() => document.getElementById("transaction-search-input")?.focus(), 220);
       return;
@@ -376,6 +410,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        void loadCommandPalette();
+        setCommandOpen(true);
+        return;
+      }
       if (isTypingTarget(event.target)) return;
       if (event.key === "/" && page === "transactions") {
         event.preventDefault();
@@ -411,6 +451,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const canNavigate = canShowTimeControls && timeRange.preset !== "all" && timeRange.preset !== "custom";
 
   async function openGitSave() {
+    void loadGitSaveModal();
     setGitSaveOpen(true);
     await refreshGitStatus();
   }
@@ -424,19 +465,28 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   function openManualEntry() {
+    void loadEntryModal();
     setEntryOpen(true);
   }
 
   function openAiEntry() {
+    void loadAiBookkeepingChat();
     setAiChatMounted(true);
     setAiOpenSignal((value) => value + 1);
   }
 
+  function openQuickActions() {
+    void loadQuickActionsSheet();
+    setQuickActionsOpen(true);
+  }
+
   function openImportPage() {
+    preloadLedgerRoute("/imports");
     router.push("/imports");
   }
 
   function openReconcilePage() {
+    preloadLedgerRoute("/reconcile");
     router.push("/reconcile");
     if (!unlocked) void loginWithPasskey();
   }
@@ -473,7 +523,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
     { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, -1)) },
     { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, 1)) },
-    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => router.push(item.href) })),
+    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { preloadLedgerRoute(item.href); router.push(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
   ];
 
@@ -481,7 +531,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     <AppShell
       pathname={pathname}
       onGit={openGitSave}
-      onAdd={() => setQuickActionsOpen(true)}
+      onAdd={openQuickActions}
       gitDirty={gitDirty}
       changedFileCount={changedFileCount}
       routePending={isRoutePending}
@@ -495,9 +545,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onThemeModeChange={setThemeMode}
     >
       <Toast toast={toast} />
-      <CommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} />
-      <GitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} />
-      <QuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onGitSave={openGitSave} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} />
+      {commandOpen && <Suspense fallback={null}><LazyCommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} /></Suspense>}
+      {gitSaveOpen && <Suspense fallback={null}><LazyGitSaveModal open={gitSaveOpen} changes={gitChanges} changedFileCount={changedFileCount} loading={gitStatusLoading} committing={gitCommitting} onRefresh={refreshGitStatus} onClose={() => setGitSaveOpen(false)} onCommit={commitGitChanges} /></Suspense>}
+      {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} gitDirty={gitDirty} changedFileCount={changedFileCount} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onGitSave={openGitSave} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} /></Suspense>}
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
@@ -593,38 +643,44 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
-      {page === "currencies" && <CurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={loginWithPasskey} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} />}
-      {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></>; })()}
-      {page === "settings" && <SettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
-      {page === "budgets" && <BudgetPanel rows={budgetRows} valuationCurrency={dataValuationCurrency} full />}
-      {page === "imports" && <ImportPage onImported={guardedImportRefresh} />}
-      {page === "reconcile" && (unlocked ? <ReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "currencies" && <Suspense fallback={<RouteFallback label="正在准备货币与汇率…" />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={loginWithPasskey} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
+      {page === "accounts" && (() => {
+        const detailAccount = accountFromPathname(pathname);
+        if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。");
+        return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></></Suspense>;
+      })()}
+      {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} /></Suspense>}
+      {page === "budgets" && <Suspense fallback={<RouteFallback label="正在准备预算…" />}><LazyBudgetPanel rows={budgetRows} valuationCurrency={dataValuationCurrency} full /></Suspense>}
+      {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} /></Suspense>}
+      {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {(page === "home" || page === "transactions") && (
-        <TransactionList
-          txns={projectedTxns}
-          accounts={accounts}
-          searchable={page === "transactions"}
-          categoryQuery={page === "transactions" ? txnCategoryQuery : ""}
-          setCategoryQuery={page === "transactions" ? setTxnCategoryQuery : undefined}
-          metadataQuery={page === "transactions" ? txnMetadataQuery : ""}
-          setMetadataQuery={page === "transactions" ? setTxnMetadataQuery : undefined}
-          searchQuery={page === "transactions" ? txnSearchQuery : ""}
-          setSearchQuery={page === "transactions" ? setTxnSearchQuery : undefined}
-          matchMode={page === "transactions" ? categoryMatchMode : "prefix"}
-          setMatchMode={page === "transactions" ? setCategoryMatchMode : undefined}
-          viewMode={txnViewMode}
-          setViewMode={setTxnViewMode}
-          onUpdate={guardedUpdateTransaction}
-          onDelete={guardedDeleteTransaction}
-          onReverse={guardedReverseTransaction}
-        />
+        <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
+          <LazyTransactionList
+            txns={projectedTxns}
+            accounts={accounts}
+            searchable={page === "transactions"}
+            categoryQuery={page === "transactions" ? txnCategoryQuery : ""}
+            setCategoryQuery={page === "transactions" ? setTxnCategoryQuery : undefined}
+            metadataQuery={page === "transactions" ? txnMetadataQuery : ""}
+            setMetadataQuery={page === "transactions" ? setTxnMetadataQuery : undefined}
+            searchQuery={page === "transactions" ? txnSearchQuery : ""}
+            setSearchQuery={page === "transactions" ? setTxnSearchQuery : undefined}
+            matchMode={page === "transactions" ? categoryMatchMode : "prefix"}
+            setMatchMode={page === "transactions" ? setCategoryMatchMode : undefined}
+            viewMode={txnViewMode}
+            setViewMode={setTxnViewMode}
+            onUpdate={guardedUpdateTransaction}
+            onDelete={guardedDeleteTransaction}
+            onReverse={guardedReverseTransaction}
+          />
+        </Suspense>
       )}
       </div>
 
       {aiChatMounted && <AiBookkeepingChat load={load} refreshGitStatus={refreshGitStatus} showToast={showToast} openSignal={aiOpenSignal} />}
 
-      {entryOpen && <EntryModal onClose={() => setEntryOpen(false)}><EntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></EntryModal>}
+      {entryOpen && <Suspense fallback={null}><LazyEntryModal onClose={() => setEntryOpen(false)}><LazyEntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></LazyEntryModal></Suspense>}
     </AppShell>
   );
 }

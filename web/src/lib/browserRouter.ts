@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { scrollLedgerTo } from "./scrollTarget";
 
 type NavigateOptions = { scroll?: boolean };
@@ -6,7 +6,9 @@ type NavigateOptions = { scroll?: boolean };
 export const ledgerBeforeNavigateEvent = "ledger-before-navigate";
 
 function emitLocationChange() {
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  startTransition(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
 }
 
 export function navigate(href: string, replace = false, options?: NavigateOptions) {

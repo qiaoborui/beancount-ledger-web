@@ -1,7 +1,8 @@
-const CACHE_NAME = "beancount-ledger-shell-v7";
+const CACHE_NAME = "beancount-ledger-shell-v8";
 const API_CACHE_NAME = "beancount-ledger-api-v2";
 const APP_SHELL = "/";
 const APP_STATIC_ASSETS = [APP_SHELL, "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
+const STATIC_CACHE_MAX_ENTRIES = 96;
 // Only cache read-only API responses that do not vary by sensitive unlock state.
 // Summary, transactions, and income-statement intentionally stay network-only here because
 // the server returns different payloads before/after Face ID / Passkey unlock. Caching them
@@ -23,7 +24,10 @@ self.addEventListener("message", (event) => {
 self.addEventListener("activate", (event) => {
   const keep = new Set([CACHE_NAME, API_CACHE_NAME]);
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key)))).then(() => self.clients.claim()),
+    Promise.all([
+      self.registration.navigationPreload ? self.registration.navigationPreload.enable() : Promise.resolve(),
+      caches.keys().then((keys) => Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key)))),
+    ]).then(() => self.clients.claim()),
   );
 });
 
@@ -96,8 +100,15 @@ async function cacheFirst(request) {
   if (response && response.status === 200 && response.type === "basic") {
     const cache = await caches.open(CACHE_NAME);
     await cache.put(request, response.clone());
+    await trimCache(cache, STATIC_CACHE_MAX_ENTRIES);
   }
   return response;
+}
+
+async function trimCache(cache, maxEntries) {
+  const keys = await cache.keys();
+  if (keys.length <= maxEntries) return;
+  await Promise.all(keys.slice(0, keys.length - maxEntries).map((key) => cache.delete(key)));
 }
 
 self.addEventListener("fetch", (event) => {
@@ -114,7 +125,8 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      Promise.resolve(event.preloadResponse)
+        .then((preload) => preload || fetch(request))
         .catch(async () => {
           const cachedShell = await caches.match(APP_SHELL);
           return cachedShell ?? new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });

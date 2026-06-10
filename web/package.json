@@ -13,7 +13,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource/noto-serif-sc": "^5.2.9",
     "@simplewebauthn/browser": "^13.3.0",
     "@streamdown/cjk": "^1.0.3",
     "ai": "^6.0.191",
