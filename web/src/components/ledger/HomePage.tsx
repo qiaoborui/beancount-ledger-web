@@ -1,9 +1,11 @@
 import { Eye, EyeOff } from "lucide-react";
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { Metric } from "./shared";
 import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
+
+const LazyHomeDailyTrendChart = lazy(() => import("./HomeDailyTrendChart").then((mod) => ({ default: mod.HomeDailyTrendChart })));
 
 export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; valuationCurrency: string; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
@@ -61,11 +63,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
 
 function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
   const label = rows.length ? `${rows[0][0].slice(5)} ~ ${rows.at(-1)?.[0].slice(5)}` : "本期";
-  const data = rows.map(([date, value]) => ({
-    date,
-    income: value.income / 100,
-    expense: value.expense / 100,
-  }));
+  const { ref, ready } = useDeferredChartReady(rows.length > 0 && showAmounts);
   return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-4 xl:min-h-0 max-xl:min-h-[360px]">
     <div className="flex items-start justify-between gap-3">
       <div>
@@ -78,31 +76,51 @@ function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [strin
       </div>
       <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
     </div>
-    {rows.length ? showAmounts ? <div className="ledger-chart mt-4 min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }} barCategoryGap="34%">
-          <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={12} tickFormatter={(value) => String(value).slice(5)} />
-          <YAxis yAxisId="expense" width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
-          <YAxis yAxisId="income" orientation="right" width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
-          <Tooltip
-            cursor={{ fill: "var(--selected-bg)" }}
-            contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
-            labelFormatter={(label) => String(label)}
-            formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name === "收入" ? "收入" : "支出"]}
-          />
-          <Bar yAxisId="expense" dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
-          <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
-        </ComposedChart>
-      </ResponsiveContainer>
+    {rows.length ? showAmounts ? <div ref={ref} className="ledger-chart mt-4 min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
+      {ready ? <Suspense fallback={<div className="grid h-full min-h-[260px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">正在准备趋势图…</div>}>
+        <LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} />
+      </Suspense> : <div className="grid h-full min-h-[260px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">趋势图稍后加载</div>}
     </div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">暂无日趋势数据</div>}
   </section>;
 }
 
-function compactMoney(value: number) {
-  if (Math.abs(value) >= 10000) return `${Math.round(value / 10000)}万`;
-  if (Math.abs(value) >= 1000) return `${Math.round(value / 1000)}k`;
-  return `${Math.round(value)}`;
+function useDeferredChartReady(enabled: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      return;
+    }
+    const element = ref.current;
+    if (!element || ready) return;
+
+    let idleId: number | null = null;
+    const markReady = () => setReady(true);
+    const observer = "IntersectionObserver" in window ? new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) markReady();
+    }, { rootMargin: "160px" }) : null;
+
+    observer?.observe(element);
+    if (!observer) {
+      idleId = window.setTimeout(markReady, 600);
+    } else if (window.requestIdleCallback) {
+      idleId = window.requestIdleCallback(markReady, { timeout: 2200 });
+    } else {
+      idleId = window.setTimeout(markReady, 1800);
+    }
+
+    return () => {
+      observer?.disconnect();
+      if (idleId != null) {
+        if (window.cancelIdleCallback) window.cancelIdleCallback(idleId);
+        else window.clearTimeout(idleId);
+      }
+    };
+  }, [enabled, ready]);
+
+  return { ref, ready };
 }
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {

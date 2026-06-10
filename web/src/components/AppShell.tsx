@@ -4,6 +4,7 @@ import { BarChart3, BookOpen, ChevronLeft, ChevronRight, Coins, FileUp, GitBranc
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { haptic } from "./ledger/haptics";
+import { preloadLedgerRoute } from "./ledger/routePreload";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref, ResolvedTheme, ThemeMode } from "./ledger/types";
 
@@ -70,6 +71,20 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
       navPendingTimer.current = null;
     }
   }, [pathname]);
+
+  useEffect(() => {
+    const warmMobileTabs = () => {
+      for (const href of mobileTabHrefs) {
+        if (href !== pathname) preloadLedgerRoute(href);
+      }
+    };
+    if (window.requestIdleCallback) {
+      const id = window.requestIdleCallback(warmMobileTabs, { timeout: 3000 });
+      return () => window.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(warmMobileTabs, 1800);
+    return () => window.clearTimeout(id);
+  }, [mobileTabHrefs, pathname]);
 
   function markNavigationPending(href: string) {
     if (href === pathname) return;

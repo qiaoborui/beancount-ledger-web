@@ -23,6 +23,9 @@ const COLORS = [
   "var(--chart-secondary)",
 ];
 
+const dashboardSummaryCache = new Map<string, DashboardSummary>();
+const dashboardSummaryInFlight = new Map<string, Promise<DashboardSummary>>();
+
 type DashboardPanelId =
   | "dailyExpense"
   | "weekdayExpense"
@@ -271,40 +274,68 @@ function useDashboardRowCollapse() {
 }
 
 function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState, valuationCurrency: string, onSensitiveLocked: () => void) {
-  const [data, setData] = useState<DashboardSummary | null>(null);
+  const params = dashboardFiltersToApiQuery(timeRange, filters, valuationCurrency);
+  const [data, setData] = useState<DashboardSummary | null>(() => dashboardSummaryCache.get(params) ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
-  const params = dashboardFiltersToApiQuery(timeRange, filters, valuationCurrency);
   const reload = useCallback(() => setReloadToken((value) => value + 1), []);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
     async function load() {
-      setLoading(true);
+      const cached = reloadToken === 0 ? dashboardSummaryCache.get(params) : null;
+      if (cached) setData(cached);
+      setLoading(!cached);
       setError("");
       try {
-        const response = await fetch(`/api/ledger/dashboard?${params}`, { signal: controller.signal });
-        if (response.status === 423 || response.status === 401) {
+        const next = await fetchDashboardSummary(params);
+        if (!active) return;
+        dashboardSummaryCache.set(params, next);
+        setData(next);
+      } catch (err) {
+        if (!active) return;
+        if (err instanceof DashboardLockedError) {
           onSensitiveLocked();
           setData(null);
           return;
         }
-        const next = await readJson<DashboardSummary & { error?: string }>(response);
-        if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
-        setData(next);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "看板加载失败");
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active) setLoading(false);
       }
     }
     void load();
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, [onSensitiveLocked, params, reloadToken]);
 
   return { data, loading, error, reload };
+}
+
+class DashboardLockedError extends Error {}
+
+async function fetchDashboardSummary(params: string) {
+  const existing = dashboardSummaryInFlight.get(params);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const response = await fetch(`/api/ledger/dashboard?${params}`);
+    if (response.status === 423 || response.status === 401) {
+      throw new DashboardLockedError("Dashboard locked");
+    }
+    const next = await readJson<DashboardSummary & { error?: string }>(response);
+    if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+    return next;
+  })();
+
+  dashboardSummaryInFlight.set(params, request);
+  try {
+    return await request;
+  } finally {
+    dashboardSummaryInFlight.delete(params);
+  }
 }
 
 function DashboardStatusCard({ title, detail, icon, actionLabel, onAction }: { title: string; detail: string; icon?: ReactNode; actionLabel?: string; onAction?: () => void }) {
