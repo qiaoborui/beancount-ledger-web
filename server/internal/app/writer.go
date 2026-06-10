@@ -53,9 +53,12 @@ type LedgerEntry struct {
 }
 
 type EntryPosting struct {
-	Account  string `json:"account"`
-	Amount   string `json:"amount"`
-	Currency string `json:"currency"`
+	Account       string `json:"account"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	PriceKind     string `json:"priceKind,omitempty"`
+	PriceAmount   string `json:"priceAmount,omitempty"`
+	PriceCurrency string `json:"priceCurrency,omitempty"`
 }
 
 type fileSnapshot struct {
@@ -578,9 +581,25 @@ func TransactionToBean(entry LedgerEntry) string {
 		lines = append(lines, fmt.Sprintf("  %s: %s", key, metadataValueToBean(entry.Metadata[key])))
 	}
 	for _, posting := range entry.Postings {
-		lines = append(lines, fmt.Sprintf("  %-34s %12s %s", posting.Account, posting.Amount, posting.Currency))
+		lines = append(lines, renderEntryPosting(posting))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func renderEntryPosting(posting EntryPosting) string {
+	currency := posting.Currency
+	if currency == "" {
+		currency = "CNY"
+	}
+	line := fmt.Sprintf("  %-34s %12s %s", posting.Account, posting.Amount, currency)
+	if posting.PriceAmount != "" && posting.PriceCurrency != "" {
+		operator := "@"
+		if posting.PriceKind == "total" {
+			operator = "@@"
+		}
+		line += fmt.Sprintf(" %s %s %s", operator, posting.PriceAmount, posting.PriceCurrency)
+	}
+	return line
 }
 
 func BalanceToBean(entry LedgerEntry) string {

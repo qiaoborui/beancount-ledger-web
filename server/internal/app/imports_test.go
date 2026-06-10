@@ -482,6 +482,73 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 	}
 }
 
+func TestCmbCheckingFXImportHelpers(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "commodities.bean"), strings.Join([]string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity HKD",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
+		"2026-01-01 open Assets:Cash CNY",
+		"2026-01-01 open Assets:CN:CMB:Checking CNY",
+		"2026-01-01 open Assets:CN:CMB:HKD HKD",
+		"2026-01-01 open Expenses:Food CNY",
+		"2026-01-01 open Income:Salary CNY",
+		"2026-01-01 open Income:Other CNY",
+		"2026-01-01 open Equity:Opening-Balances CNY",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-checking-config.yaml"), strings.Join([]string{
+		"defaultDebitAccount: Expenses:Food",
+		"defaultCreditAccount: Income:Salary",
+		"cashAccount: Assets:CN:CMB:Checking",
+		"defaultCurrency: CNY",
+		"currencyAccounts:",
+		"  CNY: Assets:CN:CMB:Checking",
+		"  HKD: Assets:CN:CMB:HKD",
+		"cmbChecking:",
+		"  rules: []",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "cmb-checking-fx.csv")
+	output := filepath.Join(t.TempDir(), "cmb-checking-fx.bean")
+	mustWrite(t, input, strings.Join([]string{
+		"记账日期,货币,交易金额,联机余额,交易摘要,对手信息",
+		"2026-06-07,CNY,-86.86,\"11,322.78\",结售汇即时售汇,乔博睿",
+		"2026-06-07,HKD,100.00,100.00,结售汇即时售汇,乔博睿",
+		"2026-06-07,HKD,-100.00,0.00,结售汇即时结汇,乔博睿",
+		"2026-06-07,CNY,86.52,\"11,409.30\",结售汇即时结汇,乔博睿",
+	}, "\n"))
+
+	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
+	server.writer = NewLedgerWriter(cfg, server.cache)
+	if err := server.generateCmbCheckingBean(input, output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	if strings.Count(generated, `txType: "fx"`) != 2 {
+		t.Fatalf("expected two fx entries:\n%s", generated)
+	}
+	if !strings.Contains(generated, "Assets:CN:CMB:HKD") || !strings.Contains(generated, "100.00 HKD @@ 86.86 CNY") || !strings.Contains(generated, "-100.00 HKD @@ 86.52 CNY") {
+		t.Fatalf("generated bean missing FX postings:\n%s", generated)
+	}
+	entries, err := parsePreviewEntries(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].TxType != "fx" || entries[0].Postings[0].PriceKind != "total" || entries[0].Postings[0].PriceAmount != "86.86" {
+		t.Fatalf("unexpected preview entries: %#v", entries)
+	}
+	rendered, err := server.validateAndRenderImportEntries(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "100.00 HKD @@ 86.86 CNY") || !strings.Contains(rendered, "-100.00 HKD @@ 86.52 CNY") {
+		t.Fatalf("rendered import lost FX prices:\n%s", rendered)
+	}
+}
+
 func TestCmbPDFTableHelpers(t *testing.T) {
 	headerLine := pdfTextLine{Y: 700, Items: []pdfTextItem{
 		{Text: "交易日", X: 10, Y: 700},

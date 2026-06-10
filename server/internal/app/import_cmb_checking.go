@@ -22,6 +22,7 @@ type cmbCheckingConfig struct {
 	DefaultDebitAccount  string                   `yaml:"defaultDebitAccount"`
 	DefaultCreditAccount string                   `yaml:"defaultCreditAccount"`
 	CashAccount          string                   `yaml:"cashAccount"`
+	CurrencyAccounts     map[string]string        `yaml:"currencyAccounts"`
 	DefaultCurrency      string                   `yaml:"defaultCurrency"`
 	Title                string                   `yaml:"title"`
 	CMBChecking          cmbCheckingConfigSection `yaml:"cmbChecking"`
@@ -72,9 +73,19 @@ func (s *Server) generateCmbCheckingBean(inputFile, outputFile string) error {
 		return err
 	}
 	blocks := make([]string, 0, len(rows))
-	for _, row := range rows {
+	for index := 0; index < len(rows); index++ {
+		row := rows[index]
 		amount := cents(row.Amount)
 		if amount == 0 {
+			continue
+		}
+		if index+1 < len(rows) && cmbCheckingRowsAreFXPair(row, rows[index+1], config.DefaultCurrency) {
+			block, err := renderCmbCheckingFXEntry(row, rows[index+1], config)
+			if err != nil {
+				return err
+			}
+			blocks = append(blocks, block)
+			index++
 			continue
 		}
 		blocks = append(blocks, renderCmbCheckingEntry(row, amount, config))
@@ -111,6 +122,12 @@ func (s *Server) loadCmbCheckingConfig() (cmbCheckingConfig, error) {
 	}
 	if config.CashAccount == "" {
 		config.CashAccount = "Assets:CN:CMB:Checking"
+	}
+	if config.CurrencyAccounts == nil {
+		config.CurrencyAccounts = map[string]string{}
+	}
+	if config.CurrencyAccounts["CNY"] == "" {
+		config.CurrencyAccounts["CNY"] = config.CashAccount
 	}
 	if config.DefaultCurrency == "" {
 		config.DefaultCurrency = "CNY"
@@ -213,6 +230,100 @@ func renderCmbCheckingEntry(row cmbCheckingRow, amount int, config cmbCheckingCo
 	return strings.Join(lines, "\n")
 }
 
+func cmbCheckingRowsAreFXPair(left, right cmbCheckingRow, defaultCurrency string) bool {
+	if left.Date != right.Date {
+		return false
+	}
+	if !cmbCheckingFXSummary(left.Summary) || left.Summary != right.Summary {
+		return false
+	}
+	if strings.TrimSpace(left.Counterparty) != strings.TrimSpace(right.Counterparty) {
+		return false
+	}
+	leftCurrency := valueOr(left.Currency, defaultCurrency)
+	rightCurrency := valueOr(right.Currency, defaultCurrency)
+	if leftCurrency == rightCurrency {
+		return false
+	}
+	if leftCurrency != defaultCurrency && rightCurrency != defaultCurrency {
+		return false
+	}
+	leftAmount := cents(left.Amount)
+	rightAmount := cents(right.Amount)
+	return leftAmount != 0 && rightAmount != 0 && sign(leftAmount) != sign(rightAmount)
+}
+
+func cmbCheckingFXSummary(summary string) bool {
+	return strings.Contains(summary, "结售汇即时售汇") || strings.Contains(summary, "结售汇即时结汇")
+}
+
+func renderCmbCheckingFXEntry(left, right cmbCheckingRow, config cmbCheckingConfig) (string, error) {
+	defaultCurrency := valueOr(config.DefaultCurrency, "CNY")
+	cnyRow, foreignRow := left, right
+	if valueOr(left.Currency, defaultCurrency) != defaultCurrency {
+		cnyRow, foreignRow = right, left
+	}
+	cnyAmount := cents(cnyRow.Amount)
+	foreignAmount := cents(foreignRow.Amount)
+	foreignCurrency := valueOr(foreignRow.Currency, defaultCurrency)
+	cnyAccount := cmbCheckingCurrencyAccount(defaultCurrency, config)
+	foreignAccount := cmbCheckingCurrencyAccount(foreignCurrency, config)
+	if cnyAccount == "" {
+		return "", fmt.Errorf("招商银行储蓄卡换汇缺少 %s 币种账户配置", defaultCurrency)
+	}
+	if foreignAccount == "" {
+		return "", fmt.Errorf("招商银行储蓄卡换汇缺少 %s 币种账户配置", foreignCurrency)
+	}
+	rate := cmbCheckingFXRate(cnyAmount, foreignAmount)
+	payee := cmbCheckingPayee(left.Counterparty, left.Summary)
+	lines := []string{fmt.Sprintf(`%s * "%s" "%s"`, left.Date, escapeBean(payee), escapeBean(left.Summary))}
+	lines = append(lines,
+		fmt.Sprintf(`  method: "%s"`, escapeBean(left.Summary)),
+		fmt.Sprintf(`  onlineBalanceCny: "%s"`, escapeBean(cnyRow.OnlineBalance)),
+		fmt.Sprintf(`  onlineBalanceForeign: "%s"`, escapeBean(foreignRow.OnlineBalance)),
+		fmt.Sprintf(`  foreignCurrency: "%s"`, escapeBean(foreignCurrency)),
+		fmt.Sprintf(`  orderId: "%s"`, cmbCheckingFXOrderID(left, right)),
+		fmt.Sprintf(`  rows: "%d,%d"`, left.RowNumber, right.RowNumber),
+		`  source: "cmb-checking"`,
+		`  txType: "fx"`,
+		fmt.Sprintf(`  fxRate: "%s %s/%s"`, rate, defaultCurrency, foreignCurrency),
+	)
+	if strings.TrimSpace(left.Counterparty) != "" {
+		lines = append(lines, fmt.Sprintf(`  counterparty: "%s"`, escapeBean(left.Counterparty)))
+	}
+	if cnyAmount > 0 {
+		lines = append(lines,
+			fmt.Sprintf("  %-34s %12s %s", cnyAccount, fromCents(cnyAmount), defaultCurrency),
+			fmt.Sprintf("  %-34s %12s %s @@ %s %s", foreignAccount, fromCents(foreignAmount), foreignCurrency, fromCents(cnyAmount), defaultCurrency),
+		)
+		return strings.Join(lines, "\n"), nil
+	}
+	lines = append(lines,
+		fmt.Sprintf("  %-34s %12s %s @@ %s %s", foreignAccount, fromCents(foreignAmount), foreignCurrency, fromCents(-cnyAmount), defaultCurrency),
+		fmt.Sprintf("  %-34s %12s %s", cnyAccount, fromCents(cnyAmount), defaultCurrency),
+	)
+	return strings.Join(lines, "\n"), nil
+}
+
+func cmbCheckingCurrencyAccount(currency string, config cmbCheckingConfig) string {
+	if account := strings.TrimSpace(config.CurrencyAccounts[currency]); account != "" {
+		return account
+	}
+	if currency == valueOr(config.DefaultCurrency, "CNY") {
+		return config.CashAccount
+	}
+	return ""
+}
+
+func cmbCheckingFXRate(cnyAmount, foreignAmount int) string {
+	cnyAmount = abs(cnyAmount)
+	foreignAmount = abs(foreignAmount)
+	if foreignAmount == 0 {
+		return "0.000000"
+	}
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", float64(cnyAmount)/float64(foreignAmount)), "0"), ".")
+}
+
 func cmbCheckingTargetAccount(row cmbCheckingRow, amount int, config cmbCheckingConfig) string {
 	text := row.Summary + " " + row.Counterparty
 	for _, rule := range config.CMBChecking.Rules {
@@ -245,6 +356,15 @@ func cmbCheckingOrderID(row cmbCheckingRow) string {
 	return "cmb-checking-" + hex.EncodeToString(sum[:8])
 }
 
+func cmbCheckingFXOrderID(left, right cmbCheckingRow) string {
+	canonical := strings.Join([]string{
+		left.Date, left.Currency, left.Amount, left.OnlineBalance, left.Summary, left.Counterparty,
+		right.Date, right.Currency, right.Amount, right.OnlineBalance, right.Summary, right.Counterparty,
+	}, "\x00")
+	sum := sha256.Sum256([]byte(canonical))
+	return "cmb-checking-fx-" + hex.EncodeToString(sum[:8])
+}
+
 type cmbCheckingPDFResult struct {
 	CSV      string
 	RowCount int
@@ -275,7 +395,7 @@ func parseCmbCheckingPDFToCSV(inputFile string) (cmbCheckingPDFResult, error) {
 		}
 	}
 	rows := [][]string{}
-	lineRe := regexp.MustCompile(`^\s*(\d{4}-\d{2}-\d{2})\s+(CNY)\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(.+?)\s{2,}(.+?)\s*$`)
+	lineRe := regexp.MustCompile(`^\s*(\d{4}-\d{2}-\d{2})\s+([A-Z][A-Z0-9]*)\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(.+?)\s{2,}(.+?)\s*$`)
 	for pageNo := 1; pageNo <= reader.NumPage(); pageNo++ {
 		lines := groupPDFTextLines(pageTextItems(reader.Page(pageNo)))
 		for _, line := range lines {

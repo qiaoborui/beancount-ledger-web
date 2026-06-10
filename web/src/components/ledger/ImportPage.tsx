@@ -40,7 +40,7 @@ type ProviderChoice = { value: ProviderOverride; label: string; detail: string; 
 type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string };
 
 type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
-type ImportPosting = { account: string; amount: string; currency: string };
+type ImportPosting = { account: string; amount: string; currency: string; priceKind?: "unit" | "total"; priceAmount?: string; priceCurrency?: string };
 type ImportEntry = {
   id: string;
   date: string;
