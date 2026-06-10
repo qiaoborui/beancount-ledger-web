@@ -202,16 +202,20 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	for _, point := range body.CashflowSeries {
 		gotAllLabels = append(gotAllLabels, point.Month)
 	}
+	wantAllLabels := make([]string, 0, len(wantMonthLabels))
+	for _, label := range wantMonthLabels {
+		wantAllLabels = append(wantAllLabels, "2026-"+label)
+	}
 	if body.Start != "2000-01-01" || body.End != "2099-12-31" {
 		t.Fatalf("all-time dashboard should preserve requested range, got start=%s end=%s", body.Start, body.End)
 	}
-	if !reflect.DeepEqual(gotAllLabels, wantMonthLabels) || len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 {
+	if !reflect.DeepEqual(gotAllLabels, wantAllLabels) || len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "2026-05-01" || body.KPIs.Income != 100000 || body.KPIs.Expense != 1200 {
 		t.Fatalf("all-time dashboard should trim chart buckets to ledger activity, got cashflow=%#v netWorth=%#v kpis=%#v", body.CashflowSeries, body.NetWorthSeries, body.KPIs)
 	}
-	if len(body.CategorySeries) != 1 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Month != "05-01" {
+	if len(body.CategorySeries) != 1 || len(body.CategorySeries[0].Values) != 31 || body.CategorySeries[0].Values[0].Month != "2026-05-01" {
 		t.Fatalf("all-time dashboard should trim category trend buckets to ledger activity, got %#v", body.CategorySeries)
 	}
-	if len(body.AccountBalanceSeries) != 1 || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Month != "05-01" {
+	if len(body.AccountBalanceSeries) != 1 || len(body.AccountBalanceSeries[0].Values) != 31 || body.AccountBalanceSeries[0].Values[0].Month != "2026-05-01" {
 		t.Fatalf("all-time dashboard should trim account trend buckets to ledger activity, got %#v", body.AccountBalanceSeries)
 	}
 }

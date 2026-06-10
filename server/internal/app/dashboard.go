@@ -151,6 +151,7 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 	priceIndex := snapshotPriceIndex(snapshot)
 	txns := dashboardFilterTransactions(snapshot.Transactions, filters, priceIndex, valuationCurrency)
 	seriesStart, seriesEnd := dashboardSeriesRange(start, end, txns)
+	includeYearLabels := dashboardIncludeYearBucketLabels(start, end)
 	rawBalances := snapshotRawBalances(snapshot)
 	if !filters.Empty() {
 		rawBalances = CurrentBalances(txns)
@@ -159,7 +160,7 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 	summary := MonthSummaryWithPriceIndex(start, end, txns, priceIndex, valuationCurrency)
 	accountMap := snapshotAccountMap(snapshot)
 	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, priceIndex, end, accountMap, valuationCurrency)
-	seriesSummaries := dashboardBucketSummaries(txns, priceIndex, seriesStart, seriesEnd, valuationCurrency)
+	seriesSummaries := dashboardBucketSummaries(txns, priceIndex, seriesStart, seriesEnd, valuationCurrency, includeYearLabels)
 	assets, liabilities := balanceTotals(balanceRows)
 	var savingsRate *float64
 	if summary.Income > 0 {
@@ -178,12 +179,12 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 		End:                  end,
 		Currency:             valuationCurrency,
 		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
-		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), priceIndex, seriesStart, seriesEnd, valuationCurrency),
+		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), priceIndex, seriesStart, seriesEnd, valuationCurrency, includeYearLabels),
 		CashflowSeries:       dashboardCashflowSeries(seriesSummaries),
 		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, priceIndex, start, end, valuationCurrency),
 		WeekdayExpense:       dashboardWeekdayExpense(txns, priceIndex, start, end, valuationCurrency),
 		CategorySeries:       dashboardCategorySeries(seriesSummaries, 8, accountMap),
-		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balanceRows, priceIndex, seriesStart, seriesEnd, 6, valuationCurrency),
+		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balanceRows, priceIndex, seriesStart, seriesEnd, 6, valuationCurrency, includeYearLabels),
 		BudgetPressure:       budgetPressure,
 		Anomalies:            dashboardAnomalies(txns, priceIndex, start, end, 10, valuationCurrency),
 		TopPayees:            topPayees,
@@ -449,8 +450,8 @@ type dashboardBucketSummary struct {
 	Categories map[string]int
 }
 
-func dashboardBucketSummaries(txns []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []dashboardBucketSummary {
-	buckets := dashboardBuckets(start, end)
+func dashboardBucketSummaries(txns []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string, includeYearLabels bool) []dashboardBucketSummary {
+	buckets := dashboardBuckets(start, end, includeYearLabels)
 	rows := make([]dashboardBucketSummary, len(buckets))
 	for i, bucket := range buckets {
 		rows[i] = dashboardBucketSummary{Bucket: bucket, Categories: map[string]int{}}
@@ -491,8 +492,8 @@ func dashboardBucketIndex(buckets []dashboardBucket, date string) int {
 	return index
 }
 
-func dashboardNetWorthSeries(sorted []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string) []NetWorthPoint {
-	buckets := dashboardBuckets(start, end)
+func dashboardNetWorthSeries(sorted []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string, includeYearLabels bool) []NetWorthPoint {
+	buckets := dashboardBuckets(start, end, includeYearLabels)
 	balances := map[string]map[string]int{}
 	out := make([]NetWorthPoint, 0, len(buckets))
 	index := 0
@@ -649,7 +650,7 @@ func weekdayLabel(date string) string {
 	}
 }
 
-func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balances []AccountBalance, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string) []DashboardAccountSeries {
+func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balances []AccountBalance, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string, includeYearLabels bool) []DashboardAccountSeries {
 	labels := map[string]Account{}
 	for _, account := range accounts {
 		labels[account.Account] = account
@@ -678,7 +679,7 @@ func dashboardAccountBalanceSeries(txns []Transaction, accounts []Account, balan
 		selected = selected[:limit]
 	}
 
-	buckets := dashboardBuckets(start, end)
+	buckets := dashboardBuckets(start, end, includeYearLabels)
 	seriesValues := accountBucketEndValuations(txns, selected, buckets, priceIndex, valuationCurrency)
 	out := make([]DashboardAccountSeries, 0, len(selected))
 	for _, accountName := range selected {
@@ -918,7 +919,7 @@ type dashboardBucket struct {
 	End   string
 }
 
-func dashboardBuckets(start, end string) []dashboardBucket {
+func dashboardBuckets(start, end string, includeYearLabels bool) []dashboardBucket {
 	startDate, errStart := time.Parse("2006-01-02", start)
 	endDate, errEnd := time.Parse("2006-01-02", end)
 	if errStart != nil || errEnd != nil || !startDate.Before(endDate) {
@@ -926,10 +927,10 @@ func dashboardBuckets(start, end string) []dashboardBucket {
 	}
 	days := int(endDate.Sub(startDate).Hours() / 24)
 	if days <= 45 {
-		return dayBuckets(startDate, endDate)
+		return dayBuckets(startDate, endDate, includeYearLabels)
 	}
 	if days <= 180 {
-		return weekBuckets(startDate, endDate)
+		return weekBuckets(startDate, endDate, includeYearLabels)
 	}
 	if days <= 730 {
 		return monthBuckets(startDate, endDate)
@@ -937,16 +938,16 @@ func dashboardBuckets(start, end string) []dashboardBucket {
 	return quarterBuckets(startDate, endDate)
 }
 
-func dayBuckets(startDate, endDate time.Time) []dashboardBucket {
+func dayBuckets(startDate, endDate time.Time, includeYearLabels bool) []dashboardBucket {
 	out := []dashboardBucket{}
 	for current := startDate; current.Before(endDate); current = current.AddDate(0, 0, 1) {
 		next := current.AddDate(0, 0, 1)
-		out = append(out, dashboardBucket{Label: current.Format("01-02"), Start: current.Format("2006-01-02"), End: next.Format("2006-01-02")})
+		out = append(out, dashboardBucket{Label: dashboardDateBucketLabel(current, includeYearLabels), Start: current.Format("2006-01-02"), End: next.Format("2006-01-02")})
 	}
 	return out
 }
 
-func weekBuckets(startDate, endDate time.Time) []dashboardBucket {
+func weekBuckets(startDate, endDate time.Time, includeYearLabels bool) []dashboardBucket {
 	out := []dashboardBucket{}
 	for current := startDate; current.Before(endDate); current = current.AddDate(0, 0, 7) {
 		next := current.AddDate(0, 0, 7)
@@ -954,10 +955,23 @@ func weekBuckets(startDate, endDate time.Time) []dashboardBucket {
 			next = endDate
 		}
 		labelEnd := next.AddDate(0, 0, -1)
-		label := current.Format("01-02") + "~" + labelEnd.Format("01-02")
+		label := dashboardDateBucketLabel(current, includeYearLabels) + "~" + dashboardDateBucketLabel(labelEnd, includeYearLabels)
 		out = append(out, dashboardBucket{Label: label, Start: current.Format("2006-01-02"), End: next.Format("2006-01-02")})
 	}
 	return out
+}
+
+func dashboardIncludeYearBucketLabels(start, end string) bool {
+	startDate, errStart := time.Parse("2006-01-02", start)
+	endDate, errEnd := time.Parse("2006-01-02", end)
+	return errStart == nil && errEnd == nil && endDate.Sub(startDate).Hours()/24 > 730
+}
+
+func dashboardDateBucketLabel(date time.Time, includeYear bool) string {
+	if includeYear {
+		return date.Format("2006-01-02")
+	}
+	return date.Format("01-02")
 }
 
 func monthBuckets(startDate, endDate time.Time) []dashboardBucket {
