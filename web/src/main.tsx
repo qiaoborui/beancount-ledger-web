@@ -1,3 +1,7 @@
+import "@fontsource/noto-serif-sc/chinese-simplified-400.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-500.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-600.css";
+import "@fontsource/noto-serif-sc/chinese-simplified-700.css";
 import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { LedgerApp } from "@/components/LedgerApp";
