@@ -1,4 +1,4 @@
-import { FileCode2, FolderOpen, RotateCcw, Save, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, FileCode2, FolderOpen, RotateCcw, Save, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -19,10 +19,26 @@ type LedgerEditorFileResponse = {
 };
 
 type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
+type EditorMode = "edit" | "diff";
+type TreeNode = {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  file?: LedgerEditorFile;
+  children: TreeNode[];
+};
+type DiffLine = {
+  kind: "same" | "added" | "removed";
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+};
 
 export function LedgerEditorPage({ online, onSaved, showToast }: { online: boolean; onSaved: () => void; showToast: ToastFn }) {
   const [files, setFiles] = useState<LedgerEditorFile[]>([]);
   const [fileQuery, setFileQuery] = useState("");
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set([""]));
+  const [mode, setMode] = useState<EditorMode>("edit");
   const [selectedPath, setSelectedPath] = useState("");
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
@@ -38,11 +54,18 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
 
   const dirty = content !== originalContent;
   const selectedFile = files.find((file) => file.path === selectedPath);
-  const filteredFiles = useMemo(() => {
+  const visibleFiles = useMemo(() => {
     const query = fileQuery.trim().toLowerCase();
     if (!query) return files;
     return files.filter((file) => file.path.toLowerCase().includes(query));
   }, [fileQuery, files]);
+  const tree = useMemo(() => buildFileTree(visibleFiles), [visibleFiles]);
+  const diffLines = useMemo(() => buildLineDiff(originalContent, content), [content, originalContent]);
+  const changeStats = useMemo(() => diffLines.reduce((acc, line) => {
+    if (line.kind === "added") acc.added += 1;
+    if (line.kind === "removed") acc.removed += 1;
+    return acc;
+  }, { added: 0, removed: 0 }), [diffLines]);
   const stats = useMemo(() => {
     const lines = content === "" ? 1 : content.split("\n").length;
     return { lines, chars: content.length };
@@ -51,6 +74,16 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    setExpandedDirs((current) => {
+      const next = new Set(current);
+      next.add("");
+      for (const dir of parentDirs(selectedPath)) next.add(dir);
+      return next;
+    });
+  }, [selectedPath]);
 
   const loadFile = useCallback(async (path: string, options: { force?: boolean } = {}) => {
     if (!path) return;
@@ -169,6 +202,15 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     });
   }
 
+  function toggleDir(path: string) {
+    setExpandedDirs((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
   return (
     <section className="ledger-editor-shell min-w-0 overflow-hidden rounded-2xl border border-line bg-panel shadow-sm">
       <div className="grid min-h-[calc(100dvh-13rem)] min-w-0 lg:grid-cols-[310px_minmax(0,1fr)]">
@@ -181,18 +223,9 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
             </label>
           </div>
           <div className="max-h-[42dvh] overflow-auto p-2 lg:max-h-[calc(100dvh-18rem)]">
-            {loadingFiles ? <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">正在读取文件列表…</div> : filteredFiles.length ? filteredFiles.map((file) => {
-              const active = file.path === selectedPath;
-              return (
-                <button key={file.path} type="button" className={`mb-1 flex w-full min-w-0 items-start gap-2 rounded-xl border px-3 py-2 text-left ${active ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-transparent text-olive hover:border-line hover:bg-panel"}`} onClick={() => void loadFile(file.path)} title={file.path}>
-                  <FileCode2 className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{file.name}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-stone">{file.dir === "." ? "/" : file.dir}</span>
-                  </span>
-                </button>
-              );
-            }) : <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">没有匹配的可编辑账本文件。</div>}
+            {loadingFiles ? <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">正在读取文件列表…</div> : tree.children.length ? tree.children.map((node) => (
+              <FileTreeNode key={node.path || node.name} node={node} depth={0} selectedPath={selectedPath} queryActive={fileQuery.trim() !== ""} expandedDirs={expandedDirs} onToggleDir={toggleDir} onOpenFile={loadFile} />
+            )) : <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">没有匹配的可编辑账本文件。</div>}
           </div>
         </aside>
 
@@ -208,6 +241,10 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <div className="grid h-9 grid-cols-2 overflow-hidden rounded-xl border border-line bg-panel">
+                <button type="button" className={`px-3 text-sm ${mode === "edit" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("edit")}>编辑</button>
+                <button type="button" className={`px-3 text-sm ${mode === "diff" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("diff")}>Diff</button>
+              </div>
               <Button variant="outline" className="rounded-xl bg-panel text-stone" disabled={!dirty || loadingFile || saving} onClick={() => { setContent(originalContent); showToast("info", "已恢复为上次读取的内容。"); }}>
                 <RotateCcw className="h-4 w-4" /> 还原
               </Button>
@@ -218,27 +255,163 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
           </div>
 
           {error && <div className="border-b border-line bg-[var(--danger)]/10 px-4 py-2 text-sm text-[var(--danger)]">{error}</div>}
-          <div className="relative min-h-[520px] flex-1 bg-[rgb(var(--color-ink))] text-[rgb(var(--color-paper))] lg:min-h-0">
-            {loadingFile && <div className="absolute inset-0 z-20 grid place-items-center bg-ink/45 text-sm text-paper backdrop-blur-sm">正在读取文件…</div>}
-            <pre ref={highlightRef} aria-hidden="true" className="ledger-editor-highlight absolute inset-0 overflow-auto p-0">
-              <code className="block min-w-max py-4 pr-6">{renderHighlightedLines(content)}</code>
-            </pre>
-            <textarea
-              ref={textareaRef}
-              className="ledger-editor-input absolute inset-0 resize-none overflow-auto border-0 bg-transparent py-4 pr-6 outline-none"
-              value={content}
-              spellCheck={false}
-              wrap="off"
-              onChange={(event) => setContent(event.target.value)}
-              onScroll={handleEditorScroll}
-              onKeyDown={handleEditorKeyDown}
-              aria-label="Beancount 文件编辑器"
-            />
-          </div>
+          {mode === "edit" ? (
+            <div className="relative min-h-[520px] flex-1 bg-[rgb(var(--color-ink))] text-[rgb(var(--color-paper))] lg:min-h-0">
+              {loadingFile && <div className="absolute inset-0 z-20 grid place-items-center bg-ink/45 text-sm text-paper backdrop-blur-sm">正在读取文件…</div>}
+              <pre ref={highlightRef} aria-hidden="true" className="ledger-editor-highlight absolute inset-0 overflow-auto p-0">
+                <code className="block min-w-max py-4 pr-6">{renderHighlightedLines(content)}</code>
+              </pre>
+              <textarea
+                ref={textareaRef}
+                className="ledger-editor-input absolute inset-0 resize-none overflow-auto border-0 bg-transparent py-4 pr-6 outline-none"
+                value={content}
+                spellCheck={false}
+                wrap="off"
+                onChange={(event) => setContent(event.target.value)}
+                onScroll={handleEditorScroll}
+                onKeyDown={handleEditorKeyDown}
+                aria-label="Beancount 文件编辑器"
+              />
+            </div>
+          ) : (
+            <DiffView lines={diffLines} added={changeStats.added} removed={changeStats.removed} />
+          )}
         </div>
       </div>
     </section>
   );
+}
+
+function FileTreeNode({ node, depth, selectedPath, queryActive, expandedDirs, onToggleDir, onOpenFile }: { node: TreeNode; depth: number; selectedPath: string; queryActive: boolean; expandedDirs: Set<string>; onToggleDir: (path: string) => void; onOpenFile: (path: string) => Promise<void> }) {
+  const expanded = queryActive || expandedDirs.has(node.path);
+  const paddingLeft = `${0.5 + depth * 0.875}rem`;
+  if (node.type === "directory") {
+    return (
+      <div>
+        <button type="button" className="mb-1 flex h-8 w-full min-w-0 items-center gap-1 rounded-lg px-2 text-left text-sm font-medium text-olive hover:bg-panel hover:text-ink" style={{ paddingLeft }} onClick={() => onToggleDir(node.path)} aria-expanded={expanded}>
+          {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />}
+          <FolderOpen className="h-4 w-4 shrink-0 text-brand" />
+          <span className="truncate">{node.name}</span>
+        </button>
+        {expanded && node.children.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} queryActive={queryActive} expandedDirs={expandedDirs} onToggleDir={onToggleDir} onOpenFile={onOpenFile} />)}
+      </div>
+    );
+  }
+  const active = node.path === selectedPath;
+  return (
+    <button type="button" className={`mb-1 flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border px-2 text-left text-sm ${active ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-transparent text-olive hover:border-line hover:bg-panel hover:text-ink"}`} style={{ paddingLeft }} onClick={() => void onOpenFile(node.path)} title={node.path}>
+      <span className="w-3.5 shrink-0" />
+      <FileCode2 className="h-4 w-4 shrink-0 text-brand" />
+      <span className="truncate">{node.name}</span>
+    </button>
+  );
+}
+
+function DiffView({ lines, added, removed }: { lines: DiffLine[]; added: number; removed: number }) {
+  const hasChanges = added > 0 || removed > 0;
+  return (
+    <div className="flex min-h-[520px] flex-1 flex-col bg-[rgb(var(--color-ink))] text-[rgb(var(--color-paper))] lg:min-h-0">
+      <div className="flex shrink-0 items-center justify-between border-b border-paper/10 px-4 py-2 font-mono text-xs text-paper/60">
+        <span>{hasChanges ? `+${added} / -${removed}` : "没有未保存改动"}</span>
+        <span>working copy diff</span>
+      </div>
+      <div className="ledger-diff-view flex-1 overflow-auto py-3">
+        {hasChanges ? lines.map((line, index) => <DiffLineRow key={`${index}-${line.kind}`} line={line} />) : <div className="grid min-h-80 place-items-center text-sm text-paper/45">编辑文件后，这里会显示相对加载版本的 Diff。</div>}
+      </div>
+    </div>
+  );
+}
+
+function DiffLineRow({ line }: { line: DiffLine }) {
+  const marker = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
+  return (
+    <div className={`ledger-diff-line ledger-diff-line-${line.kind}`}>
+      <span className="ledger-diff-gutter">{line.oldLine ?? ""}</span>
+      <span className="ledger-diff-gutter">{line.newLine ?? ""}</span>
+      <span className="ledger-diff-marker">{marker}</span>
+      <span className="ledger-diff-code">{line.text || " "}</span>
+    </div>
+  );
+}
+
+function buildFileTree(files: LedgerEditorFile[]): TreeNode {
+  const root: TreeNode = { name: "ledger", path: "", type: "directory", children: [] };
+  const dirs = new Map<string, TreeNode>([["", root]]);
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let current = root;
+    let currentPath = "";
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      const nextPath = currentPath ? `${currentPath}/${part}` : part;
+      if (index === parts.length - 1) {
+        current.children.push({ name: part, path: file.path, type: "file", file, children: [] });
+        continue;
+      }
+      let dir = dirs.get(nextPath);
+      if (!dir) {
+        dir = { name: part, path: nextPath, type: "directory", children: [] };
+        dirs.set(nextPath, dir);
+        current.children.push(dir);
+      }
+      current = dir;
+      currentPath = nextPath;
+    }
+  }
+  sortTree(root);
+  return root;
+}
+
+function sortTree(node: TreeNode) {
+  node.children.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { numeric: true });
+  });
+  for (const child of node.children) sortTree(child);
+}
+
+function parentDirs(path: string) {
+  const parts = path.split("/").slice(0, -1);
+  const dirs: string[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    dirs.push(parts.slice(0, index + 1).join("/"));
+  }
+  return dirs;
+}
+
+function buildLineDiff(before: string, after: string): DiffLine[] {
+  if (before === after) return [];
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  let prefix = 0;
+  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < beforeLines.length - prefix &&
+    suffix < afterLines.length - prefix &&
+    beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const rows: DiffLine[] = [];
+  const contextBefore = Math.max(0, prefix - 4);
+  for (let index = contextBefore; index < prefix; index += 1) {
+    rows.push({ kind: "same", oldLine: index + 1, newLine: index + 1, text: beforeLines[index] });
+  }
+  for (let index = prefix; index < beforeLines.length - suffix; index += 1) {
+    rows.push({ kind: "removed", oldLine: index + 1, text: beforeLines[index] });
+  }
+  for (let index = prefix; index < afterLines.length - suffix; index += 1) {
+    rows.push({ kind: "added", newLine: index + 1, text: afterLines[index] });
+  }
+  const suffixStartBefore = beforeLines.length - suffix;
+  const suffixStartAfter = afterLines.length - suffix;
+  for (let offset = 0; offset < Math.min(suffix, 4); offset += 1) {
+    rows.push({ kind: "same", oldLine: suffixStartBefore + offset + 1, newLine: suffixStartAfter + offset + 1, text: beforeLines[suffixStartBefore + offset] });
+  }
+  return rows;
 }
 
 async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {

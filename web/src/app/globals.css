@@ -670,3 +670,44 @@ button.card:active, a.card:active { transform: scale(0.992); }
 .ledger-token-account { color: #b8d0ee; }
 .ledger-token-number { color: #f0d08a; }
 .ledger-token-currency { color: #c5bbb0; }
+
+.ledger-diff-view {
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5rem;
+}
+
+.ledger-diff-line {
+  display: grid;
+  min-width: max-content;
+  grid-template-columns: 4rem 4rem 1.75rem minmax(36rem, 1fr);
+  border-left: 3px solid transparent;
+  color: rgba(var(--color-paper), 0.84);
+}
+
+.ledger-diff-line-added {
+  border-left-color: rgb(var(--color-income));
+  background: rgba(var(--color-income), 0.18);
+}
+
+.ledger-diff-line-removed {
+  border-left-color: rgb(var(--color-expense));
+  background: rgba(var(--color-expense), 0.18);
+}
+
+.ledger-diff-gutter {
+  user-select: none;
+  padding-right: 0.75rem;
+  text-align: right;
+  color: rgba(var(--color-paper), 0.34);
+}
+
+.ledger-diff-marker {
+  user-select: none;
+  color: rgba(var(--color-paper), 0.62);
+}
+
+.ledger-diff-code {
+  white-space: pre;
+  padding-right: 1.5rem;
+}
