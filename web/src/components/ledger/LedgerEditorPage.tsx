@@ -256,8 +256,8 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
 
           {error && <div className="border-b border-line bg-[var(--danger)]/10 px-4 py-2 text-sm text-[var(--danger)]">{error}</div>}
           {mode === "edit" ? (
-            <div className="relative min-h-[520px] flex-1 bg-[rgb(var(--color-ink))] text-[rgb(var(--color-paper))] lg:min-h-0">
-              {loadingFile && <div className="absolute inset-0 z-20 grid place-items-center bg-ink/45 text-sm text-paper backdrop-blur-sm">正在读取文件…</div>}
+            <div className="ledger-code-surface relative min-h-[520px] flex-1 lg:min-h-0">
+              {loadingFile && <div className="ledger-code-loading absolute inset-0 z-20 grid place-items-center text-sm backdrop-blur-sm">正在读取文件…</div>}
               <pre ref={highlightRef} aria-hidden="true" className="ledger-editor-highlight absolute inset-0 overflow-auto p-0">
                 <code className="block min-w-max py-4 pr-6">{renderHighlightedLines(content)}</code>
               </pre>
@@ -310,13 +310,13 @@ function FileTreeNode({ node, depth, selectedPath, queryActive, expandedDirs, on
 function DiffView({ lines, added, removed }: { lines: DiffLine[]; added: number; removed: number }) {
   const hasChanges = added > 0 || removed > 0;
   return (
-    <div className="flex min-h-[520px] flex-1 flex-col bg-[rgb(var(--color-ink))] text-[rgb(var(--color-paper))] lg:min-h-0">
-      <div className="flex shrink-0 items-center justify-between border-b border-paper/10 px-4 py-2 font-mono text-xs text-paper/60">
+    <div className="ledger-code-surface flex min-h-[520px] flex-1 flex-col lg:min-h-0">
+      <div className="ledger-diff-toolbar flex shrink-0 items-center justify-between px-4 py-2 font-mono text-xs">
         <span>{hasChanges ? `+${added} / -${removed}` : "没有未保存改动"}</span>
         <span>working copy diff</span>
       </div>
       <div className="ledger-diff-view flex-1 overflow-auto py-3">
-        {hasChanges ? lines.map((line, index) => <DiffLineRow key={`${index}-${line.kind}`} line={line} />) : <div className="grid min-h-80 place-items-center text-sm text-paper/45">编辑文件后，这里会显示相对加载版本的 Diff。</div>}
+        {hasChanges ? lines.map((line, index) => <DiffLineRow key={`${index}-${line.kind}`} line={line} />) : <div className="ledger-diff-empty grid min-h-80 place-items-center text-sm">编辑文件后，这里会显示相对加载版本的 Diff。</div>}
       </div>
     </div>
   );
