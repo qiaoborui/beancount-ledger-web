@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdfDetection";
 import { formatMoney } from "@/lib/money";
@@ -121,6 +121,35 @@ function providerLabel(provider: Provider, choices: ProviderChoice[]) {
   return choices.find((choice) => choice.value === provider)?.label ?? fallbackProviderChoices.find((choice) => choice.value === provider)?.label ?? provider;
 }
 
+function isProvider(value: string | undefined): value is Provider {
+  return value === "alipay" || value === "wechat" || value === "cmb" || value === "cmb-checking";
+}
+
+function importDocumentCoverageValue(document: ImportDocument) {
+  if (document.dateEnd) return document.dateEnd;
+  if (document.dateStart) return document.dateStart;
+  return "";
+}
+
+function compareImportDocumentCoverage(left: ImportDocument, right: ImportDocument) {
+  const leftCoverage = importDocumentCoverageValue(left);
+  const rightCoverage = importDocumentCoverageValue(right);
+  if (leftCoverage !== rightCoverage) return leftCoverage.localeCompare(rightCoverage);
+  return new Date(left.modTime).getTime() - new Date(right.modTime).getTime();
+}
+
+export function latestImportDocumentsByProvider(documents: ImportDocument[]) {
+  const latest: Partial<Record<Provider, ImportDocument>> = {};
+  for (const document of documents) {
+    if (!isProvider(document.provider)) continue;
+    const current = latest[document.provider];
+    if (!current || compareImportDocumentCoverage(document, current) > 0) {
+      latest[document.provider] = document;
+    }
+  }
+  return latest;
+}
+
 function formatImportTotals(entries: ImportEntry[]) {
   const totals = new Map<string, number>();
   for (const entry of entries) {
@@ -220,6 +249,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const reviewTotalAmount = useMemo(() => formatImportTotals(entries), [entries]);
   const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
   const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
+  const latestImportsByProvider = useMemo(() => latestImportDocumentsByProvider(importDocuments), [importDocuments]);
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -515,7 +545,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           </div>
 
-          <div className="grid min-w-0 max-w-full grid-rows-[auto_auto_auto_auto] gap-4 overflow-hidden">
+          <div className="grid min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_auto] gap-4 overflow-hidden">
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
@@ -553,6 +583,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 </div>
               ) : null}
             </div>
+
+            <LastImportByProviderPanel
+              latestByProvider={latestImportsByProvider}
+              loading={documentsLoading}
+              providerChoices={providerChoices}
+              onRefresh={() => void loadImportDocuments()}
+            />
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
               <div className="flex items-center justify-between gap-3">
@@ -920,6 +957,55 @@ function ImportStep({ index, title, detail, active, done }: { index: number; tit
       <div className="min-w-0 flex-1 overflow-hidden">
         <div className="truncate text-sm font-medium text-ink">{title}</div>
         <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function LastImportByProviderPanel({
+  latestByProvider,
+  loading,
+  providerChoices,
+  onRefresh,
+}: {
+  latestByProvider: Partial<Record<Provider, ImportDocument>>;
+  loading: boolean;
+  providerChoices: ProviderChoice[];
+  onRefresh: () => void;
+}) {
+  const providers = providerChoices.filter((choice): choice is ProviderChoice & { value: Provider } => isProvider(choice.value));
+  return (
+    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <CalendarClock className="h-4 w-4 shrink-0 text-brand" />
+            <div className="truncate text-sm font-medium text-ink">各渠道已导入至</div>
+          </div>
+          <div className="mt-1 text-xs leading-5 text-stone">按账单截止日判断，续导时从下一天开始。</div>
+        </div>
+        <Button type="button" variant="outline" size="icon-sm" onClick={onRefresh} disabled={loading} title="刷新导入记录">
+          <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
+        </Button>
+      </div>
+
+      <div className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
+        {providers.map((provider) => {
+          const document = latestByProvider[provider.value];
+          return (
+            <div key={provider.value} className="grid min-w-0 gap-2 px-3 py-3">
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <span className="truncate text-sm font-medium text-ink">{provider.label}</span>
+                <span className={cn("shrink-0 rounded-full px-2 py-1 text-xs font-medium tabular-nums", document ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>
+                  {document ? document.dateEnd || document.dateStart || "未知日期" : "暂无记录"}
+                </span>
+              </div>
+              <div className="min-w-0 truncate text-xs leading-5 text-stone" title={document?.name}>
+                {document ? `${formatImportDocumentRange(document)} · ${formatImportDocumentTime(document.modTime)} · ${document.name}` : "这个渠道还没有归档账单。"}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
