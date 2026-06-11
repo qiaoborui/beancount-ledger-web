@@ -71,12 +71,21 @@
   --chart-palette-4: #7d8b6f;
   --chart-palette-5: #b58b6b;
   --chart-palette-6: #6b6a64;
-  --ledger-code-bg: #151617;
-  --ledger-code-fg: #f5f4ed;
-  --ledger-code-muted: rgba(245, 244, 237, 0.38);
-  --ledger-code-border: rgba(245, 244, 237, 0.10);
-  --ledger-code-gutter-bg: rgba(0, 0, 0, 0.28);
-  --ledger-code-selection: rgba(126, 160, 198, 0.42);
+  --ledger-code-bg: #faf9f5;
+  --ledger-code-fg: #141413;
+  --ledger-code-muted: rgba(107, 106, 100, 0.72);
+  --ledger-code-border: rgba(20, 20, 19, 0.10);
+  --ledger-code-gutter-bg: rgba(20, 20, 19, 0.05);
+  --ledger-code-selection: rgba(45, 90, 138, 0.22);
+  --ledger-token-date: #8a6f2f;
+  --ledger-token-directive: #1b365d;
+  --ledger-token-string: #7f5f35;
+  --ledger-token-tag: #4a6b55;
+  --ledger-token-income: #4a6b55;
+  --ledger-token-expense: #8e4a3d;
+  --ledger-token-account: #2d5a8a;
+  --ledger-token-number: #8a6f2f;
+  --ledger-token-currency: #504e49;
 }
 
 html[data-theme="dark"] {
@@ -140,6 +149,15 @@ html[data-theme="dark"] {
   --ledger-code-border: rgba(235, 230, 218, 0.12);
   --ledger-code-gutter-bg: rgba(0, 0, 0, 0.34);
   --ledger-code-selection: rgba(126, 160, 198, 0.42);
+  --ledger-token-date: #d7b56d;
+  --ledger-token-directive: #8fb7e4;
+  --ledger-token-string: #d7c184;
+  --ledger-token-tag: #b7d48d;
+  --ledger-token-income: #96d2aa;
+  --ledger-token-expense: #e29b8e;
+  --ledger-token-account: #b8d0ee;
+  --ledger-token-number: #f0d08a;
+  --ledger-token-currency: #c5bbb0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -204,6 +222,15 @@ html[data-theme="dark"] {
     --ledger-code-border: rgba(235, 230, 218, 0.12);
     --ledger-code-gutter-bg: rgba(0, 0, 0, 0.34);
     --ledger-code-selection: rgba(126, 160, 198, 0.42);
+    --ledger-token-date: #d7b56d;
+    --ledger-token-directive: #8fb7e4;
+    --ledger-token-string: #d7c184;
+    --ledger-token-tag: #b7d48d;
+    --ledger-token-income: #96d2aa;
+    --ledger-token-expense: #e29b8e;
+    --ledger-token-account: #b8d0ee;
+    --ledger-token-number: #f0d08a;
+    --ledger-token-currency: #c5bbb0;
   }
 }
 
@@ -689,15 +716,15 @@ button.card:active, a.card:active { transform: scale(0.992); }
 }
 
 .ledger-token-comment { color: var(--ledger-code-muted); }
-.ledger-token-date { color: #d7b56d; }
-.ledger-token-directive { color: #8fb7e4; font-weight: 600; }
-.ledger-token-string { color: #d7c184; }
-.ledger-token-tag { color: #b7d48d; }
-.ledger-token-income { color: #96d2aa; }
-.ledger-token-expense { color: #e29b8e; }
-.ledger-token-account { color: #b8d0ee; }
-.ledger-token-number { color: #f0d08a; }
-.ledger-token-currency { color: #c5bbb0; }
+.ledger-token-date { color: var(--ledger-token-date); }
+.ledger-token-directive { color: var(--ledger-token-directive); font-weight: 600; }
+.ledger-token-string { color: var(--ledger-token-string); }
+.ledger-token-tag { color: var(--ledger-token-tag); }
+.ledger-token-income { color: var(--ledger-token-income); }
+.ledger-token-expense { color: var(--ledger-token-expense); }
+.ledger-token-account { color: var(--ledger-token-account); }
+.ledger-token-number { color: var(--ledger-token-number); }
+.ledger-token-currency { color: var(--ledger-token-currency); }
 
 .ledger-diff-view {
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
