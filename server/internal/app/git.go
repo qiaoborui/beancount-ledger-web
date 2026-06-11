@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "budgets.bean", "README.md", "accounts.bean", "prices.bean"}
+var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "accounts.bean", "budgets.bean", "commodities.bean", "prices.bean", "README.md"}
 
 type GitChange struct {
 	Path           string `json:"path"`
@@ -151,6 +151,9 @@ func cleanLedgerGitPath(cfg Config, rawPath string) (string, error) {
 			return path, nil
 		}
 	}
+	if isLedgerEditorPathAllowed(path) {
+		return path, nil
+	}
 	return "", fmt.Errorf("path is outside ledger tracked areas: %s", path)
 }
 
@@ -195,14 +198,26 @@ func truncateGitDiff(diff string) string {
 
 func ledgerGitTrackedPathspecs(cfg Config) []string {
 	paths := []string{}
+	seen := map[string]bool{}
 	for _, path := range ledgerGitCandidatePaths {
 		if _, err := os.Stat(filepath.Join(cfg.LedgerRoot, path)); err == nil {
 			paths = append(paths, path)
+			seen[path] = true
 			continue
 		}
 		output, err := gitLedgerOutput(cfg, "ls-files", "--", path)
 		if err == nil && strings.TrimSpace(output) != "" {
 			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	if files, err := listLedgerEditorFiles(cfg); err == nil {
+		for _, file := range files {
+			if seen[file.Path] {
+				continue
+			}
+			paths = append(paths, file.Path)
+			seen[file.Path] = true
 		}
 	}
 	return paths

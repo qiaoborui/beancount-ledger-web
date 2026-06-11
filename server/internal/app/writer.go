@@ -83,6 +83,7 @@ const (
 	ledgerWriteSourceTransactionReversal = "transaction-reversal"
 	ledgerWriteSourceReconciliation      = "reconciliation"
 	ledgerWriteSourceImportCommit        = "import-commit"
+	ledgerWriteSourceEditorSave          = "editor-save"
 )
 
 func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
@@ -460,6 +461,12 @@ func (w *LedgerWriter) validateAndClear(source string) error {
 		publishLedgerUpdated(w.cfg, source)
 	}
 	return err
+}
+
+func (w *LedgerWriter) ReplaceLedgerFile(file string, content []byte) error {
+	return w.RunTransactionWithSource(ledgerWriteSourceEditorSave, func(tx *LedgerWriteTransaction) error {
+		return tx.WriteFile(file, content, 0o644)
+	})
 }
 
 func includeLineFor(cfg Config, file string) string {
