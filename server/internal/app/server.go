@@ -79,6 +79,9 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.GET("/imports/documents/file", s.importsDocumentFile)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)
+	ledger.GET("/editor/files", s.editorFiles)
+	ledger.GET("/editor/file", s.editorFile)
+	ledger.PUT("/editor/file", s.saveEditorFile)
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/chat", s.aiChat)

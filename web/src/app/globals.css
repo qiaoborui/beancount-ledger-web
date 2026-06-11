@@ -614,3 +614,59 @@ button.card:active, a.card:active { transform: scale(0.992); }
     transition-duration: 0.001ms !important;
   }
 }
+
+.ledger-editor-highlight,
+.ledger-editor-input {
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5rem;
+  tab-size: 2;
+}
+
+.ledger-editor-highlight {
+  color: rgba(var(--color-paper), 0.86);
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.28) 0 4.25rem, transparent 4.25rem),
+    rgb(var(--color-ink));
+}
+
+.ledger-editor-input {
+  padding-left: 5.25rem;
+  color: transparent;
+  caret-color: rgb(var(--color-paper));
+  white-space: pre;
+}
+
+.ledger-editor-input::selection {
+  background: rgba(var(--color-brand), 0.42);
+}
+
+.ledger-editor-line {
+  display: grid;
+  min-height: 1.5rem;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+}
+
+.ledger-editor-line-number {
+  user-select: none;
+  padding-right: 0.875rem;
+  text-align: right;
+  color: rgba(var(--color-paper), 0.34);
+}
+
+.ledger-editor-code {
+  padding-left: 1rem;
+  padding-right: 1.5rem;
+  white-space: pre;
+}
+
+.ledger-token-comment { color: rgba(var(--color-paper), 0.42); }
+.ledger-token-date { color: #d7b56d; }
+.ledger-token-directive { color: #8fb7e4; font-weight: 600; }
+.ledger-token-string { color: #d7c184; }
+.ledger-token-tag { color: #b7d48d; }
+.ledger-token-income { color: #96d2aa; }
+.ledger-token-expense { color: #e29b8e; }
+.ledger-token-account { color: #b8d0ee; }
+.ledger-token-number { color: #f0d08a; }
+.ledger-token-currency { color: #c5bbb0; }

@@ -9,6 +9,7 @@ export const loadEntryModal = () => import("./EntryModal");
 export const loadGitSaveModal = () => import("./GitSaveModal");
 export const loadQuickActionsSheet = () => import("./QuickActionsSheet");
 export const loadImportPage = () => import("./ImportPage");
+export const loadLedgerEditorPage = () => import("./LedgerEditorPage");
 export const loadAccountPanels = () => import("./AccountPanels");
 export const loadAccountDetailPage = () => import("./AccountDetailPage");
 export const loadCurrencyPage = () => import("./CurrencyPage");
@@ -23,6 +24,7 @@ const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
   accounts: loadAccountPanels,
   budgets: loadAccountPanels,
   imports: loadImportPage,
+  editor: loadLedgerEditorPage,
   reconcile: loadReconcilePage,
   settings: loadSettingsPage,
   "income-statement": loadIncomeStatementPage,
@@ -44,6 +46,7 @@ function pageFromHref(href: string): LedgerPage {
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
+  if (pathname.startsWith("/editor")) return "editor";
   if (pathname.startsWith("/reconcile")) return "reconcile";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/income-statement")) return "income-statement";

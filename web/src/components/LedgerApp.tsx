@@ -40,6 +40,7 @@ import {
   loadGitSaveModal,
   loadImportPage,
   loadIncomeStatementPage,
+  loadLedgerEditorPage,
   loadNetWorthPage,
   loadQuickActionsSheet,
   loadReconcilePage,
@@ -63,6 +64,7 @@ const LazyEntryPanel = lazy(() => loadEntryModal().then((mod) => ({ default: mod
 const LazyGitSaveModal = lazy(() => loadGitSaveModal().then((mod) => ({ default: mod.GitSaveModal })));
 const LazyQuickActionsSheet = lazy(() => loadQuickActionsSheet().then((mod) => ({ default: mod.QuickActionsSheet })));
 const LazyImportPage = lazy(() => loadImportPage().then((mod) => ({ default: mod.ImportPage })));
+const LazyLedgerEditorPage = lazy(() => loadLedgerEditorPage().then((mod) => ({ default: mod.LedgerEditorPage })));
 const LazyAccountDetailPage = lazy(() => loadAccountDetailPage().then((mod) => ({ default: mod.AccountDetailPage })));
 const LazyCurrencyPage = lazy(() => loadCurrencyPage().then((mod) => ({ default: mod.CurrencyPage })));
 const LazyReconcilePage = lazy(() => loadReconcilePage().then((mod) => ({ default: mod.ReconcilePage })));
@@ -99,6 +101,7 @@ function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
+  if (pathname.startsWith("/editor")) return "editor";
   if (pathname.startsWith("/reconcile")) return "reconcile";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/income-statement")) return "income-statement";
@@ -652,6 +655,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} /></Suspense>}
       {page === "budgets" && <Suspense fallback={<RouteFallback label="正在准备预算…" />}><LazyBudgetPanel rows={budgetRows} valuationCurrency={dataValuationCurrency} full /></Suspense>}
       {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} /></Suspense>}
+      {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备账本编辑器…" />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); void refreshGitStatus(); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock("账本编辑器已隐藏", "在线编辑会展示完整 Beancount 文件和金额，需要使用 Face ID / Passkey 后查看。"))}
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {(page === "home" || page === "transactions") && (
@@ -712,13 +716,14 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "currencies";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
     budgets: { eyebrow: "budget period", title: `${label} 预算` },
     imports: { eyebrow: "statement import", title: "账单导入" },
+    editor: { eyebrow: "ledger editor", title: "账本编辑器" },
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
     accounts: { eyebrow: "account book", title: "账户与余额" },
     "net-worth": { eyebrow: "net worth range", title: `${label} 净资产` },
