@@ -51,6 +51,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   const highlightRef = useRef<HTMLPreElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dirtyRef = useRef(false);
+  const selectedPathRef = useRef("");
 
   const dirty = content !== originalContent;
   const selectedFile = files.find((file) => file.path === selectedPath);
@@ -76,6 +77,10 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   }, [dirty]);
 
   useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
+
+  useEffect(() => {
     if (!selectedPath) return;
     setExpandedDirs((current) => {
       const next = new Set(current);
@@ -92,6 +97,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     setError("");
     try {
       const data = await fetchJSON<LedgerEditorFileResponse>(`/api/ledger/editor/file?path=${encodeURIComponent(path)}`);
+      selectedPathRef.current = data.path;
       setSelectedPath(data.path);
       setContent(data.content);
       setOriginalContent(data.content);
@@ -113,8 +119,9 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     try {
       const data = await fetchJSON<{ files: LedgerEditorFile[] }>("/api/ledger/editor/files");
       setFiles(data.files);
-      const firstPath = data.files.find((file) => file.path === selectedPath)?.path ?? data.files.find((file) => file.path === "main.bean")?.path ?? data.files[0]?.path ?? "";
-      if (firstPath && (!selectedPath || !data.files.some((file) => file.path === selectedPath))) {
+      const currentPath = selectedPathRef.current;
+      const firstPath = data.files.find((file) => file.path === currentPath)?.path ?? data.files.find((file) => file.path === "main.bean")?.path ?? data.files[0]?.path ?? "";
+      if (firstPath && (!currentPath || !data.files.some((file) => file.path === currentPath))) {
         await loadFile(firstPath, { force: true });
       }
     } catch (err) {
@@ -124,7 +131,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     } finally {
       setLoadingFiles(false);
     }
-  }, [loadFile, selectedPath, showToast]);
+  }, [loadFile, showToast]);
 
   const saveFile = useCallback(async () => {
     if (!selectedPath || saving) return;
