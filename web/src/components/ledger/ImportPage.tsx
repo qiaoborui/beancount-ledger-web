@@ -975,33 +975,27 @@ function LastImportByProviderPanel({
 }) {
   const providers = providerChoices.filter((choice): choice is ProviderChoice & { value: Provider } => isProvider(choice.value));
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
-      <div className="flex min-w-0 items-start justify-between gap-3">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-3">
+      <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <CalendarClock className="h-4 w-4 shrink-0 text-brand" />
-            <div className="truncate text-sm font-medium text-ink">各渠道已导入至</div>
+            <div className="truncate text-sm font-medium text-ink">账单截止日</div>
           </div>
-          <div className="mt-1 text-xs leading-5 text-stone">按账单截止日判断，续导时从下一天开始。</div>
         </div>
         <Button type="button" variant="outline" size="icon-sm" onClick={onRefresh} disabled={loading} title="刷新导入记录">
           <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
         </Button>
       </div>
 
-      <div className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="mt-3 grid min-w-0 grid-cols-2 gap-2">
         {providers.map((provider) => {
           const document = latestByProvider[provider.value];
           return (
-            <div key={provider.value} className="grid min-w-0 gap-2 px-3 py-3">
-              <div className="flex min-w-0 items-center justify-between gap-3">
-                <span className="truncate text-sm font-medium text-ink">{provider.label}</span>
-                <span className={cn("shrink-0 rounded-full px-2 py-1 text-xs font-medium tabular-nums", document ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>
-                  {document ? document.dateEnd || document.dateStart || "未知日期" : "暂无记录"}
-                </span>
-              </div>
-              <div className="min-w-0 truncate text-xs leading-5 text-stone" title={document?.name}>
-                {document ? `${formatImportDocumentRange(document)} · ${formatImportDocumentTime(document.modTime)} · ${document.name}` : "这个渠道还没有归档账单。"}
+            <div key={provider.value} className="min-w-0 rounded-xl border border-line bg-panel px-3 py-2" title={document ? `${provider.label}: ${formatImportDocumentRange(document)} · ${document.name}` : `${provider.label}: 暂无记录`}>
+              <div className="truncate text-xs leading-5 text-stone">{provider.label}</div>
+              <div className={cn("mt-0.5 truncate text-sm font-medium tabular-nums", document ? "text-brand" : "text-stone")}>
+                {document ? document.dateEnd || document.dateStart || "未知日期" : "暂无记录"}
               </div>
             </div>
           );
