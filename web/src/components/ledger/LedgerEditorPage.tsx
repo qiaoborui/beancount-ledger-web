@@ -103,7 +103,9 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
       setOriginalContent(data.content);
       setHash(data.hash);
       setModTime(data.modTime);
-      window.setTimeout(() => textareaRef.current?.focus(), 40);
+      if (shouldAutoFocusEditor()) {
+        window.setTimeout(() => textareaRef.current?.focus(), 40);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "读取文件失败";
       setError(message);
@@ -480,4 +482,8 @@ function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function shouldAutoFocusEditor() {
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 }

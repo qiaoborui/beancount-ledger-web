@@ -457,6 +457,13 @@ button.card:active, a.card:active { transform: scale(0.992); }
   animation: app-tab-pop 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+@media (max-width: 767px) {
+  .app-shell:has(.ledger-editor-input:focus) .mobile-bottom-nav,
+  .app-shell:has(.ledger-editor-input:focus) .app-fab {
+    display: none;
+  }
+}
+
 .app-fab {
   animation: app-fab-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
