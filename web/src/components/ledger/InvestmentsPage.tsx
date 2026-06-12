@@ -206,7 +206,7 @@ function EmptyState({ text }: { text: string }) {
 
 function investmentHoldings(investments: InvestmentSummary | null): InvestmentHolding[] {
   if (!investments) return [];
-  if (investments.holdings?.length) return investments.holdings;
+  if (investments.holdings?.length) return investments.holdings.filter(isVisibleHolding);
   return legacyHoldings(investments.positions ?? [], investments.quotes ?? []);
 }
 
@@ -242,7 +242,11 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
     current.accountCount = current.positions.length;
     byCommodity.set(position.commodity, current);
   }
-  return [...byCommodity.values()].sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
+  return [...byCommodity.values()].filter(isVisibleHolding).sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
+}
+
+function isVisibleHolding(holding: InvestmentHolding) {
+  return holding.commodity.trim() !== "" && Math.abs(holding.totalQuantity) > 0;
 }
 
 function pricePoints(history?: CommodityPrice[] | null): PricePoint[] {

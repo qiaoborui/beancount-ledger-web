@@ -4,7 +4,7 @@ import { InvestmentsPage } from "./InvestmentsPage";
 import type { InvestmentSummary } from "./types";
 
 describe("InvestmentsPage", () => {
-  it("renders holdings with a null price history from cached or older responses", () => {
+  it("ignores cached holdings without a real held security", () => {
     const investments: InvestmentSummary = {
       totalMarketValueCny: 0,
       updatedAt: "2026-06-12",
@@ -20,10 +20,19 @@ describe("InvestmentsPage", () => {
           accountCount: 0,
           positions: null,
         },
+        {
+          commodity: "",
+          commodityName: "",
+          latestPrice: undefined,
+          priceHistory: null,
+          totalQuantity: 0,
+          accountCount: 0,
+          positions: null,
+        },
       ],
     };
 
     expect(() => renderToString(<InvestmentsPage investments={investments} />)).not.toThrow();
-    expect(renderToString(<InvestmentsPage investments={investments} />)).toContain("暂无曲线");
+    expect(renderToString(<InvestmentsPage investments={investments} />)).toContain("暂无证券商品");
   });
 });

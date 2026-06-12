@@ -154,9 +154,9 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 		return positions[i].Account < positions[j].Account
 	})
 
-	quotes := make([]InvestmentQuote, 0, len(securities))
+	quotes := make([]InvestmentQuote, 0, len(quoteQuantity))
 	updatedAt := ""
-	for commodity := range securities {
+	for commodity := range quoteQuantity {
 		quote := InvestmentQuote{
 			Commodity:        commodity,
 			CommodityName:    commodityName(commodityMap, commodity),
@@ -186,7 +186,7 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 		return quotes[i].Commodity < quotes[j].Commodity
 	})
 
-	holdings := investmentHoldings(securities, commodityMap, latestPrices, priceHistory, positions, quoteQuantity, priceIndex)
+	holdings := investmentHoldings(commodityMap, latestPrices, priceHistory, positions, quoteQuantity, priceIndex)
 	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Quotes: quotes, UpdatedAt: updatedAt}
 }
 
@@ -255,18 +255,8 @@ func investmentPriceHistory(prices []Price) map[string][]CommodityPrice {
 	return history
 }
 
-func investmentHoldings(securities map[string]bool, commodityMap map[string]Commodity, latestPrices map[string]*CommodityPrice, priceHistory map[string][]CommodityPrice, positions []InvestmentPosition, quantities map[string]float64, priceIndex PriceIndex) []InvestmentHolding {
+func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[string]*CommodityPrice, priceHistory map[string][]CommodityPrice, positions []InvestmentPosition, quantities map[string]float64, priceIndex PriceIndex) []InvestmentHolding {
 	byCommodity := map[string]*InvestmentHolding{}
-	for commodity := range securities {
-		byCommodity[commodity] = &InvestmentHolding{
-			Commodity:     commodity,
-			CommodityName: commodityName(commodityMap, commodity),
-			LatestPrice:   latestPrices[commodity],
-			PriceHistory:  commodityPriceHistory(priceHistory, commodity),
-			TotalQuantity: quantities[commodity],
-			Positions:     []InvestmentPosition{},
-		}
-	}
 	for _, position := range positions {
 		holding := byCommodity[position.Commodity]
 		if holding == nil {
