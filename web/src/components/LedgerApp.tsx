@@ -44,12 +44,18 @@ import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 
 const LazyNetWorthPage = lazy(() => import("./ledger/NetWorthPage").then((mod) => ({ default: mod.NetWorthPage })));
 
+const LazyInvestmentsPage = lazy(() => import("./ledger/InvestmentsPage").then((mod) => ({ default: mod.InvestmentsPage })));
+
 const LazyIncomeStatementPage = lazy(() => import("./ledger/IncomeStatementPage").then((mod) => ({ default: mod.IncomeStatementPage })));
 
 const LazyDashboardPage = lazy(() => import("./ledger/DashboardPage").then((mod) => ({ default: mod.DashboardPage })));
 
 function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
+}
+
+function InvestmentsPage(props: ComponentProps<typeof LazyInvestmentsPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备股票持仓…</section>}><LazyInvestmentsPage {...props} /></Suspense>;
 }
 
 function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
@@ -63,6 +69,7 @@ function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/dashboard")) return "dashboard";
   if (pathname.startsWith("/net-worth")) return "net-worth";
+  if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
@@ -189,6 +196,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     monthEndNetWorthRows,
     netWorthWindows,
     creditCards,
+    investments,
     loadingFresh,
     refreshing,
     lastSyncedAt,
@@ -573,6 +581,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} balances={balances} accounts={accounts} incomeStatement={incomeStatement} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} creditCards={creditCards} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
       {page === "accounts" && (() => { const detailAccount = accountFromPathname(pathname); if (detailAccount) return unlocked ? <AccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要使用 Face ID / Passkey 后查看。"); return <>{unlocked ? <><BalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><CreditCardPanel cards={creditCards} statuses={accountStatuses} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<AccountManager accounts={accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></>; })()}
       {page === "settings" && <SettingsPage settings={privacySettings} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} />}
@@ -636,7 +645,7 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "investments";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
@@ -646,6 +655,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
     accounts: { eyebrow: "account book", title: "账户与余额" },
     "net-worth": { eyebrow: "net worth range", title: `${label} 净资产` },
+    investments: { eyebrow: "securities", title: "股票持仓" },
     "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
     settings: { eyebrow: "preferences", title: "设置" },
   };

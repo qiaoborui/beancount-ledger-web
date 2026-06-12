@@ -174,6 +174,14 @@ func (s *Server) dashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, BuildDashboardSummaryWithFilters(snapshot, start, end, parseDashboardFilters(c)))
 }
 
+func (s *Server) investments(c *gin.Context) {
+	snapshot, ok := s.snapshot(c, true)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, BuildInvestmentSummary(snapshot.Lines, snapshot.Accounts))
+}
+
 func parseDashboardFilters(c *gin.Context) DashboardFilters {
 	filters := DashboardFilters{
 		Categories: splitDashboardFilterValues(c.Query("category")),

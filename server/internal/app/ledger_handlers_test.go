@@ -79,6 +79,78 @@ func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 	}
 }
 
+func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "commodities.bean"), strings.Join([]string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity USD",
+		"2026-01-01 commodity QQQ",
+		`  name: "Invesco QQQ Trust"`,
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
+		"2026-01-01 open Assets:Cash CNY",
+		`  alias: "现金"`,
+		"2026-01-01 open Assets:Broker:QQQ QQQ",
+		`  alias: "券商 QQQ 持仓"`,
+		"2026-01-01 open Expenses:Food CNY",
+		"2026-01-01 open Income:Salary CNY",
+		"2026-01-01 open Equity:Opening-Balances CNY",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "prices.bean"), strings.Join([]string{
+		"2026-05-31 price USD 7.0000 CNY",
+		"2026-05-31 price QQQ 100.00 USD",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"), strings.Join([]string{
+		`2026-05-01 * "Cafe" "Lunch" #work`,
+		`  note: "noodles"`,
+		"  Expenses:Food 12.00 CNY",
+		"  Assets:Cash -12.00 CNY",
+		"",
+		`2026-05-31 * "Employer" "Salary"`,
+		"  Assets:Cash 1000.00 CNY",
+		"  Income:Salary -1000.00 CNY",
+		"",
+		`2026-05-31 * "Broker" "QQQ opening"`,
+		"  Assets:Broker:QQQ 0.50 QQQ",
+		"  Equity:Opening-Balances -0.50 QQQ",
+		"",
+	}, "\n"))
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/investments", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("investments status=%d body=%s", res.Code, res.Body.String())
+	}
+	var body InvestmentSummary
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.TotalMarketValueCNY != 35000 || body.UpdatedAt != "2026-05-31" {
+		t.Fatalf("unexpected investment summary: %#v", body)
+	}
+	if len(body.Positions) != 1 {
+		t.Fatalf("expected one position, got %#v", body.Positions)
+	}
+	position := body.Positions[0]
+	if position.Account != "Assets:Broker:QQQ" || position.AccountLabel != "券商 QQQ 持仓" || position.CommodityName != "Invesco QQQ Trust" {
+		t.Fatalf("unexpected position identity: %#v", position)
+	}
+	if position.Quantity != 0.5 || position.LatestPrice == nil || position.LatestPrice.Amount != 100 || position.LatestPrice.Currency != "USD" {
+		t.Fatalf("unexpected position pricing: %#v", position)
+	}
+	if position.MarketValueCNY == nil || *position.MarketValueCNY != 35000 {
+		t.Fatalf("unexpected CNY value: %#v", position)
+	}
+	if len(body.Quotes) != 1 || body.Quotes[0].Commodity != "QQQ" || body.Quotes[0].PositionCount != 1 {
+		t.Fatalf("unexpected quotes: %#v", body.Quotes)
+	}
+}
+
 func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")

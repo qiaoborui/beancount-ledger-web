@@ -15,6 +15,7 @@ export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof 
   { href: "/budgets", label: "预算", icon: BarChart3, mobilePrimary: false },
   { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false },
   { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false },
+  { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false },
   { href: "/reconcile", label: "对账", icon: Scale, mobilePrimary: false },
   { href: "/settings", label: "设置", icon: Settings, mobilePrimary: false },

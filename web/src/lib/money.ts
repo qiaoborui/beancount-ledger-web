@@ -30,6 +30,33 @@ export function formatCompactCny(value: number): string {
   return compactCnyFormatter.format(value);
 }
 
+export function formatMoney(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${currency}`;
+  }
+}
+
+export function formatCompactMoney(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      notation: "compact",
+      compactDisplay: "short",
+      maximumFractionDigits: 1,
+    }).format(value);
+  } catch {
+    return `${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value)} ${currency}`;
+  }
+}
+
 export function monthRange(month: string): { start: string; end: string } {
   const [year, m] = month.split("-").map(Number);
   const start = `${year}-${String(m).padStart(2, "0")}-01`;

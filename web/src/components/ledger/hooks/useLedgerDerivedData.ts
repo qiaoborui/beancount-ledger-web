@@ -13,7 +13,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, netWorthRows
 
   const accountLabelMap = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, account.label])), [accounts]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.active), [accounts]);
-  const balanceAccounts = useMemo(() => accounts.filter((account) => !["expense", "income", "equity"].includes(account.group)), [accounts]);
+  const balanceAccounts = useMemo(() => accounts.filter((account) => account.currency === "CNY" && !["expense", "income", "equity"].includes(account.group)), [accounts]);
   const expenseAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "expense").map((account) => account.account), [activeAccounts]);
   const incomeAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "income").map((account) => account.account), [activeAccounts]);
   const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);

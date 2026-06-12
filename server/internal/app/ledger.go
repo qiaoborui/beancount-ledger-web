@@ -117,7 +117,7 @@ var (
 	metaRe    = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
 	balanceRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b`)
 	budgetRe  = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(CNY)\b`)
-	openRe    = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+(CNY)\b`)
+	openRe    = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)\s+([A-Z][A-Z0-9._-]*)\b`)
 	closeRe   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
 )
 

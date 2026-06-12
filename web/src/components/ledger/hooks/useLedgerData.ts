@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -49,6 +49,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
   const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.monthEndNetWorthRows ?? []);
   const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialRuntimeCache?.netWorthWindows ?? null);
   const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialRuntimeCache?.creditCards ?? []);
+  const [investments, setInvestments] = useState<InvestmentSummary | null>(() => initialRuntimeCache?.investments ?? null);
   const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialRuntimeCache?.reconciliationRows ?? []);
   const [accounts, setAccounts] = useState<AccountView[]>(() => initialRuntimeCache?.accounts ?? []);
   const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialRuntimeCache?.incomeStatement ?? null);
@@ -66,6 +67,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     setMonthEndNetWorthRows([]);
     setNetWorthWindows(null);
     setCreditCards([]);
+    setInvestments(null);
     setTxns([]);
     setBudgetRows([]);
     setReconciliationRows([]);
@@ -84,6 +86,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     setMonthEndNetWorthRows(cache.monthEndNetWorthRows ?? []);
     setNetWorthWindows(cache.netWorthWindows ?? null);
     setCreditCards(cache.creditCards ?? []);
+    setInvestments(cache.investments ?? null);
     setTxns(cache.txns);
     setBudgetRows(cache.budgetRows);
     setReconciliationRows(cache.reconciliationRows ?? []);
@@ -100,6 +103,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     setMonthEndNetWorthRows([]);
     setNetWorthWindows(null);
     setCreditCards([]);
+    setInvestments(null);
     setTxns([]);
     setReconciliationRows([]);
     setAccountStatuses([]);
@@ -128,8 +132,9 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
           fetchJson<{ accounts?: AccountView[] }>("/api/ledger/accounts"),
           fetchJson<NonNullable<IncomeStatementCache>>(`/api/ledger/income-statement?${params}`),
           unlocked ? fetchSensitiveJson<{ statuses?: AccountStatus[] }>("/api/ledger/account-status", { statuses: [] }, onSensitiveLocked) : Promise.resolve({ statuses: [] }),
+          unlocked ? fetchSensitiveJson<InvestmentSummary | null>("/api/ledger/investments", null, onSensitiveLocked) : Promise.resolve(null),
         ] as const;
-        const [s, t, b, r, a, inc, st, version] = await Promise.all([...requests, fetchLedgerVersion()]);
+        const [s, t, b, r, a, inc, st, inv, version] = await Promise.all([...requests, fetchLedgerVersion()]);
         const fresh: LedgerCache = {
           summary: s.summary ?? null,
           balances: unlocked ? (s.balances ?? {}) : {},
@@ -137,6 +142,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
           monthEndNetWorthRows: unlocked ? (s.monthEndNetWorth ?? []) : [],
           netWorthWindows: unlocked ? (s.netWorthWindows ?? null) : null,
           creditCards: unlocked ? (s.creditCards ?? []) : [],
+          investments: unlocked ? inv : null,
           txns: t.transactions ?? [],
           budgetRows: b.rows ?? [],
           reconciliationRows: unlocked ? (r.rows ?? []) : [],
@@ -242,6 +248,7 @@ export function useLedgerData({ timeRange, unlocked, onSensitiveLocked, onSensit
     monthEndNetWorthRows,
     netWorthWindows,
     creditCards,
+    investments,
     reconciliationRows,
     accounts,
     incomeStatement,
