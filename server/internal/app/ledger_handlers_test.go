@@ -93,6 +93,8 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 		"2026-01-01 commodity USD",
 		"2026-01-01 commodity QQQ",
 		`  name: "Invesco QQQ Trust"`,
+		"2026-01-01 commodity VOO",
+		`  name: "Vanguard S&P 500 ETF"`,
 		"",
 	}, "\n"))
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
@@ -160,11 +162,17 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	if position.MarketValueCNY == nil || *position.MarketValueCNY != 38500 {
 		t.Fatalf("unexpected CNY value: %#v", position)
 	}
-	if len(body.Quotes) != 1 || body.Quotes[0].Commodity != "QQQ" || body.Quotes[0].PositionCount != 2 {
+	qqqQuote := InvestmentQuote{}
+	for _, quote := range body.Quotes {
+		if quote.Commodity == "QQQ" {
+			qqqQuote = quote
+		}
+	}
+	if qqqQuote.Commodity != "QQQ" || qqqQuote.PositionCount != 2 {
 		t.Fatalf("unexpected quotes: %#v", body.Quotes)
 	}
-	if len(body.Holdings) != 1 {
-		t.Fatalf("expected one holding, got %#v", body.Holdings)
+	if len(body.Holdings) != 2 {
+		t.Fatalf("expected two holdings, got %#v", body.Holdings)
 	}
 	holding := body.Holdings[0]
 	if holding.Commodity != "QQQ" || holding.CommodityName != "Invesco QQQ Trust" || holding.AccountCount != 2 {
@@ -181,6 +189,24 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	}
 	if len(holding.PriceHistory) != 2 || holding.PriceHistory[0].Date != "2026-05-31" || holding.PriceHistory[1].Date != "2026-06-01" {
 		t.Fatalf("unexpected holding price history: %#v", holding.PriceHistory)
+	}
+	if body.Holdings[1].Commodity != "VOO" || body.Holdings[1].PriceHistory == nil || len(body.Holdings[1].PriceHistory) != 0 {
+		t.Fatalf("unpriced holding should keep an empty price history array: %#v", body.Holdings[1])
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	rawHoldings, ok := raw["holdings"].([]any)
+	if !ok || len(rawHoldings) != 2 {
+		t.Fatalf("unexpected raw holdings: %#v", raw["holdings"])
+	}
+	rawUnpriced, ok := rawHoldings[1].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected raw holding shape: %#v", rawHoldings[1])
+	}
+	if _, ok := rawUnpriced["priceHistory"].([]any); !ok {
+		t.Fatalf("unpriced holding priceHistory should encode as an array, got %#v", rawUnpriced["priceHistory"])
 	}
 }
 

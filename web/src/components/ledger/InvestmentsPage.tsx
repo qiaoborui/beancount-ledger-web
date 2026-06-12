@@ -62,6 +62,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
 function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHolding; expanded: boolean; onToggle: () => void }) {
   const points = pricePoints(holding.priceHistory).slice(-120);
   const change = priceChange(points);
+  const positions = holding.positions ?? [];
   return (
     <article className="bg-panel px-4 py-4 sm:px-5">
       <div className="grid gap-4 md:grid-cols-[minmax(160px,1.1fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(220px,1.2fr)_40px] md:items-center">
@@ -105,7 +106,7 @@ function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHoldin
 
       {expanded && (
         <div className="mt-4 rounded-2xl border border-line bg-paper p-3">
-          {holding.positions.length ? <PositionBreakdown positions={holding.positions} /> : <div className="p-3 text-sm text-stone">暂无账户持仓。</div>}
+          {positions.length ? <PositionBreakdown positions={positions} /> : <div className="p-3 text-sm text-stone">暂无账户持仓。</div>}
         </div>
       )}
     </article>
@@ -206,7 +207,7 @@ function EmptyState({ text }: { text: string }) {
 function investmentHoldings(investments: InvestmentSummary | null): InvestmentHolding[] {
   if (!investments) return [];
   if (investments.holdings?.length) return investments.holdings;
-  return legacyHoldings(investments.positions, investments.quotes);
+  return legacyHoldings(investments.positions ?? [], investments.quotes ?? []);
 }
 
 function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote[]): InvestmentHolding[] {
@@ -235,6 +236,7 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
       accountCount: 0,
       positions: [],
     };
+    current.positions = current.positions ?? [];
     current.positions.push(position);
     current.totalQuantity += position.quantity;
     current.accountCount = current.positions.length;
@@ -243,8 +245,8 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
   return [...byCommodity.values()].sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
 }
 
-function pricePoints(history: CommodityPrice[]): PricePoint[] {
-  return history.map((price) => ({ date: price.date, price: price.amount }));
+function pricePoints(history?: CommodityPrice[] | null): PricePoint[] {
+  return (history ?? []).map((price) => ({ date: price.date, price: price.amount }));
 }
 
 function priceChange(points: PricePoint[]) {

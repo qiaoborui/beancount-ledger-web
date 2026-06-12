@@ -262,7 +262,7 @@ func investmentHoldings(securities map[string]bool, commodityMap map[string]Comm
 			Commodity:     commodity,
 			CommodityName: commodityName(commodityMap, commodity),
 			LatestPrice:   latestPrices[commodity],
-			PriceHistory:  append([]CommodityPrice(nil), priceHistory[commodity]...),
+			PriceHistory:  commodityPriceHistory(priceHistory, commodity),
 			TotalQuantity: quantities[commodity],
 			Positions:     []InvestmentPosition{},
 		}
@@ -274,7 +274,7 @@ func investmentHoldings(securities map[string]bool, commodityMap map[string]Comm
 				Commodity:     position.Commodity,
 				CommodityName: position.CommodityName,
 				LatestPrice:   latestPrices[position.Commodity],
-				PriceHistory:  append([]CommodityPrice(nil), priceHistory[position.Commodity]...),
+				PriceHistory:  commodityPriceHistory(priceHistory, position.Commodity),
 				TotalQuantity: quantities[position.Commodity],
 				Positions:     []InvestmentPosition{},
 			}
@@ -313,6 +313,10 @@ func investmentHoldings(securities map[string]bool, commodityMap map[string]Comm
 		return holdings[i].Commodity < holdings[j].Commodity
 	})
 	return holdings
+}
+
+func commodityPriceHistory(priceHistory map[string][]CommodityPrice, commodity string) []CommodityPrice {
+	return append([]CommodityPrice{}, priceHistory[commodity]...)
 }
 
 func investmentQuantities(lines []BeanLine, securities map[string]bool) map[string]float64 {
