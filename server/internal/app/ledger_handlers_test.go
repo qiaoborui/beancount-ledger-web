@@ -100,6 +100,8 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 		`  alias: "现金"`,
 		"2026-01-01 open Assets:Broker:QQQ QQQ",
 		`  alias: "券商 QQQ 持仓"`,
+		"2026-01-01 open Assets:Broker:Taxable:QQQ QQQ",
+		`  alias: "券商应税 QQQ 持仓"`,
 		"2026-01-01 open Expenses:Food CNY",
 		"2026-01-01 open Income:Salary CNY",
 		"2026-01-01 open Equity:Opening-Balances CNY",
@@ -108,6 +110,7 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "prices.bean"), strings.Join([]string{
 		"2026-05-31 price USD 7.0000 CNY",
 		"2026-05-31 price QQQ 100.00 USD",
+		"2026-06-01 price QQQ 110.00 USD",
 		"",
 	}, "\n"))
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"), strings.Join([]string{
@@ -124,6 +127,10 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 		"  Assets:Broker:QQQ 0.50 QQQ",
 		"  Equity:Opening-Balances -0.50 QQQ",
 		"",
+		`2026-05-31 * "Broker" "QQQ taxable opening"`,
+		"  Assets:Broker:Taxable:QQQ 0.25 QQQ",
+		"  Equity:Opening-Balances -0.25 QQQ",
+		"",
 	}, "\n"))
 	t.Setenv("APP_PASSWORD", "secret")
 	router := NewRouter(cfg)
@@ -137,24 +144,43 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.TotalMarketValueCNY != 35000 || body.UpdatedAt != "2026-05-31" {
+	if body.TotalMarketValueCNY != 57750 || body.UpdatedAt != "2026-06-01" {
 		t.Fatalf("unexpected investment summary: %#v", body)
 	}
-	if len(body.Positions) != 1 {
-		t.Fatalf("expected one position, got %#v", body.Positions)
+	if len(body.Positions) != 2 {
+		t.Fatalf("expected two positions, got %#v", body.Positions)
 	}
 	position := body.Positions[0]
 	if position.Account != "Assets:Broker:QQQ" || position.AccountLabel != "券商 QQQ 持仓" || position.CommodityName != "Invesco QQQ Trust" {
 		t.Fatalf("unexpected position identity: %#v", position)
 	}
-	if position.Quantity != 0.5 || position.LatestPrice == nil || position.LatestPrice.Amount != 100 || position.LatestPrice.Currency != "USD" {
+	if position.Quantity != 0.5 || position.LatestPrice == nil || position.LatestPrice.Amount != 110 || position.LatestPrice.Currency != "USD" {
 		t.Fatalf("unexpected position pricing: %#v", position)
 	}
-	if position.MarketValueCNY == nil || *position.MarketValueCNY != 35000 {
+	if position.MarketValueCNY == nil || *position.MarketValueCNY != 38500 {
 		t.Fatalf("unexpected CNY value: %#v", position)
 	}
-	if len(body.Quotes) != 1 || body.Quotes[0].Commodity != "QQQ" || body.Quotes[0].PositionCount != 1 {
+	if len(body.Quotes) != 1 || body.Quotes[0].Commodity != "QQQ" || body.Quotes[0].PositionCount != 2 {
 		t.Fatalf("unexpected quotes: %#v", body.Quotes)
+	}
+	if len(body.Holdings) != 1 {
+		t.Fatalf("expected one holding, got %#v", body.Holdings)
+	}
+	holding := body.Holdings[0]
+	if holding.Commodity != "QQQ" || holding.CommodityName != "Invesco QQQ Trust" || holding.AccountCount != 2 {
+		t.Fatalf("unexpected holding identity: %#v", holding)
+	}
+	if holding.TotalQuantity != 0.75 || holding.LatestPrice == nil || holding.LatestPrice.Amount != 110 || holding.LatestPrice.Currency != "USD" {
+		t.Fatalf("unexpected holding pricing: %#v", holding)
+	}
+	if holding.TotalMarketValueCNY == nil || *holding.TotalMarketValueCNY != 57750 {
+		t.Fatalf("unexpected holding CNY value: %#v", holding)
+	}
+	if len(holding.Positions) != 2 || holding.Positions[1].Account != "Assets:Broker:Taxable:QQQ" {
+		t.Fatalf("unexpected holding positions: %#v", holding.Positions)
+	}
+	if len(holding.PriceHistory) != 2 || holding.PriceHistory[0].Date != "2026-05-31" || holding.PriceHistory[1].Date != "2026-06-01" {
+		t.Fatalf("unexpected holding price history: %#v", holding.PriceHistory)
 	}
 }
 
