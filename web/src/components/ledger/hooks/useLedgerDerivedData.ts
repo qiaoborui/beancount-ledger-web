@@ -14,7 +14,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
 
   const accountLabelMap = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.active), [accounts]);
-  const balanceAccounts = useMemo(() => accounts.filter((account) => !["expense", "income", "equity"].includes(account.group)), [accounts]);
+  const balanceAccounts = useMemo(() => accounts.filter((account) => isMonetaryAccount(account) && !["expense", "income", "equity"].includes(account.group)), [accounts]);
   const expenseAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "expense").map((account) => account.account), [activeAccounts]);
   const incomeAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "income").map((account) => account.account), [activeAccounts]);
   const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);
@@ -41,6 +41,11 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
   }));
 
   return { chart, accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart };
+}
+
+function isMonetaryAccount(account: AccountView) {
+  const currency = account.currency || "CNY";
+  return ["CNY", "USD", "HKD", "GBP", "EUR", "JPY"].includes(currency);
 }
 
 function accountBalanceDisplayRow(account: AccountView, nativeBalance: number | undefined, rows: AccountBalance[], fallbackValuationCurrency: string) {

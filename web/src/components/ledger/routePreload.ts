@@ -2,6 +2,7 @@ import type { LedgerPage } from "./types";
 
 export const loadDashboardPage = () => import("./DashboardPage");
 export const loadNetWorthPage = () => import("./NetWorthPage");
+export const loadInvestmentsPage = () => import("./InvestmentsPage");
 export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
 export const loadAiBookkeepingChat = () => import("./AiBookkeepingChat");
 export const loadCommandPalette = () => import("./CommandPalette");
@@ -20,6 +21,7 @@ export const loadTransactionList = () => import("./TransactionList");
 const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
   dashboard: loadDashboardPage,
   "net-worth": loadNetWorthPage,
+  investments: loadInvestmentsPage,
   transactions: loadTransactionList,
   accounts: loadAccountPanels,
   budgets: loadAccountPanels,
@@ -43,6 +45,7 @@ function pageFromHref(href: string): LedgerPage {
   })();
   if (pathname.startsWith("/dashboard")) return "dashboard";
   if (pathname.startsWith("/net-worth")) return "net-worth";
+  if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";

@@ -170,15 +170,25 @@ function changeTone(change: number | null) {
 }
 
 function currencyUniverse(commodities: string[], prices: Price[], balances: AccountBalance[], accounts: AccountView[], valuationCurrency: string) {
+  const monetary = monetaryCommoditySet(prices, valuationCurrency);
   const seen = new Set<string>([valuationCurrency, "CNY"]);
-  for (const commodity of commodities) if (commodity) seen.add(commodity);
+  for (const commodity of commodities) if (monetary.has(commodity)) seen.add(commodity);
   for (const price of prices) {
-    seen.add(price.currency);
-    seen.add(price.quoteCurrency);
+    if (monetary.has(price.currency)) seen.add(price.currency);
+    if (monetary.has(price.quoteCurrency)) seen.add(price.quoteCurrency);
   }
-  for (const balance of balances) if (balance.currency) seen.add(balance.currency);
-  for (const account of accounts) if (account.currency) seen.add(account.currency);
+  for (const balance of balances) if (monetary.has(balance.currency)) seen.add(balance.currency);
+  for (const account of accounts) if (monetary.has(account.currency)) seen.add(account.currency);
   return [...seen].sort((a, b) => a === valuationCurrency ? -1 : b === valuationCurrency ? 1 : a.localeCompare(b));
+}
+
+function monetaryCommoditySet(prices: Price[], valuationCurrency: string) {
+  const seen = new Set(["CNY", "USD", "HKD", "GBP", "EUR", "JPY", valuationCurrency]);
+  for (const price of prices) {
+    if (price.quoteCurrency) seen.add(price.quoteCurrency);
+    if (price.quoteCurrency === "CNY" || price.currency === "CNY") seen.add(price.currency);
+  }
+  return seen;
 }
 
 function latestRate(currency: string, targetCurrency: string, prices: Price[]): RateInfo {

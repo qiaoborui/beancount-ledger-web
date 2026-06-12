@@ -17,6 +17,7 @@ export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof 
   { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false },
   { href: "/editor", label: "编辑", icon: FileCode2, mobilePrimary: false },
   { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false },
+  { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false },
   { href: "/currencies", label: "货币", icon: Coins, mobilePrimary: false },
   { href: "/reconcile", label: "对账", icon: Scale, mobilePrimary: false },

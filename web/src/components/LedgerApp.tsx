@@ -40,6 +40,7 @@ import {
   loadGitSaveModal,
   loadImportPage,
   loadIncomeStatementPage,
+  loadInvestmentsPage,
   loadLedgerEditorPage,
   loadNetWorthPage,
   loadQuickActionsSheet,
@@ -53,6 +54,7 @@ import type { LedgerNavHref, LedgerPage } from "./ledger/types";
 const LazyNetWorthPage = lazy(() => loadNetWorthPage().then((mod) => ({ default: mod.NetWorthPage })));
 
 const LazyIncomeStatementPage = lazy(() => loadIncomeStatementPage().then((mod) => ({ default: mod.IncomeStatementPage })));
+const LazyInvestmentsPage = lazy(() => loadInvestmentsPage().then((mod) => ({ default: mod.InvestmentsPage })));
 
 const LazyDashboardPage = lazy(() => loadDashboardPage().then((mod) => ({ default: mod.DashboardPage })));
 
@@ -79,6 +81,10 @@ function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备净资产图表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
 }
 
+function InvestmentsPage(props: ComponentProps<typeof LazyInvestmentsPage>) {
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备股票持仓…</section>}><LazyInvestmentsPage {...props} /></Suspense>;
+}
+
 function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
 }
@@ -98,6 +104,7 @@ function RouteFallback({ label }: { label: string }) {
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/dashboard")) return "dashboard";
   if (pathname.startsWith("/net-worth")) return "net-worth";
+  if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
@@ -231,6 +238,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     creditCards,
     commodities,
     prices,
+    investments,
     loadingFresh,
     refreshing,
     lastSyncedAt,
@@ -645,6 +653,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
+      {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要使用 Face ID / Passkey 后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={loginWithPasskey} onSelectCategory={openCategoryTransactions} />}
       {page === "currencies" && <Suspense fallback={<RouteFallback label="正在准备货币与汇率…" />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={loginWithPasskey} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
       {page === "accounts" && (() => {
@@ -716,7 +725,7 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
@@ -727,6 +736,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
     accounts: { eyebrow: "account book", title: "账户与余额" },
     "net-worth": { eyebrow: "net worth range", title: `${label} 净资产` },
+    investments: { eyebrow: "securities", title: "股票持仓" },
     "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
     currencies: { eyebrow: "currencies and fx", title: "货币与汇率" },
     settings: { eyebrow: "preferences", title: "设置" },

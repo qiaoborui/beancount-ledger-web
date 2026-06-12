@@ -60,9 +60,11 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	accountBalances := AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
 	reconciliationRows := []gin.H{}
 	accountStatuses := []AccountStatus{}
+	investments := InvestmentSummary{}
 	if unlocked {
 		reconciliationRows = buildReconciliationRows(snapshot, start, end)
 		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
+		investments = BuildInvestmentSummary(snapshot.Lines, snapshot.Accounts, snapshot.Prices)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	return gin.H{
@@ -75,6 +77,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		"monthEndNetWorth":   monthEndRows,
 		"netWorthWindows":    windows,
 		"creditCards":        creditCards,
+		"investments":        investments,
 		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
 		"budgetRows":         buildBudgetRows(snapshot, start, end, valuationCurrency),
 		"reconciliationRows": reconciliationRows,
