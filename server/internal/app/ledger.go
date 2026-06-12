@@ -511,7 +511,7 @@ func AccountBalanceRowsWithPriceIndex(balances map[string]map[string]int, priceI
 	rows := []AccountBalance{}
 	for account, byCurrency := range balances {
 		for currency, amount := range byCurrency {
-			valuation, ok := priceIndex.Valuation(amount, currency, valuationCurrency, "")
+			valuation, ok := priceIndex.Valuation(amount, currency, valuationCurrency, date)
 			rows = append(rows, AccountBalance{
 				Account:           account,
 				Currency:          currency,
@@ -539,15 +539,20 @@ func firstRawValuationCurrency(values []string) string {
 }
 
 type PriceIndex struct {
-	byPair map[string][]Price
+	byPair   map[string][]Price
+	pairKeys []string
 }
 
 func NewPriceIndex(prices []Price) PriceIndex {
 	index := PriceIndex{byPair: map[string][]Price{}}
 	for _, price := range prices {
 		key := pricePairKey(price.Currency, price.QuoteCurrency)
+		if _, ok := index.byPair[key]; !ok {
+			index.pairKeys = append(index.pairKeys, key)
+		}
 		index.byPair[key] = append(index.byPair[key], price)
 	}
+	sort.Strings(index.pairKeys)
 	for key := range index.byPair {
 		rows := index.byPair[key]
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
@@ -557,6 +562,10 @@ func NewPriceIndex(prices []Price) PriceIndex {
 }
 
 func (index PriceIndex) Valuation(amount int, currency, targetCurrency string, date string) (int, bool) {
+	return index.valuation(amount, currency, targetCurrency, date, map[string]bool{})
+}
+
+func (index PriceIndex) valuation(amount int, currency, targetCurrency string, date string, seen map[string]bool) (int, bool) {
 	currency = normalizeValuationCurrency(currency)
 	targetCurrency = normalizeValuationCurrency(targetCurrency)
 	if currency == targetCurrency {
@@ -568,12 +577,30 @@ func (index PriceIndex) Valuation(amount int, currency, targetCurrency string, d
 	if price, ok := index.latestPrice(targetCurrency, currency, date); ok && price.Amount != 0 {
 		return amount * 100 / price.Amount, true
 	}
-	if currency != "CNY" && targetCurrency != "CNY" {
-		cny, ok := index.Valuation(amount, currency, "CNY", date)
-		if !ok {
-			return 0, false
+	if seen[currency] {
+		return 0, false
+	}
+	seen[currency] = true
+	for _, key := range index.pairKeys {
+		base, quote := splitPricePairKey(key)
+		if base == currency {
+			price, ok := index.latestPrice(base, quote, date)
+			if ok {
+				value := amount * price.Amount / 100
+				if converted, ok := index.valuation(value, quote, targetCurrency, date, cloneSeenCurrencies(seen)); ok {
+					return converted, true
+				}
+			}
 		}
-		return index.Valuation(cny, "CNY", targetCurrency, date)
+		if quote == currency {
+			price, ok := index.latestPrice(base, quote, date)
+			if ok && price.Amount != 0 {
+				value := amount * 100 / price.Amount
+				if converted, ok := index.valuation(value, base, targetCurrency, date, cloneSeenCurrencies(seen)); ok {
+					return converted, true
+				}
+			}
+		}
 	}
 	return 0, false
 }
@@ -590,11 +617,24 @@ func (index PriceIndex) latestPrice(currency, quoteCurrency string, date string)
 	if i > 0 {
 		return &prices[i-1], true
 	}
-	return &prices[0], true
+	return nil, false
 }
 
 func pricePairKey(currency, quoteCurrency string) string {
 	return normalizeValuationCurrency(currency) + "\x00" + normalizeValuationCurrency(quoteCurrency)
+}
+
+func splitPricePairKey(key string) (string, string) {
+	currency, quoteCurrency, _ := strings.Cut(key, "\x00")
+	return currency, quoteCurrency
+}
+
+func cloneSeenCurrencies(seen map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(seen))
+	for currency, value := range seen {
+		out[currency] = value
+	}
+	return out
 }
 
 func ValuationInCNY(amount int, currency string, prices []Price, date string) (int, bool) {

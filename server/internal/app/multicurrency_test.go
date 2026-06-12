@@ -224,11 +224,41 @@ func TestValuationUsesLatestPriceOutsideHistoricalNetWorth(t *testing.T) {
 	}
 }
 
+func TestSecurityAccountBalancesUseDatedPriceChain(t *testing.T) {
+	prices := []Price{
+		{Date: "2026-05-31", Currency: "USD", Amount: 700, QuoteCurrency: "CNY"},
+		{Date: "2026-05-31", Currency: "QQQ", Amount: 10000, QuoteCurrency: "USD"},
+		{Date: "2026-06-01", Currency: "QQQ", Amount: 11000, QuoteCurrency: "USD"},
+	}
+	balances := map[string]map[string]int{
+		"Assets:Broker:QQQ": {"QQQ": 50},
+	}
+
+	mayRows := AccountBalanceRowsInCurrency(balances, prices, "2026-05-31", "CNY")
+	mayAssets, _ := balanceTotals(mayRows)
+	if len(mayRows) != 1 || mayRows[0].Valuation != 35000 || mayRows[0].ValuationMissing || mayAssets != 35000 {
+		t.Fatalf("May security valuation rows=%#v assets=%d, want QQQ valued at 35000 CNY", mayRows, mayAssets)
+	}
+
+	juneRows := AccountBalanceRowsInCurrency(balances, prices, "2026-06-01", "CNY")
+	juneAssets, _ := balanceTotals(juneRows)
+	if len(juneRows) != 1 || juneRows[0].Valuation != 38500 || juneRows[0].ValuationMissing || juneAssets != 38500 {
+		t.Fatalf("June security valuation rows=%#v assets=%d, want QQQ valued at 38500 CNY", juneRows, juneAssets)
+	}
+
+	beforeRows := AccountBalanceRowsInCurrency(balances, prices, "2026-05-30", "CNY")
+	beforeAssets, _ := balanceTotals(beforeRows)
+	if len(beforeRows) != 1 || !beforeRows[0].ValuationMissing || beforeAssets != 0 {
+		t.Fatalf("pre-price valuation rows=%#v assets=%d, want missing valuation and zero assets", beforeRows, beforeAssets)
+	}
+}
+
 func TestPriceIndexMatchesLegacyValuationSemantics(t *testing.T) {
 	prices := []Price{
 		{Date: "2026-06-08", Currency: "USD", Amount: 680, QuoteCurrency: "CNY"},
 		{Date: "2026-06-01", Currency: "USD", Amount: 720, QuoteCurrency: "CNY"},
 		{Date: "2026-05-01", Currency: "HKD", Amount: 92, QuoteCurrency: "CNY"},
+		{Date: "2026-06-08", Currency: "QQQ", Amount: 11000, QuoteCurrency: "USD"},
 	}
 	index := NewPriceIndex(prices)
 	cases := []struct {
@@ -241,13 +271,17 @@ func TestPriceIndexMatchesLegacyValuationSemantics(t *testing.T) {
 		{amount: 100, from: "USD", to: "CNY", want: 680},
 		{amount: 680, from: "CNY", to: "USD", want: 100},
 		{amount: 100, from: "USD", to: "CNY", date: "2026-06-01", want: 720},
-		{amount: 100, from: "USD", to: "CNY", date: "2026-05-01", want: 720},
 		{amount: 920, from: "HKD", to: "USD", want: 124},
+		{amount: 50, from: "QQQ", to: "CNY", want: 37400},
+		{amount: 37400, from: "CNY", to: "QQQ", want: 50},
 	}
 	for _, tc := range cases {
 		got, ok := index.Valuation(tc.amount, tc.from, tc.to, tc.date)
 		if !ok || got != tc.want {
 			t.Fatalf("indexed valuation %d %s to %s at %q = %d ok=%v, want %d true", tc.amount, tc.from, tc.to, tc.date, got, ok, tc.want)
 		}
+	}
+	if got, ok := index.Valuation(100, "USD", "CNY", "2026-05-01"); ok {
+		t.Fatalf("historical valuation before first price = %d ok=%v, want missing valuation", got, ok)
 	}
 }

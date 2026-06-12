@@ -14,7 +14,6 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
 
   const accountLabelMap = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
   const activeAccounts = useMemo(() => accounts.filter((account) => account.active), [accounts]);
-  const balanceAccounts = useMemo(() => accounts.filter((account) => isMonetaryAccount(account) && !["expense", "income", "equity"].includes(account.group)), [accounts]);
   const expenseAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "expense").map((account) => account.account), [activeAccounts]);
   const incomeAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "income").map((account) => account.account), [activeAccounts]);
   const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);
@@ -28,6 +27,8 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
     }
     return out;
   }, [accountBalances]);
+
+  const balanceAccounts = useMemo(() => accounts.filter((account) => isBalanceAccount(account, balancesByAccount) && !["expense", "income", "equity"].includes(account.group)), [accounts, balancesByAccount]);
 
   const visibleBalances = balanceAccounts
     .filter(({ account }) => balances[account] !== undefined || balancesByAccount.has(account) || page === "accounts")
@@ -46,6 +47,10 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
 function isMonetaryAccount(account: AccountView) {
   const currency = account.currency || "CNY";
   return ["CNY", "USD", "HKD", "GBP", "EUR", "JPY"].includes(currency);
+}
+
+function isBalanceAccount(account: AccountView, balancesByAccount: Map<string, AccountBalance[]>) {
+  return isMonetaryAccount(account) || balancesByAccount.has(account.account);
 }
 
 function accountBalanceDisplayRow(account: AccountView, nativeBalance: number | undefined, rows: AccountBalance[], fallbackValuationCurrency: string) {
