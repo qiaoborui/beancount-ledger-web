@@ -29,9 +29,10 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
   }, [accountBalances]);
 
   const balanceAccounts = useMemo(() => accounts.filter((account) => isBalanceAccount(account, balancesByAccount) && !["expense", "income", "equity"].includes(account.group)), [accounts, balancesByAccount]);
+  const accountPageAccounts = useMemo(() => accounts.filter((account) => isVisibleAccountPageAccount(account, balances, balancesByAccount)), [accounts, balances, balancesByAccount]);
 
   const visibleBalances = balanceAccounts
-    .filter(({ account }) => balances[account] !== undefined || balancesByAccount.has(account) || page === "accounts")
+    .filter((account) => page === "accounts" ? isVisibleAccountPageAccount(account, balances, balancesByAccount) : balances[account.account] !== undefined || balancesByAccount.has(account.account))
     .map((item) => accountBalanceDisplayRow(item, balances[item.account], balancesByAccount.get(item.account) ?? [], valuationCurrency));
 
   const netWorthChart = netWorthRows.map((row) => ({
@@ -41,7 +42,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
     净资产: row.netWorth / 100,
   }));
 
-  return { chart, accountLabelMap, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart };
+  return { chart, accountLabelMap, accountPageAccounts, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart };
 }
 
 function isMonetaryAccount(account: AccountView) {
@@ -51,6 +52,21 @@ function isMonetaryAccount(account: AccountView) {
 
 function isBalanceAccount(account: AccountView, balancesByAccount: Map<string, AccountBalance[]>) {
   return isMonetaryAccount(account) || balancesByAccount.has(account.account);
+}
+
+function hasOwnBalance(balances: Record<string, number>, account: string) {
+  return Object.prototype.hasOwnProperty.call(balances, account);
+}
+
+function hasNonZeroBalance(nativeBalance: number | undefined, rows: AccountBalance[]) {
+  if (nativeBalance !== undefined && nativeBalance !== 0) return true;
+  return rows.some((row) => row.amount !== 0 || row.valuation !== 0);
+}
+
+function isVisibleAccountPageAccount(account: AccountView, balances: Record<string, number>, balancesByAccount: Map<string, AccountBalance[]>) {
+  const rows = balancesByAccount.get(account.account) ?? [];
+  const hasLedgerActivity = hasOwnBalance(balances, account.account) || rows.length > 0;
+  return hasLedgerActivity && hasNonZeroBalance(balances[account.account], rows);
 }
 
 function accountBalanceDisplayRow(account: AccountView, nativeBalance: number | undefined, rows: AccountBalance[], fallbackValuationCurrency: string) {
