@@ -198,7 +198,7 @@ var billImporters = []billImporter{
 		title:           "CMB Credit Card",
 		uiOrder:         30,
 		config:          importProviderConfig{Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行信用卡", Detail: "信用卡 PDF 或已转换 CSV"},
-		documentAccount: "Liabilities:CN:CMB:CreditCard",
+		documentAccount: "Liabilities:CN:CMB:CreditCard:0016",
 		detect: func(filename, sample, ext string) (providerDetection, bool) {
 			if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") {
 				return providerDetection{Provider: "cmb", Reason: "PDF 文件将按招商银行信用卡账单解析", Confidence: "medium"}, true

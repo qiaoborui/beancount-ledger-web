@@ -419,8 +419,8 @@ func TestCmbImportHelpers(t *testing.T) {
 		t.Fatalf("filtered CSV dropped non-prefix rows:\n%s", filtered)
 	}
 
-	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard": true}
-	if got := providerDocumentAccount("cmb", accounts, "Assets:CN:CMB:Checking"); got != "Liabilities:CN:CMB:CreditCard" {
+	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard:0016": true}
+	if got := providerDocumentAccount("cmb", accounts, "Assets:CN:CMB:Checking"); got != "Liabilities:CN:CMB:CreditCard:0016" {
 		t.Fatalf("document account = %s", got)
 	}
 }
@@ -435,7 +435,7 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 		"cmbChecking:",
 		"  rules:",
 		"    - item: 掌上生活还款",
-		"      targetAccount: Liabilities:CN:CMB:CreditCard",
+		"      targetAccount: Liabilities:CN:CMB:CreditCard:0016",
 		"    - item: 摩拜,岭南通",
 		"      targetAccount: Expenses:Food",
 		"",
@@ -465,7 +465,7 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 	if !strings.Contains(generated, `source: "cmb-checking"`) || !strings.Contains(generated, `Assets:Cash`) {
 		t.Fatalf("generated bean missing checking metadata or cash account:\n%s", generated)
 	}
-	if !strings.Contains(generated, `Liabilities:CN:CMB:CreditCard`) || !strings.Contains(generated, `11595.81 CNY`) {
+	if !strings.Contains(generated, `Liabilities:CN:CMB:CreditCard:0016`) || !strings.Contains(generated, `11595.81 CNY`) {
 		t.Fatalf("generated bean missing credit-card repayment posting:\n%s", generated)
 	}
 	entries, err := parsePreviewEntries(generated)
@@ -476,8 +476,8 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 		t.Fatalf("unexpected preview entries: %#v", entries)
 	}
 
-	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard": true}
-	if got := providerDocumentAccount("cmb-checking", accounts, "Liabilities:CN:CMB:CreditCard"); got != "Assets:CN:CMB:Checking" {
+	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard:0016": true}
+	if got := providerDocumentAccount("cmb-checking", accounts, "Liabilities:CN:CMB:CreditCard:0016"); got != "Assets:CN:CMB:Checking" {
 		t.Fatalf("document account = %s", got)
 	}
 }

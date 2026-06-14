@@ -12,13 +12,13 @@ function entry(patch: Partial<ImportEntryInput>): ImportEntryInput {
     payee: "Merchant",
     narration: "Merchant",
     categoryAccount: "Expenses:Food:Meals",
-    fundingAccount: "Liabilities:CN:CMB:CreditCard",
+    fundingAccount: "Liabilities:CN:CMB:CreditCard:0016",
     amount: 82,
     currency: "CNY",
     metadata: {},
     postings: [
       { account: "Expenses:Food:Meals", amount: "82.00", currency: "CNY" },
-      { account: "Liabilities:CN:CMB:CreditCard", amount: "-82.00", currency: "CNY" },
+      { account: "Liabilities:CN:CMB:CreditCard:0016", amount: "-82.00", currency: "CNY" },
     ],
     ...patch,
   };
@@ -27,7 +27,7 @@ function entry(patch: Partial<ImportEntryInput>): ImportEntryInput {
 describe("import flow display", () => {
   it("shows normal expenses from funding account to expense category", () => {
     expect(importFlowForEntry(entry({}))).toEqual({
-      from: "Liabilities:CN:CMB:CreditCard",
+      from: "Liabilities:CN:CMB:CreditCard:0016",
       to: "Expenses:Food:Meals",
       kind: "支出流向",
     });
@@ -36,12 +36,12 @@ describe("import flow display", () => {
   it("shows refunds from the expense category back to the funding account", () => {
     expect(importFlowForEntry(entry({
       postings: [
-        { account: "Liabilities:CN:CMB:CreditCard", amount: "82.00", currency: "CNY" },
+        { account: "Liabilities:CN:CMB:CreditCard:0016", amount: "82.00", currency: "CNY" },
         { account: "Expenses:Food:Meals", amount: "-82.00", currency: "CNY" },
       ],
     }))).toEqual({
       from: "Expenses:Food:Meals",
-      to: "Liabilities:CN:CMB:CreditCard",
+      to: "Liabilities:CN:CMB:CreditCard:0016",
       kind: "退款流入",
     });
   });
