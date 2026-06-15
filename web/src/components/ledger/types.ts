@@ -6,7 +6,7 @@ export type Txn = { date: string; payee: string; narration: string; metadata?: R
 export type AccountDetailRow = { date: string; payee: string; narration: string; change: number; balance: number; txn: Txn };
 export type BudgetRow = { account: string; alias?: string | null; label?: string; budget: number; spent: number; remaining: number; ratio: number | null };
 export type ReconcileRow = { account: string; alias?: string | null; label: string; currency: string; ledgerBalance: number; status: "asserted" | "pending"; lastAssertion: { date: string; amount: number; currency: string } | null };
-export type AccountGroup = "cash" | "credit" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";
+export type AccountGroup = "cash" | "credit" | "liability" | "wealth" | "receivable" | "expense" | "income" | "equity" | "other";
 export type AccountOperation = { kind: "create" | "update" | "disable"; date: string; account: string; alias?: string; currency?: string; group?: AccountGroup };
 export type AccountStatus = {
   account: string;

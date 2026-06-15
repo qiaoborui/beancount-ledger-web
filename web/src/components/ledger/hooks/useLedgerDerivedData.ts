@@ -16,7 +16,7 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
   const activeAccounts = useMemo(() => accounts.filter((account) => account.active), [accounts]);
   const expenseAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "expense").map((account) => account.account), [activeAccounts]);
   const incomeAccounts = useMemo(() => activeAccounts.filter((account) => account.group === "income").map((account) => account.account), [activeAccounts]);
-  const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);
+  const paymentAccounts = useMemo(() => activeAccounts.filter((account) => ["cash", "credit", "liability", "wealth", "receivable"].includes(account.group)).map((account) => account.account), [activeAccounts]);
 
   const balancesByAccount = useMemo(() => {
     const out = new Map<string, AccountBalance[]>();

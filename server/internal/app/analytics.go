@@ -3,6 +3,7 @@ package app
 import (
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -126,7 +127,7 @@ func CreditCards(txns []Transaction, balances map[string]int, accounts []Account
 }
 
 func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts []Account, start, end string, prices []Price, valuationCurrency string) []CreditCardAnalytics {
-	cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycle(time.Now().Format("2006-01-02"))
+	asOf := time.Now().Format("2006-01-02")
 	rawBalances := CurrentBalances(txns)
 	priceIndex := NewPriceIndex(prices)
 	var out []CreditCardAnalytics
@@ -134,6 +135,7 @@ func CreditCardsInCurrency(txns []Transaction, balances map[string]int, accounts
 		if account.Group != "credit" || !strings.HasPrefix(account.Account, "Liabilities:") {
 			continue
 		}
+		cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycleForAccount(asOf, account)
 		row := CreditCardAnalytics{Account: account.Account, Alias: account.Alias, Label: accountDisplayLabel(account.Account, account.Label), BillCycleStart: cycleStart, BillCycleEnd: cycleEnd, StatementDate: statementDate, DueDate: dueDate}
 		for _, txn := range txns {
 			cardTotals := map[string]int{}
@@ -484,13 +486,85 @@ func summarizePaymentAccountsWithPriceIndex(txns []Transaction, start, end strin
 }
 
 func creditCardBillingCycle(asOf string) (string, string, string, string) {
-	date, _ := time.Parse("2006-01-02", asOf)
-	year, month, day := date.Date()
-	cycleMonth := int(month)
-	if day < 17 {
-		cycleMonth--
+	return creditCardBillingCycleWithDays(asOf, 18, 5)
+}
+
+func creditCardBillingCycleForAccount(asOf string, account Account) (string, string, string, string) {
+	statementDay := metadataDay(account.Metadata, 18, "statement-day", "statementDay", "bill-day", "billing-day", "billingDay", "posting-day", "accounting-day", "book-day", "账单日", "记账日")
+	dueDay := metadataDay(account.Metadata, 5, "due-day", "dueDay", "payment-due-day", "repayment-day", "repaymentDay", "还款日")
+	return creditCardBillingCycleWithDays(asOf, statementDay, dueDay)
+}
+
+func creditCardBillingCycleWithDays(asOf string, statementDay, dueDay int) (string, string, string, string) {
+	date, err := time.Parse("2006-01-02", asOf)
+	if err != nil {
+		date = time.Now()
 	}
-	return dateString(year, cycleMonth, 17), dateString(year, cycleMonth+1, 17), dateString(year, cycleMonth+1, 18), dateString(year, cycleMonth+2, 5)
+	statementDay = clampDay(statementDay)
+	dueDay = clampDay(dueDay)
+	boundaryDay := statementDay - 1
+	year, month, _ := date.Date()
+	boundaryThisMonth := monthlyBoundary(year, month, boundaryDay)
+	cycleStart := monthlyBoundary(year, month, boundaryDay)
+	cycleEnd := monthlyBoundary(year, month+1, boundaryDay)
+	if date.Before(boundaryThisMonth) {
+		cycleStart = monthlyBoundary(year, month-1, boundaryDay)
+		cycleEnd = boundaryThisMonth
+	}
+	statementDate := cycleEnd.AddDate(0, 0, 1)
+	dueDate := dateWithDay(statementDate.Year(), statementDate.Month(), dueDay)
+	if !dueDate.After(statementDate) {
+		dueDate = dateWithDay(statementDate.Year(), statementDate.Month()+1, dueDay)
+	}
+	return cycleStart.Format("2006-01-02"), cycleEnd.Format("2006-01-02"), statementDate.Format("2006-01-02"), dueDate.Format("2006-01-02")
+}
+
+func metadataDay(metadata map[string]MetadataValue, fallback int, keys ...string) int {
+	if metadata == nil {
+		return fallback
+	}
+	for _, key := range keys {
+		value, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case int:
+			return typed
+		case float64:
+			return int(typed)
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(typed)); err == nil {
+				return parsed
+			}
+		}
+	}
+	return fallback
+}
+
+func clampDay(day int) int {
+	if day < 1 {
+		return 1
+	}
+	if day > 31 {
+		return 31
+	}
+	return day
+}
+
+func monthlyBoundary(year int, month time.Month, day int) time.Time {
+	if day <= 0 {
+		return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
+	}
+	return dateWithDay(year, month, day)
+}
+
+func dateWithDay(year int, month time.Month, day int) time.Time {
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
 func dateString(year int, month int, day int) string {

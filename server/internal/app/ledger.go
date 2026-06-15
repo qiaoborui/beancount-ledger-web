@@ -145,19 +145,20 @@ type AccountDetailRow struct {
 }
 
 var (
-	commodityPattern = `[A-Z][A-Z0-9._-]*`
-	includeRe        = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
-	txnRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
-	txnTagRe         = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
-	directiveRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
-	postRe           = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	metaRe           = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
-	balanceRe        = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	budgetRe         = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	openRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)(?:\s+(` + commodityPattern + `(?:\s*,\s*` + commodityPattern + `)*))?\b`)
-	closeRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
-	commodityRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+commodity\s+(` + commodityPattern + `)\b`)
-	priceRe          = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+price\s+(` + commodityPattern + `)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	commodityPattern    = `[A-Z][A-Z0-9._-]*`
+	includeRe           = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
+	txnRe               = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
+	txnTagRe            = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
+	directiveRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
+	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	metaRe              = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
+	balanceRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	budgetRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	openRe              = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)(?:\s+(` + commodityPattern + `(?:\s*,\s*` + commodityPattern + `)*))?\b`)
+	closeRe             = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
+	commodityRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+commodity\s+(` + commodityPattern + `)\b`)
+	priceRe             = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+price\s+(` + commodityPattern + `)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	creditCardAccountRe = regexp.MustCompile(`(?i)(^|:)(CreditCard|Credit|Card)(:|$)|信用卡|贷记卡`)
 )
 
 func mainBeanPath(cfg Config) string     { return filepath.Join(cfg.LedgerRoot, "main.bean") }
@@ -432,8 +433,10 @@ func accountGroup(account string, metadata map[string]MetadataValue, alias *stri
 		return "equity"
 	case strings.HasPrefix(account, "Assets:Receivable"), strings.HasPrefix(account, "Liabilities:Payable"):
 		return "receivable"
-	case strings.HasPrefix(account, "Liabilities:"):
+	case strings.HasPrefix(account, "Liabilities:") && creditCardAccountRe.MatchString(haystack):
 		return "credit"
+	case strings.HasPrefix(account, "Liabilities:"):
+		return "liability"
 	case regexp.MustCompile(`(?i)(^|:)(Wealth|Fund|Stock|Bond|HousingFund|Insurance)(:|$)|理财|稳利宝|增利宝|余利宝|余额宝|零钱通|基金|债券|股票|保险|黄金|存单|定期`).MatchString(haystack):
 		return "wealth"
 	case strings.HasPrefix(account, "Assets:"):
@@ -447,7 +450,8 @@ func normalizeGroup(value string) string {
 	aliases := map[string]string{
 		"cash": "cash", "checking": "cash", "bank": "cash", "现金": "cash", "活期": "cash",
 		"wealth": "wealth", "investment": "wealth", "invest": "wealth", "asset": "wealth", "理财": "wealth", "投资": "wealth", "基金": "wealth",
-		"credit": "credit", "liability": "credit", "liabilities": "credit", "debt": "credit", "负债": "credit", "信用卡": "credit",
+		"credit": "credit", "credit-card": "credit", "creditcard": "credit", "信用卡": "credit",
+		"liability": "liability", "liabilities": "liability", "debt": "liability", "负债": "liability", "债务": "liability",
 		"receivable": "receivable", "payable": "receivable", "应收": "receivable", "应付": "receivable",
 		"expense": "expense", "expenses": "expense", "支出": "expense",
 		"income": "income", "收入": "income",

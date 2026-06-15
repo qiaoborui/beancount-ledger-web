@@ -20,15 +20,15 @@ function prevDay(dateStr: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function classifyAccount(account: string): "wealth" | "credit" | "cash" {
-  if (account.startsWith("Liabilities:")) return "credit";
+function classifyAccount(account: string): "wealth" | "liability" | "cash" {
+  if (account.startsWith("Liabilities:")) return "liability";
   if (account.includes(":Wealth") || account.includes(":Fund") || account.includes(":Stock") || account.includes(":Bond") || account.includes(":Insurance") || account.includes(":HousingFund")) return "wealth";
   return "cash";
 }
 
-const typeMeta: Record<"wealth" | "credit" | "cash", { label: string; cls: string; hint: string }> = {
+const typeMeta: Record<"wealth" | "liability" | "cash", { label: string; cls: string; hint: string }> = {
   wealth: { label: "利息自动调整", cls: "bg-tag text-brand border-line", hint: "差额将自动走收益/亏损科目" },
-  credit: { label: "差额需核实", cls: "bg-panel text-[var(--danger)] border-line", hint: "信用卡差额通常说明有漏记账，请核实后再提交" },
+  liability: { label: "差额需核实", cls: "bg-panel text-[var(--danger)] border-line", hint: "负债差额通常说明有漏记账或还款记录需核实" },
   cash: { label: "差额待调整", cls: "bg-panel text-warm border-line", hint: "差额将记入权益调整科目，后续需补记账" },
 };
 

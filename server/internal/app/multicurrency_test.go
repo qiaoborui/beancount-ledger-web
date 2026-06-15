@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
@@ -190,6 +191,57 @@ func TestCreditCardAnalyticsUsePostingCurrencyWhenAccountCurrencyIsUnconstrained
 	card := cards[0]
 	if card.PeriodSpend != 7100 || card.PeriodRepayments != 3550 || card.Balance != -3550 || card.Outstanding != 3550 {
 		t.Fatalf("credit card analytics used wrong currency: %#v", card)
+	}
+}
+
+func TestCreditCardAnalyticsOnlyIncludesCreditCardLiabilities(t *testing.T) {
+	accounts := []Account{
+		{Account: "Liabilities:CN:CMB:CreditCard:0016", Label: "CMB Card", Group: "credit"},
+		{Account: "Liabilities:Friends", Label: "Friend payable", Group: "liability"},
+	}
+
+	cards := CreditCardsInCurrency(nil, nil, accounts, "2026-05-01", "2026-06-01", nil, "CNY")
+
+	if len(cards) != 1 || cards[0].Account != "Liabilities:CN:CMB:CreditCard:0016" {
+		t.Fatalf("credit card analytics included non-card liabilities: %#v", cards)
+	}
+}
+
+func TestCreditCardAnalyticsUsesAccountBillingMetadata(t *testing.T) {
+	account := Account{
+		Account: "Liabilities:Card",
+		Label:   "Card",
+		Group:   "credit",
+		Metadata: map[string]MetadataValue{
+			"statement-day": float64(10),
+			"due-day":       float64(25),
+		},
+	}
+	expectedStart, expectedEnd, expectedStatement, expectedDue := creditCardBillingCycleForAccount(time.Now().Format("2006-01-02"), account)
+
+	cards := CreditCardsInCurrency(nil, nil, []Account{account}, "2026-05-01", "2026-06-01", nil, "CNY")
+
+	if len(cards) != 1 {
+		t.Fatalf("expected one card, got %#v", cards)
+	}
+	card := cards[0]
+	if card.BillCycleStart != expectedStart || card.BillCycleEnd != expectedEnd || card.StatementDate != expectedStatement || card.DueDate != expectedDue {
+		t.Fatalf("credit card billing metadata was ignored: %#v, want %s %s %s %s", card, expectedStart, expectedEnd, expectedStatement, expectedDue)
+	}
+	if card.StatementDate == "" || card.DueDate == "" {
+		t.Fatalf("credit card billing dates are empty: %#v", card)
+	}
+}
+
+func TestAccountGroupSeparatesCreditCardsFromOtherLiabilities(t *testing.T) {
+	if got := accountGroup("Liabilities:Friends", nil, nil); got != "liability" {
+		t.Fatalf("plain liability group = %s, want liability", got)
+	}
+	if got := accountGroup("Liabilities:CN:CMB:CreditCard:0016", nil, nil); got != "credit" {
+		t.Fatalf("credit card group = %s, want credit", got)
+	}
+	if got := normalizeGroup("负债"); got != "liability" {
+		t.Fatalf("normalized liability group = %s, want liability", got)
 	}
 }
 
