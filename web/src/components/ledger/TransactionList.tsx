@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import {
   AlertDialog,
@@ -603,12 +603,22 @@ type PendingTransactionAction =
   | { kind: "delete"; reason: string }
   | { kind: "reverse"; date: string };
 
+type EditablePosting = {
+  account: string;
+  amount: string;
+  currency: string;
+};
+
+function toEditablePostings(postings: Txn["postings"]): EditablePosting[] {
+  return postings.map((p) => ({ account: p.account, amount: (p.amount / 100).toFixed(2), currency: p.currency ?? "CNY" }));
+}
+
 function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
   const [narration, setNarration] = useState(txn.narration);
-  const [postings, setPostings] = useState(() => txn.postings.map((p) => ({ account: p.account, amount: (p.amount / 100).toFixed(2), currency: p.currency ?? "CNY" })));
+  const [postings, setPostings] = useState<EditablePosting[]>(() => toEditablePostings(txn.postings));
   const [metadata, setMetadata] = useState(() => JSON.stringify(txn.metadata ?? {}, null, 2));
   const [tags, setTags] = useState(() => (txn.tags ?? []).join(" "));
   const [formError, setFormError] = useState<string | null>(null);
@@ -617,12 +627,23 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const accountOptions = useMemo(() => accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account)), [accounts, postings]);
   const optionLabel = (account: AccountView) => formatAccountOptionLabel(account);
   const reverseDate = new Date().toISOString().slice(0, 10);
+  const primary = primaryPosting(txn);
+  const resetForm = () => {
+    setDate(txn.date);
+    setPayee(txn.payee);
+    setNarration(txn.narration);
+    setPostings(toEditablePostings(txn.postings));
+    setMetadata(JSON.stringify(txn.metadata ?? {}, null, 2));
+    setTags((txn.tags ?? []).join(" "));
+    setFormError(null);
+  };
   const hasUnsavedChanges = editing && (
     date !== txn.date ||
     payee !== txn.payee ||
     narration !== txn.narration ||
     metadata !== JSON.stringify(txn.metadata ?? {}, null, 2) ||
     tags !== (txn.tags ?? []).join(" ") ||
+    postings.length !== txn.postings.length ||
     postings.some((posting, index) => posting.account !== txn.postings[index]?.account || posting.amount !== ((txn.postings[index]?.amount ?? 0) / 100).toFixed(2) || posting.currency !== (txn.postings[index]?.currency ?? "CNY"))
   );
   const shouldClose = () => {
@@ -643,13 +664,26 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       setFormError("metadata 必须是 JSON 对象");
       return;
     }
-    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: postings.map((p) => ({ account: p.account, amount: p.amount, currency: p.currency.trim().toUpperCase() || "CNY" })) });
+    const cleanedPostings = postings.map((p) => ({ account: p.account.trim(), amount: p.amount.trim(), currency: p.currency.trim().toUpperCase() || "CNY" }));
+    if (cleanedPostings.length < 2) {
+      setFormError("资金流向至少需要 2 行");
+      return;
+    }
+    if (cleanedPostings.some((p) => !p.account)) {
+      setFormError("每条资金流向都需要账户");
+      return;
+    }
+    if (cleanedPostings.some((p) => !p.amount || Number.isNaN(Number(p.amount)))) {
+      setFormError("每条资金流向都需要有效金额");
+      return;
+    }
+    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: cleanedPostings });
     setEditing(false);
     onClose();
   }
 
   const footer = editing ? <div className="grid grid-cols-2 gap-2">
-    <Button variant="outline" className="h-11 bg-panel" onClick={() => setEditing(false)}>取消</Button>
+    <Button variant="outline" className="h-11 bg-panel" onClick={() => { resetForm(); setEditing(false); }}>取消</Button>
     <Button className="h-11" onClick={save}>保存修改</Button>
   </div> : <div className="grid gap-2 sm:grid-cols-3">
     <Button variant="outline" className="h-11 bg-panel" onClick={() => setEditing(true)}>编辑</Button>
@@ -658,18 +692,52 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   </div>;
 
   const body = <>
-    <div className="mb-4 text-xs text-stone">{txn.source.file}:{txn.source.line}{txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}</div>
-    {editing ? <div className="grid gap-3">
-          {formError && <Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert>}
+    <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
+      <span className="min-w-0 [overflow-wrap:anywhere]">{txn.source.file}:{txn.source.line}</span>
+      {txn.pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}
+    </div>
+    {editing ? <div className="grid min-w-0 gap-4">
+      {formError && <Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert>}
+      <section className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel/60 p-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
+        <label className="grid gap-1 text-xs text-stone">
+          <span>日期</span>
           <Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <Input className="h-11 bg-panel" value={payee} onChange={(e) => setPayee(e.target.value)} />
-          <Input className="h-11 bg-panel" value={narration} onChange={(e) => setNarration(e.target.value)} />
-          <Textarea className="min-h-28 bg-panel font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} />
-          <Input className="h-11 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />
-          {postings.map((p, i) => <div key={i} className="grid gap-2 sm:grid-cols-[1fr_140px_96px]">
-            <div>
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs text-stone">
+          <span>交易对象</span>
+          <Input className="h-11 min-w-0 bg-panel" value={payee} onChange={(e) => setPayee(e.target.value)} />
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs text-stone sm:col-span-2">
+          <span>摘要</span>
+          <Input className="h-11 min-w-0 bg-panel" value={narration} onChange={(e) => setNarration(e.target.value)} />
+        </label>
+      </section>
+
+      <section className="min-w-0 rounded-2xl border border-line bg-panel/60 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-medium text-warm">资金流向</h3>
+            <p className="mt-0.5 text-xs text-stone">每一行对应一条 Beancount posting，可继续添加参与账户。</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 shrink-0 rounded-xl bg-panel px-3 text-sm"
+            onClick={() => setPostings((rows) => [...rows, { account: "", amount: "", currency: rows.at(-1)?.currency || "CNY" }])}
+          >
+            <Plus className="h-4 w-4" />
+            <span>添加</span>
+          </Button>
+        </div>
+        <div className="mt-3 grid min-w-0 gap-3">
+          {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 sm:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
+            <div className="min-w-0">
+              <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone">
+                <span>账户 {i + 1}</span>
+                <span className="shrink-0">{p.account ? shortAccount(p.account) : "未选择"}</span>
+              </div>
               <Select value={accountOptions.some((account) => account.account === p.account) ? p.account : ALL_FILTER_VALUE} onValueChange={(value) => value !== ALL_FILTER_VALUE && setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: value } : row))}>
-                <SelectTrigger className="h-11 w-full bg-panel">
+                <SelectTrigger className="h-10 w-full min-w-0 bg-panel">
                   <SelectValue placeholder="选择账户 / 分类" />
                 </SelectTrigger>
                 <SelectContent className="max-h-80">
@@ -677,17 +745,70 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
                   {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{optionLabel(account)}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Input list={`txn-account-options-${i}`} className="mt-2 h-11 bg-panel text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} />
+              <Input list={`txn-account-options-${i}`} className="mt-2 h-10 min-w-0 bg-panel text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} />
               <datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account} label={optionLabel(account)} />)}</datalist>
             </div>
-            <Input className="h-11 bg-panel" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
-            <Input className="h-11 bg-panel uppercase" value={p.currency} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, currency: e.target.value.toUpperCase() } : row))} />
+            <label className="grid gap-1 text-xs text-stone">
+              <span>金额</span>
+              <Input className="h-10 bg-panel text-right tabular-nums" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
+            </label>
+            <label className="grid gap-1 text-xs text-stone">
+              <span>币种</span>
+              <Input className="h-10 bg-panel uppercase" value={p.currency} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, currency: e.target.value.toUpperCase() } : row))} />
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 self-end rounded-xl bg-panel px-0 text-stone hover:text-destructive"
+              disabled={postings.length <= 2}
+              title={postings.length <= 2 ? "至少保留 2 条资金流向" : "删除这条资金流向"}
+              onClick={() => setPostings((rows) => rows.filter((_, idx) => idx !== i))}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>)}
-    </div> : <div>
-      <div className="text-lg font-medium">{txn.date} {txn.payee}</div>
-      <div className="text-olive">{txn.narration}</div>
-      <MetadataBadges txn={txn} />
-      <div className="mt-4 space-y-2">{txn.postings.map((p, i) => <div key={i} className="flex justify-between gap-3 rounded-xl border border-line bg-panel p-3 text-sm"><span className="min-w-0 truncate">{p.account}</span><strong className="shrink-0">{formatMoney(p.amount / 100, p.currency ?? "CNY")}</strong></div>)}</div>
+        </div>
+      </section>
+
+      <section className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel/60 p-3">
+        <label className="grid min-w-0 gap-1 text-xs text-stone">
+          <span>标签</span>
+          <Input className="h-11 min-w-0 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />
+        </label>
+        <label className="grid min-w-0 gap-1 text-xs text-stone">
+          <span>Metadata</span>
+          <Textarea className="min-h-36 min-w-0 bg-panel font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} />
+        </label>
+      </section>
+    </div> : <div className="grid min-w-0 gap-4">
+      <section className="min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs text-stone">{txn.date}</div>
+            <div className="mt-1 text-lg font-medium text-warm [overflow-wrap:anywhere]">{txn.payee || "无收付款方"}</div>
+            <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
+            <MetadataBadges txn={txn} />
+          </div>
+          {primary && <div className="shrink-0 rounded-xl border border-line bg-paper px-3 py-2 text-right">
+            <div className="text-[11px] text-stone">主金额</div>
+            <div className={`mt-0.5 text-lg font-semibold ${amountColor(primary.amount)}`}>{fmtTxnAmount(primary.amount, primary.currency)}</div>
+          </div>}
+        </div>
+      </section>
+
+      <section className="min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-medium text-warm">资金流向</h3>
+          <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{txn.postings.length} 条</span>
+        </div>
+        <div className="mt-3 grid min-w-0 gap-2">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+          <div className="min-w-0">
+            <div className="text-xs text-stone">#{i + 1} {shortAccount(p.account)}</div>
+            <div className="mt-0.5 text-sm text-warm [overflow-wrap:anywhere]">{p.account}</div>
+          </div>
+          <strong className={`text-left text-sm tabular-nums sm:text-right ${amountColor(p.amount)}`}>{fmtPostingAmount(p.amount, p.currency)}</strong>
+        </div>)}</div>
+      </section>
     </div>}
   </>;
 
@@ -702,7 +823,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   };
 
   return <>
-    <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer}>{body}</MobileSheet>
+    <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer} size="xl" panelClassName="sm:max-w-3xl" bodyClassName="overflow-x-hidden">{body}</MobileSheet>
     <AlertDialog open={Boolean(pendingAction)} onOpenChange={(open) => !open && setPendingAction(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
