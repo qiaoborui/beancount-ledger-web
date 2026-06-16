@@ -59,15 +59,30 @@ if not _BEAN_CHECK:
 # ---- Account whitelist ----
 _OPEN_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+open\s+([A-Z][A-Za-z0-9:-]+)\b")
 _CLOSE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+close\s+([A-Z][A-Za-z0-9:-]+)\b")
+_INCLUDE_RE = re.compile(r'^include\s+"([^"]+)"\s*$')
 
 
-def load_allowed_accounts() -> set[str]:
-    accounts_file = LEDGER_ROOT / "accounts.bean"
-    opened: set[str] = set()
-    closed: set[str] = set()
-    if not accounts_file.exists():
+def iter_ledger_lines(path: Path, seen=None):
+    seen = seen or set()
+    full = path.resolve()
+    if full in seen or not full.exists():
+        return
+    seen.add(full)
+    for raw in full.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        include_match = _INCLUDE_RE.match(line)
+        if include_match:
+            yield from iter_ledger_lines(full.parent / include_match.group(1), seen)
+            continue
+        yield raw
+
+
+def load_allowed_accounts():
+    opened = set()
+    closed = set()
+    if not MAIN_BEAN.exists():
         return opened
-    for raw in accounts_file.read_text(encoding="utf-8").splitlines():
+    for raw in iter_ledger_lines(MAIN_BEAN):
         line = raw.strip()
         open_match = _OPEN_RE.match(line)
         if open_match:

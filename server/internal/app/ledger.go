@@ -337,21 +337,21 @@ func ParsePrices(lines []BeanLine) []Price {
 }
 
 func ParseAccounts(cfg Config) ([]Account, error) {
-	text, err := os.ReadFile(accountsBeanPath(cfg))
+	lines, err := ReadLedgerLines(mainBeanPath(cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
 	accounts := map[string]*Account{}
 	var current string
-	for _, line := range strings.Split(string(text), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if m := openRe.FindStringSubmatch(line); m != nil {
+	for _, line := range lines {
+		text := strings.TrimSuffix(line.Text, "\r")
+		if m := openRe.FindStringSubmatch(text); m != nil {
 			acct := &Account{Account: m[2], OpenDate: m[1], Currency: primaryOpenCurrency(m[3]), Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
 			accounts[m[2]] = acct
 			current = m[2]
 			continue
 		}
-		if m := closeRe.FindStringSubmatch(line); m != nil {
+		if m := closeRe.FindStringSubmatch(text); m != nil {
 			if acct := accounts[m[2]]; acct != nil {
 				closeDate := m[1]
 				acct.CloseDate = &closeDate
@@ -360,7 +360,7 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 			current = ""
 			continue
 		}
-		if m := metaRe.FindStringSubmatch(line); m != nil && current != "" {
+		if m := metaRe.FindStringSubmatch(text); m != nil && current != "" {
 			acct := accounts[current]
 			if acct == nil {
 				continue
@@ -379,7 +379,7 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 			acct.Group = accountGroup(acct.Account, acct.Metadata, acct.Alias)
 			continue
 		}
-		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") {
+		if strings.TrimSpace(text) != "" && !strings.HasPrefix(text, " ") {
 			current = ""
 		}
 	}

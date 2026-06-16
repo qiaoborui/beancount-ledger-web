@@ -207,6 +207,43 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	}
 }
 
+func TestAccountsParseAdditionalIncludedFiles(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts_stocks.bean"), strings.Join([]string{
+		"2026-06-16 open Assets:Broker:NVDA NVDA",
+		`  alias: "券商 NVDA 持仓"`,
+		`  group: "wealth"`,
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "main.bean"), strings.Join([]string{
+		`option "title" "Test Ledger"`,
+		`option "operating_currency" "CNY"`,
+		`include "commodities.bean"`,
+		`include "accounts.bean"`,
+		`include "accounts_stocks.bean"`,
+		`include "budgets.bean"`,
+		`include "prices.bean"`,
+		`include "transactions/2026/05.bean"`,
+		"",
+	}, "\n"))
+
+	accounts, err := ParseAccounts(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountMap := map[string]Account{}
+	for _, account := range accounts {
+		accountMap[account.Account] = account
+	}
+	stock, ok := accountMap["Assets:Broker:NVDA"]
+	if !ok {
+		t.Fatalf("expected included stock account, got %#v", accounts)
+	}
+	if stock.Label != "券商 NVDA 持仓" || stock.Group != "wealth" || stock.Currency != "NVDA" {
+		t.Fatalf("unexpected included stock account metadata: %#v", stock)
+	}
+}
+
 func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
