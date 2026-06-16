@@ -29,6 +29,9 @@ type InvestmentPosition struct {
 	CommodityName  string          `json:"commodityName"`
 	Quantity       float64         `json:"quantity"`
 	LatestPrice    *CommodityPrice `json:"latestPrice,omitempty"`
+	AverageCost    *float64        `json:"averageCost,omitempty"`
+	CostValue      *float64        `json:"costValue,omitempty"`
+	CostCurrency   string          `json:"costCurrency,omitempty"`
 	MarketValue    *float64        `json:"marketValue,omitempty"`
 	MarketCurrency string          `json:"marketCurrency,omitempty"`
 	MarketValueCNY *int            `json:"marketValueCny,omitempty"`
@@ -50,6 +53,9 @@ type InvestmentHolding struct {
 	LatestPrice         *CommodityPrice      `json:"latestPrice,omitempty"`
 	PriceHistory        []CommodityPrice     `json:"priceHistory"`
 	TotalQuantity       float64              `json:"totalQuantity"`
+	AverageCost         *float64             `json:"averageCost,omitempty"`
+	TotalCostValue      *float64             `json:"totalCostValue,omitempty"`
+	CostCurrency        string               `json:"costCurrency,omitempty"`
 	TotalMarketValue    *float64             `json:"totalMarketValue,omitempty"`
 	MarketCurrency      string               `json:"marketCurrency,omitempty"`
 	TotalMarketValueCNY *int                 `json:"totalMarketValueCny,omitempty"`
@@ -68,6 +74,7 @@ type InvestmentSummary struct {
 var (
 	commodityDetailRe   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+commodity\s+(` + commodityPattern + `)\b`)
 	investmentPostingRe = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	postingCostRe       = regexp.MustCompile(`\{\s*(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\s*\}`)
 )
 
 var fiatCommodities = map[string]bool{
@@ -106,6 +113,7 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 	latestPrices := latestInvestmentPrices(prices)
 	priceHistory := investmentPriceHistory(prices)
 	positionQuantities := investmentQuantities(lines, securities)
+	positionCosts := investmentCosts(lines, securities)
 	positions := make([]InvestmentPosition, 0, len(positionQuantities))
 	quoteQuantity := map[string]float64{}
 	quotePositionCount := map[string]int{}
@@ -128,6 +136,13 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 			CommodityName: commodityName(commodityMap, commodity),
 			Quantity:      quantity,
 			LatestPrice:   latestPrices[commodity],
+		}
+		if cost := positionCosts[key]; cost.valid() && !roundedZero(quantity) {
+			value := cost.value
+			average := cost.value / quantity
+			position.CostValue = &value
+			position.AverageCost = &average
+			position.CostCurrency = cost.currency
 		}
 		if position.LatestPrice != nil {
 			value := quantity * position.LatestPrice.Amount
@@ -271,6 +286,7 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 			byCommodity[position.Commodity] = holding
 		}
 		holding.Positions = append(holding.Positions, position)
+		addPositionCost(holding, position)
 	}
 	holdings := make([]InvestmentHolding, 0, len(byCommodity))
 	for _, holding := range byCommodity {
@@ -282,6 +298,10 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 			return holding.Positions[i].Account < holding.Positions[j].Account
 		})
 		holding.AccountCount = len(holding.Positions)
+		if holding.TotalCostValue != nil && !roundedZero(holding.TotalQuantity) {
+			average := *holding.TotalCostValue / holding.TotalQuantity
+			holding.AverageCost = &average
+		}
 		if holding.LatestPrice != nil && !roundedZero(holding.TotalQuantity) {
 			value := holding.TotalQuantity * holding.LatestPrice.Amount
 			holding.TotalMarketValue = &value
@@ -303,6 +323,25 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 		return holdings[i].Commodity < holdings[j].Commodity
 	})
 	return holdings
+}
+
+func addPositionCost(holding *InvestmentHolding, position InvestmentPosition) {
+	if position.CostValue == nil || position.CostCurrency == "" {
+		return
+	}
+	if holding.CostCurrency != "" && holding.CostCurrency != position.CostCurrency {
+		holding.TotalCostValue = nil
+		holding.AverageCost = nil
+		holding.CostCurrency = ""
+		return
+	}
+	holding.CostCurrency = position.CostCurrency
+	total := 0.0
+	if holding.TotalCostValue != nil {
+		total = *holding.TotalCostValue
+	}
+	total += *position.CostValue
+	holding.TotalCostValue = &total
 }
 
 func commodityPriceHistory(priceHistory map[string][]CommodityPrice, commodity string) []CommodityPrice {
@@ -331,6 +370,51 @@ func investmentQuantities(lines []BeanLine, securities map[string]bool) map[stri
 		positions[m[1]+"\x00"+m[3]] += decimal(m[2])
 	}
 	return positions
+}
+
+type investmentCost struct {
+	value    float64
+	currency string
+	mixed    bool
+}
+
+func (cost investmentCost) valid() bool {
+	return cost.currency != "" && !cost.mixed && !roundedZero(cost.value)
+}
+
+func investmentCosts(lines []BeanLine, securities map[string]bool) map[string]investmentCost {
+	costs := map[string]investmentCost{}
+	currentTxn := false
+	for _, line := range lines {
+		if txnRe.MatchString(line.Text) {
+			currentTxn = true
+			continue
+		}
+		if directiveRe.MatchString(line.Text) {
+			currentTxn = false
+			continue
+		}
+		if !currentTxn {
+			continue
+		}
+		posting := investmentPostingRe.FindStringSubmatch(line.Text)
+		cost := postingCostRe.FindStringSubmatch(line.Text)
+		if posting == nil || cost == nil || !strings.HasPrefix(posting[1], "Assets:") || !securities[posting[3]] {
+			continue
+		}
+		key := posting[1] + "\x00" + posting[3]
+		current := costs[key]
+		currency := cost[2]
+		if current.currency != "" && current.currency != currency {
+			current.mixed = true
+			costs[key] = current
+			continue
+		}
+		current.currency = currency
+		current.value += decimal(posting[2]) * decimal(cost[1])
+		costs[key] = current
+	}
+	return costs
 }
 
 func marketValueCNY(value float64, currency string, priceIndex PriceIndex) *int {

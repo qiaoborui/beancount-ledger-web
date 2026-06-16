@@ -77,10 +77,12 @@ function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHoldin
         <div className="grid grid-cols-2 gap-3 md:block">
           <Fact label="总份额" value={formatQuantity(holding.totalQuantity)} />
           <Fact label="最新价" value={formatPrice(holding.latestPrice)} />
+          <Fact label="成本价" value={formatCostPrice(holding.averageCost, holding.costCurrency)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:block">
           <Fact label="原币市值" value={formatMarketValue(holding.totalMarketValue, holding.marketCurrency)} />
+          <Fact label="原币成本" value={formatMarketValue(holding.totalCostValue, holding.costCurrency)} />
           <Fact label="CNY 折算" value={formatCnyValue(holding.totalMarketValueCny)} strong />
         </div>
 
@@ -116,13 +118,15 @@ function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHoldin
 function PositionBreakdown({ positions }: { positions: InvestmentPosition[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[620px] border-separate border-spacing-0 text-sm">
+      <table className="w-full min-w-[820px] border-separate border-spacing-0 text-sm">
         <thead className="text-xs uppercase tracking-[0.14em] text-stone">
           <tr>
             <TableHead align="left">账户</TableHead>
             <TableHead>份额</TableHead>
             <TableHead>最新价</TableHead>
+            <TableHead>成本价</TableHead>
             <TableHead>原币市值</TableHead>
+            <TableHead>原币成本</TableHead>
             <TableHead>CNY 折算</TableHead>
           </tr>
         </thead>
@@ -132,7 +136,9 @@ function PositionBreakdown({ positions }: { positions: InvestmentPosition[] }) {
               <TableCell align="left"><div className="max-w-72 truncate text-olive">{position.accountLabel}</div><div className="max-w-72 truncate text-xs text-stone">{position.account}</div></TableCell>
               <TableCell>{formatQuantity(position.quantity)}</TableCell>
               <TableCell>{formatPrice(position.latestPrice)}</TableCell>
+              <TableCell>{formatCostPrice(position.averageCost, position.costCurrency)}</TableCell>
               <TableCell>{formatMarketValue(position.marketValue, position.marketCurrency)}</TableCell>
+              <TableCell>{formatMarketValue(position.costValue, position.costCurrency)}</TableCell>
               <TableCell strong>{formatCnyValue(position.marketValueCny)}</TableCell>
             </tr>
           ))}
@@ -240,6 +246,17 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
     current.positions.push(position);
     current.totalQuantity += position.quantity;
     current.accountCount = current.positions.length;
+    if (position.costValue != null && position.costCurrency) {
+      if (!current.costCurrency || current.costCurrency === position.costCurrency) {
+        current.costCurrency = position.costCurrency;
+        current.totalCostValue = (current.totalCostValue ?? 0) + position.costValue;
+        current.averageCost = current.totalQuantity ? current.totalCostValue / current.totalQuantity : undefined;
+      } else {
+        current.costCurrency = undefined;
+        current.totalCostValue = undefined;
+        current.averageCost = undefined;
+      }
+    }
     byCommodity.set(position.commodity, current);
   }
   return [...byCommodity.values()].filter(isVisibleHolding).sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
@@ -270,9 +287,14 @@ function formatPrice(price?: CommodityPrice) {
   return formatMoney(price.amount, price.currency);
 }
 
+function formatCostPrice(value?: number, currency?: string) {
+  if (value == null || !currency) return "暂无";
+  return formatMoney(value, currency);
+}
+
 function formatMarketValue(value?: number, currency?: string) {
   if (value == null || !currency) return "暂无";
-  return formatCompactMoney(value, currency);
+  return formatMoney(value, currency);
 }
 
 function formatCnyValue(value?: number) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -126,11 +127,11 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 		"  Income:Salary -1000.00 CNY",
 		"",
 		`2026-05-31 * "Broker" "QQQ opening"`,
-		"  Assets:Broker:QQQ 0.50 QQQ",
+		"  Assets:Broker:QQQ 0.50 QQQ {100.00 USD}",
 		"  Equity:Opening-Balances -0.50 QQQ",
 		"",
 		`2026-05-31 * "Broker" "QQQ taxable opening"`,
-		"  Assets:Broker:Taxable:QQQ 0.25 QQQ",
+		"  Assets:Broker:Taxable:QQQ 0.25 QQQ {90.00 USD}",
 		"  Equity:Opening-Balances -0.25 QQQ",
 		"",
 	}, "\n"))
@@ -162,6 +163,9 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	if position.MarketValueCNY == nil || *position.MarketValueCNY != 38500 {
 		t.Fatalf("unexpected CNY value: %#v", position)
 	}
+	if position.AverageCost == nil || *position.AverageCost != 100 || position.CostValue == nil || *position.CostValue != 50 || position.CostCurrency != "USD" {
+		t.Fatalf("unexpected position cost basis: %#v", position)
+	}
 	qqqQuote := InvestmentQuote{}
 	for _, quote := range body.Quotes {
 		if quote.Commodity == "QQQ" {
@@ -183,6 +187,9 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	}
 	if holding.TotalMarketValueCNY == nil || *holding.TotalMarketValueCNY != 57750 {
 		t.Fatalf("unexpected holding CNY value: %#v", holding)
+	}
+	if holding.TotalCostValue == nil || math.Abs(*holding.TotalCostValue-72.5) > 0.000001 || holding.AverageCost == nil || math.Abs(*holding.AverageCost-96.66666666666667) > 0.000001 || holding.CostCurrency != "USD" {
+		t.Fatalf("unexpected holding cost basis: %#v", holding)
 	}
 	if len(holding.Positions) != 2 || holding.Positions[1].Account != "Assets:Broker:Taxable:QQQ" {
 		t.Fatalf("unexpected holding positions: %#v", holding.Positions)
