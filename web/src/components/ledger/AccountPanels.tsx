@@ -155,11 +155,10 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                 <BalanceMetric label="长期未更新" value={`${selectedGroup.statusCounts.grey}`} />
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <div className="min-w-[760px]">
-                <div className="grid grid-cols-[minmax(220px,1.6fr)_minmax(180px,1fr)_72px_140px_112px_44px] border-b border-line px-4 py-3 text-xs text-stone">
+            <div className="overflow-hidden">
+              <div className="min-w-0">
+                <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line px-4 py-3 text-xs text-stone">
                   <span>账户</span>
-                  <span>路径</span>
                   <span>币种</span>
                   <span className="text-right">余额</span>
                   <span>状态</span>
@@ -176,7 +175,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                         key={row.account}
                         role="button"
                         tabIndex={0}
-                        className={`grid w-full cursor-pointer grid-cols-[minmax(220px,1.6fr)_minmax(180px,1fr)_72px_140px_112px_44px] items-center gap-3 border-b border-line px-4 py-3 text-left text-sm outline-none last:border-b-0 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "hover:bg-paper"}`}
+                        className={`grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line px-4 py-3 text-left text-sm outline-none last:border-b-0 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "hover:bg-paper"}`}
                         onClick={() => setSelectedAccount(row.account)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -191,12 +190,11 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                             <strong className="truncate text-warm">{row.label}</strong>
                             {row.active === false && <span className="rounded bg-line px-1.5 py-0.5 text-[10px] text-stone">已关闭</span>}
                           </span>
-                          <span className="mt-1 block truncate text-xs text-stone">{lastActivityMap.get(row.account) ? `最近活动 ${lastActivityMap.get(row.account)}` : "暂无近期活动"}</span>
+                          <span className="mt-1 block truncate text-xs text-stone">{shortAccountPath(row.account)} · {lastActivityMap.get(row.account) ? `最近活动 ${lastActivityMap.get(row.account)}` : "暂无近期活动"}</span>
                         </span>
-                        <span className="truncate text-xs text-stone">{shortAccountPath(row.account)}</span>
                         <span className="w-fit rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive">{row.currency || "多币种"}</span>
                         <span className={`text-right font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
-                        <span className="text-xs text-stone">{status ? statusTitle(status) : "未检查"}</span>
+                        <span className="truncate text-xs text-stone">{status ? statusTitle(status) : "未检查"}</span>
                         <span className="flex justify-end">
                           {onToggleAccount && <button type="button" className="rounded-lg border border-line bg-panel p-1.5 text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
                         </span>
@@ -383,8 +381,8 @@ function BalanceMetric({ label, value }: { label: string; value: string }) {
 }
 
 function BalanceClusterHeader({ cluster, visible }: { cluster: BalanceCluster; visible: boolean }) {
-  return <div className="grid grid-cols-[minmax(220px,1.6fr)_minmax(180px,1fr)_72px_140px_112px_44px] items-center gap-3 border-b border-line bg-paper/80 px-4 py-2 text-xs text-stone">
-    <span className="col-span-2 min-w-0 truncate font-medium text-olive">{cluster.label}</span>
+  return <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line bg-paper/80 px-4 py-2 text-xs text-stone">
+    <span className="min-w-0 truncate font-medium text-olive">{cluster.label}</span>
     <span className="rounded-lg border border-line bg-panel px-2 py-1 text-center text-olive">{cluster.rows.length} 个</span>
     <span className={`text-right font-medium ${cluster.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatClusterAmount(cluster, visible)}</span>
     <span>异常 {cluster.issueCount}</span>

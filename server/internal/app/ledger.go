@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,6 +25,13 @@ type Posting struct {
 	Account  string `json:"account"`
 	Amount   int    `json:"amount"`
 	Currency string `json:"currency,omitempty"`
+}
+
+type parsedPosting struct {
+	Posting
+	Blank        bool
+	CostAmount   int
+	CostCurrency string
 }
 
 type Transaction struct {
@@ -150,7 +158,9 @@ var (
 	txnRe               = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
 	txnTagRe            = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
 	directiveRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
-	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
+	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b(.*)$`)
+	postBlankRe         = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s*(?:;.*)?$`)
+	postCostRe          = regexp.MustCompile(`\{[^}]*?(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)[^}]*\}`)
 	metaRe              = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
 	balanceRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
 	budgetRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
@@ -211,10 +221,13 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 	var txns []Transaction
 	var current *Transaction
 	var raw []string
+	var postings []parsedPosting
 	finish := func() {
 		if current != nil {
 			current.Source.Hash = transactionHash(raw)
+			current.Postings = finalizeParsedPostings(postings)
 		}
+		postings = nil
 		raw = nil
 	}
 	for _, line := range lines {
@@ -255,11 +268,74 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 			continue
 		}
 		if m := postRe.FindStringSubmatch(line.Text); m != nil {
-			current.Postings = append(current.Postings, Posting{Account: m[1], Amount: cents(m[2]), Currency: m[3]})
+			posting := parsedPosting{Posting: Posting{Account: m[1], Amount: cents(m[2]), Currency: m[3]}}
+			if cost := postCostRe.FindStringSubmatch(m[4]); cost != nil {
+				posting.CostAmount = cents(cost[1])
+				posting.CostCurrency = cost[2]
+			}
+			postings = append(postings, posting)
+			continue
+		}
+		if m := postBlankRe.FindStringSubmatch(line.Text); m != nil {
+			postings = append(postings, parsedPosting{Posting: Posting{Account: m[1]}, Blank: true})
 		}
 	}
 	finish()
 	return txns
+}
+
+func finalizeParsedPostings(parsed []parsedPosting) []Posting {
+	blankCount := 0
+	var inferred *Posting
+	for _, posting := range parsed {
+		if posting.Blank {
+			blankCount++
+		}
+	}
+	if blankCount == 1 {
+		imbalance := map[string]int{}
+		for _, posting := range parsed {
+			if posting.Blank {
+				continue
+			}
+			amount := posting.Amount
+			currency := posting.Currency
+			if posting.CostAmount != 0 && posting.CostCurrency != "" {
+				amount = int(math.Round(float64(posting.Amount) * float64(posting.CostAmount) / 100))
+				currency = posting.CostCurrency
+			}
+			if currency != "" {
+				imbalance[currency] += amount
+			}
+		}
+		var currency string
+		var amount int
+		for itemCurrency, itemAmount := range imbalance {
+			if itemAmount == 0 {
+				continue
+			}
+			if currency != "" {
+				currency = ""
+				break
+			}
+			currency = itemCurrency
+			amount = itemAmount
+		}
+		if currency != "" {
+			inferred = &Posting{Amount: -amount, Currency: currency}
+		}
+	}
+	out := make([]Posting, 0, len(parsed))
+	for _, posting := range parsed {
+		if posting.Blank {
+			if inferred != nil {
+				out = append(out, Posting{Account: posting.Account, Amount: inferred.Amount, Currency: inferred.Currency})
+			}
+			continue
+		}
+		out = append(out, posting.Posting)
+	}
+	return out
 }
 
 func parseMetadataValue(raw string) MetadataValue {
