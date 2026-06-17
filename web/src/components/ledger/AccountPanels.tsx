@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { ClientNavLink } from "./ClientNavLink";
-import { Bot, Eye, EyeOff, Pencil } from "lucide-react";
+import { Archive, ArrowLeftRight, Bot, ChevronDown, CreditCard, Eye, EyeOff, ListChecks, Pencil, TrendingUp, WalletCards, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/money";
 import { Button } from "@/components/ui/button";
@@ -12,10 +12,341 @@ const loadAccountAgentChat = () => import("./AccountAgentChat");
 const LazyAccountAgentChat = lazy(() => loadAccountAgentChat().then((mod) => ({ default: mod.AccountAgentChat })));
 
 type BalanceRow = { account: string; label: string; value: number; currency?: string; active?: boolean; group?: AccountGroup; valuation?: boolean };
+type BalanceStatusFilter = "all" | "issue" | "yellow" | "grey";
+type BalanceGroup = {
+  key: AccountGroup;
+  label: string;
+  rows: BalanceRow[];
+  total: number;
+  currencies: string[];
+  statusCounts: Record<AccountStatus["status"], number>;
+  issueCount: number;
+};
+
+const balanceGroupDefs: { key: AccountGroup; label: string }[] = [
+  { key: "cash", label: "日常资金" },
+  { key: "credit", label: "信用卡" },
+  { key: "wealth", label: "投资理财" },
+  { key: "receivable", label: "应收应付" },
+  { key: "liability", label: "其他负债" },
+  { key: "other", label: "低频 / 归档" },
+];
+
+const balanceGroupKeys = new Set<AccountGroup>(balanceGroupDefs.map((group) => group.key));
+
+const statusFilters: { key: BalanceStatusFilter; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "issue", label: "异常" },
+  { key: "yellow", label: "未断言" },
+  { key: "grey", label: "长期未更新" },
+];
 
 export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap = {}, onToggleAll, onToggleAccount, statuses, txns = [] }: { rows: BalanceRow[]; full?: boolean; allVisible?: boolean; visibleAccountMap?: Record<string, boolean>; onToggleAll?: () => void; onToggleAccount?: (account: string) => void; statuses?: AccountStatus[]; txns?: Txn[] }) {
   const trendMap = useMemo(() => Object.fromEntries(rows.map((row) => [row.account, accountTrendPoints(row, txns)])), [rows, txns]);
-  return <section className="card mt-6 p-4"><div className="flex items-center justify-between gap-3"><h2 className="font-serif text-2xl">账户余额</h2><div className="flex items-center gap-2">{statusDotLegend()}{onToggleAll && <button className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-panel" onClick={onToggleAll} title={allVisible ? "隐藏所有账户余额" : "显示所有账户余额"}>{allVisible ? <EyeOff className="inline h-4 w-4" /> : <Eye className="inline h-4 w-4" />} <span className="ml-1 hidden sm:inline">{allVisible ? "全部隐藏" : "全部显示"}</span></button>}</div></div>{rows.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{rows.map((r) => { const visible = visibleAccountMap[r.account] ?? allVisible; const st = statuses?.find(s => s.account === r.account); return <div key={r.account} className="relative min-h-32 overflow-hidden rounded-xl border border-line bg-panel p-3"><AccountSparkline points={trendMap[r.account] ?? []} liability={r.account.startsWith("Liabilities")} /><div className="relative z-10 flex items-start justify-between gap-3"><div className="min-w-0 text-sm text-stone"><ClientNavLink href={`/accounts/${encodeURIComponent(r.account)}`} className="hover:text-warm hover:underline"><span className="flex items-center gap-1.5">{st && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(st.status)}`} title={statusTitle(st)} />}{r.label}</span></ClientNavLink>{r.active === false && <span className="ml-2 rounded-xl bg-line px-2 py-0.5 text-xs">已关闭</span>}</div>{onToggleAccount && <button className="relative z-10 shrink-0 rounded-xl border border-line bg-panel/75 px-2 py-1 text-olive backdrop-blur hover:bg-panel" onClick={() => onToggleAccount(r.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}</div><div className={`relative z-10 mt-5 text-2xl font-medium ${r.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{visible ? r.valuation ? formatValuation(r.value / 100, r.currency ?? "CNY") : formatMoney(r.value / 100, r.currency ?? "CNY") : "••••••"}</div><div className="relative z-10 mt-2 truncate text-xs text-stone">{r.valuation ? `${r.account} · 估值` : r.account}</div></div>; })}</div> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}{!full && <p className="mt-3 text-xs text-stone">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}</section>;
+  const statusMap = useMemo(() => new Map((statuses ?? []).map((status) => [status.account, status])), [statuses]);
+  const lastActivityMap = useMemo(() => accountLastActivity(rows, txns), [rows, txns]);
+  const [statusFilter, setStatusFilter] = useState<BalanceStatusFilter>("all");
+  const [selectedGroupKey, setSelectedGroupKey] = useState<AccountGroup>("cash");
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  const filteredRows = useMemo(() => rows.filter((row) => accountMatchesStatusFilter(statusMap.get(row.account), statusFilter)), [rows, statusFilter, statusMap]);
+  const groups = useMemo(() => buildBalanceGroups(filteredRows, statusMap), [filteredRows, statusMap]);
+  const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? groups[0] ?? null;
+  const desktopDetailRow = selectedGroup?.rows.find((row) => row.account === selectedAccount) ?? selectedGroup?.rows[0] ?? null;
+  const mobileDetailRow = selectedAccount ? rows.find((row) => row.account === selectedAccount) ?? null : null;
+
+  function rowVisible(row: BalanceRow) {
+    return visibleAccountMap[row.account] ?? allVisible;
+  }
+
+  function groupVisible(group: BalanceGroup) {
+    return group.rows.length > 0 && group.rows.every(rowVisible);
+  }
+
+  function selectGroup(group: BalanceGroup) {
+    setSelectedGroupKey(group.key);
+    setSelectedAccount(group.rows[0]?.account ?? null);
+  }
+
+  return <section className="card mt-6 p-4">
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <h2 className="font-serif text-2xl">账户余额</h2>
+        <p className="mt-1 text-sm text-stone">按账户用途收纳余额；桌面端用分组目录，移动端用抽屉展开。</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-xl border border-line bg-panel p-1">
+          {statusFilters.map((filter) => (
+            <button
+              key={filter.key}
+              className={`h-8 rounded-lg px-2.5 text-xs transition ${statusFilter === filter.key ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`}
+              onClick={() => setStatusFilter(filter.key)}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+        {onToggleAll && <button className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onToggleAll} title={allVisible ? "隐藏所有账户余额" : "显示所有账户余额"}>{allVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{allVisible ? "全部隐藏" : "全部显示"}</span></button>}
+      </div>
+    </div>
+
+    {rows.length ? groups.length ? <>
+      <div className="mt-4 hidden gap-4 lg:grid lg:grid-cols-[260px_minmax(0,1fr)_320px]">
+        <div className="rounded-xl border border-line bg-panel p-2">
+          <div className="flex h-10 items-center justify-between px-2 text-sm font-medium text-olive">
+            <span>分组</span>
+            <span className="text-xs text-stone">{filteredRows.length} 个账户</span>
+          </div>
+          <div className="space-y-2">
+            {groups.map((group) => {
+              const selected = selectedGroup?.key === group.key;
+              return <button key={group.key} className={`w-full rounded-xl border p-3 text-left transition ${selected ? "border-brand bg-brand text-paper shadow-[var(--paper-shadow)]" : "border-line bg-paper text-olive hover:bg-tag"}`} onClick={() => selectGroup(group)}>
+                <div className="flex items-start gap-3">
+                  <span className={`mt-0.5 ${selected ? "text-paper" : "text-warm"}`}>{groupIcon(group.key, "h-5 w-5")}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <strong className="truncate text-sm">{group.label}</strong>
+                      <span className={`shrink-0 text-xs ${selected ? "text-paper/75" : "text-stone"}`}>{group.rows.length}</span>
+                    </span>
+                    <span className={`mt-2 block text-lg font-semibold ${selected ? "text-paper" : group.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(group, groupVisible(group))}</span>
+                    <span className={`mt-1 flex items-center gap-1 text-xs ${selected ? "text-paper/75" : "text-stone"}`}>
+                      <span className={`inline-block h-2 w-2 rounded-full ${group.issueCount ? "bg-[var(--warning)]" : "bg-[var(--success)]"}`} />
+                      异常 {group.issueCount}
+                    </span>
+                  </span>
+                </div>
+              </button>;
+            })}
+          </div>
+        </div>
+
+        <div className="min-w-0 rounded-xl border border-line bg-panel">
+          {selectedGroup && <>
+            <div className="border-b border-line p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-warm">{groupIcon(selectedGroup.key, "h-6 w-6")}</span>
+                  <div>
+                    <h3 className="text-xl font-semibold text-warm">当前分组：{selectedGroup.label}</h3>
+                    <p className="mt-1 text-xs text-stone">{selectedGroup.rows.length} 个账户 · {selectedGroup.currencies.length > 1 ? `${selectedGroup.currencies.length} 个币种` : selectedGroup.currencies[0] ?? "无币种"}</p>
+                  </div>
+                </div>
+                <div className={`text-right text-2xl font-semibold ${selectedGroup.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(selectedGroup, groupVisible(selectedGroup))}</div>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <BalanceMetric label="账户数量" value={`${selectedGroup.rows.length}`} />
+                <BalanceMetric label="断言通过" value={`${selectedGroup.statusCounts.green}`} />
+                <BalanceMetric label="未断言" value={`${selectedGroup.statusCounts.yellow}`} />
+                <BalanceMetric label="长期未更新" value={`${selectedGroup.statusCounts.grey}`} />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[760px]">
+                <div className="grid grid-cols-[minmax(220px,1.6fr)_minmax(180px,1fr)_72px_140px_112px_44px] border-b border-line px-4 py-3 text-xs text-stone">
+                  <span>账户</span>
+                  <span>路径</span>
+                  <span>币种</span>
+                  <span className="text-right">余额</span>
+                  <span>状态</span>
+                  <span></span>
+                </div>
+                {selectedGroup.rows.map((row) => {
+                  const visible = rowVisible(row);
+                  const status = statusMap.get(row.account);
+                  const selected = desktopDetailRow?.account === row.account;
+                  return <div
+                    key={row.account}
+                    role="button"
+                    tabIndex={0}
+                    className={`grid w-full cursor-pointer grid-cols-[minmax(220px,1.6fr)_minmax(180px,1fr)_72px_140px_112px_44px] items-center gap-3 border-b border-line px-4 py-3 text-left text-sm outline-none last:border-b-0 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "hover:bg-paper"}`}
+                    onClick={() => setSelectedAccount(row.account)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedAccount(row.account);
+                      }
+                    }}
+                  >
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2">
+                        {status && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(status.status)}`} title={statusTitle(status)} />}
+                        <strong className="truncate text-warm">{row.label}</strong>
+                        {row.active === false && <span className="rounded bg-line px-1.5 py-0.5 text-[10px] text-stone">已关闭</span>}
+                      </span>
+                      <span className="mt-1 block truncate text-xs text-stone">{lastActivityMap.get(row.account) ? `最近活动 ${lastActivityMap.get(row.account)}` : "暂无近期活动"}</span>
+                    </span>
+                    <span className="truncate text-xs text-stone">{shortAccountPath(row.account)}</span>
+                    <span className="w-fit rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive">{row.currency || "多币种"}</span>
+                    <span className={`text-right font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
+                    <span className="text-xs text-stone">{status ? statusTitle(status) : "未检查"}</span>
+                    <span className="flex justify-end">
+                      {onToggleAccount && <button type="button" className="rounded-lg border border-line bg-panel p-1.5 text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+                    </span>
+                  </div>;
+                })}
+              </div>
+            </div>
+          </>}
+        </div>
+
+        <AccountDetailPanel row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} lastActivity={desktopDetailRow ? lastActivityMap.get(desktopDetailRow.account) : undefined} points={desktopDetailRow ? trendMap[desktopDetailRow.account] ?? [] : []} onToggleAccount={onToggleAccount} />
+      </div>
+
+      <div className="mt-4 space-y-3 lg:hidden">
+        {groups.map((group, index) => {
+          const open = openGroups[group.key] ?? (index === 0 || group.issueCount > 0);
+          return <div key={group.key} className="overflow-hidden rounded-xl border border-line bg-panel">
+            <button className="flex w-full items-center justify-between gap-3 p-4 text-left" onClick={() => setOpenGroups((current) => ({ ...current, [group.key]: !open }))}>
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="text-warm">{groupIcon(group.key, "h-6 w-6")}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-lg font-semibold text-warm">{group.label}</span>
+                  <span className="mt-0.5 block text-xs text-stone">{group.rows.length} 个账户</span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-3">
+                <span className="text-right">
+                  <span className={`block font-semibold ${group.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(group, groupVisible(group))}</span>
+                  <span className="text-xs text-stone">异常 {group.issueCount}</span>
+                </span>
+                <ChevronDown className={`h-5 w-5 text-olive transition ${open ? "rotate-180" : ""}`} />
+              </span>
+            </button>
+            {open && <div className="border-t border-line">
+              {group.rows.map((row) => {
+                const visible = rowVisible(row);
+                const status = statusMap.get(row.account);
+                return <button key={row.account} className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-paper" onClick={() => setSelectedAccount(row.account)}>
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${status ? statusColor(status.status) : "bg-stone"}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-warm">{row.label}</span>
+                    <span className="mt-0.5 block truncate text-xs text-stone">{shortAccountPath(row.account)}</span>
+                  </span>
+                  <span className="shrink-0 rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive">{row.currency || "多币种"}</span>
+                  <span className={`shrink-0 text-right text-sm font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
+                </button>;
+              })}
+            </div>}
+          </div>;
+        })}
+      </div>
+
+      {mobileDetailRow && <div className="fixed inset-0 z-50 lg:hidden">
+        <button className="absolute inset-0 bg-[var(--overlay)]" aria-label="关闭账户详情" onClick={() => setSelectedAccount(null)} />
+        <div className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 shadow-[var(--float-shadow)]">
+          <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-line" />
+          <AccountDetailPanel row={mobileDetailRow} visible={rowVisible(mobileDetailRow)} status={statusMap.get(mobileDetailRow.account)} lastActivity={lastActivityMap.get(mobileDetailRow.account)} points={trendMap[mobileDetailRow.account] ?? []} onToggleAccount={onToggleAccount} compact onClose={() => setSelectedAccount(null)} />
+        </div>
+      </div>}
+    </> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前筛选下没有账户。</p> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}
+    {!full && <p className="mt-3 text-xs text-stone">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}
+  </section>;
+}
+
+function buildBalanceGroups(rows: BalanceRow[], statusMap: Map<string, AccountStatus>): BalanceGroup[] {
+  return balanceGroupDefs.map((def) => {
+    const groupRows = rows.filter((row) => balanceGroupKey(row) === def.key);
+    const statusCounts: Record<AccountStatus["status"], number> = { green: 0, red: 0, yellow: 0, grey: 0 };
+    for (const row of groupRows) {
+      const status = statusMap.get(row.account);
+      if (status) statusCounts[status.status] += 1;
+    }
+    return {
+      ...def,
+      rows: groupRows,
+      total: groupRows.reduce((sum, row) => sum + row.value, 0),
+      currencies: Array.from(new Set(groupRows.map((row) => row.currency || "多币种"))),
+      statusCounts,
+      issueCount: statusCounts.red + statusCounts.yellow + statusCounts.grey,
+    };
+  }).filter((group) => group.rows.length > 0);
+}
+
+function balanceGroupKey(row: BalanceRow): AccountGroup {
+  const key = row.group ?? "other";
+  return balanceGroupKeys.has(key) ? key : "other";
+}
+
+function accountMatchesStatusFilter(status: AccountStatus | undefined, filter: BalanceStatusFilter) {
+  if (filter === "all") return true;
+  if (!status) return false;
+  if (filter === "issue") return status.status !== "green";
+  return status.status === filter;
+}
+
+function accountLastActivity(rows: BalanceRow[], txns: Txn[]) {
+  const accounts = new Set(rows.map((row) => row.account));
+  const out = new Map<string, string>();
+  for (const txn of txns) {
+    for (const posting of txn.postings) {
+      if (!accounts.has(posting.account)) continue;
+      const previous = out.get(posting.account);
+      if (!previous || txn.date > previous) out.set(posting.account, txn.date);
+    }
+  }
+  return out;
+}
+
+function formatRowAmount(row: BalanceRow, visible: boolean) {
+  if (!visible) return "••••••";
+  const currency = row.currency ?? "CNY";
+  return row.valuation ? formatValuation(row.value / 100, currency) : formatMoney(row.value / 100, currency);
+}
+
+function formatGroupAmount(group: BalanceGroup, visible: boolean) {
+  if (!visible) return "••••••";
+  if (group.currencies.length !== 1 || group.currencies[0] === "多币种") return `${group.currencies.length} 币种`;
+  return formatMoney(group.total / 100, group.currencies[0]);
+}
+
+function shortAccountPath(account: string) {
+  return account.split(":").slice(0, -1).join(" > ") || account;
+}
+
+function groupIcon(group: AccountGroup, className: string) {
+  if (group === "credit") return <CreditCard className={className} />;
+  if (group === "wealth") return <TrendingUp className={className} />;
+  if (group === "receivable" || group === "liability") return <ArrowLeftRight className={className} />;
+  if (group === "other") return <Archive className={className} />;
+  return <WalletCards className={className} />;
+}
+
+function BalanceMetric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl border border-line bg-paper p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 font-medium text-olive">{value}</div></div>;
+}
+
+function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; onClose?: () => void }) {
+  if (!row) {
+    return <aside className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
+  }
+  return <aside className={`${compact ? "" : "rounded-xl border border-line bg-panel p-4"}`}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h3 className="truncate text-xl font-semibold text-warm">{row.label}</h3>
+        <p className="mt-1 truncate text-xs text-stone">{row.account}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {onToggleAccount && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+        {onClose && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title="关闭账户详情"><X className="h-4 w-4" /></button>}
+      </div>
+    </div>
+    <div className="mt-5 grid grid-cols-3 gap-3">
+      <BalanceMetric label="余额" value={formatRowAmount(row, visible)} />
+      <BalanceMetric label="状态" value={status ? statusTitle(status) : "未检查"} />
+      <BalanceMetric label="币种" value={row.currency || "多币种"} />
+    </div>
+    <div className="relative mt-4 min-h-24 overflow-hidden rounded-xl border border-line bg-paper p-3">
+      <AccountSparkline points={points} liability={row.account.startsWith("Liabilities")} />
+      <div className="relative z-10 text-xs text-stone">最近活动</div>
+      <div className="relative z-10 mt-2 text-sm font-medium text-olive">{lastActivity ?? "暂无近期活动"}</div>
+      <div className="relative z-10 mt-1 text-xs text-stone">{row.active === false ? "账户已关闭" : "账户启用中"}</div>
+    </div>
+    <div className="mt-4 grid grid-cols-2 gap-3">
+      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-line bg-paper text-sm font-medium text-olive hover:bg-tag"><ListChecks className="h-4 w-4" />流水</ClientNavLink>
+      <ClientNavLink href="/reconcile" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand text-sm font-medium text-paper hover:bg-brand-light"><ListChecks className="h-4 w-4" />对账</ClientNavLink>
+    </div>
+  </aside>;
 }
 
 function accountTrendPoints(row: BalanceRow, txns: Txn[]) {
@@ -116,23 +447,4 @@ export function statusTitle(st: AccountStatus): string {
     case "yellow": return "未断言";
     case "grey": return st.lastEntryDate ? `超过60天未更新（最近：${st.lastEntryDate}）` : "无记录";
   }
-}
-
-function statusDotLegend() {
-  const items: { status: AccountStatus["status"]; label: string }[] = [
-    { status: "green", label: "断言通过" },
-    { status: "red", label: "断言失败" },
-    { status: "yellow", label: "未断言" },
-    { status: "grey", label: "长期未更新" },
-  ];
-  return (
-    <div className="hidden items-center gap-2 sm:flex">
-      {items.map((item) => (
-        <span key={item.status} className="flex items-center gap-1 text-xs text-stone">
-          <span className={`inline-block h-2 w-2 rounded-full ${statusColor(item.status)}`} />
-          {item.label}
-        </span>
-      ))}
-    </div>
-  );
 }
