@@ -1,48 +1,50 @@
-import { formatCny, formatCompactCny, formatCompactMoney, formatMoney } from "@/lib/money";
+import { formatCny, formatCompactCny, formatMoney } from "@/lib/money";
 import { ChevronDown, LineChart as LineChartIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
-import type { CommodityPrice, InvestmentHolding, InvestmentPosition, InvestmentQuote, InvestmentSummary } from "./types";
+import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentSummary } from "./types";
 
 type PricePoint = { date: string; price: number };
+type MoneyValue = { value: number; currency: string };
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
   const holdings = useMemo(() => investmentHoldings(investments), [investments]);
   const [openHoldings, setOpenHoldings] = useState<Record<string, boolean>>({});
   const positions = investments?.positions ?? [];
   const heldHoldings = holdings.filter((holding) => Math.abs(holding.totalQuantity) > 0);
-  const pricedHoldings = holdings.filter((holding) => holding.latestPrice);
   const latestDate = investments?.updatedAt || latestPriceDate(holdings);
   const accountCount = new Set(positions.map((position) => position.account)).size;
+  const costSummary = summarizeHoldingCosts(heldHoldings);
+  const profitSummary = summarizeHoldingProfit(heldHoldings);
+  const lotCount = heldHoldings.reduce((total, holding) => total + (holding.lots?.length ?? 0), 0);
 
   return (
-    <>
-      <section className="card p-4">
-        <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.8fr]">
-          <SummaryBlock label="持仓市值" value={formatCompactCny((investments?.totalMarketValueCny ?? 0) / 100)} detail={latestDate ? `价格更新 ${latestDate}` : "暂无价格"} tone="amount-gold" />
-          <SummaryBlock label="持仓股票" value={`${heldHoldings.length}`} detail={`${accountCount} 个账户持有证券`} tone="text-olive" />
-          <SummaryBlock label="股票池" value={`${holdings.length}`} detail={`${pricedHoldings.length} 个有价格曲线`} tone="text-olive" />
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-xl border border-line bg-panel">
+        <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+          <SummaryMetric label="持仓市值" value={formatCompactCny((investments?.totalMarketValueCny ?? 0) / 100)} detail={latestDate ? latestDate : "暂无价格"} tone="amount-gold" />
+          <SummaryMetric label="原币成本" value={formatMoneyValue(costSummary)} detail={`${lotCount} 笔买入`} tone="text-warm" />
+          <SummaryMetric label="账面盈亏" value={formatProfit(profitSummary)} detail={profitSummary ? "原币口径" : "等待同币种成本"} tone={profitTone(profitSummary)} />
+          <SummaryMetric label="持仓股票" value={`${heldHoldings.length}`} detail={`${accountCount} 个账户`} tone="text-olive" />
         </div>
       </section>
 
-      <section className="card mt-6 overflow-hidden p-0">
-        <div className="border-b border-line bg-paper px-4 py-4 sm:px-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="font-serif text-2xl">股票持仓</h2>
-              <p className="mt-1 text-sm text-olive">按股票聚合持仓，同一只股票下展开查看账户拆分。</p>
-            </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-line bg-panel px-3 py-1 text-xs text-stone">
-              <LineChartIcon className="h-3.5 w-3.5 text-brand" />
-              price history
-            </div>
-          </div>
+      <section className="overflow-hidden rounded-xl border border-line bg-panel">
+        <div className="hidden border-b border-line bg-paper px-5 py-3 text-xs text-stone md:grid md:grid-cols-[minmax(180px,1.25fr)_0.58fr_0.72fr_0.72fr_0.72fr_0.72fr_0.72fr_40px] md:items-center md:gap-4">
+          <div>股票</div>
+          <div className="text-right">持有股数</div>
+          <div className="text-right">平均成本</div>
+          <div className="text-right">总成本</div>
+          <div className="text-right">最新价</div>
+          <div className="text-right">原币市值</div>
+          <div className="text-right">账面盈亏</div>
+          <div />
         </div>
 
         {holdings.length ? (
           <div className="divide-y divide-line">
             {holdings.map((holding) => {
-              const expanded = openHoldings[holding.commodity] ?? holding.accountCount > 1;
+              const expanded = openHoldings[holding.commodity] ?? (holdings.length === 1 || holding.accountCount <= 1);
               return (
                 <HoldingRow
                   key={holding.commodity}
@@ -55,96 +57,153 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
           </div>
         ) : <EmptyState text="暂无证券商品" />}
       </section>
-    </>
+    </div>
   );
 }
 
 function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHolding; expanded: boolean; onToggle: () => void }) {
-  const points = pricePoints(holding.priceHistory).slice(-120);
-  const change = priceChange(points);
+  const points = pricePoints(holding.priceHistory).slice(-90);
+  const lots = holding.lots ?? [];
   const positions = holding.positions ?? [];
+  const profit = holdingProfit(holding);
+
   return (
-    <article className="bg-panel px-4 py-4 sm:px-5">
-      <div className="grid gap-4 md:grid-cols-[minmax(160px,1.1fr)_minmax(140px,0.8fr)_minmax(140px,0.8fr)_minmax(220px,1.2fr)_40px] md:items-center">
-        <div className="min-w-0">
-          <SecurityName symbol={holding.commodity} name={holding.commodityName} />
-          <div className="mt-2 flex flex-wrap gap-2 text-xs text-stone">
-            <Badge>{holding.accountCount > 0 ? `${holding.accountCount} 个账户` : "仅价格记录"}</Badge>
-            <Badge>{holding.latestPrice?.date ?? "暂无价格"}</Badge>
+    <article className="bg-panel">
+      <div className="px-4 py-4 sm:px-5">
+        <div className="grid gap-4 md:grid-cols-[minmax(180px,1.25fr)_0.58fr_0.72fr_0.72fr_0.72fr_0.72fr_0.72fr_40px] md:items-center">
+          <div className="min-w-0">
+            <SecurityName symbol={holding.commodity} name={holding.commodityName} />
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-stone">
+              <Badge>{lots.length ? `最近买入 ${lots[0]?.date}` : "暂无买入批次"}</Badge>
+              <Badge>{holding.accountCount} 个账户</Badge>
+            </div>
           </div>
+
+          <RowMetric label="持有股数" value={formatQuantity(holding.totalQuantity)} />
+          <RowMetric label="平均成本" value={formatCostPrice(holding.averageCost, holding.costCurrency)} />
+          <RowMetric label="总成本" value={formatMarketValue(holding.totalCostValue, holding.costCurrency)} />
+          <RowMetric label="最新价" value={formatPrice(holding.latestPrice)} />
+          <RowMetric label="原币市值" value={formatMarketValue(holding.totalMarketValue, holding.marketCurrency)} />
+          <RowMetric label="账面盈亏" value={formatProfit(profit)} tone={profitTone(profit)} />
+
+          <button type="button" className="hidden h-10 w-10 items-center justify-center rounded-lg border border-line bg-paper text-stone transition-[background-color,transform] active:scale-95 [@media(hover:hover)]:hover:bg-tag md:flex" onClick={onToggle} aria-expanded={expanded} aria-label={`${holding.commodity} 买入批次`}>
+            <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+          </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:block">
-          <Fact label="总份额" value={formatQuantity(holding.totalQuantity)} />
-          <Fact label="最新价" value={formatPrice(holding.latestPrice)} />
-          <Fact label="成本价" value={formatCostPrice(holding.averageCost, holding.costCurrency)} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 md:block">
-          <Fact label="原币市值" value={formatMarketValue(holding.totalMarketValue, holding.marketCurrency)} />
-          <Fact label="原币成本" value={formatMarketValue(holding.totalCostValue, holding.costCurrency)} />
-          <Fact label="CNY 折算" value={formatCnyValue(holding.totalMarketValueCny)} strong />
-        </div>
-
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center justify-between gap-3 text-xs text-stone">
-            <span>价格曲线</span>
-            <span className={`tabular-nums ${changeTone(change)}`}>{formatPriceChange(change)}</span>
-          </div>
-          <div className="h-24 min-w-0 md:h-20">
-            {points.length >= 2 ? <PriceSparkline points={points} currency={holding.latestPrice?.currency ?? ""} /> : <div className="grid h-full place-items-center rounded-xl border border-dashed border-line bg-paper text-xs text-stone">暂无曲线</div>}
-          </div>
-        </div>
-
-        <button type="button" className="hidden h-10 w-10 items-center justify-center rounded-xl border border-line bg-paper text-stone transition-colors hover:bg-tag md:flex" onClick={onToggle} aria-expanded={expanded} aria-label={`${holding.commodity} 账户明细`}>
+        <button type="button" className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper text-sm font-medium text-olive transition-[background-color,transform] active:scale-95 [@media(hover:hover)]:hover:bg-tag md:hidden" onClick={onToggle} aria-expanded={expanded}>
+          买入批次
           <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
         </button>
       </div>
 
-      <button type="button" className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-line bg-paper text-sm font-medium text-olive transition-colors hover:bg-tag md:hidden" onClick={onToggle} aria-expanded={expanded}>
-        账户明细
-        <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
-      </button>
-
       {expanded && (
-        <div className="mt-4 rounded-2xl border border-line bg-paper p-3">
-          {positions.length ? <PositionBreakdown positions={positions} /> : <div className="p-3 text-sm text-stone">暂无账户持仓。</div>}
+        <div className="border-t border-line bg-paper px-4 py-4 sm:px-5">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="min-w-0 space-y-5">
+              <InvestmentLots lots={lots} />
+              {positions.length ? <PositionBreakdown positions={positions} /> : null}
+            </div>
+            <PricePanel holding={holding} points={points} />
+          </div>
         </div>
       )}
     </article>
   );
 }
 
+function InvestmentLots({ lots }: { lots: InvestmentLot[] }) {
+  return (
+    <section>
+      <SectionHeader title="买入批次" meta={`${lots.length} 笔`} />
+      {lots.length ? (
+        <div className="mt-2 overflow-x-auto rounded-lg border border-line bg-panel">
+          <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
+            <thead className="bg-paper text-xs text-stone">
+              <tr>
+                <TableHead align="left">买入日期</TableHead>
+                <TableHead align="left">账户</TableHead>
+                <TableHead>股数</TableHead>
+                <TableHead>成本价</TableHead>
+                <TableHead>成本</TableHead>
+              </tr>
+            </thead>
+            <tbody>
+              {lots.map((lot, index) => (
+                <tr key={`${lot.date}:${lot.account}:${lot.commodity}:${index}`}>
+                  <TableCell align="left" strong>{lot.date}</TableCell>
+                  <TableCell align="left">
+                    <div className="max-w-72 truncate text-olive">{lot.accountLabel}</div>
+                    <div className="max-w-72 truncate text-xs text-stone">{lot.account}</div>
+                  </TableCell>
+                  <TableCell>{formatQuantity(lot.quantity)}</TableCell>
+                  <TableCell>{formatCostPrice(lot.unitCost, lot.costCurrency)}</TableCell>
+                  <TableCell strong>{formatMarketValue(lot.costValue, lot.costCurrency)}</TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <EmptyInline text="暂无买入批次" />}
+    </section>
+  );
+}
+
 function PositionBreakdown({ positions }: { positions: InvestmentPosition[] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[820px] border-separate border-spacing-0 text-sm">
-        <thead className="text-xs uppercase tracking-[0.14em] text-stone">
-          <tr>
-            <TableHead align="left">账户</TableHead>
-            <TableHead>份额</TableHead>
-            <TableHead>最新价</TableHead>
-            <TableHead>成本价</TableHead>
-            <TableHead>原币市值</TableHead>
-            <TableHead>原币成本</TableHead>
-            <TableHead>CNY 折算</TableHead>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((position) => (
-            <tr key={`${position.account}:${position.commodity}`} className="border-b border-line">
-              <TableCell align="left"><div className="max-w-72 truncate text-olive">{position.accountLabel}</div><div className="max-w-72 truncate text-xs text-stone">{position.account}</div></TableCell>
-              <TableCell>{formatQuantity(position.quantity)}</TableCell>
-              <TableCell>{formatPrice(position.latestPrice)}</TableCell>
-              <TableCell>{formatCostPrice(position.averageCost, position.costCurrency)}</TableCell>
-              <TableCell>{formatMarketValue(position.marketValue, position.marketCurrency)}</TableCell>
-              <TableCell>{formatMarketValue(position.costValue, position.costCurrency)}</TableCell>
-              <TableCell strong>{formatCnyValue(position.marketValueCny)}</TableCell>
+    <section>
+      <SectionHeader title="账户拆分" meta={`${positions.length} 个账户`} />
+      <div className="mt-2 overflow-x-auto rounded-lg border border-line bg-panel">
+        <table className="w-full min-w-[860px] border-separate border-spacing-0 text-sm">
+          <thead className="bg-paper text-xs text-stone">
+            <tr>
+              <TableHead align="left">账户</TableHead>
+              <TableHead>股数</TableHead>
+              <TableHead>平均成本</TableHead>
+              <TableHead>总成本</TableHead>
+              <TableHead>原币市值</TableHead>
+              <TableHead>CNY 折算</TableHead>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {positions.map((position) => (
+              <tr key={`${position.account}:${position.commodity}`}>
+                <TableCell align="left">
+                  <div className="max-w-72 truncate text-olive">{position.accountLabel}</div>
+                  <div className="max-w-72 truncate text-xs text-stone">{position.account}</div>
+                </TableCell>
+                <TableCell>{formatQuantity(position.quantity)}</TableCell>
+                <TableCell>{formatCostPrice(position.averageCost, position.costCurrency)}</TableCell>
+                <TableCell>{formatMarketValue(position.costValue, position.costCurrency)}</TableCell>
+                <TableCell>{formatMarketValue(position.marketValue, position.marketCurrency)}</TableCell>
+                <TableCell strong>{formatCnyValue(position.marketValueCny)}</TableCell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function PricePanel({ holding, points }: { holding: InvestmentHolding; points: PricePoint[] }) {
+  const change = priceChange(points);
+  return (
+    <aside className="min-w-0">
+      <SectionHeader title="价格" meta={holding.latestPrice?.date ?? "暂无"} />
+      <div className="mt-2 rounded-lg border border-line bg-panel p-3">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="inline-flex items-center gap-2 text-stone">
+            <LineChartIcon className="h-4 w-4 text-brand" />
+            <span>{formatPrice(holding.latestPrice)}</span>
+          </div>
+          <span className={`tabular-nums ${profitTone(change == null ? null : { value: change, currency: "%" })}`}>{formatPriceChange(change)}</span>
+        </div>
+        <div className="mt-3 h-28 min-w-0">
+          {points.length >= 2 ? <PriceSparkline points={points} currency={holding.latestPrice?.currency ?? ""} /> : <EmptyInline text="暂无曲线" />}
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -157,21 +216,39 @@ function PriceSparkline({ points, currency }: { points: PricePoint[]; currency: 
           <Tooltip
             formatter={(value) => [formatMoney(Number(value), currency || "CNY"), "价格"]}
             labelFormatter={(label) => String(label)}
-            contentStyle={{ borderColor: "var(--line)", background: "var(--panel)", color: "var(--ink)", borderRadius: 12 }}
+            contentStyle={{ borderColor: "var(--line)", background: "var(--panel)", color: "var(--ink)", borderRadius: 8 }}
           />
-          <Line type="monotone" dataKey="price" stroke="var(--chart-primary)" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+          <Line type="monotone" dataKey="price" stroke="var(--chart-primary)" strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-function SummaryBlock({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
+function SummaryMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-panel p-4">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
-      <div className={`mt-2 truncate font-serif text-3xl font-medium ${tone}`}>{value}</div>
-      <div className="mt-1 text-xs text-stone">{detail}</div>
+    <div className="min-w-0 px-4 py-4 sm:px-5">
+      <div className="text-xs text-stone">{label}</div>
+      <div className={`mt-1 truncate text-2xl font-medium tabular-nums ${tone}`}>{value}</div>
+      <div className="mt-1 truncate text-xs text-stone">{detail}</div>
+    </div>
+  );
+}
+
+function RowMetric({ label, value, tone = "text-warm" }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="grid min-w-0 grid-cols-[88px_1fr] items-baseline gap-3 md:block">
+      <div className="text-xs text-stone md:hidden">{label}</div>
+      <div className={`truncate text-right font-medium tabular-nums ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ title, meta }: { title: string; meta: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <span className="shrink-0 text-xs text-stone">{meta}</span>
     </div>
   );
 }
@@ -179,23 +256,14 @@ function SummaryBlock({ label, value, detail, tone }: { label: string; value: st
 function SecurityName({ symbol, name }: { symbol: string; name: string }) {
   return (
     <div className="min-w-0">
-      <div className="font-semibold text-ink">{symbol}</div>
-      <div className="mt-0.5 truncate text-xs text-stone">{name}</div>
-    </div>
-  );
-}
-
-function Fact({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="min-w-0 md:mb-2 md:last:mb-0">
-      <div className="text-xs text-stone">{label}</div>
-      <div className={`mt-1 truncate text-right font-medium [font-variant-numeric:tabular-nums] md:text-left ${strong ? "text-olive" : "text-warm"}`}>{value}</div>
+      <div className="text-lg font-semibold leading-tight text-ink">{symbol}</div>
+      <div className="mt-1 truncate text-xs text-stone">{name}</div>
     </div>
   );
 }
 
 function Badge({ children }: { children: ReactNode }) {
-  return <span className="rounded-full border border-line bg-paper px-2.5 py-1">{children}</span>;
+  return <span className="rounded-md border border-line bg-paper px-2 py-1">{children}</span>;
 }
 
 function TableHead({ children, align = "right" }: { children: string; align?: "left" | "right" }) {
@@ -203,11 +271,15 @@ function TableHead({ children, align = "right" }: { children: string; align?: "l
 }
 
 function TableCell({ children, align = "right", strong = false }: { children: ReactNode; align?: "left" | "right"; strong?: boolean }) {
-  return <td className={`border-b border-line px-3 py-3 align-middle [font-variant-numeric:tabular-nums] ${align === "left" ? "text-left" : "text-right"} ${strong ? "font-semibold text-olive" : "text-warm"}`}>{children}</td>;
+  return <td className={`border-b border-line px-3 py-3 align-middle tabular-nums ${align === "left" ? "text-left" : "text-right"} ${strong ? "font-semibold text-olive" : "text-warm"}`}>{children}</td>;
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="m-4 rounded-2xl border border-line bg-panel p-6 text-center text-sm text-stone">{text}</div>;
+  return <div className="m-4 rounded-lg border border-line bg-paper p-6 text-center text-sm text-stone">{text}</div>;
+}
+
+function EmptyInline({ text }: { text: string }) {
+  return <div className="grid h-full min-h-20 place-items-center rounded-lg border border-dashed border-line bg-paper px-3 py-4 text-xs text-stone">{text}</div>;
 }
 
 function investmentHoldings(investments: InvestmentSummary | null): InvestmentHolding[] {
@@ -229,6 +301,7 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
       totalMarketValueCny: quote.marketValueCny,
       accountCount: quote.positionCount,
       positions: [],
+      lots: [],
     });
   }
   for (const position of positions) {
@@ -241,11 +314,17 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
       marketCurrency: position.marketCurrency,
       accountCount: 0,
       positions: [],
+      lots: [],
     };
     current.positions = current.positions ?? [];
     current.positions.push(position);
+    current.lots = [...(current.lots ?? []), ...(position.lots ?? [])];
     current.totalQuantity += position.quantity;
     current.accountCount = current.positions.length;
+    if (position.marketValue != null && position.marketCurrency) {
+      current.marketCurrency = position.marketCurrency;
+      current.totalMarketValue = (current.totalMarketValue ?? 0) + position.marketValue;
+    }
     if (position.costValue != null && position.costCurrency) {
       if (!current.costCurrency || current.costCurrency === position.costCurrency) {
         current.costCurrency = position.costCurrency;
@@ -278,6 +357,36 @@ function priceChange(points: PricePoint[]) {
   return (last - first) / first;
 }
 
+function holdingProfit(holding: InvestmentHolding): MoneyValue | null {
+  if (holding.totalMarketValue == null || holding.totalCostValue == null || !holding.marketCurrency || holding.marketCurrency !== holding.costCurrency) {
+    return null;
+  }
+  return { value: holding.totalMarketValue - holding.totalCostValue, currency: holding.marketCurrency };
+}
+
+function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null {
+  const totals = new Map<string, number>();
+  for (const holding of holdings) {
+    if (holding.totalCostValue == null || !holding.costCurrency) return null;
+    totals.set(holding.costCurrency, (totals.get(holding.costCurrency) ?? 0) + holding.totalCostValue);
+  }
+  if (totals.size !== 1) return null;
+  const [[currency, value]] = [...totals.entries()];
+  return { value, currency };
+}
+
+function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | null {
+  const totals = new Map<string, number>();
+  for (const holding of holdings) {
+    const profit = holdingProfit(holding);
+    if (!profit) return null;
+    totals.set(profit.currency, (totals.get(profit.currency) ?? 0) + profit.value);
+  }
+  if (totals.size !== 1) return null;
+  const [[currency, value]] = [...totals.entries()];
+  return { value, currency };
+}
+
 function formatQuantity(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(value);
 }
@@ -302,16 +411,27 @@ function formatCnyValue(value?: number) {
   return formatCny(value / 100);
 }
 
+function formatMoneyValue(value: MoneyValue | null) {
+  if (!value) return "暂无";
+  return formatMoney(value.value, value.currency);
+}
+
+function formatProfit(value: MoneyValue | null) {
+  if (!value) return "暂无";
+  const sign = value.value > 0 ? "+" : "";
+  return `${sign}${formatMoney(value.value, value.currency)}`;
+}
+
 function formatPriceChange(change: number | null) {
-  if (change == null) return "暂无变化";
+  if (change == null) return "暂无";
   const sign = change > 0 ? "+" : "";
   return `${sign}${(change * 100).toFixed(2)}%`;
 }
 
-function changeTone(change: number | null) {
-  if (change == null) return "text-stone";
-  if (change > 0) return "amount-income";
-  if (change < 0) return "amount-expense";
+function profitTone(value: MoneyValue | null) {
+  if (!value) return "text-stone";
+  if (value.value > 0) return "amount-income";
+  if (value.value < 0) return "amount-expense";
   return "text-stone";
 }
 

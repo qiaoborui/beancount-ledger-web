@@ -166,6 +166,9 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	if position.AverageCost == nil || *position.AverageCost != 100 || position.CostValue == nil || *position.CostValue != 50 || position.CostCurrency != "USD" {
 		t.Fatalf("unexpected position cost basis: %#v", position)
 	}
+	if len(position.Lots) != 1 || position.Lots[0].Date != "2026-05-31" || position.Lots[0].Quantity != 0.5 || position.Lots[0].UnitCost == nil || *position.Lots[0].UnitCost != 100 || position.Lots[0].CostValue == nil || *position.Lots[0].CostValue != 50 || position.Lots[0].CostCurrency != "USD" {
+		t.Fatalf("unexpected position lots: %#v", position.Lots)
+	}
 	qqqQuote := InvestmentQuote{}
 	for _, quote := range body.Quotes {
 		if quote.Commodity == "QQQ" {
@@ -190,6 +193,15 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	}
 	if holding.TotalCostValue == nil || math.Abs(*holding.TotalCostValue-72.5) > 0.000001 || holding.AverageCost == nil || math.Abs(*holding.AverageCost-96.66666666666667) > 0.000001 || holding.CostCurrency != "USD" {
 		t.Fatalf("unexpected holding cost basis: %#v", holding)
+	}
+	if len(body.Lots) != 2 || len(holding.Lots) != 2 {
+		t.Fatalf("expected two investment lots, body=%#v holding=%#v", body.Lots, holding.Lots)
+	}
+	if holding.Lots[0].AccountLabel != "券商 QQQ 持仓" || holding.Lots[0].Date != "2026-05-31" || holding.Lots[0].Quantity != 0.5 || holding.Lots[0].UnitCost == nil || *holding.Lots[0].UnitCost != 100 || holding.Lots[0].CostValue == nil || *holding.Lots[0].CostValue != 50 || holding.Lots[0].CostCurrency != "USD" {
+		t.Fatalf("unexpected first holding lot: %#v", holding.Lots[0])
+	}
+	if holding.Lots[1].AccountLabel != "券商应税 QQQ 持仓" || holding.Lots[1].Date != "2026-05-31" || holding.Lots[1].Quantity != 0.25 || holding.Lots[1].UnitCost == nil || *holding.Lots[1].UnitCost != 90 || holding.Lots[1].CostValue == nil || *holding.Lots[1].CostValue != 22.5 || holding.Lots[1].CostCurrency != "USD" {
+		t.Fatalf("unexpected second holding lot: %#v", holding.Lots[1])
 	}
 	if len(holding.Positions) != 2 || holding.Positions[1].Account != "Assets:Broker:Taxable:QQQ" {
 		t.Fatalf("unexpected holding positions: %#v", holding.Positions)

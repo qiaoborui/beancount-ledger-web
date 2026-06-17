@@ -9,6 +9,7 @@ describe("InvestmentsPage", () => {
       totalMarketValueCny: 0,
       updatedAt: "2026-06-12",
       positions: [],
+      lots: [],
       quotes: [],
       holdings: [
         {
@@ -19,6 +20,7 @@ describe("InvestmentsPage", () => {
           totalQuantity: 0,
           accountCount: 0,
           positions: null,
+          lots: null,
         },
         {
           commodity: "",
@@ -28,6 +30,7 @@ describe("InvestmentsPage", () => {
           totalQuantity: 0,
           accountCount: 0,
           positions: null,
+          lots: null,
         },
       ],
     };
@@ -54,6 +57,32 @@ describe("InvestmentsPage", () => {
           marketValue: 635.97,
           marketCurrency: "USD",
           marketValueCny: 429915,
+          lots: [
+            {
+              date: "2026-06-16",
+              account: "Assets:HK:ZABank:Investments:NVDA",
+              accountLabel: "众安银行 NVDA 持仓",
+              commodity: "NVDA",
+              commodityName: "NVIDIA Corporation",
+              quantity: 3,
+              unitCost: 209.5,
+              costValue: 628.5,
+              costCurrency: "USD",
+            },
+          ],
+        },
+      ],
+      lots: [
+        {
+          date: "2026-06-16",
+          account: "Assets:HK:ZABank:Investments:NVDA",
+          accountLabel: "众安银行 NVDA 持仓",
+          commodity: "NVDA",
+          commodityName: "NVIDIA Corporation",
+          quantity: 3,
+          unitCost: 209.5,
+          costValue: 628.5,
+          costCurrency: "USD",
         },
       ],
       quotes: [],
@@ -88,6 +117,32 @@ describe("InvestmentsPage", () => {
               marketValue: 635.97,
               marketCurrency: "USD",
               marketValueCny: 429915,
+              lots: [
+                {
+                  date: "2026-06-16",
+                  account: "Assets:HK:ZABank:Investments:NVDA",
+                  accountLabel: "众安银行 NVDA 持仓",
+                  commodity: "NVDA",
+                  commodityName: "NVIDIA Corporation",
+                  quantity: 3,
+                  unitCost: 209.5,
+                  costValue: 628.5,
+                  costCurrency: "USD",
+                },
+              ],
+            },
+          ],
+          lots: [
+            {
+              date: "2026-06-16",
+              account: "Assets:HK:ZABank:Investments:NVDA",
+              accountLabel: "众安银行 NVDA 持仓",
+              commodity: "NVDA",
+              commodityName: "NVIDIA Corporation",
+              quantity: 3,
+              unitCost: 209.5,
+              costValue: 628.5,
+              costCurrency: "USD",
             },
           ],
         },
@@ -97,10 +152,14 @@ describe("InvestmentsPage", () => {
     const html = renderToString(<InvestmentsPage investments={investments} />);
 
     expect(html).toContain("US$635.97");
-    expect(html).toContain("成本价");
-    expect(html).toContain("原币成本");
+    expect(html).toContain("买入批次");
+    expect(html).toContain("2026-06-16");
+    expect(html).toContain("持有股数");
+    expect(html).toContain("平均成本");
+    expect(html).toContain("总成本");
     expect(html).toContain("US$209.50");
     expect(html).toContain("US$628.50");
+    expect(html).toContain("3");
     expect(html).not.toContain("$636");
   });
 });

@@ -35,6 +35,19 @@ type InvestmentPosition struct {
 	MarketValue    *float64        `json:"marketValue,omitempty"`
 	MarketCurrency string          `json:"marketCurrency,omitempty"`
 	MarketValueCNY *int            `json:"marketValueCny,omitempty"`
+	Lots           []InvestmentLot `json:"lots"`
+}
+
+type InvestmentLot struct {
+	Date          string   `json:"date"`
+	Account       string   `json:"account"`
+	AccountLabel  string   `json:"accountLabel"`
+	Commodity     string   `json:"commodity"`
+	CommodityName string   `json:"commodityName"`
+	Quantity      float64  `json:"quantity"`
+	UnitCost      *float64 `json:"unitCost,omitempty"`
+	CostValue     *float64 `json:"costValue,omitempty"`
+	CostCurrency  string   `json:"costCurrency,omitempty"`
 }
 
 type InvestmentQuote struct {
@@ -61,12 +74,14 @@ type InvestmentHolding struct {
 	TotalMarketValueCNY *int                 `json:"totalMarketValueCny,omitempty"`
 	AccountCount        int                  `json:"accountCount"`
 	Positions           []InvestmentPosition `json:"positions"`
+	Lots                []InvestmentLot      `json:"lots"`
 }
 
 type InvestmentSummary struct {
 	TotalMarketValueCNY int                  `json:"totalMarketValueCny"`
 	Holdings            []InvestmentHolding  `json:"holdings"`
 	Positions           []InvestmentPosition `json:"positions"`
+	Lots                []InvestmentLot      `json:"lots"`
 	Quotes              []InvestmentQuote    `json:"quotes"`
 	UpdatedAt           string               `json:"updatedAt,omitempty"`
 }
@@ -114,6 +129,7 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 	priceHistory := investmentPriceHistory(prices)
 	positionQuantities := investmentQuantities(lines, securities)
 	positionCosts := investmentCosts(lines, securities)
+	positionLots := investmentLots(lines, securities, accountMap, commodityMap)
 	positions := make([]InvestmentPosition, 0, len(positionQuantities))
 	quoteQuantity := map[string]float64{}
 	quotePositionCount := map[string]int{}
@@ -136,6 +152,7 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 			CommodityName: commodityName(commodityMap, commodity),
 			Quantity:      quantity,
 			LatestPrice:   latestPrices[commodity],
+			Lots:          positionLots[key],
 		}
 		if cost := positionCosts[key]; cost.valid() && !roundedZero(quantity) {
 			value := cost.value
@@ -201,8 +218,9 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 		return quotes[i].Commodity < quotes[j].Commodity
 	})
 
+	lots := summaryLots(positionLots, positions)
 	holdings := investmentHoldings(commodityMap, latestPrices, priceHistory, positions, quoteQuantity, priceIndex)
-	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Quotes: quotes, UpdatedAt: updatedAt}
+	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Lots: lots, Quotes: quotes, UpdatedAt: updatedAt}
 }
 
 func parseCommodityDetails(lines []BeanLine) []Commodity {
@@ -286,6 +304,7 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 			byCommodity[position.Commodity] = holding
 		}
 		holding.Positions = append(holding.Positions, position)
+		holding.Lots = append(holding.Lots, position.Lots...)
 		addPositionCost(holding, position)
 	}
 	holdings := make([]InvestmentHolding, 0, len(byCommodity))
@@ -310,6 +329,7 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 				holding.TotalMarketValueCNY = cny
 			}
 		}
+		sortInvestmentLots(holding.Lots)
 		holdings = append(holdings, *holding)
 	}
 	sort.Slice(holdings, func(i, j int) bool {
@@ -323,6 +343,21 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 		return holdings[i].Commodity < holdings[j].Commodity
 	})
 	return holdings
+}
+
+func summaryLots(positionLots map[string][]InvestmentLot, positions []InvestmentPosition) []InvestmentLot {
+	held := map[string]bool{}
+	for _, position := range positions {
+		held[position.Account+"\x00"+position.Commodity] = true
+	}
+	lots := []InvestmentLot{}
+	for key, rows := range positionLots {
+		if held[key] {
+			lots = append(lots, rows...)
+		}
+	}
+	sortInvestmentLots(lots)
+	return lots
 }
 
 func addPositionCost(holding *InvestmentHolding, position InvestmentPosition) {
@@ -415,6 +450,73 @@ func investmentCosts(lines []BeanLine, securities map[string]bool) map[string]in
 		costs[key] = current
 	}
 	return costs
+}
+
+func investmentLots(lines []BeanLine, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
+	lots := map[string][]InvestmentLot{}
+	currentTxn := false
+	currentDate := ""
+	for _, line := range lines {
+		if m := txnRe.FindStringSubmatch(line.Text); m != nil {
+			currentTxn = true
+			currentDate = m[1]
+			continue
+		}
+		if directiveRe.MatchString(line.Text) {
+			currentTxn = false
+			currentDate = ""
+			continue
+		}
+		if !currentTxn {
+			continue
+		}
+		posting := investmentPostingRe.FindStringSubmatch(line.Text)
+		if posting == nil || !strings.HasPrefix(posting[1], "Assets:") || !securities[posting[3]] {
+			continue
+		}
+		quantity := decimal(posting[2])
+		if quantity <= 0 || roundedZero(quantity) {
+			continue
+		}
+		accountName, commodity := posting[1], posting[3]
+		label := accountName
+		if acct := accountMap[accountName]; acct.Label != "" {
+			label = acct.Label
+		}
+		lot := InvestmentLot{
+			Date:          currentDate,
+			Account:       accountName,
+			AccountLabel:  label,
+			Commodity:     commodity,
+			CommodityName: commodityName(commodityMap, commodity),
+			Quantity:      quantity,
+		}
+		if cost := postingCostRe.FindStringSubmatch(line.Text); cost != nil {
+			unit := decimal(cost[1])
+			value := quantity * unit
+			lot.UnitCost = &unit
+			lot.CostValue = &value
+			lot.CostCurrency = cost[2]
+		}
+		key := accountName + "\x00" + commodity
+		lots[key] = append(lots[key], lot)
+	}
+	for key := range lots {
+		sortInvestmentLots(lots[key])
+	}
+	return lots
+}
+
+func sortInvestmentLots(lots []InvestmentLot) {
+	sort.Slice(lots, func(i, j int) bool {
+		if lots[i].Date != lots[j].Date {
+			return lots[i].Date > lots[j].Date
+		}
+		if lots[i].Commodity != lots[j].Commodity {
+			return lots[i].Commodity < lots[j].Commodity
+		}
+		return lots[i].Account < lots[j].Account
+	})
 }
 
 func marketValueCNY(value float64, currency string, priceIndex PriceIndex) *int {
