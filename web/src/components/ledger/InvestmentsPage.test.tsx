@@ -71,6 +71,27 @@ describe("InvestmentsPage", () => {
             },
           ],
         },
+        {
+          account: "Assets:Broker:QQQ",
+          accountLabel: "券商 QQQ 持仓",
+          commodity: "QQQ",
+          commodityName: "Invesco QQQ Trust",
+          quantity: 0.0056,
+          latestPrice: { date: "2026-06-15", commodity: "QQQ", amount: 729.86, currency: "USD" },
+          marketValue: 4.087216,
+          marketCurrency: "USD",
+          marketValueCny: 2759,
+          lots: [
+            {
+              date: "2026-06-12",
+              account: "Assets:Broker:QQQ",
+              accountLabel: "券商 QQQ 持仓",
+              commodity: "QQQ",
+              commodityName: "Invesco QQQ Trust",
+              quantity: 0.0056,
+            },
+          ],
+        },
       ],
       lots: [
         {
@@ -83,6 +104,14 @@ describe("InvestmentsPage", () => {
           unitCost: 209.5,
           costValue: 628.5,
           costCurrency: "USD",
+        },
+        {
+          date: "2026-06-12",
+          account: "Assets:Broker:QQQ",
+          accountLabel: "券商 QQQ 持仓",
+          commodity: "QQQ",
+          commodityName: "Invesco QQQ Trust",
+          quantity: 0.0056,
         },
       ],
       quotes: [],
@@ -146,6 +175,53 @@ describe("InvestmentsPage", () => {
             },
           ],
         },
+        {
+          commodity: "QQQ",
+          commodityName: "Invesco QQQ Trust",
+          latestPrice: { date: "2026-06-15", commodity: "QQQ", amount: 729.86, currency: "USD" },
+          priceHistory: [
+            { date: "2026-06-12", commodity: "QQQ", amount: 725.2, currency: "USD" },
+            { date: "2026-06-15", commodity: "QQQ", amount: 729.86, currency: "USD" },
+          ],
+          totalQuantity: 0.0056,
+          totalMarketValue: 4.087216,
+          marketCurrency: "USD",
+          totalMarketValueCny: 2759,
+          accountCount: 1,
+          positions: [
+            {
+              account: "Assets:Broker:QQQ",
+              accountLabel: "券商 QQQ 持仓",
+              commodity: "QQQ",
+              commodityName: "Invesco QQQ Trust",
+              quantity: 0.0056,
+              latestPrice: { date: "2026-06-15", commodity: "QQQ", amount: 729.86, currency: "USD" },
+              marketValue: 4.087216,
+              marketCurrency: "USD",
+              marketValueCny: 2759,
+              lots: [
+                {
+                  date: "2026-06-12",
+                  account: "Assets:Broker:QQQ",
+                  accountLabel: "券商 QQQ 持仓",
+                  commodity: "QQQ",
+                  commodityName: "Invesco QQQ Trust",
+                  quantity: 0.0056,
+                },
+              ],
+            },
+          ],
+          lots: [
+            {
+              date: "2026-06-12",
+              account: "Assets:Broker:QQQ",
+              accountLabel: "券商 QQQ 持仓",
+              commodity: "QQQ",
+              commodityName: "Invesco QQQ Trust",
+              quantity: 0.0056,
+            },
+          ],
+        },
       ],
     };
 
@@ -154,12 +230,17 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("US$635.97");
     expect(html).toContain("买入批次");
     expect(html).toContain("2026-06-16");
+    expect(html).toContain("1/2 有成本");
+    expect(html).toContain("2 笔买入");
     expect(html).toContain("持有股数");
     expect(html).toContain("平均成本");
     expect(html).toContain("总成本");
     expect(html).toContain("US$209.50");
     expect(html).toContain("US$628.50");
+    expect(html).toContain("QQQ");
     expect(html).toContain("3");
+    expect(html).not.toContain("买入日期");
+    expect(html).not.toContain("账户拆分");
     expect(html).not.toContain("$636");
   });
 });

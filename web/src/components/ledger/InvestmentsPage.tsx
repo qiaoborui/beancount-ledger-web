@@ -9,13 +9,15 @@ type MoneyValue = { value: number; currency: string };
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
   const holdings = useMemo(() => investmentHoldings(investments), [investments]);
-  const [openHoldings, setOpenHoldings] = useState<Record<string, boolean>>({});
+  const [openHolding, setOpenHolding] = useState<string | null>(null);
   const positions = investments?.positions ?? [];
   const heldHoldings = holdings.filter((holding) => Math.abs(holding.totalQuantity) > 0);
   const latestDate = investments?.updatedAt || latestPriceDate(holdings);
   const accountCount = new Set(positions.map((position) => position.account)).size;
   const costSummary = summarizeHoldingCosts(heldHoldings);
   const profitSummary = summarizeHoldingProfit(heldHoldings);
+  const holdingsWithCost = countHoldingsWithCost(heldHoldings);
+  const holdingsWithProfit = countHoldingsWithProfit(heldHoldings);
   const lotCount = heldHoldings.reduce((total, holding) => total + (holding.lots?.length ?? 0), 0);
 
   return (
@@ -23,8 +25,8 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
       <section className="overflow-hidden rounded-xl border border-line bg-panel">
         <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           <SummaryMetric label="持仓市值" value={formatCompactCny((investments?.totalMarketValueCny ?? 0) / 100)} detail={latestDate ? latestDate : "暂无价格"} tone="amount-gold" />
-          <SummaryMetric label="原币成本" value={formatMoneyValue(costSummary)} detail={`${lotCount} 笔买入`} tone="text-warm" />
-          <SummaryMetric label="账面盈亏" value={formatProfit(profitSummary)} detail={profitSummary ? "原币口径" : "等待同币种成本"} tone={profitTone(profitSummary)} />
+          <SummaryMetric label="原币成本" value={formatMoneyValue(costSummary)} detail={`${holdingsWithCost}/${heldHoldings.length} 有成本 · ${lotCount} 笔买入`} tone="text-warm" />
+          <SummaryMetric label="账面盈亏" value={formatProfit(profitSummary)} detail={`${holdingsWithProfit}/${heldHoldings.length} 可计算`} tone={profitTone(profitSummary)} />
           <SummaryMetric label="持仓股票" value={`${heldHoldings.length}`} detail={`${accountCount} 个账户`} tone="text-olive" />
         </div>
       </section>
@@ -44,13 +46,13 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
         {holdings.length ? (
           <div className="divide-y divide-line">
             {holdings.map((holding) => {
-              const expanded = openHoldings[holding.commodity] ?? (holdings.length === 1 || holding.accountCount <= 1);
+              const expanded = openHolding === holding.commodity;
               return (
                 <HoldingRow
                   key={holding.commodity}
                   holding={holding}
                   expanded={expanded}
-                  onToggle={() => setOpenHoldings((current) => ({ ...current, [holding.commodity]: !expanded }))}
+                  onToggle={() => setOpenHolding((current) => current === holding.commodity ? null : holding.commodity)}
                 />
               );
             })}
@@ -367,7 +369,7 @@ function holdingProfit(holding: InvestmentHolding): MoneyValue | null {
 function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null {
   const totals = new Map<string, number>();
   for (const holding of holdings) {
-    if (holding.totalCostValue == null || !holding.costCurrency) return null;
+    if (holding.totalCostValue == null || !holding.costCurrency) continue;
     totals.set(holding.costCurrency, (totals.get(holding.costCurrency) ?? 0) + holding.totalCostValue);
   }
   if (totals.size !== 1) return null;
@@ -379,12 +381,20 @@ function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | nul
   const totals = new Map<string, number>();
   for (const holding of holdings) {
     const profit = holdingProfit(holding);
-    if (!profit) return null;
+    if (!profit) continue;
     totals.set(profit.currency, (totals.get(profit.currency) ?? 0) + profit.value);
   }
   if (totals.size !== 1) return null;
   const [[currency, value]] = [...totals.entries()];
   return { value, currency };
+}
+
+function countHoldingsWithCost(holdings: InvestmentHolding[]) {
+  return holdings.filter((holding) => holding.totalCostValue != null && Boolean(holding.costCurrency)).length;
+}
+
+function countHoldingsWithProfit(holdings: InvestmentHolding[]) {
+  return holdings.filter((holding) => holdingProfit(holding) != null).length;
 }
 
 function formatQuantity(value: number) {
