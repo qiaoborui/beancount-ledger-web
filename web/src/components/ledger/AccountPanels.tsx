@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { ClientNavLink } from "./ClientNavLink";
 import { Archive, ArrowLeftRight, Bot, ChevronDown, CreditCard, Eye, EyeOff, ListChecks, Pencil, TrendingUp, WalletCards, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
@@ -258,13 +259,15 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
         })}
       </div>
 
-      {mobileDetailRow && <div className="fixed inset-0 z-50 lg:hidden">
-        <button className="absolute inset-0 bg-[var(--overlay)]" aria-label="关闭账户详情" onClick={() => setSelectedAccount(null)} />
-        <div className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 shadow-[var(--float-shadow)]">
-          <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-line" />
-          <AccountDetailPanel row={mobileDetailRow} visible={rowVisible(mobileDetailRow)} status={statusMap.get(mobileDetailRow.account)} lastActivity={lastActivityMap.get(mobileDetailRow.account)} points={trendMap[mobileDetailRow.account] ?? []} onToggleAccount={onToggleAccount} compact onClose={() => setSelectedAccount(null)} />
-        </div>
-      </div>}
+      <MobileAccountDetailSheet
+        row={mobileDetailRow}
+        visible={mobileDetailRow ? rowVisible(mobileDetailRow) : false}
+        status={mobileDetailRow ? statusMap.get(mobileDetailRow.account) : undefined}
+        lastActivity={mobileDetailRow ? lastActivityMap.get(mobileDetailRow.account) : undefined}
+        points={mobileDetailRow ? trendMap[mobileDetailRow.account] ?? [] : []}
+        onToggleAccount={onToggleAccount}
+        onClose={() => setSelectedAccount(null)}
+      />
     </> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前筛选下没有账户。</p> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}
     {!full && <p className="mt-3 text-xs text-stone">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}
   </section>;
@@ -387,6 +390,39 @@ function BalanceClusterHeader({ cluster, visible }: { cluster: BalanceCluster; v
     <span>异常 {cluster.issueCount}</span>
     <span></span>
   </div>;
+}
+
+function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, onToggleAccount, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; onClose: () => void }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!row) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [row, onClose]);
+
+  if (!mounted || !row) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[120] lg:hidden">
+      <button className="absolute inset-0 bg-[var(--overlay)]" aria-label="关闭账户详情" onClick={onClose} />
+      <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-[var(--float-shadow)]" role="dialog" aria-modal="true" aria-label="账户详情">
+        <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-line" />
+        <AccountDetailPanel row={row} visible={visible} status={status} lastActivity={lastActivity} points={points} onToggleAccount={onToggleAccount} compact onClose={onClose} />
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; onClose?: () => void }) {
