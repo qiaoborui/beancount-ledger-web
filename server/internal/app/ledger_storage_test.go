@@ -35,6 +35,45 @@ func TestLedgerParserAndCache(t *testing.T) {
 	}
 }
 
+func TestParseTransactionsInfersSingleBlankPostingWithCost(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "commodities.bean"), strings.Join([]string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity USD",
+		"2026-01-01 commodity NVDA",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
+		"2026-01-01 open Assets:Broker:USD USD",
+		"2026-01-01 open Assets:Broker:Investments:NVDA NVDA",
+		"2026-01-01 open Expenses:Investment:Fee USD",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"), strings.Join([]string{
+		`2026-05-31 * "Broker" "Buy NVDA"`,
+		"  Assets:Broker:Investments:NVDA 3 NVDA {209.50 USD}",
+		"  Expenses:Investment:Fee 0.99 USD",
+		"  Assets:Broker:USD",
+		"",
+	}, "\n"))
+
+	snapshot, err := NewLedgerCache(cfg).Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := snapshot.RawBalances
+	if raw["Assets:Broker:Investments:NVDA"]["NVDA"] != 300 {
+		t.Fatalf("NVDA balance = %#v, want 3 NVDA", raw["Assets:Broker:Investments:NVDA"])
+	}
+	if raw["Assets:Broker:USD"]["USD"] != -62949 {
+		t.Fatalf("USD balance = %#v, want -629.49 USD", raw["Assets:Broker:USD"])
+	}
+	detail := AccountDetail("Assets:Broker:USD", snapshot.Transactions)
+	if len(detail) != 1 || detail[0].Change != -62949 || detail[0].Txn.Postings[2].Currency != "USD" {
+		t.Fatalf("USD detail did not include inferred posting: %#v", detail)
+	}
+}
+
 func TestWriterRollsBackOnBeanCheckFailure(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
