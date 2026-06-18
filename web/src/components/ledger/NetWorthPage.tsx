@@ -18,7 +18,7 @@ type ChartRow = { date: string; 资产: number; 负债: number; 净资产: numbe
 type ViewMode = "daily" | "month-end";
 
 export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, accounts, incomeStatement, valuationCurrency, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; accountBalances: AccountBalance[]; accounts: AccountView[]; incomeStatement: IncomeStatementCache; valuationCurrency: string; visible: boolean; onToggleVisible: () => void }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("month-end");
+  const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const displayCurrency = accountBalances.find((row) => row.valuationCurrency)?.valuationCurrency ?? valuationCurrency;
   const valuationBalances = useMemo(() => valuationByAccount(accountBalances), [accountBalances]);
   const assets = Object.entries(valuationBalances).filter(([a]) => a.startsWith("Assets:")).reduce((s, [, v]) => s + v, 0);
@@ -30,7 +30,8 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
   const savingsRate = income > 0 ? netIncome / income : null;
   const mask = (value: string) => visible ? value : "••••••";
   const monthEndChart = useMemo(() => monthEndRows.map((row) => ({ date: row.date.slice(0, 7), 资产: row.assets / 100, 负债: row.liabilities / 100, 净资产: row.netWorth / 100 })), [monthEndRows]);
-  const chartRows = viewMode === "month-end" ? monthEndChart : rows;
+  const canUseMonthEnd = monthEndChart.length > 1;
+  const chartRows = viewMode === "month-end" && canUseMonthEnd ? monthEndChart : rows;
 
   return <>
     <section className="card p-3 md:p-4">
@@ -53,8 +54,8 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
 
     <section className="mt-3 grid gap-3 sm:grid-cols-2"><InsightCard label="财富/投资收入" value={mask(formatValuation(investmentIncome / 100, displayCurrency))} tone="amount-income" /><InsightCard label="负债率" value={visible ? assets > 0 ? `${(liabilities / assets * 100).toFixed(1)}%` : "暂无资产" : "••••••"} tone="amount-expense" /></section>
     <AssetAllocation accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} />
-    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} /><LiabilitiesTrend rows={chartRows} visible={visible} valuationCurrency={displayCurrency} /></section>
-    <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} valuationCurrency={displayCurrency} onModeChange={setViewMode} />
+    <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} /><LiabilitiesTrend rows={rows} visible={visible} valuationCurrency={displayCurrency} /></section>
+    <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} canUseMonthEnd={canUseMonthEnd} valuationCurrency={displayCurrency} onModeChange={setViewMode} />
   </>;
 }
 
@@ -99,8 +100,9 @@ function chartMoney(value: number) {
   return new Intl.NumberFormat("en-US", { notation: "compact", compactDisplay: "short", maximumFractionDigits: 1 }).format(value);
 }
 
-function NetWorthChart({ rows, visible, mode, valuationCurrency, onModeChange }: { rows: ChartRow[]; visible: boolean; mode: ViewMode; valuationCurrency: string; onModeChange: (mode: ViewMode) => void }) {
-  return <section className="card mt-6 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-2xl">净资产变化</h2><p className="mt-1 text-sm text-olive">日视图看波动，月末视图看长期趋势。</p></div><div className="flex rounded-xl border border-line bg-panel p-1 text-sm"><button className={`rounded px-3 py-1 ${mode === "daily" ? "bg-brand text-paper" : "text-olive"}`} onClick={() => onModeChange("daily")}>日视图</button><button className={`rounded px-3 py-1 ${mode === "month-end" ? "bg-brand text-paper" : "text-olive"}`} onClick={() => onModeChange("month-end")}>月末视图</button></div></div>{visible ? <div className="ledger-chart mt-4 h-72 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} domain={["dataMin", "dataMax"]} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name]} /><Legend /><Line type="monotone" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={3} dot={mode === "month-end"} /><Line type="monotone" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+function NetWorthChart({ rows, visible, mode, canUseMonthEnd, valuationCurrency, onModeChange }: { rows: ChartRow[]; visible: boolean; mode: ViewMode; canUseMonthEnd: boolean; valuationCurrency: string; onModeChange: (mode: ViewMode) => void }) {
+  const effectiveMode = mode === "month-end" && canUseMonthEnd ? "month-end" : "daily";
+  return <section className="card mt-6 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-2xl">净资产变化</h2><p className="mt-1 text-sm text-olive">日视图看本期波动，月末视图看跨月趋势；负债在上方独立缩放。</p></div><div className="flex rounded-xl border border-line bg-panel p-1 text-sm"><button className={`rounded px-3 py-1 ${effectiveMode === "daily" ? "bg-brand text-paper" : "text-olive"}`} onClick={() => onModeChange("daily")}>日视图</button><button className={`rounded px-3 py-1 ${effectiveMode === "month-end" ? "bg-brand text-paper" : "text-olive"} disabled:cursor-not-allowed disabled:opacity-45`} onClick={() => onModeChange("month-end")} disabled={!canUseMonthEnd}>月末视图</button></div></div>{visible ? <div className="ledger-chart mt-4 h-72 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} domain={["dataMin", "dataMax"]} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name]} /><Legend /><Line type="monotone" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={3} dot={effectiveMode === "month-end"} /><Line type="monotone" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
 }
 
 function HiddenMoney() {
