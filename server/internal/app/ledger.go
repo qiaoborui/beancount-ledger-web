@@ -158,7 +158,7 @@ var (
 	txnRe               = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
 	txnTagRe            = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
 	directiveRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
-	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b(.*)$`)
+	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d[\d,]*(?:\.\d+)?)\s+(` + commodityPattern + `)\b(.*)$`)
 	postBlankRe         = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s*(?:;.*)?$`)
 	postCostRe          = regexp.MustCompile(`\{[^}]*?(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)[^}]*\}`)
 	metaRe              = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
