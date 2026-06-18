@@ -789,11 +789,8 @@ func MonthSummaryWithPriceIndex(start, end string, txns []Transaction, priceInde
 		for _, posting := range txn.Postings {
 			amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			if strings.HasPrefix(posting.Account, "Income:") {
-				if amount < 0 {
-					amount = -amount
-				}
-				summary.Income += amount
-				summary.Days[day]["income"] += amount
+				summary.Income += -amount
+				summary.Days[day]["income"] += -amount
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
 				summary.Expense += amount
@@ -836,11 +833,7 @@ func IncomeStatementTreeInCurrency(start, end string, txns []Transaction, prices
 		}
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Income:") {
-				amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
-				if amount < 0 {
-					amount = -amount
-				}
-				addIncomeStatementAmount(incomeMap, posting.Account, amount, txnID)
+				addIncomeStatementAmount(incomeMap, posting.Account, -postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency), txnID)
 			}
 			if strings.HasPrefix(posting.Account, "Expenses:") {
 				addIncomeStatementAmount(expenseMap, posting.Account, postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency), txnID)
