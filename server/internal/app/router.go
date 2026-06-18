@@ -52,6 +52,14 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 	c.JSON(http.StatusOK, payload)
 }
 
+func (s *Server) ledgerEntries(c *gin.Context) {
+	snapshot, ok := s.snapshot(c, false)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, BeanLoadResultFromEntries(snapshot.BeanEntries, snapshot.BeanErrors))
+}
+
 func (s *Server) summary(c *gin.Context) {
 	if !requireAuth(c) {
 		return
@@ -162,7 +170,7 @@ func (s *Server) investments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, BuildInvestmentSummary(snapshot.Lines, snapshot.Accounts, snapshot.Prices))
+	c.JSON(http.StatusOK, BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices))
 }
 
 func parseDashboardFilters(c *gin.Context) DashboardFilters {

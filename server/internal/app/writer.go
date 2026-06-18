@@ -239,7 +239,7 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 		if err != nil {
 			return err
 		}
-		accounts, err := ParseAccounts(w.cfg)
+		accounts, err := w.knownAccounts()
 		if err != nil {
 			return err
 		}
@@ -345,7 +345,22 @@ func (w *LedgerWriter) knownCommodities() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseCommodities(lines), nil
+	return CommoditiesFromBeanEntries(ParseBeanLines(lines).Entries), nil
+}
+
+func (w *LedgerWriter) knownAccounts() ([]Account, error) {
+	if w.cache != nil {
+		snapshot, err := w.cache.Snapshot()
+		if err != nil {
+			return nil, err
+		}
+		return snapshot.Accounts, nil
+	}
+	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	return AccountsFromBeanEntries(ParseBeanLines(lines).Entries), nil
 }
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {

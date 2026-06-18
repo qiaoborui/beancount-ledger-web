@@ -64,7 +64,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	if unlocked {
 		reconciliationRows = buildReconciliationRows(snapshot, start, end)
 		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-		investments = BuildInvestmentSummary(snapshot.Lines, snapshot.Accounts, snapshot.Prices)
+		investments = BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	return gin.H{

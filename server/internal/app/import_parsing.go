@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -23,10 +22,16 @@ func detectBillProvider(filename string, content []byte, override string) (provi
 }
 
 func parsePreviewEntries(beanText string) ([]ImportEntry, error) {
-	blocks := transactionBlocks(beanText)
-	entries := make([]ImportEntry, 0, len(blocks))
-	for index, block := range blocks {
-		entry, err := parsePreviewEntry(block, index)
+	result := ParseBeanLines(beanTextLines("<import-preview>", beanText))
+	if len(result.Errors) > 0 {
+		return nil, result.Errors[0]
+	}
+	entries := make([]ImportEntry, 0, len(result.Entries))
+	for _, beanEntry := range result.Entries {
+		if beanEntry.Kind != "transaction" {
+			continue
+		}
+		entry, err := previewEntryFromBeanEntry(beanEntry, len(entries))
 		if err != nil {
 			return nil, err
 		}
@@ -35,43 +40,27 @@ func parsePreviewEntries(beanText string) ([]ImportEntry, error) {
 	return entries, nil
 }
 
-func parsePreviewEntry(block string, index int) (ImportEntry, error) {
-	lines := strings.Split(block, "\n")
-	if len(lines) == 0 {
-		return ImportEntry{}, errors.New("空交易块")
+func beanTextLines(filename, beanText string) []BeanLine {
+	normalized := strings.ReplaceAll(beanText, "\r\n", "\n")
+	rawLines := strings.Split(normalized, "\n")
+	lines := make([]BeanLine, 0, len(rawLines))
+	for i, line := range rawLines {
+		lines = append(lines, BeanLine{File: filename, Line: i + 1, Text: strings.TrimSuffix(line, "\r")})
 	}
-	header, err := parseImportHeader(lines[0])
-	if err != nil {
-		return ImportEntry{}, err
+	return lines
+}
+
+func previewEntryFromBeanEntry(beanEntry BeanEntry, index int) (ImportEntry, error) {
+	if beanEntry.Kind != "transaction" {
+		return ImportEntry{}, errors.New("预览条目不是交易")
 	}
-	metadata := map[string]string{}
-	postings := []EntryPosting{}
-	metaRe := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*):\s+(.+)$`)
-	postRe := regexp.MustCompile(`^([A-Za-z][A-Za-z0-9:_-]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)(?:\s+(@@?)\s+(\d+(?:\.\d+)?)\s+(` + commodityPattern + `))?$`)
-	for _, line := range lines[1:] {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if m := metaRe.FindStringSubmatch(trimmed); m != nil {
-			metadata[m[1]] = unquoteBean(m[2])
-			continue
-		}
-		if m := postRe.FindStringSubmatch(trimmed); m != nil {
-			priceKind := ""
-			if m[4] == "@" {
-				priceKind = "unit"
-			} else if m[4] == "@@" {
-				priceKind = "total"
-			}
-			postings = append(postings, EntryPosting{Account: m[1], Amount: m[2], Currency: m[3], PriceKind: priceKind, PriceAmount: m[5], PriceCurrency: m[6]})
-		}
-	}
+	metadata := previewMetadata(beanEntry.Metadata)
+	postings := previewPostings(beanEntry.Postings)
 	category, funding := choosePreviewAccounts(postings)
 	amount := maxPostingAmount(postings)
 	id := metadata["orderId"]
 	if id == "" {
-		id = fmt.Sprintf("%s-%d", header.Date, index)
+		id = fmt.Sprintf("%s-%d", beanEntry.Date, index)
 	}
 	currency := "CNY"
 	if category.Currency != "" {
@@ -81,10 +70,10 @@ func parsePreviewEntry(block string, index int) (ImportEntry, error) {
 	}
 	return ImportEntry{
 		ID:              id,
-		Date:            header.Date,
-		Flag:            header.Flag,
-		Payee:           header.Payee,
-		Narration:       header.Narration,
+		Date:            beanEntry.Date,
+		Flag:            beanEntry.Flag,
+		Payee:           beanEntry.Payee,
+		Narration:       beanEntry.Narration,
 		Source:          metadata["source"],
 		OrderID:         metadata["orderId"],
 		MerchantID:      metadata["merchantId"],
@@ -102,19 +91,47 @@ func parsePreviewEntry(block string, index int) (ImportEntry, error) {
 	}, nil
 }
 
-type importHeader struct {
-	Date      string
-	Flag      string
-	Payee     string
-	Narration string
+func previewMetadata(values map[string]MetadataValue) map[string]string {
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		metadata[key] = metadataString(value)
+	}
+	return metadata
 }
 
-func parseImportHeader(line string) (importHeader, error) {
-	m := regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+([*!])\s+"((?:\\.|[^"])*)"\s+"((?:\\.|[^"])*)"`).FindStringSubmatch(line)
-	if m == nil {
-		return importHeader{}, fmt.Errorf("无法解析交易行: %s", line)
+func metadataString(value MetadataValue) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
 	}
-	return importHeader{Date: m[1], Flag: m[2], Payee: unquoteBean(`"` + m[3] + `"`), Narration: unquoteBean(`"` + m[4] + `"`)}, nil
+}
+
+func previewPostings(postings []parsedPosting) []EntryPosting {
+	out := make([]EntryPosting, 0, len(postings))
+	for _, posting := range postings {
+		if posting.Account == "" {
+			continue
+		}
+		entryPosting := EntryPosting{
+			Account:  posting.Account,
+			Amount:   posting.Quantity.Number,
+			Currency: posting.Quantity.Currency,
+		}
+		if posting.Price.Currency != "" {
+			entryPosting.PriceKind = "unit"
+			if posting.TotalPrice {
+				entryPosting.PriceKind = "total"
+			}
+			entryPosting.PriceAmount = posting.Price.Number
+			entryPosting.PriceCurrency = posting.Price.Currency
+		}
+		out = append(out, entryPosting)
+	}
+	return out
 }
 
 func choosePreviewAccounts(postings []EntryPosting) (EntryPosting, EntryPosting) {
@@ -162,46 +179,33 @@ func choosePreviewAccounts(postings []EntryPosting) (EntryPosting, EntryPosting)
 }
 
 func parseBeanSummary(beanText string) beanSummary {
-	re := regexp.MustCompile(`(?m)^(\d{4}-\d{2}-\d{2})\s+[*!]\s+`)
-	matches := re.FindAllStringSubmatch(beanText, -1)
-	dates := make([]string, 0, len(matches))
-	for _, match := range matches {
-		dates = append(dates, match[1])
-	}
-	sort.Strings(dates)
-	summary := beanSummary{CandidateCount: len(dates)}
-	if len(dates) > 0 {
-		summary.DateStart = dates[0]
-		summary.DateEnd = dates[len(dates)-1]
+	result := ParseBeanLines(beanTextLines("<import-summary>", beanText))
+	summary := beanSummary{}
+	for _, entry := range result.Entries {
+		if entry.Kind != "transaction" || entry.Date == "" {
+			continue
+		}
+		summary.CandidateCount++
+		if summary.DateStart == "" || entry.Date < summary.DateStart {
+			summary.DateStart = entry.Date
+		}
+		if summary.DateEnd == "" || entry.Date > summary.DateEnd {
+			summary.DateEnd = entry.Date
+		}
 	}
 	return summary
 }
 
 func transactionOnlyBeanText(beanText string) string {
-	return strings.TrimSpace(strings.Join(transactionBlocks(beanText), "\n\n"))
-}
-
-func transactionBlocks(beanText string) []string {
-	lines := strings.Split(strings.ReplaceAll(beanText, "\r\n", "\n"), "\n")
-	chunks := []string{}
-	current := []string(nil)
-	startRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+[*!]\s+`)
-	for _, line := range lines {
-		if startRe.MatchString(line) {
-			if len(current) > 0 {
-				chunks = append(chunks, strings.TrimRight(strings.Join(current, "\n"), "\n"))
-			}
-			current = []string{line}
+	result := ParseBeanLines(beanTextLines("<import-transactions>", beanText))
+	blocks := make([]string, 0, len(result.Entries))
+	for _, entry := range result.Entries {
+		if entry.Kind != "transaction" || len(entry.RawLines) == 0 {
 			continue
 		}
-		if current != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || strings.TrimSpace(line) == "") {
-			current = append(current, line)
-		}
+		blocks = append(blocks, strings.TrimRight(strings.Join(entry.RawLines, "\n"), "\n"))
 	}
-	if len(current) > 0 {
-		chunks = append(chunks, strings.TrimRight(strings.Join(current, "\n"), "\n"))
-	}
-	return chunks
+	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
 }
 
 func parseCSVLine(line string) []string {
@@ -254,12 +258,12 @@ func (s *Server) cmbPaymentSourcePrefixes() []string {
 }
 
 func (s *Server) importAccountOptions() ([]ginH, error) {
-	accounts, err := ParseAccounts(s.cfg)
+	snapshot, err := s.cache.Snapshot()
 	if err != nil {
 		return nil, err
 	}
 	options := []ginH{}
-	for _, account := range accounts {
+	for _, account := range snapshot.Accounts {
 		if account.Active {
 			options = append(options, ginH{"account": account.Account, "alias": account.Alias, "label": account.Label, "group": account.Group, "active": account.Active})
 		}

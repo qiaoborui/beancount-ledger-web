@@ -2,9 +2,7 @@ package app
 
 import (
 	"math"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -86,12 +84,6 @@ type InvestmentSummary struct {
 	UpdatedAt           string               `json:"updatedAt,omitempty"`
 }
 
-var (
-	commodityDetailRe   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+commodity\s+(` + commodityPattern + `)\b`)
-	investmentPostingRe = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	postingCostRe       = regexp.MustCompile(`\{\s*(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\s*\}`)
-)
-
 var fiatCommodities = map[string]bool{
 	"CNY": true,
 	"USD": true,
@@ -102,7 +94,11 @@ var fiatCommodities = map[string]bool{
 }
 
 func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price) InvestmentSummary {
-	commodities := parseCommodityDetails(lines)
+	return BuildInvestmentSummaryFromBeanEntries(ParseBeanLines(lines).Entries, accounts, prices)
+}
+
+func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Account, prices []Price) InvestmentSummary {
+	commodities := parseCommodityDetails(entries)
 	commodityMap := map[string]Commodity{}
 	securities := map[string]bool{}
 	for _, commodity := range commodities {
@@ -127,9 +123,9 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 	priceIndex := NewPriceIndex(prices)
 	latestPrices := latestInvestmentPrices(prices)
 	priceHistory := investmentPriceHistory(prices)
-	positionQuantities := investmentQuantities(lines, securities)
-	positionCosts := investmentCosts(lines, securities)
-	positionLots := investmentLots(lines, securities, accountMap, commodityMap)
+	positionQuantities := investmentQuantities(entries, securities)
+	positionCosts := investmentCosts(entries, securities)
+	positionLots := investmentLots(entries, securities, accountMap, commodityMap)
 	positions := make([]InvestmentPosition, 0, len(positionQuantities))
 	quoteQuantity := map[string]float64{}
 	quotePositionCount := map[string]int{}
@@ -223,33 +219,22 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Lots: lots, Quotes: quotes, UpdatedAt: updatedAt}
 }
 
-func parseCommodityDetails(lines []BeanLine) []Commodity {
+func parseCommodityDetails(entries []BeanEntry) []Commodity {
 	commodities := map[string]*Commodity{}
-	var current string
-	for _, line := range lines {
-		if m := commodityDetailRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
-			item := &Commodity{Date: m[1], Symbol: m[2], Name: m[2], Metadata: map[string]MetadataValue{}}
-			commodities[item.Symbol] = item
-			current = item.Symbol
+	for _, entry := range entries {
+		if entry.Kind != "commodity" || entry.Currency == "" {
 			continue
 		}
-		if m := metaRe.FindStringSubmatch(line.Text); m != nil && current != "" {
-			item := commodities[current]
-			if item == nil {
-				continue
-			}
-			value := parseMetadataValue(m[2])
-			item.Metadata[m[1]] = value
-			if m[1] == "name" {
+		item := &Commodity{Date: entry.Date, Symbol: entry.Currency, Name: entry.Currency, Metadata: map[string]MetadataValue{}}
+		for key, value := range entry.Metadata {
+			item.Metadata[key] = value
+			if key == "name" {
 				if name, ok := value.(string); ok && strings.TrimSpace(name) != "" {
 					item.Name = strings.TrimSpace(name)
 				}
 			}
-			continue
 		}
-		if strings.TrimSpace(line.Text) != "" && !strings.HasPrefix(line.Text, " ") {
-			current = ""
-		}
+		commodities[item.Symbol] = item
 	}
 	out := make([]Commodity, 0, len(commodities))
 	for _, item := range commodities {
@@ -383,26 +368,18 @@ func commodityPriceHistory(priceHistory map[string][]CommodityPrice, commodity s
 	return append([]CommodityPrice{}, priceHistory[commodity]...)
 }
 
-func investmentQuantities(lines []BeanLine, securities map[string]bool) map[string]float64 {
+func investmentQuantities(entries []BeanEntry, securities map[string]bool) map[string]float64 {
 	positions := map[string]float64{}
-	currentTxn := false
-	for _, line := range lines {
-		if txnRe.MatchString(line.Text) {
-			currentTxn = true
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
 			continue
 		}
-		if directiveRe.MatchString(line.Text) {
-			currentTxn = false
-			continue
+		for _, posting := range entry.Postings {
+			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+				continue
+			}
+			positions[posting.Account+"\x00"+posting.Currency] += float64(posting.Amount) / 100
 		}
-		if !currentTxn {
-			continue
-		}
-		m := investmentPostingRe.FindStringSubmatch(line.Text)
-		if m == nil || !strings.HasPrefix(m[1], "Assets:") || !securities[m[3]] {
-			continue
-		}
-		positions[m[1]+"\x00"+m[3]] += decimal(m[2])
 	}
 	return positions
 }
@@ -417,89 +394,80 @@ func (cost investmentCost) valid() bool {
 	return cost.currency != "" && !cost.mixed && !roundedZero(cost.value)
 }
 
-func investmentCosts(lines []BeanLine, securities map[string]bool) map[string]investmentCost {
+func investmentCosts(entries []BeanEntry, securities map[string]bool) map[string]investmentCost {
 	costs := map[string]investmentCost{}
-	currentTxn := false
-	for _, line := range lines {
-		if txnRe.MatchString(line.Text) {
-			currentTxn = true
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
 			continue
 		}
-		if directiveRe.MatchString(line.Text) {
-			currentTxn = false
-			continue
-		}
-		if !currentTxn {
-			continue
-		}
-		posting := investmentPostingRe.FindStringSubmatch(line.Text)
-		cost := postingCostRe.FindStringSubmatch(line.Text)
-		if posting == nil || cost == nil || !strings.HasPrefix(posting[1], "Assets:") || !securities[posting[3]] {
-			continue
-		}
-		key := posting[1] + "\x00" + posting[3]
-		current := costs[key]
-		currency := cost[2]
-		if current.currency != "" && current.currency != currency {
-			current.mixed = true
+		for _, posting := range entry.Postings {
+			if posting.CostCurrency == "" || !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+				continue
+			}
+			key := posting.Account + "\x00" + posting.Currency
+			current := costs[key]
+			currency := posting.CostCurrency
+			if current.currency != "" && current.currency != currency {
+				current.mixed = true
+				costs[key] = current
+				continue
+			}
+			current.currency = currency
+			if posting.TotalCost {
+				current.value += float64(posting.CostAmount) / 100
+			} else {
+				current.value += (float64(posting.Amount) / 100) * (float64(posting.CostAmount) / 100)
+			}
 			costs[key] = current
-			continue
 		}
-		current.currency = currency
-		current.value += decimal(posting[2]) * decimal(cost[1])
-		costs[key] = current
 	}
 	return costs
 }
 
-func investmentLots(lines []BeanLine, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
+func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
 	lots := map[string][]InvestmentLot{}
-	currentTxn := false
-	currentDate := ""
-	for _, line := range lines {
-		if m := txnRe.FindStringSubmatch(line.Text); m != nil {
-			currentTxn = true
-			currentDate = m[1]
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
 			continue
 		}
-		if directiveRe.MatchString(line.Text) {
-			currentTxn = false
-			currentDate = ""
-			continue
+		for _, posting := range entry.Postings {
+			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+				continue
+			}
+			quantity := float64(posting.Amount) / 100
+			if quantity <= 0 || roundedZero(quantity) {
+				continue
+			}
+			accountName, commodity := posting.Account, posting.Currency
+			label := accountName
+			if acct := accountMap[accountName]; acct.Label != "" {
+				label = acct.Label
+			}
+			lot := InvestmentLot{
+				Date:          entry.Date,
+				Account:       accountName,
+				AccountLabel:  label,
+				Commodity:     commodity,
+				CommodityName: commodityName(commodityMap, commodity),
+				Quantity:      quantity,
+			}
+			if posting.CostCurrency != "" {
+				if posting.TotalCost {
+					value := float64(posting.CostAmount) / 100
+					unit := value / quantity
+					lot.UnitCost = &unit
+					lot.CostValue = &value
+				} else {
+					unit := float64(posting.CostAmount) / 100
+					value := quantity * unit
+					lot.UnitCost = &unit
+					lot.CostValue = &value
+				}
+				lot.CostCurrency = posting.CostCurrency
+			}
+			key := accountName + "\x00" + commodity
+			lots[key] = append(lots[key], lot)
 		}
-		if !currentTxn {
-			continue
-		}
-		posting := investmentPostingRe.FindStringSubmatch(line.Text)
-		if posting == nil || !strings.HasPrefix(posting[1], "Assets:") || !securities[posting[3]] {
-			continue
-		}
-		quantity := decimal(posting[2])
-		if quantity <= 0 || roundedZero(quantity) {
-			continue
-		}
-		accountName, commodity := posting[1], posting[3]
-		label := accountName
-		if acct := accountMap[accountName]; acct.Label != "" {
-			label = acct.Label
-		}
-		lot := InvestmentLot{
-			Date:          currentDate,
-			Account:       accountName,
-			AccountLabel:  label,
-			Commodity:     commodity,
-			CommodityName: commodityName(commodityMap, commodity),
-			Quantity:      quantity,
-		}
-		if cost := postingCostRe.FindStringSubmatch(line.Text); cost != nil {
-			unit := decimal(cost[1])
-			value := quantity * unit
-			lot.UnitCost = &unit
-			lot.CostValue = &value
-			lot.CostCurrency = cost[2]
-		}
-		key := accountName + "\x00" + commodity
-		lots[key] = append(lots[key], lot)
 	}
 	for key := range lots {
 		sortInvestmentLots(lots[key])
@@ -547,9 +515,4 @@ func cnyValue(value *int) int {
 
 func roundedZero(value float64) bool {
 	return math.Abs(value) < 0.00000001
-}
-
-func decimal(value string) float64 {
-	n, _ := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(value, ",", "")), 64)
-	return n
 }

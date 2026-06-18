@@ -53,6 +53,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger := api.Group("/ledger")
 	ledger.GET("/bootstrap", s.ledgerBootstrap)
 	ledger.GET("/version", s.ledgerVersion)
+	ledger.GET("/entries", s.ledgerEntries)
 	ledger.GET("/summary", s.summary)
 	ledger.GET("/transactions", s.transactions)
 	ledger.POST("/transactions", s.reverseTransaction)

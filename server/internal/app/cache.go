@@ -21,6 +21,9 @@ type LedgerVersion struct {
 type LedgerSnapshot struct {
 	LedgerVersion
 	Lines             []BeanLine                `json:"lines"`
+	BeanEntries       []BeanEntry               `json:"-"`
+	BeanErrors        []BeanParseError          `json:"-"`
+	OptionsMap        map[string]string         `json:"-"`
 	Transactions      []Transaction             `json:"transactions"`
 	TransactionsAsc   []Transaction             `json:"-"`
 	TransactionsDesc  []Transaction             `json:"-"`
@@ -67,44 +70,14 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	var wg sync.WaitGroup
-	var txns []Transaction
-	var accounts []Account
-	var accountErr error
-	var prices []Price
-	var balanceAssertions []BalanceAssertion
-	var budgets []Budget
-	var commodities []string
-
-	wg.Add(6)
-	go func() {
-		defer wg.Done()
-		txns = ParseTransactions(lines)
-	}()
-	go func() {
-		defer wg.Done()
-		accounts, accountErr = ParseAccounts(c.cfg)
-	}()
-	go func() {
-		defer wg.Done()
-		prices = ParsePrices(lines)
-	}()
-	go func() {
-		defer wg.Done()
-		balanceAssertions = ParseBalances(lines)
-	}()
-	go func() {
-		defer wg.Done()
-		budgets = ParseBudgets(lines)
-	}()
-	go func() {
-		defer wg.Done()
-		commodities = ParseCommodities(lines)
-	}()
-	wg.Wait()
-	if accountErr != nil {
-		return nil, accountErr
-	}
+	compiled := CompileBeanLines(lines)
+	entries := compiled.Entries
+	txns := TransactionsFromBeanEntries(entries)
+	accounts := AccountsFromBeanEntries(entries)
+	prices := PricesFromBeanEntries(entries)
+	balanceAssertions := BalanceAssertionsFromBeanEntries(entries)
+	budgets := BudgetsFromBeanEntries(entries)
+	commodities := CommoditiesFromBeanEntries(entries)
 	rawBalances := CurrentBalances(txns)
 	transactionsAsc, transactionsDesc := sortedTransactionViews(txns)
 	priceIndex := NewPriceIndex(prices)
@@ -112,6 +85,9 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	snapshot := &LedgerSnapshot{
 		LedgerVersion:     version,
 		Lines:             lines,
+		BeanEntries:       entries,
+		BeanErrors:        compiled.Errors,
+		OptionsMap:        OptionsMapFromBeanEntries(entries),
 		Transactions:      txns,
 		TransactionsAsc:   transactionsAsc,
 		TransactionsDesc:  transactionsDesc,

@@ -220,12 +220,12 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry) 
 	if summary.CandidateCount == 0 || summary.DateStart == "" || summary.DateEnd == "" {
 		return nil, errors.New("去重后没有可写入的交易")
 	}
-	accounts, err := ParseAccounts(s.cfg)
+	snapshot, err := s.cache.Snapshot()
 	if err != nil {
 		return nil, err
 	}
 	accountSet := map[string]bool{}
-	for _, account := range accounts {
+	for _, account := range snapshot.Accounts {
 		accountSet[account.Account] = true
 	}
 	fallbackDocumentAccount := ""

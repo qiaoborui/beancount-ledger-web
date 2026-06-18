@@ -212,6 +212,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/passkey/register/verify":      true,
 		"GET /api/ledger/bootstrap":              true,
 		"GET /api/ledger/version":                true,
+		"GET /api/ledger/entries":                true,
 		"GET /api/ledger/summary":                true,
 		"GET /api/ledger/transactions":           true,
 		"POST /api/ledger/transactions":          true,
@@ -315,6 +316,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		body   string
 	}{
 		{http.MethodGet, "/api/ledger/version", ""},
+		{http.MethodGet, "/api/ledger/entries", ""},
 		{http.MethodGet, "/api/ledger/bootstrap?start=2026-05-01&end=2026-06-01", ""},
 		{http.MethodGet, "/api/ledger/transactions?start=2026-05-01&end=2026-06-01", ""},
 		{http.MethodGet, "/api/ledger/balances", ""},
