@@ -25,13 +25,21 @@ type Posting struct {
 	Account  string `json:"account"`
 	Amount   int    `json:"amount"`
 	Currency string `json:"currency,omitempty"`
+	Flag     string `json:"flag,omitempty"`
 }
 
 type parsedPosting struct {
 	Posting
-	Blank        bool
-	CostAmount   int
-	CostCurrency string
+	Blank         bool
+	Quantity      BeanAmount
+	CostAmount    int
+	CostCurrency  string
+	Cost          BeanAmount
+	TotalCost     bool
+	PriceAmount   int
+	PriceCurrency string
+	Price         BeanAmount
+	TotalPrice    bool
 }
 
 type Transaction struct {
@@ -40,6 +48,7 @@ type Transaction struct {
 	Narration string                   `json:"narration"`
 	Metadata  map[string]MetadataValue `json:"metadata,omitempty"`
 	Tags      []string                 `json:"tags,omitempty"`
+	Links     []string                 `json:"links,omitempty"`
 	Postings  []Posting                `json:"postings"`
 	Source    TransactionSource        `json:"source"`
 }
@@ -155,19 +164,6 @@ type AccountDetailRow struct {
 var (
 	commodityPattern    = `[A-Z][A-Z0-9._-]*`
 	includeRe           = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
-	txnRe               = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$`)
-	txnTagRe            = regexp.MustCompile(`#([A-Za-z0-9_-]+)`)
-	directiveRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`)
-	postRe              = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d[\d,]*(?:\.\d+)?)\s+(` + commodityPattern + `)\b(.*)$`)
-	postBlankRe         = regexp.MustCompile(`^\s+([A-Z][A-Za-z0-9-:]+)\s*(?:;.*)?$`)
-	postCostRe          = regexp.MustCompile(`\{[^}]*?(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)[^}]*\}`)
-	metaRe              = regexp.MustCompile(`^\s+([a-z][a-zA-Z0-9_-]*):\s+(.+)$`)
-	balanceRe           = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9-:]+)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	budgetRe            = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+(Expenses(?::[A-Za-z0-9-]+)+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
-	openRe              = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+open\s+([A-Z][A-Za-z0-9-:]+)(?:\s+(` + commodityPattern + `(?:\s*,\s*` + commodityPattern + `)*))?\b`)
-	closeRe             = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+close\s+([A-Z][A-Za-z0-9-:]+)\b`)
-	commodityRe         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+commodity\s+(` + commodityPattern + `)\b`)
-	priceRe             = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+price\s+(` + commodityPattern + `)\s+(-?\d+(?:\.\d+)?)\s+(` + commodityPattern + `)\b`)
 	creditCardAccountRe = regexp.MustCompile(`(?i)(^|:)(CreditCard|Credit|Card)(:|$)|信用卡|贷记卡`)
 )
 
@@ -200,6 +196,7 @@ func ReadLedgerLines(entry string, seen map[string]bool) ([]BeanLine, error) {
 	for i, line := range strings.Split(string(text), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if m := includeRe.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			out = append(out, BeanLine{File: full, Line: i + 1, Text: line})
 			lines, err := ReadLedgerLines(filepath.Join(dir, m[1]), seen)
 			if err != nil {
 				return nil, err
@@ -218,69 +215,26 @@ func transactionHash(lines []string) string {
 }
 
 func ParseTransactions(lines []BeanLine) []Transaction {
-	var txns []Transaction
-	var current *Transaction
-	var raw []string
-	var postings []parsedPosting
-	finish := func() {
-		if current != nil {
-			current.Source.Hash = transactionHash(raw)
-			current.Postings = finalizeParsedPostings(postings)
+	return TransactionsFromBeanEntries(ParseBeanLines(lines).Entries)
+}
+
+func TransactionsFromBeanEntries(entries []BeanEntry) []Transaction {
+	txns := make([]Transaction, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
+			continue
 		}
-		postings = nil
-		raw = nil
+		txns = append(txns, Transaction{
+			Date:      entry.Date,
+			Payee:     entry.Payee,
+			Narration: entry.Narration,
+			Metadata:  entry.Metadata,
+			Tags:      entry.Tags,
+			Links:     entry.Links,
+			Postings:  finalizeParsedPostings(entry.Postings),
+			Source:    TransactionSource{File: entry.File, Line: entry.Line, Hash: transactionHash(entry.RawLines)},
+		})
 	}
-	for _, line := range lines {
-		if current != nil && line.File != current.Source.File {
-			finish()
-			current = nil
-		}
-		if m := txnRe.FindStringSubmatch(line.Text); m != nil {
-			finish()
-			raw = []string{line.Text}
-			tags := []string{}
-			for _, tag := range txnTagRe.FindAllStringSubmatch(m[4], -1) {
-				tags = append(tags, tag[1])
-			}
-			txns = append(txns, Transaction{
-				Date: m[1], Payee: m[2], Narration: m[3],
-				Metadata: map[string]MetadataValue{}, Tags: tags,
-				Postings: []Posting{},
-				Source:   TransactionSource{File: line.File, Line: line.Line, Hash: transactionHash([]string{line.Text})},
-			})
-			current = &txns[len(txns)-1]
-			continue
-		}
-		if directiveRe.MatchString(line.Text) {
-			finish()
-			current = nil
-			continue
-		}
-		if current != nil {
-			raw = append(raw, line.Text)
-		}
-		trimmed := strings.TrimSpace(line.Text)
-		if trimmed == "" || strings.HasPrefix(trimmed, ";") || current == nil {
-			continue
-		}
-		if m := metaRe.FindStringSubmatch(line.Text); m != nil {
-			current.Metadata[m[1]] = parseMetadataValue(m[2])
-			continue
-		}
-		if m := postRe.FindStringSubmatch(line.Text); m != nil {
-			posting := parsedPosting{Posting: Posting{Account: m[1], Amount: cents(m[2]), Currency: m[3]}}
-			if cost := postCostRe.FindStringSubmatch(m[4]); cost != nil {
-				posting.CostAmount = cents(cost[1])
-				posting.CostCurrency = cost[2]
-			}
-			postings = append(postings, posting)
-			continue
-		}
-		if m := postBlankRe.FindStringSubmatch(line.Text); m != nil {
-			postings = append(postings, parsedPosting{Posting: Posting{Account: m[1]}, Blank: true})
-		}
-	}
-	finish()
 	return txns
 }
 
@@ -300,9 +254,19 @@ func finalizeParsedPostings(parsed []parsedPosting) []Posting {
 			}
 			amount := posting.Amount
 			currency := posting.Currency
-			if posting.CostAmount != 0 && posting.CostCurrency != "" {
+			switch {
+			case posting.TotalCost && posting.CostCurrency != "":
+				amount = posting.CostAmount
+				currency = posting.CostCurrency
+			case posting.CostAmount != 0 && posting.CostCurrency != "":
 				amount = int(math.Round(float64(posting.Amount) * float64(posting.CostAmount) / 100))
 				currency = posting.CostCurrency
+			case posting.TotalPrice && posting.PriceCurrency != "":
+				amount = posting.PriceAmount
+				currency = posting.PriceCurrency
+			case posting.PriceAmount != 0 && posting.PriceCurrency != "":
+				amount = int(math.Round(float64(posting.Amount) * float64(posting.PriceAmount) / 100))
+				currency = posting.PriceCurrency
 			}
 			if currency != "" {
 				imbalance[currency] += amount
@@ -338,51 +302,50 @@ func finalizeParsedPostings(parsed []parsedPosting) []Posting {
 	return out
 }
 
-func parseMetadataValue(raw string) MetadataValue {
-	value := strings.TrimSpace(raw)
-	if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) && len(value) >= 2 {
-		unquoted := value[1 : len(value)-1]
-		unquoted = strings.ReplaceAll(unquoted, `\"`, `"`)
-		unquoted = strings.ReplaceAll(unquoted, `\\`, `\`)
-		return unquoted
-	}
-	if value == "TRUE" {
-		return true
-	}
-	if value == "FALSE" {
-		return false
-	}
-	if n, err := strconv.ParseFloat(value, 64); err == nil {
-		return n
-	}
-	return value
+func ParseBalances(lines []BeanLine) []BalanceAssertion {
+	return BalanceAssertionsFromBeanEntries(ParseBeanLines(lines).Entries)
 }
 
-func ParseBalances(lines []BeanLine) []BalanceAssertion {
+func BalanceAssertionsFromBeanEntries(entries []BeanEntry) []BalanceAssertion {
 	var out []BalanceAssertion
-	for _, line := range lines {
-		if m := balanceRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
-			out = append(out, BalanceAssertion{Date: m[1], Account: m[2], Amount: cents(m[3]), Currency: m[4]})
+	for _, entry := range entries {
+		if entry.Kind == "balance" {
+			out = append(out, BalanceAssertion{Date: entry.Date, Account: entry.Account, Amount: entry.Amount, Currency: entry.Currency})
 		}
 	}
 	return out
 }
 
 func ParseBudgets(lines []BeanLine) []Budget {
+	return BudgetsFromBeanEntries(ParseBeanLines(lines).Entries)
+}
+
+func BudgetsFromBeanEntries(entries []BeanEntry) []Budget {
 	var out []Budget
-	for _, line := range lines {
-		if m := budgetRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
-			out = append(out, Budget{Date: m[1], Account: m[2], Amount: cents(m[3]), Currency: m[4]})
+	for _, entry := range entries {
+		if entry.Kind != "custom" || entry.CustomType != "budget" || len(entry.CustomValues) < 3 {
+			continue
+		}
+		account, _ := entry.CustomValues[0].(string)
+		period, _ := entry.CustomValues[1].(string)
+		amountCurrency, _ := entry.CustomValues[2].(string)
+		amountText, currency, ok := strings.Cut(amountCurrency, " ")
+		if account != "" && period == "monthly" && ok {
+			out = append(out, Budget{Date: entry.Date, Account: account, Amount: cents(amountText), Currency: currency})
 		}
 	}
 	return out
 }
 
 func ParseCommodities(lines []BeanLine) []string {
+	return CommoditiesFromBeanEntries(ParseBeanLines(lines).Entries)
+}
+
+func CommoditiesFromBeanEntries(entries []BeanEntry) []string {
 	seen := map[string]bool{}
-	for _, line := range lines {
-		if m := commodityRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
-			seen[m[1]] = true
+	for _, entry := range entries {
+		if entry.Kind == "commodity" {
+			seen[entry.Currency] = true
 		}
 	}
 	out := make([]string, 0, len(seen))
@@ -394,10 +357,14 @@ func ParseCommodities(lines []BeanLine) []string {
 }
 
 func ParsePrices(lines []BeanLine) []Price {
+	return PricesFromBeanEntries(ParseBeanLines(lines).Entries)
+}
+
+func PricesFromBeanEntries(entries []BeanEntry) []Price {
 	var out []Price
-	for _, line := range lines {
-		if m := priceRe.FindStringSubmatch(strings.TrimSpace(line.Text)); m != nil {
-			out = append(out, Price{Date: m[1], Currency: m[2], Amount: cents(m[3]), QuoteCurrency: m[4]})
+	for _, entry := range entries {
+		if entry.Kind == "price" {
+			out = append(out, Price{Date: entry.Date, Currency: entry.Currency, Amount: entry.Amount, QuoteCurrency: entry.QuoteCurrency})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -417,46 +384,26 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 	if err != nil {
 		return nil, err
 	}
+	return AccountsFromBeanEntries(ParseBeanLines(lines).Entries), nil
+}
+
+func AccountsFromBeanEntries(entries []BeanEntry) []Account {
 	accounts := map[string]*Account{}
-	var current string
-	for _, line := range lines {
-		text := strings.TrimSuffix(line.Text, "\r")
-		if m := openRe.FindStringSubmatch(text); m != nil {
-			acct := &Account{Account: m[2], OpenDate: m[1], Currency: primaryOpenCurrency(m[3]), Label: m[2], Group: accountGroup(m[2], nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
-			accounts[m[2]] = acct
-			current = m[2]
-			continue
-		}
-		if m := closeRe.FindStringSubmatch(text); m != nil {
-			if acct := accounts[m[2]]; acct != nil {
-				closeDate := m[1]
+	for _, entry := range entries {
+		switch entry.Kind {
+		case "open":
+			acct := &Account{Account: entry.Account, OpenDate: entry.Date, Currency: primaryOpenCurrency(strings.Join(entry.Currencies, ",")), Label: entry.Account, Group: accountGroup(entry.Account, nil, nil), Active: true, Metadata: map[string]MetadataValue{}}
+			for key, value := range entry.Metadata {
+				acct.Metadata[key] = value
+			}
+			applyAccountMetadata(acct)
+			accounts[entry.Account] = acct
+		case "close":
+			if acct := accounts[entry.Account]; acct != nil {
+				closeDate := entry.Date
 				acct.CloseDate = &closeDate
 				acct.Active = false
 			}
-			current = ""
-			continue
-		}
-		if m := metaRe.FindStringSubmatch(text); m != nil && current != "" {
-			acct := accounts[current]
-			if acct == nil {
-				continue
-			}
-			value := parseMetadataValue(m[2])
-			acct.Metadata[m[1]] = value
-			if m[1] == "alias" {
-				if alias, ok := value.(string); ok {
-					acct.Alias = &alias
-					label := strings.TrimSpace(strings.Split(alias, "/")[0])
-					if label != "" {
-						acct.Label = label
-					}
-				}
-			}
-			acct.Group = accountGroup(acct.Account, acct.Metadata, acct.Alias)
-			continue
-		}
-		if strings.TrimSpace(text) != "" && !strings.HasPrefix(text, " ") {
-			current = ""
 		}
 	}
 	out := make([]Account, 0, len(accounts))
@@ -464,7 +411,7 @@ func ParseAccounts(cfg Config) ([]Account, error) {
 		out = append(out, *acct)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Account < out[j].Account })
-	return out, nil
+	return out
 }
 
 func primaryOpenCurrency(raw string) string {
@@ -473,6 +420,22 @@ func primaryOpenCurrency(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[0])
+}
+
+func applyAccountMetadata(acct *Account) {
+	if acct == nil {
+		return
+	}
+	if value, ok := acct.Metadata["alias"]; ok {
+		if alias, ok := value.(string); ok {
+			acct.Alias = &alias
+			label := strings.TrimSpace(strings.Split(alias, "/")[0])
+			if label != "" {
+				acct.Label = label
+			}
+		}
+	}
+	acct.Group = accountGroup(acct.Account, acct.Metadata, acct.Alias)
 }
 
 func defaultAccountCurrency(account, currency string) string {
