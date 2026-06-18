@@ -153,7 +153,7 @@ function MetadataBadges({ txn, limit }: { txn: Txn; limit?: number }) {
   ];
   const shown = typeof limit === "number" ? items.slice(0, limit) : items;
   if (!shown.length) return null;
-  return <div className="mt-2 flex flex-wrap gap-1">{shown.map((item) => <span key={item.key} className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{item.label}</span>)}{limit && items.length > limit && <span className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">+{items.length - limit}</span>}</div>;
+  return <div className="mt-2 flex flex-wrap gap-1">{shown.map((item) => <span key={item.key} className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{item.label}</span>)}{limit && items.length > limit && <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">+{items.length - limit}</span>}</div>;
 }
 
 /** 从 account 路径中提取简短名称（最后一个冒号后的部分） */
@@ -292,9 +292,9 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
       <div className="min-w-0">
         {meta.length || txn.tags?.length ? (
           <div className="flex flex-wrap gap-1">
-            {meta.slice(0, 2).map(([key, value]) => <span key={`${key}:${String(value)}`} className="max-w-[120px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{key}: {String(value)}</span>)}
-            {(txn.tags ?? []).slice(0, 1).map((tag) => <span key={tag} className="max-w-[100px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">#{tag}</span>)}
-            {meta.length + (txn.tags?.length ?? 0) > 3 && <span className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">+{meta.length + (txn.tags?.length ?? 0) - 3}</span>}
+            {meta.slice(0, 2).map(([key, value]) => <span key={`${key}:${String(value)}`} className="ledger-chip max-w-[120px] truncate rounded-full px-2 py-0.5 text-[11px]">{key}: {String(value)}</span>)}
+            {(txn.tags ?? []).slice(0, 1).map((tag) => <span key={tag} className="ledger-chip max-w-[100px] truncate rounded-full px-2 py-0.5 text-[11px]">#{tag}</span>)}
+            {meta.length + (txn.tags?.length ?? 0) > 3 && <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">+{meta.length + (txn.tags?.length ?? 0) - 3}</span>}
           </div>
         ) : <span className="text-xs text-stone/60">—</span>}
       </div>
