@@ -28,7 +28,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
           <div className="border-l-4 border-brand p-4 md:p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.2em] text-stone">financial dashboard</div>
+                <div className="ledger-kicker">financial dashboard</div>
                 <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
               </div>
@@ -67,14 +67,14 @@ function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [strin
   return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-4 xl:min-h-0 max-xl:min-h-[360px]">
     <div className="flex items-start justify-between gap-3">
       <div>
-        <div className="text-[11px] uppercase tracking-[0.18em] text-stone">daily rhythm</div>
+        <div className="ledger-kicker">daily rhythm</div>
         <h2 className="mt-1 font-serif text-xl">日收支趋势</h2>
         <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-stone">
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--color-expense))]" />支出柱</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[rgb(var(--color-income))]" />收入线</span>
         </div>
       </div>
-      <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{label}</span>
+      <span className="ledger-chip rounded-full px-2 py-1 text-xs">{label}</span>
     </div>
     {rows.length ? showAmounts ? <div ref={ref} className="ledger-chart mt-4 min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
       {ready ? <Suspense fallback={<div className="grid h-full min-h-[260px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">正在准备趋势图…</div>}>
@@ -124,7 +124,7 @@ function useDeferredChartReady(enabled: boolean) {
 }
 
 function DashboardCard({ label, value, tone, detail, onClick }: { label: string; value: string; tone: string; detail?: string; onClick?: () => void }) {
-  const content = <><div className="truncate text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 truncate text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>}</>;
+  const content = <><div className="ledger-kicker truncate">{label}</div><div className={`mt-1.5 truncate text-lg font-semibold tabular-nums ${tone}`}>{value}</div>{detail && <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>}</>;
   if (!onClick) return <div className="h-full min-w-0 overflow-hidden rounded-2xl border border-line bg-panel p-3">{content}</div>;
   return <button className="h-full min-w-0 overflow-hidden rounded-2xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={onClick}>{content}</button>;
 }

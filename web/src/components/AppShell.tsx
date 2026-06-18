@@ -148,11 +148,11 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand text-paper"><PiggyBank className="h-5 w-5" /></span>
               <span className="min-w-0">
                 <span className="block truncate leading-tight">我的账本</span>
-                <span className="block truncate text-[11px] font-normal uppercase tracking-[0.22em] text-stone">private ledger</span>
+                <span className="block truncate text-[11px] font-normal uppercase tracking-[0.14em] text-stone">private ledger</span>
               </span>
             </ClientNavLink>
           </div>
-          <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs tracking-wide text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
+          <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs font-medium text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
           <div className="flex items-center gap-2">
             <ThemeMenu themeMode={themeMode} resolvedTheme={resolvedTheme} open={themeMenuOpen} onOpenChange={setThemeMenuOpen} onThemeModeChange={onThemeModeChange} />
             {passkeyEnabled && (
@@ -182,7 +182,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
             <div className="flex items-center gap-2 font-serif text-xl font-medium"><span className="grid h-8 w-8 place-items-center rounded-xl bg-brand text-paper"><PiggyBank className="h-4 w-4" /></span> 我的账本</div>
             <button className="rounded-xl border border-line bg-paper p-2 text-stone" onClick={closeMobileMenu} aria-label="关闭侧边栏"><X className="h-4 w-4" /></button>
           </div>
-          <div className="mb-3 text-xs font-medium uppercase tracking-[0.22em] text-stone">全部功能</div>
+          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-stone">全部功能</div>
           <nav className="space-y-2">
             {ledgerNavItems.map((item) => {
               const Icon = item.icon;
@@ -204,7 +204,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
       <div className="app-shell-frame min-w-0 max-w-full md:flex">
         <aside className={`app-shell-sidebar desktop-sidebar hidden shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 md:block ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
           <div className="desktop-sidebar-header mb-3">
-            <div className="desktop-sidebar-heading min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium uppercase tracking-[0.24em] text-stone">本月账页</div>
+            <div className="desktop-sidebar-heading min-w-0 overflow-hidden whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] text-stone">本月账页</div>
             <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
@@ -214,7 +214,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
               const Icon = item.icon;
               const active = pathname === item.href;
               return (
-                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-2xl text-sm ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
+                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-2xl text-sm font-medium ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="desktop-sidebar-link-label min-w-0">{item.label}</span>
                 </ClientNavLink>
@@ -236,7 +236,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
-            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); return; } handleNavClick(event, item.href); }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
+            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); return; } handleNavClick(event, item.href); }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs font-medium transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
               <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
             </ClientNavLink>
           );

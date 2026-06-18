@@ -110,7 +110,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
         <div className="rounded-xl border border-line bg-panel p-2">
           <div className="flex h-10 items-center justify-between px-2 text-sm font-medium text-olive">
             <span>分组</span>
-            <span className="text-xs text-stone">{filteredRows.length} 个账户</span>
+            <span className="ledger-label">{filteredRows.length} 个账户</span>
           </div>
           <div className="space-y-2">
             {groups.map((group) => {
@@ -157,7 +157,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
             </div>
             <div className="overflow-hidden">
               <div className="min-w-0">
-                <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line px-4 py-3 text-xs text-stone">
+                <div className="ledger-table-head grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line px-4 py-3">
                   <span>账户</span>
                   <span>币种</span>
                   <span className="text-right">余额</span>
@@ -235,7 +235,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                 <div key={cluster.key}>
                   <div className="flex items-center justify-between gap-3 border-b border-line bg-paper/70 px-4 py-2 text-xs text-stone">
                     <span className="truncate font-medium text-olive">{cluster.label}</span>
-                    <span className="shrink-0">{cluster.rows.length} 个</span>
+                    <span className="ledger-label shrink-0">{cluster.rows.length} 个</span>
                   </div>
                   {cluster.rows.map((row) => {
                     const visible = rowVisible(row);
@@ -377,11 +377,11 @@ function groupIcon(group: AccountGroup, className: string) {
 }
 
 function BalanceMetric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-line bg-paper p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 font-medium text-olive">{value}</div></div>;
+  return <div className="rounded-xl border border-line bg-paper p-3"><div className="ledger-label">{label}</div><div className="mt-1 font-semibold tabular-nums text-olive">{value}</div></div>;
 }
 
 function BalanceClusterHeader({ cluster, visible }: { cluster: BalanceCluster; visible: boolean }) {
-  return <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line bg-paper/80 px-4 py-2 text-xs text-stone">
+  return <div className="ledger-table-head grid grid-cols-[minmax(0,1fr)_64px_minmax(92px,124px)_96px_36px] items-center gap-3 border-b border-line px-4 py-2">
     <span className="min-w-0 truncate font-medium text-olive">{cluster.label}</span>
     <span className="rounded-lg border border-line bg-panel px-2 py-1 text-center text-olive">{cluster.rows.length} 个</span>
     <span className={`text-right font-medium ${cluster.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatClusterAmount(cluster, visible)}</span>

@@ -153,7 +153,7 @@ function MetadataBadges({ txn, limit }: { txn: Txn; limit?: number }) {
   ];
   const shown = typeof limit === "number" ? items.slice(0, limit) : items;
   if (!shown.length) return null;
-  return <div className="mt-2 flex flex-wrap gap-1">{shown.map((item) => <span key={item.key} className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{item.label}</span>)}{limit && items.length > limit && <span className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">+{items.length - limit}</span>}</div>;
+  return <div className="mt-2 flex flex-wrap gap-1">{shown.map((item) => <span key={item.key} className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{item.label}</span>)}{limit && items.length > limit && <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">+{items.length - limit}</span>}</div>;
 }
 
 /** 从 account 路径中提取简短名称（最后一个冒号后的部分） */
@@ -233,15 +233,15 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
   const primary = primaryPosting(txn);
   const amt = primary?.amount ?? null;
   return (
-    <button type="button" className={`transaction-list-card card mb-1.5 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
+    <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
-          <strong className="block truncate">{txn.payee}</strong>
+          <strong className="block truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
           {txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
         </div>
-        {amt != null && <span className={`shrink-0 font-medium tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt, primary?.currency)}</span>}
+        {amt != null && <span className={`shrink-0 text-base font-semibold tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt, primary?.currency)}</span>}
       </div>
-      <div className="mt-0.5 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration}</div>
+      <div className="mt-1 text-sm leading-5 text-warm [overflow-wrap:anywhere]">{txn.narration}</div>
       {viewMode === "full" ? (
         <>
           <PostingFlow postings={txn.postings} />
@@ -250,7 +250,7 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
         </>
       ) : (
         <>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">{txn.date}{txn.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j} className="min-w-0 [overflow-wrap:anywhere]">{p.account}</span>)}</div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs leading-5 text-stone">{txn.date}{txn.postings.filter(p => p.account.startsWith("Expenses:") || p.account.startsWith("Income:")).map((p, j) => <span key={j} className="min-w-0 [overflow-wrap:anywhere]">{p.account}</span>)}</div>
           <MetadataBadges txn={txn} limit={3} />
         </>
       )}
@@ -269,32 +269,32 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
       id={rowId}
       ref={rowRef}
       type="button"
-      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
       onClick={onSelect}
     >
-      <div className="text-xs tabular-nums text-stone">
-        <div>{txn.date.slice(5)}</div>
+      <div className="text-xs font-medium tabular-nums text-stone">
+        <div className="text-olive">{txn.date.slice(5)}</div>
         <div className="mt-1 text-[11px] text-stone/70">{txn.date.slice(0, 4)}</div>
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <strong className="truncate text-sm text-ink">{txn.payee}</strong>
+          <strong className="truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
           {txn.pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步</span>}
         </div>
-        <div className="mt-0.5 truncate text-xs text-olive">{txn.narration || "无说明"}</div>
+        <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
       <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt, primary?.currency)}</div>
       <div className="min-w-0">
-        <div className="truncate text-xs text-warm">{categoryRows.join(" · ") || "未分类"}</div>
+        <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
       </div>
       <div className="min-w-0">
         {meta.length || txn.tags?.length ? (
           <div className="flex flex-wrap gap-1">
-            {meta.slice(0, 2).map(([key, value]) => <span key={`${key}:${String(value)}`} className="max-w-[120px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{key}: {String(value)}</span>)}
-            {(txn.tags ?? []).slice(0, 1).map((tag) => <span key={tag} className="max-w-[100px] truncate rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">#{tag}</span>)}
-            {meta.length + (txn.tags?.length ?? 0) > 3 && <span className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">+{meta.length + (txn.tags?.length ?? 0) - 3}</span>}
+            {meta.slice(0, 2).map(([key, value]) => <span key={`${key}:${String(value)}`} className="ledger-chip max-w-[120px] truncate rounded-full px-2 py-0.5 text-[11px]">{key}: {String(value)}</span>)}
+            {(txn.tags ?? []).slice(0, 1).map((tag) => <span key={tag} className="ledger-chip max-w-[100px] truncate rounded-full px-2 py-0.5 text-[11px]">#{tag}</span>)}
+            {meta.length + (txn.tags?.length ?? 0) > 3 && <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">+{meta.length + (txn.tags?.length ?? 0) - 3}</span>}
           </div>
         ) : <span className="text-xs text-stone/60">—</span>}
       </div>
@@ -521,7 +521,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
             onKeyDown={handleDesktopListKeyDown}
           >
-            <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-stone">
+            <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-olive">
               <span>日期</span>
               <span>交易</span>
               <span className="text-right">金额</span>

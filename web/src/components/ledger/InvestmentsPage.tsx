@@ -32,7 +32,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
       </section>
 
       <section className="overflow-hidden rounded-xl border border-line bg-panel">
-        <div className="hidden border-b border-line bg-paper px-5 py-3 text-xs text-stone md:grid md:grid-cols-[minmax(180px,1.25fr)_0.58fr_0.72fr_0.72fr_0.72fr_0.72fr_0.72fr_40px] md:items-center md:gap-4">
+        <div className="ledger-table-head hidden border-b border-line px-5 py-3 md:grid md:grid-cols-[minmax(180px,1.25fr)_0.58fr_0.72fr_0.72fr_0.72fr_0.72fr_0.72fr_40px] md:items-center md:gap-4">
           <div>股票</div>
           <div className="text-right">持有股数</div>
           <div className="text-right">平均成本</div>
@@ -121,7 +121,7 @@ function InvestmentLots({ lots }: { lots: InvestmentLot[] }) {
       {lots.length ? (
         <div className="mt-2 overflow-x-auto rounded-lg border border-line bg-panel">
           <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
-            <thead className="bg-paper text-xs text-stone">
+            <thead className="ledger-table-head">
               <tr>
                 <TableHead align="left">买入日期</TableHead>
                 <TableHead align="left">账户</TableHead>
@@ -157,7 +157,7 @@ function PositionBreakdown({ positions }: { positions: InvestmentPosition[] }) {
       <SectionHeader title="账户拆分" meta={`${positions.length} 个账户`} />
       <div className="mt-2 overflow-x-auto rounded-lg border border-line bg-panel">
         <table className="w-full min-w-[860px] border-separate border-spacing-0 text-sm">
-          <thead className="bg-paper text-xs text-stone">
+          <thead className="ledger-table-head">
             <tr>
               <TableHead align="left">账户</TableHead>
               <TableHead>股数</TableHead>
@@ -230,7 +230,7 @@ function PriceSparkline({ points, currency }: { points: PricePoint[]; currency: 
 function SummaryMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
   return (
     <div className="min-w-0 px-4 py-4 sm:px-5">
-      <div className="text-xs text-stone">{label}</div>
+      <div className="ledger-label">{label}</div>
       <div className={`mt-1 truncate text-2xl font-medium tabular-nums ${tone}`}>{value}</div>
       <div className="mt-1 truncate text-xs text-stone">{detail}</div>
     </div>
@@ -240,7 +240,7 @@ function SummaryMetric({ label, value, detail, tone }: { label: string; value: s
 function RowMetric({ label, value, tone = "text-warm" }: { label: string; value: string; tone?: string }) {
   return (
     <div className="grid min-w-0 grid-cols-[88px_1fr] items-baseline gap-3 md:block">
-      <div className="text-xs text-stone md:hidden">{label}</div>
+      <div className="ledger-label md:hidden">{label}</div>
       <div className={`truncate text-right font-medium tabular-nums ${tone}`}>{value}</div>
     </div>
   );
@@ -250,7 +250,7 @@ function SectionHeader({ title, meta }: { title: string; meta: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <h3 className="text-sm font-semibold text-ink">{title}</h3>
-      <span className="shrink-0 text-xs text-stone">{meta}</span>
+      <span className="ledger-label shrink-0">{meta}</span>
     </div>
   );
 }
@@ -265,7 +265,7 @@ function SecurityName({ symbol, name }: { symbol: string; name: string }) {
 }
 
 function Badge({ children }: { children: ReactNode }) {
-  return <span className="rounded-md border border-line bg-paper px-2 py-1">{children}</span>;
+  return <span className="ledger-chip rounded-md px-2 py-1">{children}</span>;
 }
 
 function TableHead({ children, align = "right" }: { children: string; align?: "left" | "right" }) {

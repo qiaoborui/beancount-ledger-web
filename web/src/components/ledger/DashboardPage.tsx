@@ -562,11 +562,11 @@ function DashboardInlineRow({ rowId, title, subtitle, collapsed, onToggle, summa
 }
 
 function RowSummary({ children }: { children: ReactNode }) {
-  return <span className="inline-flex max-w-full min-w-0 items-center rounded-full bg-tag px-2.5 py-0.5 text-xs text-stone sm:shrink-0"><span className="min-w-0 truncate">{children}</span></span>;
+  return <span className="ledger-chip inline-flex max-w-full min-w-0 items-center rounded-full px-2.5 py-0.5 text-xs sm:shrink-0"><span className="min-w-0 truncate">{children}</span></span>;
 }
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="min-w-0 bg-panel px-2 py-2 text-center"><div className="text-[10px] uppercase tracking-[0.12em] text-stone">{label}</div><div className={`mt-0.5 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
+  return <div className="min-w-0 bg-panel px-2 py-2 text-center"><div className="ledger-label truncate">{label}</div><div className={`mt-0.5 truncate text-base font-semibold tabular-nums ${tone}`}>{value}</div></div>;
 }
 
 function DashboardOverview({ data, visible, onToggleVisible }: { data: DashboardSummary; visible: boolean; onToggleVisible: () => void }) {
@@ -585,9 +585,9 @@ function DashboardOverview({ data, visible, onToggleVisible }: { data: Dashboard
 function OverviewMetric({ label, value, tone, detail, action }: { label: string; value: string; tone: string; detail: string; action?: ReactNode }) {
   return <div className="min-w-0 rounded-lg border border-line bg-panel px-3 py-2">
     <div className="flex items-center justify-between gap-2">
-      <span className="text-[11px] text-stone">{label}</span>
+      <span className="ledger-label">{label}</span>
       <span className="flex min-w-0 items-center justify-end gap-1.5">
-        <span className="min-w-0 truncate text-right text-[11px] text-stone">{detail}</span>
+        <span className="ledger-label min-w-0 truncate text-right">{detail}</span>
         {action}
       </span>
     </div>
@@ -630,7 +630,7 @@ function Panel({ panelId, title, subtitle, className, onView, children }: { pane
     <div className="flex items-start justify-between gap-3">
       <h3 className="min-w-0 truncate font-serif text-xl">{title}</h3>
       <div className="flex shrink-0 items-center gap-2">
-        {subtitle && <span className="max-w-[12rem] truncate rounded-full bg-tag px-2 py-1 text-xs text-stone">{subtitle}</span>}
+        {subtitle && <span className="ledger-chip max-w-[12rem] truncate rounded-full px-2 py-1 text-xs">{subtitle}</span>}
         <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag hover:text-brand" onClick={() => onView(panelId)} title="全屏查看" aria-label={`全屏查看 ${title}`}>
           <Maximize2 className="h-4 w-4" />
         </button>
@@ -891,7 +891,7 @@ function PrivateKpis({ data, visible }: { data: DashboardSummary; visible: boole
 }
 
 function SmallMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-base font-semibold ${tone}`}>{value}</div></div>;
+  return <div className="rounded-xl border border-line bg-panel p-3"><div className="ledger-kicker truncate">{label}</div><div className={`mt-1 truncate text-base font-semibold tabular-nums ${tone}`}>{value}</div></div>;
 }
 
 function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
