@@ -490,8 +490,11 @@ func creditCardBillingCycle(asOf string) (string, string, string, string) {
 }
 
 func creditCardBillingCycleForAccount(asOf string, account Account) (string, string, string, string) {
-	statementDay := metadataDay(account.Metadata, 18, "statement-day", "statementDay", "bill-day", "billing-day", "billingDay", "posting-day", "accounting-day", "book-day", "账单日", "记账日")
-	dueDay := metadataDay(account.Metadata, 5, "due-day", "dueDay", "payment-due-day", "repayment-day", "repaymentDay", "还款日")
+	statementDay, statementAtMonthEnd := metadataStatementDay(account.Metadata, 18, "statement-day", "statementDay", "bill-day", "billing-day", "billingDay", "posting-day", "accounting-day", "book-day", "账单日", "记账日")
+	dueDay := metadataDay(account.Metadata, 5, "due-day", "dueDay", "payment-due-day", "paymentDueDay", "repayment-day", "repaymentDay", "还款日")
+	if statementAtMonthEnd {
+		return creditCardMonthEndBillingCycle(asOf, dueDay)
+	}
 	return creditCardBillingCycleWithDays(asOf, statementDay, dueDay)
 }
 
@@ -519,6 +522,50 @@ func creditCardBillingCycleWithDays(asOf string, statementDay, dueDay int) (stri
 	return cycleStart.Format("2006-01-02"), cycleEnd.Format("2006-01-02"), statementDate.Format("2006-01-02"), dueDate.Format("2006-01-02")
 }
 
+func creditCardMonthEndBillingCycle(asOf string, dueDay int) (string, string, string, string) {
+	date, err := time.Parse("2006-01-02", asOf)
+	if err != nil {
+		date = time.Now()
+	}
+	dueDay = clampDay(dueDay)
+	year, month, _ := date.Date()
+	cycleStart := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	cycleEnd := time.Date(year, month+1, 1, 0, 0, 0, 0, time.UTC)
+	statementDate := cycleEnd.AddDate(0, 0, -1)
+	dueDate := dateWithDay(statementDate.Year(), statementDate.Month(), dueDay)
+	if !dueDate.After(statementDate) {
+		dueDate = dateWithDay(statementDate.Year(), statementDate.Month()+1, dueDay)
+	}
+	return cycleStart.Format("2006-01-02"), cycleEnd.Format("2006-01-02"), statementDate.Format("2006-01-02"), dueDate.Format("2006-01-02")
+}
+
+func metadataStatementDay(metadata map[string]MetadataValue, fallback int, keys ...string) (int, bool) {
+	if metadata == nil {
+		return fallback, false
+	}
+	for _, key := range keys {
+		value, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case int:
+			return typed, false
+		case float64:
+			return int(typed), false
+		case string:
+			trimmed := strings.TrimSpace(typed)
+			if isMonthEndStatementDay(trimmed) {
+				return fallback, true
+			}
+			if parsed, err := strconv.Atoi(trimmed); err == nil {
+				return parsed, false
+			}
+		}
+	}
+	return fallback, false
+}
+
 func metadataDay(metadata map[string]MetadataValue, fallback int, keys ...string) int {
 	if metadata == nil {
 		return fallback
@@ -540,6 +587,17 @@ func metadataDay(metadata map[string]MetadataValue, fallback int, keys ...string
 		}
 	}
 	return fallback
+}
+
+func isMonthEndStatementDay(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	switch normalized {
+	case "month-end", "month end", "end-of-month", "eom", "月底", "月末", "月终":
+		return true
+	default:
+		return false
+	}
 }
 
 func clampDay(day int) int {
