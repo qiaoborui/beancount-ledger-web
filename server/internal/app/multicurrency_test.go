@@ -233,6 +233,29 @@ func TestCreditCardAnalyticsUsesAccountBillingMetadata(t *testing.T) {
 	}
 }
 
+func TestCreditCardBillingCycleSupportsMonthEndStatementDay(t *testing.T) {
+	account := Account{
+		Account: "Liabilities:Huabei",
+		Label:   "Huabei",
+		Group:   "credit",
+		Metadata: map[string]MetadataValue{
+			"statementDay":  "month-end",
+			"paymentDueDay": float64(8),
+		},
+	}
+
+	cycleStart, cycleEnd, statementDate, dueDate := creditCardBillingCycleForAccount("2026-06-22", account)
+
+	if cycleStart != "2026-06-01" || cycleEnd != "2026-07-01" || statementDate != "2026-06-30" || dueDate != "2026-07-08" {
+		t.Fatalf("month-end billing cycle = %s %s %s %s", cycleStart, cycleEnd, statementDate, dueDate)
+	}
+
+	_, _, statementDate, dueDate = creditCardBillingCycleForAccount("2028-02-15", account)
+	if statementDate != "2028-02-29" || dueDate != "2028-03-08" {
+		t.Fatalf("leap-year month-end billing dates = %s %s", statementDate, dueDate)
+	}
+}
+
 func TestAccountGroupSeparatesCreditCardsFromOtherLiabilities(t *testing.T) {
 	if got := accountGroup("Liabilities:Friends", nil, nil); got != "liability" {
 		t.Fatalf("plain liability group = %s, want liability", got)
