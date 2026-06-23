@@ -1,28 +1,9 @@
 name: Deploy Ubuntu Server
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/deploy-raspberry-pi.yml"
-      - ".agents/**"
-      - "scripts/deploy-backend-artifact.sh"
-      - "scripts/deploy-frontend-artifact.sh"
-      - "server/**"
-      - "web/**"
-      - "examples/**"
-      - "docker/**"
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - ".github/workflows/deploy-raspberry-pi.yml"
-      - ".agents/**"
-      - "scripts/deploy-backend-artifact.sh"
-      - "scripts/deploy-frontend-artifact.sh"
-      - "server/**"
-      - "web/**"
-      - "examples/**"
-      - "docker/**"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       target:
@@ -37,11 +18,16 @@ on:
         default: all
 
 concurrency:
-  group: deploy-${{ github.event_name == 'pull_request' && 'preview' || github.event_name == 'workflow_dispatch' && inputs.target || 'production' }}
+  group: deploy-${{ github.event_name == 'workflow_run' && (github.event.workflow_run.event == 'pull_request' && 'preview' || 'production') || inputs.target }}
   cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
 
 jobs:
   plan:
@@ -53,11 +39,14 @@ jobs:
       backend_port: ${{ steps.target.outputs.backend_port }}
       deploy_backend: ${{ steps.changes.outputs.deploy_backend }}
       deploy_frontend: ${{ steps.changes.outputs.deploy_frontend }}
+      deploy_allowed: ${{ steps.changes.outputs.deploy_allowed }}
+      artifact_sha: ${{ steps.artifact.outputs.artifact_sha }}
+      artifact_run_id: ${{ steps.artifact.outputs.artifact_run_id }}
     steps:
       - name: Select deployment target
         id: target
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_run" && "${{ github.event.workflow_run.event }}" == "pull_request" ]]; then
             target="preview"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.target }}" == "preview" ]]; then
             target="preview"
@@ -75,14 +64,37 @@ jobs:
             echo "backend_port=${{ vars.DEPLOY_PREVIEW_PORT || vars.RASPI_PREVIEW_PORT || '3002' }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Select artifact source
+        id: artifact
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "artifact_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "artifact_run_id=${{ github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact_sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "artifact_run_id=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Download CI plan
+        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-web-ci-plan-${{ steps.artifact.outputs.artifact_sha }}
+          path: ci-plan
+          run-id: ${{ steps.artifact.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+
       - name: Detect changed components
         id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          deploy_allowed=true
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             case "${{ inputs.component }}" in
               all)
@@ -98,36 +110,45 @@ jobs:
                 deploy_frontend=true
                 ;;
             esac
-          else
-            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
-            elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
-              files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
-            else
-              files="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
-            fi
-
+          elif [[ "${{ github.event.workflow_run.conclusion }}" != "success" ]]; then
+            deploy_allowed=false
             deploy_backend=false
             deploy_frontend=false
-            while IFS= read -r file; do
-              case "$file" in
-                .github/workflows/deploy-raspberry-pi.yml|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
-                  deploy_backend=true
-                  ;;
-              esac
-              case "$file" in
-                .github/workflows/deploy-raspberry-pi.yml|web/*|web/**/*|scripts/deploy-frontend-artifact.sh)
-                  deploy_frontend=true
-                  ;;
-              esac
-            done <<< "$files"
+          elif [[ "${{ github.event.workflow_run.event }}" == "pull_request" ]]; then
+            pr_number="${{ github.event.workflow_run.pull_requests[0].number }}"
+            if [[ -z "$pr_number" ]]; then
+              deploy_allowed=false
+              deploy_backend=false
+              deploy_frontend=false
+            else
+              pr_json="$(gh api "repos/${{ github.repository }}/pulls/$pr_number")"
+              draft="$(jq -r '.draft' <<< "$pr_json")"
+              head_repo="$(jq -r '.head.repo.full_name' <<< "$pr_json")"
+              if [[ "$draft" == "true" || "$head_repo" != "${{ github.repository }}" ]]; then
+                deploy_allowed=false
+                deploy_backend=false
+                deploy_frontend=false
+              else
+                # shellcheck disable=SC1091
+                source ci-plan/components.env
+                deploy_backend="$backend"
+                deploy_frontend="$web"
+              fi
+            fi
+          else
+            # shellcheck disable=SC1091
+            source ci-plan/components.env
+            deploy_backend="$backend"
+            deploy_frontend="$web"
           fi
 
+          echo "deploy_allowed=$deploy_allowed" >> "$GITHUB_OUTPUT"
           echo "deploy_backend=$deploy_backend" >> "$GITHUB_OUTPUT"
           echo "deploy_frontend=$deploy_frontend" >> "$GITHUB_OUTPUT"
           {
             echo "## Deploy plan"
             echo
+            echo "- Allowed: \`$deploy_allowed\`"
             echo "- Backend: \`$deploy_backend\`"
             echo "- Frontend: \`$deploy_frontend\`"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -136,7 +157,7 @@ jobs:
     name: Build backend artifact
     needs: plan
     runs-on: ubuntu-24.04
-    if: ${{ needs.plan.outputs.deploy_backend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ needs.plan.outputs.deploy_allowed == 'true' && github.event_name == 'workflow_dispatch' && needs.plan.outputs.deploy_backend == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -163,19 +184,19 @@ jobs:
           if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
           cat > artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
-          sha=${{ github.sha }}
+          sha=${{ needs.plan.outputs.artifact_sha }}
           ref=${{ github.ref }}
           component=backend
           target=${{ needs.plan.outputs.target }}
           built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          tar -czf ledger-web-backend-${{ github.sha }}.tar.gz -C artifact .
+          tar -czf ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}.tar.gz -C artifact .
 
       - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ledger-web-backend-${{ github.sha }}
-          path: ledger-web-backend-${{ github.sha }}.tar.gz
+          name: ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}
+          path: ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -183,7 +204,7 @@ jobs:
     name: Build frontend artifact
     needs: plan
     runs-on: ubuntu-latest
-    if: ${{ needs.plan.outputs.deploy_frontend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ needs.plan.outputs.deploy_allowed == 'true' && github.event_name == 'workflow_dispatch' && needs.plan.outputs.deploy_frontend == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -225,19 +246,19 @@ jobs:
           cp -a web/dist artifact/dist
           cat > artifact/DEPLOYMENT.txt <<EOF
           repository=${{ github.repository }}
-          sha=${{ github.sha }}
+          sha=${{ needs.plan.outputs.artifact_sha }}
           ref=${{ github.ref }}
           component=frontend
           target=${{ needs.plan.outputs.target }}
           built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          tar -czf ledger-web-frontend-${{ github.sha }}.tar.gz -C artifact .
+          tar -czf ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}.tar.gz -C artifact .
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ledger-web-frontend-${{ github.sha }}
-          path: ledger-web-frontend-${{ github.sha }}.tar.gz
+          name: ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}
+          path: ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -245,7 +266,7 @@ jobs:
     name: Deploy frontend to Ubuntu Server
     needs: [plan, build_frontend]
     runs-on: [self-hosted, mibook]
-    if: ${{ needs.plan.outputs.deploy_frontend == 'true' && needs.build_frontend.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ always() && needs.plan.outputs.deploy_allowed == 'true' && needs.plan.outputs.deploy_frontend == 'true' && ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && needs.build_frontend.result == 'success')) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
     steps:
@@ -255,17 +276,27 @@ jobs:
       - name: Clean old frontend artifacts
         run: rm -rf /tmp/beancount-ledger-web-frontend-*
 
-      - name: Download frontend artifact
+      - name: Download frontend artifact from CI
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v4
         with:
-          name: ledger-web-frontend-${{ github.sha }}
-          path: /tmp/beancount-ledger-web-frontend-download-${{ github.sha }}
+          name: ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}
+          path: /tmp/beancount-ledger-web-frontend-download-${{ needs.plan.outputs.artifact_sha }}
+          run-id: ${{ needs.plan.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download frontend artifact
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}
+          path: /tmp/beancount-ledger-web-frontend-download-${{ needs.plan.outputs.artifact_sha }}
 
       - name: Extract frontend artifact
         run: |
-          mkdir -p /tmp/beancount-ledger-web-frontend-${{ github.sha }}
-          tar -xzf "/tmp/beancount-ledger-web-frontend-download-${{ github.sha }}/ledger-web-frontend-${{ github.sha }}.tar.gz" \
-            -C "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+          mkdir -p /tmp/beancount-ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}
+          tar -xzf "/tmp/beancount-ledger-web-frontend-download-${{ needs.plan.outputs.artifact_sha }}/ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}.tar.gz" \
+            -C "/tmp/beancount-ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}"
 
       - name: Deploy frontend artifact
         env:
@@ -275,7 +306,7 @@ jobs:
           chmod +x scripts/deploy-frontend-artifact.sh
           scripts/deploy-frontend-artifact.sh \
             "${{ needs.plan.outputs.short_target }}" \
-            "/tmp/beancount-ledger-web-frontend-${{ github.sha }}"
+            "/tmp/beancount-ledger-web-frontend-${{ needs.plan.outputs.artifact_sha }}"
 
       - name: Frontend deployment summary
         run: |
@@ -283,14 +314,14 @@ jobs:
           ## Frontend deployment complete
 
           - Environment: `${{ needs.plan.outputs.target }}`
-          - Commit: `${{ github.sha }}`
+          - Commit: `${{ needs.plan.outputs.artifact_sha }}`
           EOF
 
   deploy_backend:
     name: Deploy backend to Ubuntu Server
     needs: [plan, build_backend, deploy_frontend]
     runs-on: [self-hosted, mibook]
-    if: ${{ always() && needs.plan.outputs.deploy_backend == 'true' && needs.build_backend.result == 'success' && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success' || needs.deploy_frontend.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ always() && needs.plan.outputs.deploy_allowed == 'true' && needs.plan.outputs.deploy_backend == 'true' && ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && needs.build_backend.result == 'success')) && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success') }}
     environment:
       name: ${{ needs.plan.outputs.target }}
     steps:
@@ -300,17 +331,27 @@ jobs:
       - name: Clean old backend artifacts
         run: rm -rf /tmp/beancount-ledger-web-backend-*
 
-      - name: Download backend artifact
+      - name: Download backend artifact from CI
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v4
         with:
-          name: ledger-web-backend-${{ github.sha }}
-          path: /tmp/beancount-ledger-web-backend-download-${{ github.sha }}
+          name: ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}
+          path: /tmp/beancount-ledger-web-backend-download-${{ needs.plan.outputs.artifact_sha }}
+          run-id: ${{ needs.plan.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download backend artifact
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}
+          path: /tmp/beancount-ledger-web-backend-download-${{ needs.plan.outputs.artifact_sha }}
 
       - name: Extract backend artifact
         run: |
-          mkdir -p /tmp/beancount-ledger-web-backend-${{ github.sha }}
-          tar -xzf "/tmp/beancount-ledger-web-backend-download-${{ github.sha }}/ledger-web-backend-${{ github.sha }}.tar.gz" \
-            -C "/tmp/beancount-ledger-web-backend-${{ github.sha }}"
+          mkdir -p /tmp/beancount-ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}
+          tar -xzf "/tmp/beancount-ledger-web-backend-download-${{ needs.plan.outputs.artifact_sha }}/ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}.tar.gz" \
+            -C "/tmp/beancount-ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}"
 
       - name: Deploy backend artifact
         env:
@@ -321,7 +362,7 @@ jobs:
           scripts/deploy-backend-artifact.sh \
             "${{ needs.plan.outputs.short_target }}" \
             "${{ needs.plan.outputs.backend_port }}" \
-            "/tmp/beancount-ledger-web-backend-${{ github.sha }}"
+            "/tmp/beancount-ledger-web-backend-${{ needs.plan.outputs.artifact_sha }}"
 
       - name: Backend deployment summary
         run: |
@@ -330,5 +371,5 @@ jobs:
 
           - Environment: `${{ needs.plan.outputs.target }}`
           - Port: `${{ needs.plan.outputs.backend_port }}`
-          - Commit: `${{ github.sha }}`
+          - Commit: `${{ needs.plan.outputs.artifact_sha }}`
           EOF

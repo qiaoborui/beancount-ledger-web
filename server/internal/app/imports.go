@@ -37,11 +37,12 @@ type ImportEntry struct {
 }
 
 type importProviderConfig struct {
-	Config     string
-	Output     string
-	Extensions []string
-	Label      string
-	Detail     string
+	Config        string
+	Output        string
+	Extensions    []string
+	Label         string
+	Detail        string
+	DEGProviderID string
 }
 
 type providerDetection struct {
@@ -117,12 +118,22 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	}
 	sourceAnalysis, sourceWarnings := importer.AnalyzeSource(s, prepared, string(rawGeneratedBean))
 	prepared.Warnings = append(prepared.Warnings, sourceWarnings...)
-	dedupReport, err := s.runDedup(importer, generatedFile, "", alipayFundRounding, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.runDedupToFile(importer, generatedFile, dedupedFile, alipayFundRounding); err != nil {
-		return nil, err
+	generatedBean := transactionOnlyBeanText(string(rawGeneratedBean))
+	generatedSummary := parseBeanSummary(generatedBean)
+	dedupReport := ""
+	if generatedSummary.CandidateCount == 0 && prepared.RawRowCount > 0 && prepared.FilteredRowCount == 0 {
+		dedupReport = "前置过滤后没有候选交易，已跳过去重。"
+		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
+			return nil, err
+		}
+	} else {
+		dedupReport, err = s.runDedup(importer, generatedFile, "", alipayFundRounding, true)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.runDedupToFile(importer, generatedFile, dedupedFile, alipayFundRounding); err != nil {
+			return nil, err
+		}
 	}
 	dedupedRaw := []byte{}
 	if raw, err := os.ReadFile(dedupedFile); err == nil {
@@ -131,7 +142,6 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 		return nil, err
 	}
 
-	generatedBean := transactionOnlyBeanText(string(rawGeneratedBean))
 	dedupedBean := transactionOnlyBeanText(string(dedupedRaw))
 	entries, err := parsePreviewEntries(dedupedBean)
 	if err != nil {
@@ -139,7 +149,6 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	}
 	importer.DecorateEntries(upload, entries)
 	summary := parseBeanSummary(dedupedBean)
-	generatedSummary := parseBeanSummary(generatedBean)
 	skippedDuplicateCount := generatedSummary.CandidateCount - summary.CandidateCount
 	if skippedDuplicateCount < 0 {
 		skippedDuplicateCount = 0
@@ -420,7 +429,7 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 		return nil, fmt.Errorf("provider must be %s", strings.Join(importProviderIDs(), ", "))
 	}
 	cfg := importer.ProviderConfig()
-	required := []string{"main.bean", cfg.Config, "scripts/dedup_import.py"}
+	required := importer.ImportEngine().RequiredFiles(cfg)
 	for _, relative := range required {
 		if _, err := os.Stat(filepath.Join(s.cfg.LedgerRoot, relative)); err != nil {
 			return nil, fmt.Errorf("账本缺少必要文件: %s", relative)
@@ -506,13 +515,6 @@ func (s *Server) prefilterCmbCSV(inputFile, outputFile string) (cmbCSVPrefilter,
 	return cmbCSVPrefilter{RawRowCount: len(body), FilteredRowCount: len(kept), Skipped: skipped, Warnings: warnings}, nil
 }
 
-func (s *Server) runTranslate(provider, inputFile, outputFile string) error {
-	cfg := importProviderConfigs[provider]
-	args := []string{"translate", "-p", provider, "--target", "beancount", "--config", cfg.Config, "--output", outputFile, inputFile}
-	_, err := s.runCommand(env("DOUBLE_ENTRY_GENERATOR_BIN", "double-entry-generator"), args)
-	return err
-}
-
 func (s *Server) runDedup(importer billImporter, generatedFile, outputFile string, alipayFundRounding bool, dryRun bool) (string, error) {
 	args := []string{"scripts/dedup_import.py", generatedFile}
 	args = append(args, importer.DedupArgs(importDedupOptions{AlipayFundRounding: alipayFundRounding})...)
@@ -539,7 +541,7 @@ func (s *Server) runCommand(command string, args []string) (string, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return "", fmt.Errorf("找不到命令 %s。请设置 DOUBLE_ENTRY_GENERATOR_BIN/PYTHON_BIN 为绝对路径，或确认 Web 服务 PATH 中可以访问 double-entry-generator / python3", command)
+			return "", fmt.Errorf("找不到命令 %s。请设置 PYTHON_BIN 为绝对路径，或确认 Web 服务 PATH 中可以访问 python3", command)
 		}
 		detail := strings.TrimSpace(strings.Join([]string{stderr.String(), stdout.String(), err.Error()}, "\n"))
 		return "", errors.New(detail)

@@ -24,6 +24,7 @@ type billImporter interface {
 	ProviderTitle() string
 	DisplayOrder() int
 	ProviderConfig() importProviderConfig
+	ImportEngine() importEngine
 	Detect(filename, sample, ext string) (providerDetection, bool)
 	Prepare(*Server, importFileInput) (preparedImportInput, error)
 	Generate(*Server, preparedImportInput, string) error
@@ -42,9 +43,9 @@ type staticBillImporter struct {
 	title           string
 	uiOrder         int
 	config          importProviderConfig
+	engine          importEngine
 	detect          func(filename, sample, ext string) (providerDetection, bool)
 	prepare         func(*Server, importFileInput) (preparedImportInput, error)
-	generate        func(*Server, preparedImportInput, string) error
 	analyze         func(*Server, preparedImportInput, string) (providerSourceAnalysis, []string)
 	dedupArgs       func(importDedupOptions) []string
 	decorateEntries func(importMeta, []ImportEntry)
@@ -74,6 +75,13 @@ func (i staticBillImporter) ProviderConfig() importProviderConfig {
 	return i.config
 }
 
+func (i staticBillImporter) ImportEngine() importEngine {
+	if i.engine != nil {
+		return i.engine
+	}
+	return degImportEngine()
+}
+
 func (i staticBillImporter) Detect(filename, sample, ext string) (providerDetection, bool) {
 	if i.detect == nil {
 		return providerDetection{}, false
@@ -89,10 +97,8 @@ func (i staticBillImporter) Prepare(s *Server, input importFileInput) (preparedI
 }
 
 func (i staticBillImporter) Generate(s *Server, prepared preparedImportInput, outputFile string) error {
-	if i.generate != nil {
-		return i.generate(s, prepared, outputFile)
-	}
-	return s.runTranslate(i.ProviderID(), prepared.InputFile, outputFile)
+	engine := i.ImportEngine()
+	return engine.Generate(s, importEngineInput{ProviderID: i.ProviderID(), Config: i.ProviderConfig(), InputFile: prepared.InputFile, OutputFile: outputFile})
 }
 
 func (i staticBillImporter) AnalyzeSource(s *Server, prepared preparedImportInput, generatedBean string) (providerSourceAnalysis, []string) {
@@ -167,7 +173,7 @@ var billImporters = []billImporter{
 		label:           "招商银行储蓄卡",
 		title:           "CMB Checking",
 		uiOrder:         40,
-		config:          importProviderConfig{Config: "imports/cmb-checking-config.yaml", Output: "cmb-checking-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行储蓄卡", Detail: "储蓄卡交易流水 CSV，PDF 可尝试"},
+		config:          importProviderConfig{Config: "imports/cmb-checking-config.yaml", Output: "cmb-checking-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行储蓄卡", Detail: "储蓄卡交易流水 CSV，PDF 可尝试", DEGProviderID: "cmb"},
 		documentAccount: "Assets:CN:CMB:Checking",
 		detect: func(filename, sample, ext string) (providerDetection, bool) {
 			if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") && strings.Contains(filename, "交易流水") {
@@ -180,9 +186,6 @@ var billImporters = []billImporter{
 		},
 		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
 			return s.prepareCmbCheckingInput(input.InputFile, input.OriginalFilename, input.ImportID)
-		},
-		generate: func(s *Server, prepared preparedImportInput, outputFile string) error {
-			return s.generateCmbCheckingBean(prepared.InputFile, outputFile)
 		},
 		dedupArgs: func(options importDedupOptions) []string {
 			return []string{"--bank-card"}
@@ -227,6 +230,47 @@ var billImporters = []billImporter{
 				return nil, fmt.Errorf("招商银行信用卡行数核对失败：PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，但 DEG 生成 %d 条。已停止导入，请检查 PDF 解析或 DEG 配置", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
 			}
 			return []string{fmt.Sprintf("招商银行信用卡行数核对通过：PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+		},
+		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
+			return prepared.RawRowCount, prepared.FilteredRowCount
+		},
+	},
+	staticBillImporter{
+		id:              "ccb-credit",
+		label:           "建设银行信用卡",
+		title:           "CCB Credit Card",
+		uiOrder:         35,
+		config:          importProviderConfig{Config: "imports/ccb-credit-card-config.yaml", Output: "ccb-credit-output.bean", Extensions: []string{".eml", ".html", ".htm", ".csv"}, Label: "建设银行信用卡", Detail: "信用卡邮件 EML、HTML 或标准 CSV"},
+		documentAccount: "Liabilities:CN:CCB:CreditCard:7720",
+		detect: func(filename, sample, ext string) (providerDetection, bool) {
+			if (ext == ".eml" || ext == ".html" || ext == ".htm") && regexp.MustCompile(`中国建设银行信用卡电子账单|龙卡信用卡对账单|Credit Card Statement`).MatchString(sample) {
+				return providerDetection{Provider: "ccb-credit", Reason: "邮件内容包含建设银行信用卡账单字段", Confidence: "high"}, true
+			}
+			if ext == ".csv" && regexp.MustCompile(`交易日,银行记账日,卡号后四位,交易描述,交易币种,交易金额,结算币种,结算金额|transactionDate,postingDate,cardLast4,description,transactionCurrency,transactionAmount,settlementCurrency,settlementAmount`).MatchString(sample) {
+				return providerDetection{Provider: "ccb-credit", Reason: "CSV 内容包含建设银行信用卡标准字段", Confidence: "high"}, true
+			}
+			return providerDetection{}, false
+		},
+		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
+			return s.prepareCcbCreditInput(input.InputFile, input.OriginalFilename, input.ImportID)
+		},
+		engine: nativeImportEngine("native-ccb-credit", (*Server).generateCcbCreditBean),
+		dedupArgs: func(options importDedupOptions) []string {
+			return []string{"--credit-card"}
+		},
+		decorateEntries: decorateStatementHashEntries,
+		excludedRows: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) int {
+			excluded := prepared.RawRowCount - prepared.FilteredRowCount
+			if excluded < 0 {
+				return 0
+			}
+			return excluded
+		},
+		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
+			if generated.CandidateCount != prepared.FilteredRowCount {
+				return nil, fmt.Errorf("建设银行信用卡行数核对失败：邮件/CSV 明细 %d 条，Web 前置过滤后 %d 条，但生成 %d 条。已停止导入，请检查邮件解析或配置", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
+			}
+			return []string{fmt.Sprintf("建设银行信用卡行数核对通过：邮件/CSV 明细 %d 条，Web 前置过滤后 %d 条，生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
 		},
 		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
 			return prepared.RawRowCount, prepared.FilteredRowCount
@@ -292,6 +336,7 @@ type importProviderOption struct {
 	Detail     string   `json:"detail"`
 	Extensions []string `json:"extensions"`
 	Accept     string   `json:"accept"`
+	Engine     string   `json:"engine"`
 }
 
 func importProviderOptions() []importProviderOption {
@@ -308,6 +353,7 @@ func importProviderOptions() []importProviderOption {
 			Detail:     cfg.Detail,
 			Extensions: append([]string{}, cfg.Extensions...),
 			Accept:     strings.Join(cfg.Extensions, " / "),
+			Engine:     importer.ImportEngine().ID(),
 		})
 	}
 	return options
@@ -352,7 +398,7 @@ func detectImportProvider(filename string, content []byte, override string) (pro
 }
 
 func errorsUnsupportedBillType() error {
-	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS、招商银行信用卡 PDF/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
+	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func decorateStatementHashEntries(meta importMeta, entries []ImportEntry) {

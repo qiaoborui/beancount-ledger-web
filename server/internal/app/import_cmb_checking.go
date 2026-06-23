@@ -10,13 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	pdf "github.com/ledongthuc/pdf"
 	"gopkg.in/yaml.v3"
 )
 
-var cmbCheckingCSVHeaders = []string{"记账日期", "货币", "交易金额", "联机余额", "交易摘要", "对手信息"}
+var cmbCheckingCSVHeaders = []string{"记账日期", "货币", "交易金额", "联机余额", "交易摘要", "对手信息", "客户摘要"}
+var cmbCheckingPDFHeaders = cmbCheckingCSVHeaders[:6]
 
 type cmbCheckingConfig struct {
 	DefaultDebitAccount  string                   `yaml:"defaultDebitAccount"`
@@ -57,6 +59,9 @@ func (s *Server) prepareCmbCheckingInput(inputFile, originalFilename, importID s
 		return preparedImportInput{}, err
 	}
 	outputFile := previewPath(s.cfg, importID, "cmb-checking-normalized.csv")
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o700); err != nil {
+		return preparedImportInput{}, err
+	}
 	if err := os.WriteFile(outputFile, []byte(result.CSV), 0o600); err != nil {
 		return preparedImportInput{}, err
 	}
@@ -156,7 +161,7 @@ func readCmbCheckingCSVRows(inputFile string) ([]cmbCheckingRow, error) {
 	for index, name := range header {
 		columns[strings.TrimSpace(name)] = index
 	}
-	for _, name := range cmbCheckingCSVHeaders {
+	for _, name := range cmbCheckingPDFHeaders {
 		if _, ok := columns[name]; !ok {
 			return nil, fmt.Errorf("招商银行储蓄卡 CSV 缺少字段: %s", name)
 		}
@@ -372,6 +377,10 @@ type cmbCheckingPDFResult struct {
 }
 
 func parseCmbCheckingPDFToCSV(inputFile string) (cmbCheckingPDFResult, error) {
+	if result, err := parseCmbCheckingPDFWithPDFium(inputFile); err == nil && result.RowCount > 0 {
+		return result, nil
+	}
+
 	file, reader, err := pdf.Open(inputFile)
 	if err != nil {
 		return cmbCheckingPDFResult{}, err
@@ -413,10 +422,92 @@ func parseCmbCheckingPDFToCSV(inputFile string) (cmbCheckingPDFResult, error) {
 	return cmbCheckingPDFRowsResult(rows), nil
 }
 
+func parseCmbCheckingPDFWithPDFium(inputFile string) (cmbCheckingPDFResult, error) {
+	text, err := extractPDFPlainText(inputFile)
+	if err != nil {
+		return cmbCheckingPDFResult{}, err
+	}
+	return parseCmbCheckingPDFLayoutText(text)
+}
+
+func parseCmbCheckingPDFLayoutText(text string) (cmbCheckingPDFResult, error) {
+	rows := [][]string{}
+	lineRe := regexp.MustCompile(`^\s*(\d{4}-\d{2}-\d{2})\s+([A-Z][A-Z0-9]*)\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(.+?)\s*$`)
+	for _, rawLine := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		m := lineRe.FindStringSubmatch(line)
+		if m != nil {
+			summary, counterparty := splitCmbCheckingPDFSummaryCounterparty(m[5])
+			rows = append(rows, []string{m[1], m[2], m[3], m[4], summary, counterparty})
+			continue
+		}
+		if len(rows) == 0 || !looksLikeCmbCheckingPDFContinuation(line) {
+			continue
+		}
+		last := rows[len(rows)-1]
+		last[5] = strings.TrimSpace(strings.Join([]string{last[5], line}, " "))
+	}
+	if len(rows) == 0 {
+		return cmbCheckingPDFResult{}, errors.New("未从招商银行储蓄卡 PDF 中解析到交易明细")
+	}
+	return cmbCheckingPDFRowsResult(rows), nil
+}
+
+func splitCmbCheckingPDFSummaryCounterparty(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	summaries := []string{
+		"银联线上有卡支付",
+		"结售汇即时售汇",
+		"结售汇即时结汇",
+		"掌上生活还款",
+		"银联快捷支付",
+		"快捷支付",
+		"快捷退款",
+		"网联收款",
+		"汇入汇款",
+		"代发款项",
+	}
+	for _, summary := range summaries {
+		if value == summary {
+			return summary, ""
+		}
+		if strings.HasPrefix(value, summary+" ") {
+			return summary, strings.TrimSpace(strings.TrimPrefix(value, summary))
+		}
+	}
+	if m := regexp.MustCompile(`^(.+?)\s{2,}(.+)$`).FindStringSubmatch(value); m != nil {
+		return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+	}
+	fields := strings.Fields(value)
+	if len(fields) >= 2 {
+		return fields[0], strings.Join(fields[1:], " ")
+	}
+	return value, ""
+}
+
+func looksLikeCmbCheckingPDFContinuation(line string) bool {
+	if strings.Contains(line, "温馨提示") || strings.Contains(line, "招商银行交易流水") || strings.Contains(line, "Transaction Statement") {
+		return false
+	}
+	if regexp.MustCompile(`^\d+/\d+$`).MatchString(line) || strings.Contains(line, "————") {
+		return false
+	}
+	if regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`).MatchString(line) {
+		return false
+	}
+	if strings.Contains(line, "记账日期") || strings.Contains(line, "Date Currency") || strings.Contains(line, "Amount Balance") {
+		return false
+	}
+	return true
+}
+
 func cmbCheckingPDFRowsResult(rows [][]string) cmbCheckingPDFResult {
 	csvRows := []string{csvLine(cmbCheckingCSVHeaders)}
 	for _, row := range rows {
-		csvRows = append(csvRows, csvLine(row))
+		csvRows = append(csvRows, csvLine(padCSVRow(row, len(cmbCheckingCSVHeaders))))
 	}
 	return cmbCheckingPDFResult{
 		CSV:      strings.Join(csvRows, "\n"),
@@ -431,7 +522,7 @@ func extractCmbCheckingPDFHeaderInfo(page pdf.Page) (cmbPDFHeaderInfo, error) {
 	for _, line := range lines {
 		text := compactPDFLineText(line)
 		matchesAllHeaders := true
-		for _, header := range cmbCheckingCSVHeaders {
+		for _, header := range cmbCheckingPDFHeaders {
 			if !strings.Contains(text, header) {
 				matchesAllHeaders = false
 				break
@@ -443,21 +534,23 @@ func extractCmbCheckingPDFHeaderInfo(page pdf.Page) (cmbPDFHeaderInfo, error) {
 		}
 	}
 	if len(headerLine.Items) == 0 {
-		return cmbPDFHeaderInfo{}, fmt.Errorf("未找到招行储蓄卡 PDF 表头: %s", strings.Join(cmbCheckingCSVHeaders, ", "))
+		return cmbPDFHeaderInfo{}, fmt.Errorf("未找到招行储蓄卡 PDF 表头: %s", strings.Join(cmbCheckingPDFHeaders, ", "))
 	}
 	ranges := []cmbPDFColumnRange{}
-	for index, header := range cmbCheckingCSVHeaders {
+	for index, header := range cmbCheckingPDFHeaders {
 		x, ok := findHeaderX(headerLine, header)
 		if !ok {
 			return cmbPDFHeaderInfo{}, fmt.Errorf("未找到招行储蓄卡 PDF 表头: %s", header)
 		}
 		ranges = append(ranges, cmbPDFColumnRange{Title: header, Index: index, Left: x, Right: 9999})
 	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].Left < ranges[j].Left })
 	for i := range ranges {
 		if i+1 < len(ranges) {
 			ranges[i].Right = ranges[i+1].Left - 0.01
 		}
 	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].Index < ranges[j].Index })
 	return cmbPDFHeaderInfo{Title: "招商银行储蓄卡交易流水", Ranges: ranges}, nil
 }
 
@@ -465,7 +558,7 @@ func extractCmbCheckingPDFRows(page pdf.Page, headerInfo cmbPDFHeaderInfo) [][]s
 	lines := groupPDFTextLines(pageTextItems(page))
 	rows := [][]string{}
 	for _, line := range lines {
-		cells := make([]string, len(cmbCheckingCSVHeaders))
+		cells := make([]string, len(cmbCheckingPDFHeaders))
 		hasCell := false
 		for _, item := range line.Items {
 			col := cmbPDFColumnForX(item.X, headerInfo.Ranges)
@@ -483,7 +576,7 @@ func extractCmbCheckingPDFRows(page pdf.Page, headerInfo cmbPDFHeaderInfo) [][]s
 }
 
 func looksLikeCmbCheckingPDFDataRow(row []string) bool {
-	if len(row) < len(cmbCheckingCSVHeaders) {
+	if len(row) < len(cmbCheckingPDFHeaders) {
 		return false
 	}
 	dateRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

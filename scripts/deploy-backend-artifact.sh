@@ -282,6 +282,29 @@ else
   exit 1
 fi
 
+echo "==> Checking $APP_NAME health"
+health_url="http://127.0.0.1:$PORT_EFFECTIVE/api/health"
+health_body=""
+for _ in {1..20}; do
+  if health_body="$(curl --fail --silent --show-error --max-time 3 "$health_url" 2>/dev/null)" && [[ "$health_body" == *'"ok":true'* ]]; then
+    echo "==> $APP_NAME health check passed"
+    break
+  fi
+  sleep 1
+done
+if [[ "$health_body" != *'"ok":true'* ]]; then
+  echo "==> ERROR: $APP_NAME health check failed: $health_url" >&2
+  if [[ -n "$health_body" ]]; then
+    echo "$health_body" >&2
+  fi
+  if [[ "$SERVICE_SCOPE" == "system" ]]; then
+    sudo journalctl -u "$APP_NAME" --no-pager -n 20 >&2
+  else
+    journalctl --user -u "$APP_NAME" --no-pager -n 20 >&2
+  fi
+  exit 1
+fi
+
 find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 \
   | xargs -0 ls -dt 2>/dev/null \
   | tail -n +6 \

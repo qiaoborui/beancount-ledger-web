@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
-import { shouldConvertCmbCheckingPdf } from "@/lib/cmbCheckingPdfDetection";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
@@ -34,10 +33,10 @@ import {
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
-type Provider = "alipay" | "wechat" | "cmb" | "cmb-checking";
+type Provider = "alipay" | "wechat" | "cmb" | "ccb-credit" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
 type ProviderChoice = { value: ProviderOverride; label: string; detail: string; accept: string };
-type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string };
+type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string; engine?: string };
 
 type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
 type ImportPosting = { account: string; amount: string; currency: string; priceKind?: "unit" | "total"; priceAmount?: string; priceCurrency?: string };
@@ -101,6 +100,7 @@ const fallbackProviderChoices: ProviderChoice[] = [
   { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
   { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
   { value: "cmb", label: "招商银行信用卡", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
+  { value: "ccb-credit", label: "建设银行信用卡", detail: "信用卡邮件 EML、HTML 或标准 CSV", accept: ".eml / .html / .htm / .csv" },
   { value: "cmb-checking", label: "招商银行储蓄卡", detail: "储蓄卡交易流水 CSV，PDF 可尝试", accept: ".csv / .pdf" },
 ];
 
@@ -122,7 +122,7 @@ function providerLabel(provider: Provider, choices: ProviderChoice[]) {
 }
 
 function isProvider(value: string | undefined): value is Provider {
-  return value === "alipay" || value === "wechat" || value === "cmb" || value === "cmb-checking";
+  return value === "alipay" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "cmb-checking";
 }
 
 function importDocumentCoverageValue(document: ImportDocument) {
@@ -361,13 +361,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     try {
-      const uploadFile = shouldConvertCmbCheckingPdf(file, providerOverride)
-        ? await import("@/lib/cmbCheckingPdf").then((mod) => mod.convertCmbCheckingPdfToCsv(file))
-        : file;
       const form = new FormData();
       if (providerOverride !== "auto") form.set("provider", providerOverride);
-      form.set("file", uploadFile);
-      if (uploadFile !== file) form.set("originalFile", file);
+      form.set("file", file);
       form.set("alipayFundRounding", String(alipayFundRounding));
       const res = await fetch("/api/ledger/imports/preview", { method: "POST", body: form });
       const data = await readJson<ImportPreview>(res);
@@ -527,7 +523,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 resetForFile(event.dataTransfer.files?.[0] ?? null);
               }}
             >
-              <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
+              <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf,.eml,.html,.htm" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
               <div className="grid h-14 w-14 place-items-center rounded-2xl border border-line bg-panel text-brand shadow-sm transition group-hover:scale-105">
                 <UploadCloud className="h-7 w-7" />
               </div>

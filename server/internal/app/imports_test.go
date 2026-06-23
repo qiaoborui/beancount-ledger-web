@@ -3,14 +3,18 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+
+	pdf "github.com/ledongthuc/pdf"
 )
 
 func TestImportPreviewAndCommit(t *testing.T) {
@@ -18,27 +22,6 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
 	if err := os.Chmod(beanCheck, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	deg := filepath.Join(t.TempDir(), "double-entry-generator")
-	mustWrite(t, deg, strings.Join([]string{
-		"#!/bin/sh",
-		"out=\"\"",
-		"prev=\"\"",
-		"for arg in \"$@\"; do",
-		"  if [ \"$prev\" = \"--output\" ]; then out=\"$arg\"; fi",
-		"  prev=\"$arg\"",
-		"done",
-		"cat > \"$out\" <<'EOF'",
-		"2026-05-03 * \"便利店\" \"便利店\"",
-		"  orderId: \"alipay-1\"",
-		"  source: \"alipay\"",
-		"  Expenses:Food                         6.50 CNY",
-		"  Assets:Cash                         -6.50 CNY",
-		"EOF",
-		"",
-	}, "\n"))
-	if err := os.Chmod(deg, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fakePython := filepath.Join(t.TempDir(), "python3")
@@ -60,10 +43,20 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if err := os.Chmod(fakePython, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), "alipay: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Income:Other",
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipay:",
+		"  rules:",
+		"    - method: 网商银行储蓄卡",
+		"      methodAccount: Assets:Cash",
+		"    - category: 日用百货",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
-	t.Setenv("DOUBLE_ENTRY_GENERATOR_BIN", deg)
 	t.Setenv("PYTHON_BIN", fakePython)
 	t.Setenv("APP_PASSWORD", "secret")
 	router := NewRouter(cfg)
@@ -75,7 +68,33 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = part.Write([]byte("交易创建时间,交易对方,金额\n2026-05-03,便利店,6.50\n"))
+	_, _ = part.Write([]byte(strings.Join([]string{
+		"------------------------------------------------------------------------------------",
+		"导出信息：",
+		"姓名：测试",
+		"支付宝账户：test@example.com",
+		"起始时间：[2026-05-24 00:00:00]    终止时间：[2026-05-24 23:59:59]",
+		"导出交易类型：[全部]",
+		"导出时间：[2026-05-24 23:24:06]",
+		"共1笔记录",
+		"收入：0笔 0.00元",
+		"支出：1笔 6.50元",
+		"不计收支：0笔 0.00元",
+		"",
+		"特别提示：",
+		"1.提示",
+		"2.提示",
+		"3.提示",
+		"4.提示",
+		"5.提示",
+		"6.提示",
+		"7.提示",
+		"8.提示",
+		"",
+		"------------------------支付宝支付科技有限公司  电子客户回单------------------------",
+		"交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注,",
+		"2026-05-24 17:55:17,日用百货,便利店,157******14,零食,支出,6.50,网商银行储蓄卡(0691),交易成功,module-order,merchant-1,,",
+	}, "\n")))
 	originalPart, err := writer.CreateFormFile("originalFile", "statement.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +129,7 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if preview.ImportID == "" || len(preview.Entries) != 1 {
 		t.Fatalf("unexpected preview: %#v", preview)
 	}
-	if preview.Entries[0].OrderID != "alipay-1" || preview.Entries[0].CategoryAccount != "Expenses:Food" {
+	if preview.Entries[0].OrderID != "module-order" || preview.Entries[0].CategoryAccount != "Expenses:Food" {
 		t.Fatalf("preview did not parse DEG output: %#v", preview.Entries[0])
 	}
 	foundAlias := false
@@ -137,7 +156,7 @@ func TestImportPreviewAndCommit(t *testing.T) {
 		t.Fatal("expected import output file")
 	}
 	importText := string(mustRead(t, filepath.Join(importsDir, files[0].Name())))
-	if !strings.Contains(importText, "document Assets:Cash") || !strings.Contains(importText, "orderId: \"alipay-1\"") {
+	if !strings.Contains(importText, "document Assets:Cash") || !strings.Contains(importText, "orderId: \"module-order\"") {
 		t.Fatalf("import output missing document or transaction:\n%s", importText)
 	}
 	documentsDir := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports")
@@ -168,7 +187,7 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	if len(history.Documents) != 1 {
 		t.Fatalf("documents = %#v", history.Documents)
 	}
-	if history.Documents[0].Provider != "alipay" || history.Documents[0].DateStart != "2026-05-03" || history.Documents[0].Ext != ".pdf" {
+	if history.Documents[0].Provider != "alipay" || history.Documents[0].DateStart != "2026-05-24" || history.Documents[0].Ext != ".pdf" {
 		t.Fatalf("unexpected document metadata: %#v", history.Documents[0])
 	}
 	fileRes := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/documents/file?path="+url.QueryEscape(history.Documents[0].Path), "", cookies)
@@ -200,13 +219,19 @@ func TestImportProvidersEndpoint(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Providers) != 4 {
+	if len(response.Providers) != 5 {
 		t.Fatalf("providers = %#v", response.Providers)
 	}
-	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "wechat" || response.Providers[2].ID != "cmb" || response.Providers[3].ID != "cmb-checking" {
+	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "wechat" || response.Providers[2].ID != "cmb" || response.Providers[3].ID != "ccb-credit" || response.Providers[4].ID != "cmb-checking" {
 		t.Fatalf("unexpected provider order: %#v", response.Providers)
 	}
-	if response.Providers[3].Label != "招商银行储蓄卡" || response.Providers[3].Accept != ".pdf / .csv" {
+	if response.Providers[3].Label != "建设银行信用卡" || response.Providers[3].Accept != ".eml / .html / .htm / .csv" {
+		t.Fatalf("unexpected ccb metadata: %#v", response.Providers[3])
+	}
+	if response.Providers[0].Engine != "deg-module" || response.Providers[3].Engine != "native-ccb-credit" || response.Providers[4].Engine != "deg-module" {
+		t.Fatalf("unexpected provider engines: %#v", response.Providers)
+	}
+	if response.Providers[4].Label != "招商银行储蓄卡" || response.Providers[4].Accept != ".pdf / .csv" {
 		t.Fatalf("unexpected checking metadata: %#v", response.Providers[3])
 	}
 }
@@ -379,6 +404,70 @@ func TestPrepareAlipayCSVForDEGPadsHeaderRecord(t *testing.T) {
 	}
 }
 
+func TestDEGModuleImportEngineGeneratesBeancount(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Income:Other",
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipay:",
+		"  rules:",
+		"    - method: 网商银行储蓄卡",
+		"      methodAccount: Assets:Cash",
+		"    - category: 日用百货",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "alipay.csv")
+	mustWrite(t, input, strings.Join([]string{
+		"------------------------------------------------------------------------------------",
+		"导出信息：",
+		"姓名：测试",
+		"支付宝账户：test@example.com",
+		"起始时间：[2026-05-24 00:00:00]    终止时间：[2026-05-24 23:59:59]",
+		"导出交易类型：[全部]",
+		"导出时间：[2026-05-24 23:24:06]",
+		"共1笔记录",
+		"收入：0笔 0.00元",
+		"支出：1笔 6.50元",
+		"不计收支：0笔 0.00元",
+		"",
+		"特别提示：",
+		"1.提示",
+		"2.提示",
+		"3.提示",
+		"4.提示",
+		"5.提示",
+		"6.提示",
+		"7.提示",
+		"8.提示",
+		"",
+		"------------------------支付宝支付科技有限公司  电子客户回单------------------------",
+		"交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注,",
+		"2026-05-24 17:55:17,日用百货,便利店,157******14,零食,支出,6.50,网商银行储蓄卡(0691),交易成功,module-order,merchant-1,,",
+	}, "\n"))
+
+	server := &Server{cfg: cfg}
+	prepared, err := server.prepareAlipayCSVForDEG(input, "degmodule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "alipay.bean")
+	err = degModuleImportEngine{}.Generate(server, importEngineInput{
+		ProviderID: "alipay",
+		Config:     importProviderConfigs["alipay"],
+		InputFile:  prepared.InputFile,
+		OutputFile: output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	if !strings.Contains(generated, `orderId: "module-order"`) || !strings.Contains(generated, "Expenses:Food") || !strings.Contains(generated, "Assets:Cash") {
+		t.Fatalf("generated bean missing expected module output:\n%s", generated)
+	}
+}
+
 func TestCmbImportHelpers(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-credit-card-config.yaml"), strings.Join([]string{
@@ -425,28 +514,49 @@ func TestCmbImportHelpers(t *testing.T) {
 	}
 }
 
+func TestCmbCreditPDFParserWithFixture(t *testing.T) {
+	fixture := strings.TrimSpace(os.Getenv("CMB_CREDIT_PDF_FIXTURE"))
+	if fixture == "" {
+		t.Skip("set CMB_CREDIT_PDF_FIXTURE to verify a real 招商银行信用卡 PDF")
+	}
+	result, err := parseCmbCreditPDFToCSV(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RowCount == 0 {
+		t.Fatalf("expected PDF rows, got %#v", result)
+	}
+	if !strings.Contains(result.Title, "招商银行信用卡对账单") {
+		t.Fatalf("unexpected title: %s", result.Title)
+	}
+	if !strings.Contains(result.CSV, "掌上生活还款") || !strings.Contains(result.CSV, "人民币金额") {
+		t.Fatalf("unexpected normalized CSV:\n%s", result.CSV)
+	}
+}
+
 func TestCmbCheckingImportHelpers(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-checking-config.yaml"), strings.Join([]string{
-		"defaultDebitAccount: Expenses:Food",
-		"defaultCreditAccount: Income:Salary",
-		"cashAccount: Assets:Cash",
+		"defaultMinusAccount: Expenses:Food",
+		"defaultPlusAccount: Income:Salary",
+		"defaultCashAccount: Assets:Cash",
 		"defaultCurrency: CNY",
-		"cmbChecking:",
+		"title: 招商银行储蓄卡流水",
+		"cmb:",
 		"  rules:",
-		"    - item: 掌上生活还款",
+		"    - txType: 掌上生活还款",
 		"      targetAccount: Liabilities:CN:CMB:CreditCard:0016",
-		"    - item: 摩拜,岭南通",
+		"    - peer: 摩拜,岭南通",
 		"      targetAccount: Expenses:Food",
 		"",
 	}, "\n"))
 	input := filepath.Join(t.TempDir(), "cmb-checking.csv")
 	output := filepath.Join(t.TempDir(), "cmb-checking.bean")
 	mustWrite(t, input, strings.Join([]string{
-		"记账日期,货币,交易金额,联机余额,交易摘要,对手信息",
-		"2026-05-20,CNY,100.00,106.31,网联收款,乔博睿 10563996799",
-		"2026-05-20,CNY,-50.00,56.31,银联线上有卡支付,广东岭南通股份有限公司308999841110034",
-		"2026-06-05,CNY,\"-11,595.81\",\"1,459.63\",掌上生活还款,乔博睿 4514617564329813",
+		"记账日期,货币,交易金额,联机余额,交易摘要,对手信息,客户摘要",
+		"2026-05-20,CNY,100.00,106.31,网联收款,乔博睿 10563996799,",
+		"2026-05-20,CNY,-50.00,56.31,银联线上有卡支付,广东岭南通股份有限公司308999841110034,",
+		"2026-06-05,CNY,\"-11,595.81\",\"1,459.63\",掌上生活还款,乔博睿 4514617564329813,",
 	}, "\n"))
 
 	detection, err := detectBillProvider("招商银行交易流水.pdf.csv", []byte(mustRead(t, input)), "")
@@ -458,12 +568,19 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 	}
 
 	server := &Server{cfg: cfg}
-	if err := server.generateCmbCheckingBean(input, output); err != nil {
+	importer, ok := importProvider("cmb-checking")
+	if !ok {
+		t.Fatal("missing cmb-checking provider")
+	}
+	if importer.ImportEngine().ID() != "deg-module" {
+		t.Fatalf("engine = %s", importer.ImportEngine().ID())
+	}
+	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}
 	generated := string(mustRead(t, output))
-	if !strings.Contains(generated, `source: "cmb-checking"`) || !strings.Contains(generated, `Assets:Cash`) {
-		t.Fatalf("generated bean missing checking metadata or cash account:\n%s", generated)
+	if !strings.Contains(generated, `Assets:Cash`) {
+		t.Fatalf("generated bean missing checking cash account:\n%s", generated)
 	}
 	if !strings.Contains(generated, `Liabilities:CN:CMB:CreditCard:0016`) || !strings.Contains(generated, `11595.81 CNY`) {
 		t.Fatalf("generated bean missing credit-card repayment posting:\n%s", generated)
@@ -472,13 +589,106 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 3 || entries[0].Source != "cmb-checking" || entries[1].FundingAccount != "Assets:Cash" {
+	if len(entries) != 3 || entries[1].FundingAccount != "Assets:Cash" {
 		t.Fatalf("unexpected preview entries: %#v", entries)
 	}
 
 	accounts := map[string]bool{"Assets:CN:CMB:Checking": true, "Liabilities:CN:CMB:CreditCard:0016": true}
 	if got := providerDocumentAccount("cmb-checking", accounts, "Liabilities:CN:CMB:CreditCard:0016"); got != "Assets:CN:CMB:Checking" {
 		t.Fatalf("document account = %s", got)
+	}
+}
+
+func TestCmbCheckingPDFParserWithFixture(t *testing.T) {
+	fixture := strings.TrimSpace(os.Getenv("CMB_CHECKING_PDF_FIXTURE"))
+	if fixture == "" {
+		t.Skip("set CMB_CHECKING_PDF_FIXTURE to verify a real 招商银行储蓄卡 PDF")
+	}
+	result, err := parseCmbCheckingPDFToCSV(fixture)
+	if err != nil {
+		t.Logf("first PDF lines:\n%s", debugCmbCheckingPDFLines(t, fixture, 80))
+		t.Logf("first PDF items:\n%s", debugCmbCheckingPDFItems(t, fixture, 80))
+		t.Fatal(err)
+	}
+	if result.RowCount == 0 {
+		t.Fatalf("expected PDF rows, got %#v", result)
+	}
+	output := filepath.Join(t.TempDir(), "cmb-checking-normalized.csv")
+	mustWrite(t, output, result.CSV)
+	rows, err := readCmbCheckingCSVRows(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != result.RowCount {
+		t.Fatalf("row count mismatch: result=%d csv=%d", result.RowCount, len(rows))
+	}
+}
+
+func debugCmbCheckingPDFLines(t *testing.T, fixture string, limit int) string {
+	t.Helper()
+	file, reader, err := pdf.Open(fixture)
+	if err != nil {
+		return err.Error()
+	}
+	defer file.Close()
+	lines := []string{}
+	for pageNo := 1; pageNo <= reader.NumPage() && len(lines) < limit; pageNo++ {
+		for _, line := range groupPDFTextLines(pageTextItems(reader.Page(pageNo))) {
+			text := strings.TrimSpace(compactPDFLineText(line))
+			if text == "" {
+				continue
+			}
+			lines = append(lines, text)
+			if len(lines) >= limit {
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func debugCmbCheckingPDFItems(t *testing.T, fixture string, limit int) string {
+	t.Helper()
+	file, reader, err := pdf.Open(fixture)
+	if err != nil {
+		return err.Error()
+	}
+	defer file.Close()
+	items := pageTextItems(reader.Page(1))
+	sort.Slice(items, func(i, j int) bool {
+		if absFloat(items[i].Y-items[j].Y) > 1.5 {
+			return items[i].Y > items[j].Y
+		}
+		return items[i].X < items[j].X
+	})
+	lines := []string{}
+	for i, item := range items {
+		if i >= limit {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("x=%.2f y=%.2f w=%.2f text=%q", item.X, item.Y, item.W, item.Text))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestCmbCheckingPDFRowsResultProducesImportableCSV(t *testing.T) {
+	result := cmbCheckingPDFRowsResult([][]string{
+		{"2026-06-06", "CNY", "-12.34", "100.00", "银联线上有卡支付", "示例商户"},
+	})
+	if result.RowCount != 1 {
+		t.Fatalf("row count = %d", result.RowCount)
+	}
+	output := filepath.Join(t.TempDir(), "cmb-checking-normalized.csv")
+	mustWrite(t, output, result.CSV)
+	rows, err := readCmbCheckingCSVRows(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Date != "2026-06-06" || rows[0].Counterparty != "示例商户" {
+		t.Fatalf("unexpected rows: %#v", rows)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected parser warning")
 	}
 }
 
@@ -547,6 +757,179 @@ func TestCmbCheckingFXImportHelpers(t *testing.T) {
 	if !strings.Contains(rendered, "100.00 HKD @@ 86.86 CNY") || !strings.Contains(rendered, "-100.00 HKD @@ 86.52 CNY") {
 		t.Fatalf("rendered import lost FX prices:\n%s", rendered)
 	}
+}
+
+func TestCcbCreditEmailImportHelpers(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "ccb-credit-card-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Expenses:Unknown",
+		"defaultPlusAccount: Expenses:Unknown",
+		"defaultCashAccount: Liabilities:CN:CCB:CreditCard:7720",
+		"defaultCurrency: CNY",
+		"ccbCredit:",
+		"  paymentSourceHandledExternally:",
+		"    - 支付宝-",
+		"    - 财付通-",
+		"  rules:",
+		"    - item: OPENROUTER",
+		"      targetAccount: Expenses:Digital:Subscription",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "ccb.eml")
+	normalized := filepath.Join(t.TempDir(), "ccb-normalized.csv")
+	output := filepath.Join(t.TempDir(), "ccb.bean")
+	mustWrite(t, input, ccbCreditTestEmail([]string{
+		"2026-06-13,2026-06-13,7720,财付通-滴滴出行,CNY,1.60,CNY,1.60",
+		"2026-06-18,2026-06-18,7720,支付宝-瑞幸咖啡（中国）有限公司,CNY,3.40,CNY,3.40",
+		"2026-06-20,2026-06-20,7720,OPENROUTER,CNY,10.00,CNY,10.00",
+	}))
+
+	statement, err := parseCcbCreditStatementFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statement.Rows) != 3 || statement.Cycle != "2026/06/13-2026/06/21" || statement.DueDate != "2026-07-10" {
+		t.Fatalf("unexpected statement: %#v", statement)
+	}
+	normalizedStatement := normalizedCcbCreditStatement(statement.Rows, statement)
+	if len(normalizedStatement.Transactions) != 3 || normalizedStatement.Transactions[0].Amount != 160 || normalizedStatement.Cycle != statement.Cycle {
+		t.Fatalf("unexpected normalized statement: %#v", normalizedStatement)
+	}
+	if err := writeCcbCreditCSV(statement.Rows, normalized); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{cfg: cfg}
+	prefilter, err := server.prefilterCcbCreditCSV(normalized, normalized+".filtered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefilter.RawRowCount != 3 || prefilter.Skipped != 2 || prefilter.FilteredRowCount != 1 {
+		t.Fatalf("unexpected prefilter counts: %#v", prefilter)
+	}
+	if err := server.generateCcbCreditBean(normalized+".filtered", output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	if !strings.Contains(generated, `source: "ccb-credit"`) || !strings.Contains(generated, "Expenses:Digital:Subscription") || !strings.Contains(generated, "Liabilities:CN:CCB:CreditCard:7720") {
+		t.Fatalf("generated bean missing CCB credit postings:\n%s", generated)
+	}
+	entries, err := parsePreviewEntries(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Source != "ccb-credit" || entries[0].FundingAccount != "Liabilities:CN:CCB:CreditCard:7720" {
+		t.Fatalf("unexpected preview entries: %#v", entries)
+	}
+
+	reviewCSV := filepath.Join(t.TempDir(), "ccb-review.csv")
+	mustWrite(t, reviewCSV, strings.Join([]string{
+		"no,transactionDate,postingDate,cardLast4,description,transactionCurrency,transactionAmount,settlementCurrency,settlementAmount,action,reason,page",
+		"1,2026-06-13,2026-06-13,7720,财付通-滴滴出行,人民币元,1.60,人民币元,1.60,excluded-platform,platform-payment-source,1",
+	}, "\n"))
+	reviewRows, err := readCcbCreditCSVRows(reviewCSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewRows) != 1 || reviewRows[0].TransactionCurrency != "CNY" || reviewRows[0].SettlementCurrency != "CNY" {
+		t.Fatalf("unexpected review CSV rows: %#v", reviewRows)
+	}
+	detection, err := detectImportProvider("ccb-review.csv", mustRead(t, reviewCSV), "")
+	if err != nil || detection.Provider != "ccb-credit" {
+		t.Fatalf("unexpected review CSV detection: %#v err=%v", detection, err)
+	}
+}
+
+func TestCcbCreditAllPlatformPreview(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "ccb-credit-card-config.yaml"), strings.Join([]string{
+		"defaultCashAccount: Liabilities:CN:CCB:CreditCard:7720",
+		"ccbCredit:",
+		"  paymentSourceHandledExternally:",
+		"    - 财付通-",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	part, err := writer.CreateFormFile("file", "中国建设银行信用卡电子账单.eml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte(ccbCreditTestEmail([]string{
+		"2026-06-13,2026-06-13,7720,财付通-滴滴出行,CNY,1.60,CNY,1.60",
+	})))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ledger/imports/preview", &form)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var preview struct {
+		Provider         string        `json:"provider"`
+		Entries          []ImportEntry `json:"entries"`
+		RawRowCount      int           `json:"rawRowCount"`
+		FilteredRowCount int           `json:"filteredRowCount"`
+		ExcludedRowCount int           `json:"excludedRowCount"`
+		Warnings         []string      `json:"warnings"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Provider != "ccb-credit" || len(preview.Entries) != 0 || preview.RawRowCount != 1 || preview.FilteredRowCount != 0 || preview.ExcludedRowCount != 1 {
+		t.Fatalf("unexpected preview: %#v", preview)
+	}
+	if !strings.Contains(strings.Join(preview.Warnings, "\n"), "前置过滤") {
+		t.Fatalf("preview warnings missing filter detail: %#v", preview.Warnings)
+	}
+}
+
+func ccbCreditTestEmail(csvRows []string) string {
+	bodyRows := []string{}
+	for _, row := range csvRows {
+		cells := strings.Split(row, ",")
+		bodyRows = append(bodyRows, strings.Join([]string{
+			"<tr>",
+			"<td>" + cells[0] + "</td>",
+			"<td>" + cells[1] + "</td>",
+			"<td>" + cells[2] + "</td>",
+			"<td>" + cells[3] + "</td>",
+			"<td>" + cells[4] + "</td>",
+			"<td>" + cells[5] + "</td>",
+			"<td>" + cells[6] + "</td>",
+			"<td>" + cells[7] + "</td>",
+			"</tr>",
+		}, ""))
+	}
+	html := strings.Join([]string{
+		"<html><body>",
+		"<table><tr><td>本期账单日</td><td>2026-06-21</td></tr></table>",
+		"<table><tr><td>账单周期</td><td>2026/06/13-2026/06/21</td></tr><tr><td>本期到期还款日</td><td>2026/07/10</td></tr></table>",
+		"<table>",
+		"<tr><td>【交易明细】</td></tr>",
+		"<tr><td>交易日</td><td>银行记账日</td><td>卡号后四位</td><td>交易描述</td><td>交易币/金额</td><td>结算币/金额</td></tr>",
+		strings.Join(bodyRows, "\n"),
+		"</table>",
+		"</body></html>",
+	}, "\n")
+	return strings.Join([]string{
+		"From: service@vip.ccb.com",
+		"To: ledger@example.test",
+		"Subject: 中国建设银行信用卡电子账单",
+		"Content-Type: text/html; charset=UTF-8",
+		"",
+		html,
+	}, "\r\n")
 }
 
 func TestCmbPDFTableHelpers(t *testing.T) {

@@ -1,11 +1,9 @@
 package app
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -48,27 +46,18 @@ type cmbPDFColumnRange struct {
 }
 
 func parseCmbCreditPDFToCSV(inputFile string) (cmbPDFParseResult, error) {
-	if result, err := parseCmbCreditPDFWithPdftotext(inputFile); err == nil && result.RowCount > 0 {
+	if result, err := parseCmbCreditPDFWithPDFium(inputFile); err == nil && result.RowCount > 0 {
 		return result, nil
 	}
 	return parseCmbCreditPDFWithCoordinates(inputFile)
 }
 
-func parseCmbCreditPDFWithPdftotext(inputFile string) (cmbPDFParseResult, error) {
-	command := env("PDFTOTEXT_BIN", "pdftotext")
-	cmd := exec.Command(command, "-layout", inputFile, "-")
-	cmd.Env = commandEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return cmbPDFParseResult{}, fmt.Errorf("找不到命令 %s，请安装 poppler-utils 或设置 PDFTOTEXT_BIN", command)
-		}
-		detail := strings.TrimSpace(strings.Join([]string{stderr.String(), stdout.String(), err.Error()}, "\n"))
-		return cmbPDFParseResult{}, errors.New(detail)
+func parseCmbCreditPDFWithPDFium(inputFile string) (cmbPDFParseResult, error) {
+	text, err := extractPDFPlainText(inputFile)
+	if err != nil {
+		return cmbPDFParseResult{}, err
 	}
-	return parseCmbPDFLayoutText(stdout.String())
+	return parseCmbPDFLayoutText(text)
 }
 
 func parseCmbPDFLayoutText(text string) (cmbPDFParseResult, error) {
@@ -350,6 +339,15 @@ func csvLine(cells []string) string {
 		quoted[i] = csvCell(cell)
 	}
 	return strings.Join(quoted, ",")
+}
+
+func padCSVRow(cells []string, size int) []string {
+	if len(cells) >= size {
+		return cells
+	}
+	padded := make([]string, size)
+	copy(padded, cells)
+	return padded
 }
 
 func csvCell(value string) string {

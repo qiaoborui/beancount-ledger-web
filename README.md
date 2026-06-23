@@ -49,6 +49,7 @@ The app never needs your ledger data to be committed to this repository.
 - Optional ledger Git status, pull, commit, and push
 - Password login plus optional passkey / Face ID / Touch ID unlock
 - Optional Web Push notifications
+- Statement import previews for Alipay, WeChat Pay, CMB credit cards, CMB checking accounts, and CCB credit cards
 
 ## Quick start
 
@@ -151,6 +152,16 @@ include "budgets.bean"
 include "prices.bean"
 include "transactions/2026.bean"
 ```
+
+## Statement imports
+
+The import flow keeps provider logic behind a small engine abstraction:
+
+- DEG providers use `deg-module`: Alipay, WeChat Pay, and CMB credit card statements load the same YAML config files used by double-entry-generator.
+- CMB checking-account CSV/PDF statements use the Web PDF adapter plus DEG's `cmb` provider through the `cmb-checking` import source.
+- Native providers use the same Web preview, dedup, and commit flow with DEG-style YAML config: `ccb-credit` for CCB credit card email/HTML/CSV statements.
+
+Ledger-side import files live under `$LEDGER_ROOT/imports/`. CMB checking import expects `imports/cmb-checking-config.yaml`; see [examples/preview-ledger/imports/cmb-checking-config.yaml](examples/preview-ledger/imports/cmb-checking-config.yaml) for the DEG `cmb` config shape. CCB credit card import expects `imports/ccb-credit-card-config.yaml` and accepts `.eml`, `.html`, `.htm`, or normalized `.csv` files. The `ccbCredit.paymentSourceHandledExternally` config controls prefixes such as `支付宝-`, `财付通-`, and `微信支付-` that should be filtered before generation to avoid duplicate platform-payment imports.
 
 ## Examples
 

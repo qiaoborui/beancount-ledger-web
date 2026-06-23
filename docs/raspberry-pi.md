@@ -177,8 +177,9 @@ Preview should proxy to the preview app port.
 
 ## Workflow behavior
 
-- Push to `main` deploys production.
-- Pull requests deploy preview when the PR is ready for review.
+- A successful `CI` run on `main` deploys production with the artifact built by CI.
+- A successful `CI` run on a same-repository pull request deploys preview when the
+  PR is ready for review.
 - Manual `workflow_dispatch` can deploy production or preview and can choose
   `all`, `backend`, or `frontend`.
 - Changes under `server/**`, `examples/**`, `.agents/**`, `docker/**`, or the
@@ -188,5 +189,7 @@ Preview should proxy to the preview app port.
 - Changes to the deploy workflow deploy both components.
 - When both components changed, frontend deploy completes before backend deploy,
   so a backend restart sees the latest frontend symlink.
+- Backend deploy checks `http://127.0.0.1:<port>/api/health` after systemd
+  restart and fails the run when the app cannot read the selected ledger root.
 
 Each component keeps the latest five releases for quick manual rollback.

@@ -4,9 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ARTIFACT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   plan:
@@ -35,12 +37,12 @@ jobs:
           web=false
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/ci.yml|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*)
+              .github/workflows/ci.yml|.github/workflows/deploy-raspberry-pi.yml|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
                 backend=true
                 ;;
             esac
             case "$file" in
-              .github/workflows/ci.yml|web/*|web/**/*|docker/*|docker/**/*)
+              .github/workflows/ci.yml|.github/workflows/deploy-raspberry-pi.yml|web/*|web/**/*|docker/*|docker/**/*|scripts/deploy-frontend-artifact.sh)
                 web=true
                 ;;
             esac
@@ -54,6 +56,18 @@ jobs:
             echo "- Backend: \`$backend\`"
             echo "- Web: \`$web\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p ci-plan
+          {
+            echo "backend=$backend"
+            echo "web=$web"
+          } > ci-plan/components.env
+      - name: Upload CI plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-web-ci-plan-${{ env.ARTIFACT_SHA }}
+          path: ci-plan/components.env
+          if-no-files-found: error
+          retention-days: 7
 
   go:
     name: Backend
@@ -71,7 +85,29 @@ jobs:
         run: go test ./...
       - name: Build
         working-directory: server
-        run: go build ./cmd/ledger-web
+        run: go build -o ../ledger-web ./cmd/ledger-web
+      - name: Pack backend artifact
+        run: |
+          mkdir -p artifact
+          cp ledger-web artifact/ledger-web
+          if [[ -d examples ]]; then cp -a examples artifact/examples; fi
+          if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
+          cat > artifact/DEPLOYMENT.txt <<EOF
+          repository=${{ github.repository }}
+          sha=${{ env.ARTIFACT_SHA }}
+          ref=${{ github.ref }}
+          component=backend
+          target=ci
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          tar -czf ledger-web-backend-${{ env.ARTIFACT_SHA }}.tar.gz -C artifact .
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-web-backend-${{ env.ARTIFACT_SHA }}
+          path: ledger-web-backend-${{ env.ARTIFACT_SHA }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
   web:
     name: Frontend
@@ -103,3 +139,23 @@ jobs:
       - name: Build
         working-directory: web
         run: pnpm run build
+      - name: Pack frontend artifact
+        run: |
+          mkdir -p artifact
+          cp -a web/dist artifact/dist
+          cat > artifact/DEPLOYMENT.txt <<EOF
+          repository=${{ github.repository }}
+          sha=${{ env.ARTIFACT_SHA }}
+          ref=${{ github.ref }}
+          component=frontend
+          target=ci
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          tar -czf ledger-web-frontend-${{ env.ARTIFACT_SHA }}.tar.gz -C artifact .
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-web-frontend-${{ env.ARTIFACT_SHA }}
+          path: ledger-web-frontend-${{ env.ARTIFACT_SHA }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
