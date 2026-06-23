@@ -859,6 +859,12 @@ func TestCcbCreditEmailImportHelpers(t *testing.T) {
 
 func TestCcbCreditAllPlatformPreview(t *testing.T) {
 	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
 		"2026-01-01 open Assets:Cash CNY",
 		"2026-01-01 open Expenses:Food CNY",
