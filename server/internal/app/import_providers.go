@@ -243,7 +243,9 @@ var billImporters = []billImporter{
 		config:          importProviderConfig{Config: "imports/ccb-credit-card-config.yaml", Output: "ccb-credit-output.bean", Extensions: []string{".eml", ".html", ".htm", ".csv"}, Label: "建设银行信用卡", Detail: "信用卡邮件 EML、HTML 或标准 CSV"},
 		documentAccount: "Liabilities:CN:CCB:CreditCard:7720",
 		detect: func(filename, sample, ext string) (providerDetection, bool) {
-			if (ext == ".eml" || ext == ".html" || ext == ".htm") && regexp.MustCompile(`中国建设银行信用卡电子账单|龙卡信用卡对账单|Credit Card Statement`).MatchString(sample) {
+			ccbEmailSignature := regexp.MustCompile(`(?i)service@vip\.ccb\.com|vip\.ccb\.com|creditcard\.ccb\.com`)
+			ccbStatementSignature := regexp.MustCompile(`中国建设银行信用卡电子账单|龙卡信用卡对账单|Credit Card Statement`)
+			if (ext == ".eml" || ext == ".html" || ext == ".htm") && (ccbStatementSignature.MatchString(filename) || ccbStatementSignature.MatchString(sample) || ccbEmailSignature.MatchString(sample)) {
 				return providerDetection{Provider: "ccb-credit", Reason: "邮件内容包含建设银行信用卡账单字段", Confidence: "high"}, true
 			}
 			if ext == ".csv" && regexp.MustCompile(`交易日,银行记账日,卡号后四位,交易描述,交易币种,交易金额,结算币种,结算金额|transactionDate,postingDate,cardLast4,description,transactionCurrency,transactionAmount,settlementCurrency,settlementAmount`).MatchString(sample) {

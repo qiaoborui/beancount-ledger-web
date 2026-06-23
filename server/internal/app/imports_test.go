@@ -837,6 +837,24 @@ func TestCcbCreditEmailImportHelpers(t *testing.T) {
 	if err != nil || detection.Provider != "ccb-credit" {
 		t.Fatalf("unexpected review CSV detection: %#v err=%v", detection, err)
 	}
+
+	encodedEmail := strings.Join([]string{
+		"From: service@vip.ccb.com",
+		"To: ledger@example.test",
+		"Subject: =?UTF-8?B?5Lit5Zu95bu66K6+6ZO26KGM5L+h55So5Y2h55S15a2Q6LSm5Y2V?=",
+		"Content-Type: multipart/mixed; boundary=\"ccb-test\"",
+		"",
+		"--ccb-test",
+		"Content-Type: text/html; charset=utf-8",
+		"Content-Transfer-Encoding: base64",
+		"",
+		"PCFET0NUWVBFIEhUTUw+PGh0bWw+PC9odG1sPg==",
+		"--ccb-test--",
+	}, "\r\n")
+	detection, err = detectImportProvider("statement.eml", []byte(encodedEmail), "")
+	if err != nil || detection.Provider != "ccb-credit" {
+		t.Fatalf("unexpected encoded EML detection: %#v err=%v", detection, err)
+	}
 }
 
 func TestCcbCreditAllPlatformPreview(t *testing.T) {
@@ -891,6 +909,28 @@ func TestCcbCreditAllPlatformPreview(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(preview.Warnings, "\n"), "前置过滤") {
 		t.Fatalf("preview warnings missing filter detail: %#v", preview.Warnings)
+	}
+}
+
+func TestCcbCreditEmailParserWithFixture(t *testing.T) {
+	fixture := strings.TrimSpace(os.Getenv("CCB_CREDIT_EMAIL_FIXTURE"))
+	if fixture == "" {
+		t.Skip("set CCB_CREDIT_EMAIL_FIXTURE to verify a real 建设银行信用卡 EML")
+	}
+	content := mustRead(t, fixture)
+	detection, err := detectImportProvider(filepath.Base(fixture), content, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.Provider != "ccb-credit" {
+		t.Fatalf("provider = %s", detection.Provider)
+	}
+	statement, err := parseCcbCreditStatementFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statement.Rows) == 0 {
+		t.Fatalf("expected statement rows, got %#v", statement)
 	}
 }
 
