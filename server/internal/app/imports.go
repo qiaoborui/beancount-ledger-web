@@ -59,6 +59,8 @@ type importMeta struct {
 	DocumentFile       string            `json:"documentFile,omitempty"`
 	ProviderDetection  providerDetection `json:"providerDetection"`
 	StatementHash      string            `json:"statementHash"`
+	DateStart          string            `json:"dateStart,omitempty"`
+	DateEnd            string            `json:"dateEnd,omitempty"`
 	ExpectedEntryCount *int              `json:"expectedEntryCount,omitempty"`
 }
 
@@ -68,6 +70,8 @@ type preparedImportInput struct {
 	RawRowCount      int
 	FilteredRowCount int
 	PrefilterSkipped int
+	DateStart        string
+	DateEnd          string
 }
 
 type beanSummary struct {
@@ -166,8 +170,12 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 		return nil, err
 	}
 	warnings = append(warnings, providerWarnings...)
+	dateStart := valueOr(summary.DateStart, prepared.DateStart)
+	dateEnd := valueOr(summary.DateEnd, prepared.DateEnd)
 	expected := len(entries)
 	upload.ExpectedEntryCount = &expected
+	upload.DateStart = dateStart
+	upload.DateEnd = dateEnd
 	if err := s.writeImportMeta(importID, upload); err != nil {
 		return nil, err
 	}
@@ -191,8 +199,8 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 		"generatedCount":        generatedSummary.CandidateCount,
 		"excludedRowCount":      excludedRowCount,
 		"skippedDuplicateCount": skippedDuplicateCount,
-		"dateStart":             nullableString(summary.DateStart),
-		"dateEnd":               nullableString(summary.DateEnd),
+		"dateStart":             nullableString(dateStart),
+		"dateEnd":               nullableString(dateEnd),
 		"warnings":              warnings,
 	}, nil
 }
@@ -218,16 +226,18 @@ func (s *Server) commitImport(importID, provider string, entries []ImportEntry) 
 	if meta.ExpectedEntryCount != nil && len(entries) > *meta.ExpectedEntryCount {
 		return nil, fmt.Errorf("待写入交易数量超过预览数量：预览 %d 条，提交 %d 条，请重新生成预览", *meta.ExpectedEntryCount, len(entries))
 	}
-	if len(entries) == 0 {
-		return nil, errors.New("没有可写入的交易")
+	beanText := ""
+	summary := beanSummary{DateStart: meta.DateStart, DateEnd: meta.DateEnd}
+	if len(entries) > 0 {
+		var err error
+		beanText, err = s.validateAndRenderImportEntries(entries)
+		if err != nil {
+			return nil, err
+		}
+		summary = parseBeanSummary(beanText)
 	}
-	beanText, err := s.validateAndRenderImportEntries(entries)
-	if err != nil {
-		return nil, err
-	}
-	summary := parseBeanSummary(beanText)
-	if summary.CandidateCount == 0 || summary.DateStart == "" || summary.DateEnd == "" {
-		return nil, errors.New("去重后没有可写入的交易")
+	if summary.DateStart == "" || summary.DateEnd == "" {
+		return nil, errors.New("账单没有可归档的日期范围，请重新上传账单")
 	}
 	snapshot, err := s.cache.Snapshot()
 	if err != nil {

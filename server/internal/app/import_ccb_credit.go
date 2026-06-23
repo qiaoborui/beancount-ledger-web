@@ -82,11 +82,14 @@ func (s *Server) prepareCcbCreditInput(inputFile, originalFilename, importID str
 	normalizedFile := inputFile
 	warnings := []string{}
 	rawRowCount := 0
+	dateStart := ""
+	dateEnd := ""
 	if ext == ".eml" || ext == ".html" || ext == ".htm" {
 		statement, err := parseCcbCreditStatementFile(inputFile)
 		if err != nil {
 			return preparedImportInput{}, err
 		}
+		dateStart, dateEnd = ccbCreditStatementDateRange(statement)
 		rawRowCount = len(statement.Rows)
 		normalizedFile = previewPath(s.cfg, importID, "ccb-credit-normalized.csv")
 		if err := writeCcbCreditCSV(statement.Rows, normalizedFile); err != nil {
@@ -104,6 +107,7 @@ func (s *Server) prepareCcbCreditInput(inputFile, originalFilename, importID str
 		if err != nil {
 			return preparedImportInput{}, err
 		}
+		dateStart, dateEnd = ccbCreditRowsDateRange(rows)
 		rawRowCount = len(rows)
 		warnings = append(warnings, "当前上传的是建设银行信用卡标准 CSV。")
 	} else {
@@ -119,7 +123,7 @@ func (s *Server) prepareCcbCreditInput(inputFile, originalFilename, importID str
 		rawRowCount = prefilter.RawRowCount
 	}
 	warnings = append(warnings, prefilter.Warnings...)
-	return preparedImportInput{InputFile: prefilteredFile, Warnings: warnings, RawRowCount: rawRowCount, FilteredRowCount: prefilter.FilteredRowCount, PrefilterSkipped: prefilter.Skipped}, nil
+	return preparedImportInput{InputFile: prefilteredFile, Warnings: warnings, RawRowCount: rawRowCount, FilteredRowCount: prefilter.FilteredRowCount, PrefilterSkipped: prefilter.Skipped, DateStart: dateStart, DateEnd: dateEnd}, nil
 }
 
 type ccbCreditCSVPrefilter struct {
@@ -204,6 +208,39 @@ func normalizedCcbCreditStatement(rows []ccbCreditRow, parsed ccbCreditParsedSta
 		statement.Transactions = append(statement.Transactions, normalizedCcbCreditTransaction(row))
 	}
 	return statement
+}
+
+func ccbCreditStatementDateRange(statement ccbCreditParsedStatement) (string, string) {
+	if match := regexp.MustCompile(`(\d{4}[/-]\d{2}[/-]\d{2})\s*[-~至]\s*(\d{4}[/-]\d{2}[/-]\d{2})`).FindStringSubmatch(statement.Cycle); match != nil {
+		return normalizeCcbCreditDate(match[1]), normalizeCcbCreditDate(match[2])
+	}
+	return ccbCreditRowsDateRange(statement.Rows)
+}
+
+func ccbCreditRowsDateRange(rows []ccbCreditRow) (string, string) {
+	start := ""
+	end := ""
+	for _, row := range rows {
+		date := normalizeCcbCreditDate(valueOr(row.TransactionDate, row.PostingDate))
+		if date == "" {
+			continue
+		}
+		if start == "" || date < start {
+			start = date
+		}
+		if end == "" || date > end {
+			end = date
+		}
+	}
+	return start, end
+}
+
+func normalizeCcbCreditDate(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "/", "-")
+	if regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`).MatchString(value) {
+		return value
+	}
+	return ""
 }
 
 func normalizedCcbCreditTransaction(row ccbCreditRow) normalizedTransaction {

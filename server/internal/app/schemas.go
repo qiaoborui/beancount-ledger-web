@@ -187,9 +187,6 @@ func (r ImportCommitRequest) Validate() error {
 	if strings.TrimSpace(r.Provider) == "" {
 		return fmt.Errorf("provider is required")
 	}
-	if len(r.Entries) == 0 {
-		return fmt.Errorf("entries is required")
-	}
 	for i, entry := range r.Entries {
 		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("entries[%d]: %w", i, err)

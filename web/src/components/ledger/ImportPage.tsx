@@ -242,7 +242,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
   const hasCommitted = commitResult?.ok === true;
-  const canCommit = Boolean(preview) && entries.length > 0 && !committing && !hasCommitted;
+  const canCommit = Boolean(preview) && !committing && !hasCommitted;
   const originalEntryCount = preview?.entries.length ?? 0;
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
@@ -760,7 +760,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />已写入 {commitResult.count} 条交易</div>
+                      <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />{(commitResult.count ?? 0) > 0 ? `已写入 ${commitResult.count} 条交易` : "已归档账单"}</div>
                       <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
@@ -788,7 +788,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
-                      <div className="mt-0.5 text-xs text-stone">逐条核对，移除后只提交剩余交易。</div>
+                      <div className="mt-0.5 text-xs text-stone">{entries.length === 0 ? "确认后会归档原始账单。" : "逐条核对，移除后只提交剩余交易。"}</div>
                     </div>
                     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
                       <span className="rounded-full bg-tag px-2 py-1">{entries.length} 待写入</span>
@@ -796,7 +796,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                     </div>
                   </div>
                   {entries.length === 0 ? (
-                    <div className="px-4 py-10 text-center text-sm text-stone">已删除所有候选交易。</div>
+                    <div className="px-4 py-10 text-center text-sm text-stone">没有待写入交易，确认后归档账单文件。</div>
                   ) : (
                     <div className="divide-y divide-line xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                       {entries.map((entry, index) => {

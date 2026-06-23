@@ -859,6 +859,14 @@ func TestCcbCreditEmailImportHelpers(t *testing.T) {
 
 func TestCcbCreditAllPlatformPreview(t *testing.T) {
 	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
+		"2026-01-01 open Assets:Cash CNY",
+		"2026-01-01 open Expenses:Food CNY",
+		"2026-01-01 open Income:Salary CNY",
+		"2026-01-01 open Liabilities:CN:CCB:CreditCard:7720 CNY",
+		"2026-01-01 open Equity:Opening-Balances CNY",
+		"",
+	}, "\n"))
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "ccb-credit-card-config.yaml"), strings.Join([]string{
 		"defaultCashAccount: Liabilities:CN:CCB:CreditCard:7720",
 		"ccbCredit:",
@@ -894,6 +902,7 @@ func TestCcbCreditAllPlatformPreview(t *testing.T) {
 		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	var preview struct {
+		ImportID         string        `json:"importId"`
 		Provider         string        `json:"provider"`
 		Entries          []ImportEntry `json:"entries"`
 		RawRowCount      int           `json:"rawRowCount"`
@@ -909,6 +918,35 @@ func TestCcbCreditAllPlatformPreview(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(preview.Warnings, "\n"), "前置过滤") {
 		t.Fatalf("preview warnings missing filter detail: %#v", preview.Warnings)
+	}
+
+	body, _ := json.Marshal(map[string]any{"importId": preview.ImportID, "provider": preview.Provider, "entries": preview.Entries})
+	recorder = requestWithCookies(router, http.MethodPost, "/api/ledger/imports/commit", string(body), cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("commit status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var commitResult struct {
+		OK       bool   `json:"ok"`
+		Count    int    `json:"count"`
+		BeanText string `json:"beanText"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &commitResult); err != nil {
+		t.Fatal(err)
+	}
+	if !commitResult.OK || commitResult.Count != 0 || commitResult.BeanText != "" {
+		t.Fatalf("unexpected commit result: %#v", commitResult)
+	}
+	importsDir := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports")
+	files, err := os.ReadDir(importsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected one import file, got %d", len(files))
+	}
+	importText := string(mustRead(t, filepath.Join(importsDir, files[0].Name())))
+	if !strings.Contains(importText, "document Liabilities:CN:CCB:CreditCard:7720") || strings.Contains(importText, "财付通-滴滴出行") {
+		t.Fatalf("empty import output missing document or leaked platform row:\n%s", importText)
 	}
 }
 
