@@ -22,7 +22,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -498,13 +497,13 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   return (
     <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
       <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-        <CardContent className="grid min-w-0 items-stretch gap-5 bg-paper/45 px-4 py-4 sm:px-6 lg:min-h-[calc(100dvh-18.25rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)] xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
-          <div className="min-w-0 lg:flex">
+        <CardContent className="grid min-w-0 items-start gap-4 bg-paper/45 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(260px,380px)_minmax(0,1fr)] xl:grid-cols-[minmax(280px,400px)_minmax(0,1fr)]">
+          <div className="min-w-0">
             <div
               role="button"
               tabIndex={0}
               className={cn(
-                "group flex min-h-56 min-w-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-panel p-4 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] sm:min-h-[18rem] sm:p-6 lg:min-h-full lg:w-full",
+                "group flex min-h-44 min-w-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-panel p-4 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] sm:min-h-52 sm:p-5 lg:min-h-[22rem] lg:w-full",
                 dragActive ? "border-brand bg-[var(--selected-bg)]" : "hover:border-brand/60 hover:bg-panel",
               )}
               onClick={() => inputRef.current?.click()}
@@ -541,43 +540,62 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           </div>
 
-          <div className="grid min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_auto] gap-4 overflow-hidden">
-            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
-              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
-                <span className="min-w-0 flex-1 overflow-hidden">
-                  <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
-                  <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? "草稿已恢复，重新预览需要重新选择文件。" : selectedProvider.detail}</span>
-                </span>
-                {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
-              </button>
-              {providerOpen && isRestoredDraft ? (
-                <div className="border-t border-line p-3 text-xs leading-5 text-stone">
-                  当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
+          <div className="grid min-w-0 max-w-full gap-3 overflow-hidden">
+            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]">
+              <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
+                <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
+                  <span className="min-w-0 flex-1 overflow-hidden">
+                    <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
+                    <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? "草稿已恢复，重新预览需要重新选择文件。" : selectedProvider.detail}</span>
+                  </span>
+                  {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
+                </button>
+                {providerOpen && isRestoredDraft ? (
+                  <div className="border-t border-line p-3 text-xs leading-5 text-stone">
+                    当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
+                  </div>
+                ) : providerOpen ? (
+                  <div className="grid min-w-0 gap-2 border-t border-line p-3">
+                    {providerChoices.map((choice) => (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        className={cn(
+                          "min-w-0 rounded-2xl border p-3 text-left transition",
+                          providerOverride === choice.value ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-line bg-panel text-olive hover:bg-paper",
+                        )}
+                        onClick={() => {
+                          setProviderOverride(choice.value);
+                          setProviderOpen(false);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{choice.label}</span>
+                          {providerOverride === choice.value ? <Check className="h-4 w-4 text-brand" /> : null}
+                        </div>
+                        <div className="mt-1 break-words text-xs leading-5 text-stone">{choice.detail}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
+                <div className="mb-3 flex min-w-0 items-center justify-between gap-3 px-1 text-xs text-stone">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-ink">
+                      {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
+                    </div>
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                      <span className={cn("rounded-full px-2 py-0.5", Boolean(file) || Boolean(preview) ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>选择</span>
+                      <span className={cn("rounded-full px-2 py-0.5", preview ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>预览</span>
+                      <span className={cn("rounded-full px-2 py-0.5", hasCommitted ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>写入</span>
+                    </div>
+                  </div>
+                  {draftSavedAt && !hasCommitted ? <span className="shrink-0">草稿 {formatDraftSavedAt(draftSavedAt)}</span> : null}
                 </div>
-              ) : providerOpen ? (
-                <div className="grid min-w-0 gap-2 border-t border-line p-3">
-                  {providerChoices.map((choice) => (
-                    <button
-                      key={choice.value}
-                      type="button"
-                      className={cn(
-                        "min-w-0 rounded-2xl border p-3 text-left transition",
-                        providerOverride === choice.value ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-line bg-panel text-olive hover:bg-paper",
-                      )}
-                      onClick={() => {
-                        setProviderOverride(choice.value);
-                        setProviderOpen(false);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{choice.label}</span>
-                        {providerOverride === choice.value ? <Check className="h-4 w-4 text-brand" /> : null}
-                      </div>
-                      <div className="mt-1 break-words text-xs leading-5 text-stone">{choice.detail}</div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+                {renderPrimaryActions()}
+              </div>
             </div>
 
             <LastImportByProviderPanel
@@ -586,20 +604,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               providerChoices={providerChoices}
               onRefresh={() => void loadImportDocuments()}
             />
-
-            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-ink">导入流程</div>
-                  <div className="mt-1 text-xs text-stone">预览、校对、写入，三步分开确认。</div>
-                </div>
-                <FileArchive className="h-5 w-5 text-brand" />
-              </div>
-              <Separator className="my-4" />
-              <ImportStep index={1} title="选择账单" active done={Boolean(file) || Boolean(preview)} detail={isRestoredDraft ? `已恢复 ${preview?.originalFilename ?? "导入草稿"}` : file ? file.name : "等待上传账单文件"} />
-              <ImportStep index={2} title="审核预览" active={loading || Boolean(preview)} done={Boolean(preview)} detail={preview ? `${entries.length} 条待写入交易` : "运行格式转换和去重检查"} />
-              <ImportStep index={3} title="写入账本" active={committing || hasCommitted} done={hasCommitted} detail={hasCommitted ? `已写入 ${commitResult?.count ?? 0} 条` : "确认后追加到私有账本"} />
-            </div>
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
@@ -633,15 +637,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               ) : null}
             </div>
 
-            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
-              <div className="mb-3 flex min-w-0 items-center justify-between gap-3 px-1 text-xs text-stone">
-                <span className="truncate">
-                  {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
-                </span>
-                {draftSavedAt && !hasCommitted ? <span className="shrink-0">草稿 {formatDraftSavedAt(draftSavedAt)}</span> : null}
-              </div>
-              {renderPrimaryActions()}
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -944,20 +939,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   );
 }
 
-function ImportStep({ index, title, detail, active, done }: { index: number; title: string; detail: string; active: boolean; done: boolean }) {
-  return (
-    <div className="flex min-w-0 max-w-full gap-3 overflow-hidden pb-4 last:pb-0">
-      <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-medium", done ? "border-brand bg-brand text-paper" : active ? "border-brand bg-[var(--selected-bg)] text-brand" : "border-line bg-panel text-stone")}>
-        {done ? <Check className="h-3.5 w-3.5" /> : index}
-      </div>
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div className="truncate text-sm font-medium text-ink">{title}</div>
-        <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
-      </div>
-    </div>
-  );
-}
-
 function LastImportByProviderPanel({
   latestByProvider,
   loading,
@@ -984,7 +965,7 @@ function LastImportByProviderPanel({
         </Button>
       </div>
 
-      <div className="mt-3 grid min-w-0 grid-cols-2 gap-2">
+      <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         {providers.map((provider) => {
           const document = latestByProvider[provider.value];
           return (
