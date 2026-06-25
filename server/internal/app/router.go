@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -92,55 +91,6 @@ func (s *Server) balances(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"balances": snapshot.Balances, "assertions": snapshot.BalanceAssertions})
-}
-
-func (s *Server) budget(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
-		return
-	}
-	start, end := parseTimeParams(c)
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "valuationCurrency": ValidValuationCurrency(c.Query("valuationCurrency"), snapshot.Commodities), "rows": buildBudgetRows(snapshot, start, end, c.Query("valuationCurrency"))})
-}
-
-func buildBudgetRows(snapshot *LedgerSnapshot, start, end, rawValuationCurrency string) []gin.H {
-	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
-	latest := map[string]Budget{}
-	for _, budget := range snapshot.Budgets {
-		if budget.Date <= end {
-			if cur, ok := latest[budget.Account]; !ok || budget.Date >= cur.Date {
-				latest[budget.Account] = budget
-			}
-		}
-	}
-	priceIndex := snapshotPriceIndex(snapshot)
-	actual := MonthSummaryWithPriceIndex(start, end, snapshot.Transactions, priceIndex, valuationCurrency).Categories
-	accounts := map[string]bool{}
-	for account := range latest {
-		accounts[account] = true
-	}
-	for account := range actual {
-		accounts[account] = true
-	}
-	keys := []string{}
-	for account := range accounts {
-		keys = append(keys, account)
-	}
-	sort.Strings(keys)
-	rows := []gin.H{}
-	accountMap := snapshotAccountMap(snapshot)
-	for _, account := range keys {
-		label, alias := accountLabelAlias(account, accountMap)
-		budget := budgetValuation(latest[account], priceIndex, end, valuationCurrency)
-		spent := actual[account]
-		var ratio *float64
-		if budget != 0 {
-			value := float64(spent) / float64(budget)
-			ratio = &value
-		}
-		rows = append(rows, gin.H{"account": account, "alias": alias, "label": label, "budget": budget, "spent": spent, "remaining": budget - spent, "ratio": ratio})
-	}
-	return rows
 }
 
 func (s *Server) incomeStatement(c *gin.Context) {

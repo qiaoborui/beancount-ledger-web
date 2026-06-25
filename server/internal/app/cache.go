@@ -33,7 +33,6 @@ type LedgerSnapshot struct {
 	Balances          map[string]int            `json:"balances"`
 	AccountBalances   []AccountBalance          `json:"accountBalances"`
 	BalanceAssertions []BalanceAssertion        `json:"balanceAssertions"`
-	Budgets           []Budget                  `json:"budgets"`
 	Accounts          []Account                 `json:"accounts"`
 	Commodities       []string                  `json:"commodities"`
 	Prices            []Price                   `json:"prices"`
@@ -76,7 +75,6 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
 	balanceAssertions := BalanceAssertionsFromBeanEntries(entries)
-	budgets := BudgetsFromBeanEntries(entries)
 	commodities := CommoditiesFromBeanEntries(entries)
 	rawBalances := CurrentBalances(txns)
 	transactionsAsc, transactionsDesc := sortedTransactionViews(txns)
@@ -97,7 +95,6 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 		Balances:          nativeAccountBalances(rawBalances, accountMap),
 		AccountBalances:   AccountBalanceRowsWithPriceIndex(rawBalances, priceIndex, ""),
 		BalanceAssertions: balanceAssertions,
-		Budgets:           budgets,
 		Accounts:          accounts,
 		Commodities:       commodities,
 		Prices:            prices,

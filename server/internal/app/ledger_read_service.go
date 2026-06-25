@@ -79,7 +79,6 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		"creditCards":        creditCards,
 		"investments":        investments,
 		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
-		"budgetRows":         buildBudgetRows(snapshot, start, end, valuationCurrency),
 		"reconciliationRows": reconciliationRows,
 		"accounts":           snapshot.Accounts,
 		"commodities":        snapshot.Commodities,

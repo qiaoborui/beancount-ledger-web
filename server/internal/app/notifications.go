@@ -131,32 +131,6 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 		}
 	}
 
-	latestBudgets := map[string]Budget{}
-	for _, budget := range snapshot.Budgets {
-		if budget.Date > start {
-			continue
-		}
-		if cur, ok := latestBudgets[budget.Account]; !ok || budget.Date >= cur.Date {
-			latestBudgets[budget.Account] = budget
-		}
-	}
-	actual := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices).Categories
-	for account, budget := range latestBudgets {
-		spent := actual[account]
-		if budget.Amount == 0 {
-			continue
-		}
-		ratio := float64(spent) / float64(budget.Amount)
-		if ratio >= 0.8 {
-			severity := "warning"
-			if ratio >= 1 {
-				severity = "critical"
-			}
-			amount := spent
-			insights = append(insights, Insight{ID: "budget-" + account, Severity: severity, Title: "预算接近上限", Detail: account + " 已用 " + formatInt(int(ratio*100+0.5)) + "%（" + formatCNY(spent) + " / " + formatCNY(budget.Amount) + "）。", Amount: &amount, Account: account})
-		}
-	}
-
 	currentExpense := MonthSummary(start, end, snapshot.Transactions, snapshot.Prices).Expense
 	previous := []int{}
 	for _, offset := range []int{-1, -2, -3} {

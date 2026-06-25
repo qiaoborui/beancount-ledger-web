@@ -74,7 +74,6 @@ const LazySettingsPage = lazy(() => loadSettingsPage().then((mod) => ({ default:
 const LazyTransactionList = lazy(() => loadTransactionList().then((mod) => ({ default: mod.TransactionList })));
 const LazyAccountManager = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.AccountManager })));
 const LazyBalanceGrid = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.BalanceGrid })));
-const LazyBudgetPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.BudgetPanel })));
 const LazyCreditCardPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.CreditCardPanel })));
 
 function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
@@ -106,7 +105,6 @@ function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
-  if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
   if (pathname.startsWith("/editor")) return "editor";
   if (pathname.startsWith("/reconcile")) return "reconcile";
@@ -227,7 +225,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     balances,
     accountBalances,
     txns,
-    budgetRows,
     netWorthRows,
     reconciliationRows,
     accounts,
@@ -649,7 +646,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         )}
       </div>
 
-      {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} budgetRows={budgetRows} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
+      {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要使用 Face ID / Passkey 后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要使用 Face ID / Passkey 后查看。"))}
@@ -662,7 +659,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} refreshGitStatus={refreshGitStatus} showToast={showToast} /></></Suspense>;
       })()}
       {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} /></Suspense>}
-      {page === "budgets" && <Suspense fallback={<RouteFallback label="正在准备预算…" />}><LazyBudgetPanel rows={budgetRows} valuationCurrency={dataValuationCurrency} full /></Suspense>}
       {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} /></Suspense>}
       {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备账本编辑器…" />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); void refreshGitStatus(); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock("账本编辑器已隐藏", "在线编辑会展示完整 Beancount 文件和金额，需要使用 Face ID / Passkey 后查看。"))}
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
@@ -730,7 +726,6 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
     home: { eyebrow: "monthly overview", title: `${label} 总览` },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
-    budgets: { eyebrow: "budget period", title: `${label} 预算` },
     imports: { eyebrow: "statement import", title: "账单导入" },
     editor: { eyebrow: "ledger editor", title: "账本编辑器" },
     reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },

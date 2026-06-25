@@ -7,7 +7,7 @@ import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/mone
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatAccountOptionLabel } from "./accountDisplay";
-import type { AccountGroup, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, Txn } from "./types";
+import type { AccountGroup, AccountStatus, AccountView, CreditCardAnalytics, Txn } from "./types";
 
 const loadAccountAgentChat = () => import("./AccountAgentChat");
 const LazyAccountAgentChat = lazy(() => loadAccountAgentChat().then((mod) => ({ default: mod.AccountAgentChat })));
@@ -492,10 +492,6 @@ function AccountSparkline({ points, liability }: { points: number[]; liability: 
       <path d={path} fill="none" stroke={stroke} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     </svg>
   </div>;
-}
-
-export function BudgetPanel({ rows, valuationCurrency, full }: { rows: BudgetRow[]; valuationCurrency: string; full?: boolean }) {
-  return <section className="card mt-6 p-4"><h2 className="font-serif text-2xl">预算</h2>{rows.map((r) => { const pct = r.ratio == null ? 0 : Math.round(r.ratio * 100); return <div key={r.account} className="border-b border-line py-3"><div className="flex justify-between gap-3 text-sm"><span>{formatAccountOptionLabel(r.account, r.label, r.alias)}</span><strong>{formatValuation(r.spent / 100, valuationCurrency)} / {formatValuation(r.budget / 100, valuationCurrency)}</strong></div><div className="mt-2 h-2 overflow-hidden rounded-xl bg-line"><div className={pct > 100 ? "h-full bg-[var(--danger)]" : "h-full bg-brand"} style={{ width: `${Math.min(pct, 140)}%` }} /></div><div className="mt-1 text-xs text-stone">剩余 {formatValuation(r.remaining / 100, valuationCurrency)}，使用率 {r.ratio == null ? "n/a" : `${pct}%`}</div></div>; })}{!full && <p className="mt-3 text-xs text-stone">完整预算在“预算”页。</p>}</section>;
 }
 
 export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAccountMap = {}, visible, summaryVisible, onToggleSummaryVisible, onToggleAccount }: { cards: CreditCardAnalytics[]; statuses: AccountStatus[]; valuationCurrency: string; visibleAccountMap?: Record<string, boolean>; visible: boolean; summaryVisible: boolean; onToggleSummaryVisible: () => void; onToggleAccount?: (account: string) => void }) {

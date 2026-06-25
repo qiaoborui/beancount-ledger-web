@@ -3,11 +3,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { Metric } from "./shared";
-import type { AccountStatus, BudgetRow, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
+import type { AccountStatus, CreditCardAnalytics, ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
 const LazyHomeDailyTrendChart = lazy(() => import("./HomeDailyTrendChart").then((mod) => ({ default: mod.HomeDailyTrendChart })));
 
-export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, budgetRows, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; valuationCurrency: string; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; budgetRows: BudgetRow[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, accountStatuses, onPrivacyChange, onSelectCategory }: { summary: Summary | null; valuationCurrency: string; privacySettings: PrivacySettings; sensitiveUnlocked: boolean; creditCards: CreditCardAnalytics[]; expenseAnalytics: ExpenseCategoryAnalytics[]; accountStatuses: AccountStatus[]; onPrivacyChange: <K extends keyof PrivacySettings>(key: K, value: PrivacySettings[K]) => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
   const displayCurrency = summary?.currency ?? valuationCurrency;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
@@ -15,8 +15,8 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
   const cardOutstanding = creditCards.reduce((sum, card) => sum + card.outstanding, 0);
   const cardSpend = creditCards.reduce((sum, card) => sum + card.billCycleSpend, 0);
   const topCategories = expenseAnalytics.slice(0, 3);
+  const topCategory = topCategories[0];
   const unknown = expenseAnalytics.find((row) => row.account === "Expenses:Unknown");
-  const budgetPressure = budgetRows.filter((row) => row.ratio !== null).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0)).slice(0, 3);
   const healthCounts = accountStatuses.reduce<Record<AccountStatus["status"], number>>((acc, item) => ({ ...acc, [item.status]: acc[item.status] + 1 }), { green: 0, red: 0, yellow: 0, grey: 0 });
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const dashboardGridClass = "grid min-w-0 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
@@ -30,7 +30,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
               <div>
                 <div className="ledger-kicker">financial dashboard</div>
                 <h1 className="mt-1.5 font-serif text-2xl font-medium leading-tight md:text-3xl">本期总览</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、预算和待整理项集中查看。</p>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">收支、信用卡、分类和待整理项集中查看。</p>
               </div>
               <button className="shrink-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-olive hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
                 {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4 text-brand" /> : <Eye className="h-4 w-4 text-brand" />}
@@ -45,7 +45,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
         </section>
         <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-rows-2 xl:flex-1">
           <DashboardCard label="信用卡未还" value={mask(formatValuation(cardOutstanding / 100, displayCurrency))} tone="amount-expense" detail={`账单周期消费 ${mask(formatValuation(cardSpend / 100, displayCurrency))}`} />
-          <DashboardCard label="预算压力" value={budgetPressure[0] ? `${Math.round((budgetPressure[0].ratio ?? 0) * 100)}%` : "暂无"} tone={(budgetPressure[0]?.ratio ?? 0) >= 1 ? "amount-expense" : "amount-gold"} detail={budgetPressure[0] ? formatAccountOptionLabel(budgetPressure[0].account, budgetPressure[0].label, budgetPressure[0].alias) : "暂无预算数据"} />
+          <DashboardCard label="最大分类" value={topCategory ? mask(formatValuation(topCategory.amount / 100, displayCurrency), false) : "暂无"} tone={topCategory ? "amount-expense" : "text-stone"} detail={topCategory ? formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias) : "暂无支出分类"} onClick={topCategory && onSelectCategory ? () => onSelectCategory(topCategory.account, "prefix") : undefined} />
           <DashboardCard label="账户健康" value={`${healthCounts.red} 红 · ${healthCounts.yellow} 黄 · ${healthCounts.grey} 灰`} tone={healthCounts.red ? "amount-expense" : healthCounts.yellow || healthCounts.grey ? "amount-gold" : "amount-income"} detail={`${healthCounts.green} 个账户断言通过`} />
           <DashboardCard label="待整理" value={unknown ? formatValuation(unknown.amount / 100, displayCurrency) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
         </section>
@@ -55,7 +55,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
 
     <div className={`${dashboardGridClass} mt-4 items-start`}>
       <ListCard title="支出 Top 分类" items={topCategories.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: formatValuation(row.amount / 100, displayCurrency), detail: `${row.txCount} 笔 · ${row.share == null ? "—" : `${(row.share * 100).toFixed(1)}%`}`, onClick: onSelectCategory ? () => onSelectCategory(row.account, "prefix") : undefined }))} empty="暂无支出分类" />
-      <ListCard title="预算压力" items={budgetPressure.map((row) => ({ key: row.account, title: formatAccountOptionLabel(row.account, row.label, row.alias), value: `${Math.round((row.ratio ?? 0) * 100)}%`, detail: showAmounts ? `剩余 ${formatValuation(row.remaining / 100, displayCurrency)}` : "金额已隐藏" }))} empty="暂无预算数据" />
+      <ListCard title="待整理分类" items={unknown ? [{ key: unknown.account, title: formatAccountOptionLabel(unknown.account, unknown.label, unknown.alias), value: formatValuation(unknown.amount / 100, displayCurrency), detail: `${unknown.txCount} 笔需要补分类`, onClick: onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined }] : []} empty="暂无待整理分类" />
     </div>
 
   </>;

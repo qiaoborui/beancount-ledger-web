@@ -240,7 +240,6 @@ func TestAccountsParseAdditionalIncludedFiles(t *testing.T) {
 		`include "commodities.bean"`,
 		`include "accounts.bean"`,
 		`include "accounts_stocks.bean"`,
-		`include "budgets.bean"`,
 		`include "prices.bean"`,
 		`include "transactions/2026/05.bean"`,
 		"",
@@ -296,9 +295,6 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	}
 	if len(body.NetWorthSeries) != 31 || body.NetWorthSeries[0].Date != "05-01" || body.NetWorthSeries[0].NetWorth != -1200 || body.NetWorthSeries[30].NetWorth != 98800 {
 		t.Fatalf("unexpected net worth series: %#v", body.NetWorthSeries)
-	}
-	if len(body.BudgetPressure) != 1 || body.BudgetPressure[0].Remaining != 98800 {
-		t.Fatalf("unexpected budget pressure: %#v", body.BudgetPressure)
 	}
 	if len(body.Anomalies) != 1 || body.Anomalies[0].Amount != 1200 || body.Anomalies[0].Account != "Expenses:Food" {
 		t.Fatalf("unexpected anomalies: %#v", body.Anomalies)

@@ -226,7 +226,7 @@ func shouldSkipLedgerEditorDir(path, rel, runtimeDir string) bool {
 func isLedgerEditorPathAllowed(rel string) bool {
 	base := filepath.Base(rel)
 	switch rel {
-	case "main.bean", "accounts.bean", "budgets.bean", "commodities.bean", "prices.bean", "README.md":
+	case "main.bean", "accounts.bean", "commodities.bean", "prices.bean", "README.md":
 		return true
 	}
 	if strings.HasPrefix(rel, "imports/") || strings.Contains(rel, "/.") || strings.HasPrefix(rel, ".") {
@@ -245,7 +245,6 @@ func editorFileSortKey(path string) string {
 		"main.bean":        "00-main.bean",
 		"commodities.bean": "01-commodities.bean",
 		"accounts.bean":    "02-accounts.bean",
-		"budgets.bean":     "03-budgets.bean",
 		"prices.bean":      "04-prices.bean",
 		"README.md":        "98-readme.md",
 	}
