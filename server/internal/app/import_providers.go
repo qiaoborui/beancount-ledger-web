@@ -155,6 +155,36 @@ func (i staticBillImporter) DocumentAccount(accounts map[string]bool, fallback s
 
 var billImporters = []billImporter{
 	staticBillImporter{
+		id:              "alipay-small-purse",
+		label:           "支付宝小荷包",
+		title:           "Alipay Small Purse",
+		uiOrder:         15,
+		config:          importProviderConfig{Config: "imports/alipay-config.yaml", Output: "alipay-small-purse-output.bean", Extensions: []string{".xlsx"}, Label: "支付宝小荷包", Detail: "小荷包余额收支明细 XLSX，共同资金池消费"},
+		engine:          nativeImportEngine("native-alipay-small-purse", (*Server).generateAlipaySmallPurseBean),
+		documentAccount: alipaySmallPurseCashAccount,
+		detect: func(filename, sample, ext string) (providerDetection, bool) {
+			if ext != ".xlsx" {
+				return providerDetection{}, false
+			}
+			if strings.Contains(filename, "支付宝小荷包") || strings.Contains(sample, "支付宝小荷包") {
+				return providerDetection{Provider: "alipay-small-purse", Reason: "文件名或内容包含支付宝小荷包账单字段", Confidence: "high"}, true
+			}
+			return providerDetection{}, false
+		},
+		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
+			return s.prepareAlipaySmallPurseInput(input.InputFile, input.ImportID)
+		},
+		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
+			if generated.CandidateCount != prepared.FilteredRowCount {
+				return nil, fmt.Errorf("支付宝小荷包行数核对失败：XLSX 明细 %d 条，可导入 %d 条，但生成 %d 条。已停止导入，请检查小荷包解析器", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
+			}
+			return []string{fmt.Sprintf("支付宝小荷包行数核对通过：XLSX 明细 %d 条，生成 %d 条，去重后待写入 %d 条。共同消费默认按 50/50 拆分，对象份额计入 Liabilities:Payable:Friends。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+		},
+		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
+			return prepared.RawRowCount, prepared.FilteredRowCount
+		},
+	},
+	staticBillImporter{
 		id:              "wechat",
 		label:           "微信支付",
 		title:           "WeChat Pay",
@@ -400,7 +430,7 @@ func detectImportProvider(filename string, content []byte, override string) (pro
 }
 
 func errorsUnsupportedBillType() error {
-	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
+	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func decorateStatementHashEntries(meta importMeta, entries []ImportEntry) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -219,20 +220,88 @@ func TestImportProvidersEndpoint(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Providers) != 5 {
+	if len(response.Providers) != 6 {
 		t.Fatalf("providers = %#v", response.Providers)
 	}
-	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "wechat" || response.Providers[2].ID != "cmb" || response.Providers[3].ID != "ccb-credit" || response.Providers[4].ID != "cmb-checking" {
+	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "alipay-small-purse" || response.Providers[2].ID != "wechat" || response.Providers[3].ID != "cmb" || response.Providers[4].ID != "ccb-credit" || response.Providers[5].ID != "cmb-checking" {
 		t.Fatalf("unexpected provider order: %#v", response.Providers)
 	}
-	if response.Providers[3].Label != "建设银行信用卡" || response.Providers[3].Accept != ".eml / .html / .htm / .csv" {
-		t.Fatalf("unexpected ccb metadata: %#v", response.Providers[3])
+	if response.Providers[4].Label != "建设银行信用卡" || response.Providers[4].Accept != ".eml / .html / .htm / .csv" {
+		t.Fatalf("unexpected ccb metadata: %#v", response.Providers[4])
 	}
-	if response.Providers[0].Engine != "deg-module" || response.Providers[3].Engine != "native-ccb-credit" || response.Providers[4].Engine != "deg-module" {
+	if response.Providers[0].Engine != "deg-module" || response.Providers[1].Engine != "native-alipay-small-purse" || response.Providers[4].Engine != "native-ccb-credit" || response.Providers[5].Engine != "deg-module" {
 		t.Fatalf("unexpected provider engines: %#v", response.Providers)
 	}
-	if response.Providers[4].Label != "招商银行储蓄卡" || response.Providers[4].Accept != ".pdf / .csv" {
-		t.Fatalf("unexpected checking metadata: %#v", response.Providers[3])
+	if response.Providers[5].Label != "招商银行储蓄卡" || response.Providers[5].Accept != ".pdf / .csv" {
+		t.Fatalf("unexpected checking metadata: %#v", response.Providers[5])
+	}
+}
+
+func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:Cash",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends",
+		"  rules:",
+		"    - item: 盒马",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseXLSX(t, input)
+
+	detection, err := detectBillProvider(filepath.Base(input), mustRead(t, input), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.Provider != "alipay-small-purse" {
+		t.Fatalf("provider = %s", detection.Provider)
+	}
+
+	server := &Server{cfg: cfg}
+	prepared, err := server.prepareAlipaySmallPurseInput(input, "smallpurse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.RawRowCount != 2 || prepared.FilteredRowCount != 2 || prepared.DateStart != "2026-06-22" || prepared.DateEnd != "2026-06-25" {
+		t.Fatalf("unexpected prepared input: %#v", prepared)
+	}
+
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	if err := importer.Generate(server, prepared, output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	for _, want := range []string{
+		`source: "支付宝小荷包"`,
+		`orderId: "topup-order"`,
+		`Assets:Cash`,
+		`500.00 CNY`,
+		`Liabilities:Payable:Friends`,
+		`-500.00 CNY`,
+		`orderId: "spend-order"`,
+		`Expenses:Food`,
+		`67.95 CNY`,
+		`67.94 CNY`,
+		`-135.89 CNY`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated bean missing %q:\n%s", want, generated)
+		}
+	}
+	entries, err := parsePreviewEntries(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[1].CategoryAccount != "Expenses:Food" || entries[1].FundingAccount != "Assets:Cash" {
+		t.Fatalf("unexpected preview entries: %#v", entries)
 	}
 }
 
@@ -1074,4 +1143,57 @@ func TestCmbPDFLayoutTextParser(t *testing.T) {
 	if !strings.Contains(result.CSV, "05/02,05/04,PP*APPLE.COM/BILL,34.17,9813,4.99(US)") {
 		t.Fatalf("missing foreign currency row:\n%s", result.CSV)
 	}
+}
+
+func mustWriteAlipaySmallPurseXLSX(t *testing.T, file string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	zipper := zip.NewWriter(out)
+	defer zipper.Close()
+	writeZipText := func(name, text string) {
+		t.Helper()
+		writer, err := zipper.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared := []string{
+		"支付宝小荷包名称：草莓汤圆的恋爱开支",
+		"支付宝小荷包账户ID：2088780263501952",
+		"收支明细对应的期间：自[2026年06月22日]至[2026年06月25日]",
+		"订单号", "交易时间", "交易说明", "备注", "操作人昵称", "操作人姓名", "收入金额", "支出金额",
+		"topup-order", "2026-06-22 21:58:03", "转入", "阿一哒哒", "何缘立", "500.00", "",
+		"spend-order", "2026-06-25 17:26:07", "盒马 4.0低脂高钙鲜牛奶 950ml等多件", "135.89",
+	}
+	var sharedXML strings.Builder
+	sharedXML.WriteString(`<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+	for _, value := range shared {
+		sharedXML.WriteString(`<si><t>`)
+		sharedXML.WriteString(value)
+		sharedXML.WriteString(`</t></si>`)
+	}
+	sharedXML.WriteString(`</sst>`)
+	writeZipText("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`)
+	writeZipText("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets></workbook>`)
+	writeZipText("xl/sharedStrings.xml", sharedXML.String())
+	writeZipText("xl/worksheets/sheet1.xml", strings.Join([]string{
+		`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`,
+		`<row r="1"><c r="A1" t="s"><v>0</v></c></row>`,
+		`<row r="2"><c r="A2" t="s"><v>1</v></c></row>`,
+		`<row r="3"><c r="A3" t="s"><v>2</v></c></row>`,
+		`<row r="4"><c r="A4" t="s"><v>3</v></c><c r="B4" t="s"><v>4</v></c><c r="C4" t="s"><v>5</v></c><c r="D4" t="s"><v>6</v></c><c r="E4" t="s"><v>7</v></c><c r="F4" t="s"><v>8</v></c><c r="G4" t="s"><v>9</v></c><c r="H4" t="s"><v>10</v></c></row>`,
+		`<row r="5"><c r="A5" t="s"><v>11</v></c><c r="B5" t="s"><v>12</v></c><c r="C5" t="s"><v>13</v></c><c r="D5" t="s"><v>17</v></c><c r="E5" t="s"><v>14</v></c><c r="F5" t="s"><v>15</v></c><c r="G5" t="s"><v>16</v></c><c r="H5" t="s"><v>17</v></c></row>`,
+		`<row r="6"><c r="A6" t="s"><v>18</v></c><c r="B6" t="s"><v>19</v></c><c r="C6" t="s"><v>20</v></c><c r="D6" t="s"><v>17</v></c><c r="E6" t="s"><v>14</v></c><c r="F6" t="s"><v>15</v></c><c r="G6" t="s"><v>17</v></c><c r="H6" t="s"><v>21</v></c></row>`,
+		`</sheetData></worksheet>`,
+	}, ""))
 }
