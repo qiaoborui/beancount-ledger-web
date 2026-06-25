@@ -664,12 +664,3 @@ func xlsxColumnIndex(ref string) int {
 	}
 	return index - 1
 }
-
-func sortAlipaySmallPurseRows(rows []alipaySmallPurseRow) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].DateTime == rows[j].DateTime {
-			return rows[i].OrderID < rows[j].OrderID
-		}
-		return rows[i].DateTime < rows[j].DateTime
-	})
-}
