@@ -281,6 +281,7 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 	generated := string(mustRead(t, output))
 	for _, want := range []string{
 		`source: "支付宝小荷包"`,
+		`method: "SharedPool"`,
 		`orderId: "topup-order"`,
 		`Assets:Cash`,
 		`500.00 CNY`,
@@ -295,6 +296,9 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("generated bean missing %q:\n%s", want, generated)
 		}
+	}
+	if strings.Contains(generated, `method: "支付宝小荷包"`) || strings.Contains(generated, `method: "小荷包"`) {
+		t.Fatalf("generated method would trigger generic Alipay small purse exclusion:\n%s", generated)
 	}
 	entries, err := parsePreviewEntries(generated)
 	if err != nil {

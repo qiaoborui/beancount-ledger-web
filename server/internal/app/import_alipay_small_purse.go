@@ -193,7 +193,7 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		fmt.Sprintf(`  orderId: "%s"`, escapeBean(row.OrderID)),
 		fmt.Sprintf(`  payTime: "%s"`, escapeBean(alipaySmallPursePayTime(row.DateTime))),
 		`  source: "支付宝小荷包"`,
-		`  method: "支付宝小荷包"`,
+		`  method: "SharedPool"`,
 		fmt.Sprintf(`  type: "%s"`, txType),
 		fmt.Sprintf(`  wallet: "%s"`, escapeBean(statement.WalletName)),
 		fmt.Sprintf(`  row: "%d"`, row.RowNumber),
