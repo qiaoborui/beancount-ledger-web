@@ -39,7 +39,7 @@ export function SettingsPage({
       <div className="border-l-4 border-brand pl-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">valuation</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">汇总估值</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">用于首页、趋势看板、净资产和预算汇总。单个账户余额仍显示账户原币。</p>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">用于首页、趋势看板、净资产和损益汇总。单个账户余额仍显示账户原币。</p>
       </div>
       <label className="mt-6 block max-w-xs">
         <span className="mb-2 block text-sm font-medium text-olive">估值币种</span>

@@ -24,7 +24,6 @@ const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
   investments: loadInvestmentsPage,
   transactions: loadTransactionList,
   accounts: loadAccountPanels,
-  budgets: loadAccountPanels,
   imports: loadImportPage,
   editor: loadLedgerEditorPage,
   reconcile: loadReconcilePage,
@@ -47,7 +46,6 @@ function pageFromHref(href: string): LedgerPage {
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
-  if (pathname.startsWith("/budgets")) return "budgets";
   if (pathname.startsWith("/imports")) return "imports";
   if (pathname.startsWith("/editor")) return "editor";
   if (pathname.startsWith("/reconcile")) return "reconcile";

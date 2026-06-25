@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "accounts.bean", "budgets.bean", "commodities.bean", "prices.bean", "README.md"}
+var ledgerGitCandidatePaths = []string{"main.bean", "transactions", "accounts.bean", "commodities.bean", "prices.bean", "README.md"}
 
 type GitChange struct {
 	Path           string `json:"path"`

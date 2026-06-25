@@ -26,7 +26,6 @@ func testLedger(t *testing.T) Config {
 		"2026-01-01 open Equity:Opening-Balances CNY",
 		"",
 	}, "\n"))
-	mustWrite(t, filepath.Join(root, "budgets.bean"), `2026-01-01 custom "budget" Expenses:Food "monthly" 1000.00 CNY`+"\n")
 	mustWrite(t, filepath.Join(root, "prices.bean"), "")
 	mustWrite(t, filepath.Join(root, "transactions", "2026", "05.bean"), strings.Join([]string{
 		`2026-05-01 * "Cafe" "Lunch" #work`,
@@ -44,7 +43,6 @@ func testLedger(t *testing.T) Config {
 		`option "operating_currency" "CNY"`,
 		`include "commodities.bean"`,
 		`include "accounts.bean"`,
-		`include "budgets.bean"`,
 		`include "prices.bean"`,
 		`include "transactions/2026/05.bean"`,
 		"",

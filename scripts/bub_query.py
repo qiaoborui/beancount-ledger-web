@@ -5,7 +5,6 @@ Usage:
     python3 scripts/bub_query.py balances
     python3 scripts/bub_query.py recent [limit] [account_filter]
     python3 scripts/bub_query.py summary YYYY-MM
-    python3 scripts/bub_query.py budget YYYY-MM
     python3 scripts/bub_query.py accounts
     python3 scripts/bub_query.py search <keyword> [limit]
     python3 scripts/bub_query.py check
@@ -32,7 +31,6 @@ _TXN_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})\s+[*!]\s+"([^"]*)"\s+"([^"]*)"(.*)$'
 _POSTING_RE = re.compile(r'^\s+([A-Z][A-Za-z0-9\-:]+)\s+(-?\d+(?:\.\d+)?)\s+CNY\b')
 _TAG_RE = re.compile(r'#([A-Za-z0-9_-]+)')
 _BALANCE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})\s+balance\s+([A-Z][A-Za-z0-9\-:]+)\s+(-?\d+(?:\.\d+)?)\s+CNY\b')
-_BUDGET_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})\s+custom\s+"budget"\s+([A-Z][A-Za-z0-9\-:]+)\s+"monthly"\s+(-?\d+(?:\.\d+)?)\s+CNY\b')
 
 
 def read_all_lines(entry=None, seen=None):
@@ -115,16 +113,6 @@ def parse_balances(lines=None):
     ]
 
 
-def parse_budgets(lines=None):
-    if lines is None:
-        lines = read_all_lines()
-    return [
-        {"date": m.group(1), "account": m.group(2), "amount": float(m.group(3))}
-        for line in lines
-        if (m := _BUDGET_RE.match(line["text"].strip()))
-    ]
-
-
 # ---- Query commands ----
 
 def cmd_balances():
@@ -188,33 +176,6 @@ def cmd_summary(month):
     else:
         print()
         print("(本月暂无支出记录)")
-
-
-def cmd_budget(month):
-    year, mon = map(int, month.split("-"))
-    last_day = calendar.monthrange(year, mon)[1]
-    start = f"{year}-{mon:02d}-01"
-    end = f"{year}-{mon:02d}-{last_day + 1:02d}"
-
-    budgets = {b["account"]: b["amount"] for b in parse_budgets() if b["date"].startswith(month)}
-    txns = [t for t in parse_transactions() if start <= t["date"] < end]
-
-    actual = defaultdict(float)
-    for t in txns:
-        for p in t["postings"]:
-            if p["account"].startswith("Expenses:"):
-                actual[p["account"]] += p["amount"]
-
-    print(f"=== {month} 预算报告 ===")
-    print(f"{'分类':<34} {'预算':>10} {'实际':>10} {'剩余':>10} {'使用率':>8}")
-    print("-" * 82)
-    for acct in sorted(budgets):
-        act = actual.get(acct, 0)
-        budget_amt = budgets[acct]
-        remain = budget_amt - act
-        rate = act / budget_amt * 100 if budget_amt > 0 else 0
-        status = "⚠️ 超支" if remain < 0 else "正常"
-        print(f"{acct:<34} {budget_amt:>10.2f} {act:>10.2f} {remain:>10.2f} {rate:>7.0f}% {status}")
 
 
 def cmd_accounts():
@@ -287,7 +248,6 @@ COMMANDS = {
     "balances": cmd_balances,
     "recent": cmd_recent,
     "summary": cmd_summary,
-    "budget": cmd_budget,
     "accounts": cmd_accounts,
     "search": cmd_search,
     "check": cmd_check,
@@ -301,7 +261,6 @@ def usage():
     print("  balances                  Show current balances")
     print("  recent [N] [account]      Show recent N transactions")
     print("  summary YYYY-MM           Monthly income/expense summary")
-    print("  budget YYYY-MM            Budget vs actual report")
     print("  accounts                  List all accounts")
     print("  search <keyword> [N]      Search transactions by keyword")
     print("  check                     Run bean-check")
@@ -330,7 +289,7 @@ if __name__ == "__main__":
         elif args and not args[0].isdigit():
             account = args[0]
         fn(limit=limit, account_filter=account)
-    elif cmd in ("summary", "budget"):
+    elif cmd == "summary":
         fn(args[0])
     elif cmd == "search":
         keyword = args[0]

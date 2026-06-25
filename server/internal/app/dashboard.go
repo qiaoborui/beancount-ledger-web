@@ -8,17 +8,13 @@ import (
 )
 
 type DashboardKPI struct {
-	Assets          int      `json:"assets"`
-	Liabilities     int      `json:"liabilities"`
-	NetWorth        int      `json:"netWorth"`
-	Income          int      `json:"income"`
-	Expense         int      `json:"expense"`
-	Net             int      `json:"net"`
-	SavingsRate     *float64 `json:"savingsRate"`
-	Budget          int      `json:"budget"`
-	BudgetSpent     int      `json:"budgetSpent"`
-	BudgetRemaining int      `json:"budgetRemaining"`
-	BudgetUsage     *float64 `json:"budgetUsage"`
+	Assets      int      `json:"assets"`
+	Liabilities int      `json:"liabilities"`
+	NetWorth    int      `json:"netWorth"`
+	Income      int      `json:"income"`
+	Expense     int      `json:"expense"`
+	Net         int      `json:"net"`
+	SavingsRate *float64 `json:"savingsRate"`
 }
 
 type DashboardCashflowPoint struct {
@@ -98,16 +94,6 @@ type DashboardAccountSeries struct {
 	Values  []DashboardSeriesPoint `json:"values"`
 }
 
-type DashboardBudgetPressure struct {
-	Account   string   `json:"account"`
-	Alias     *string  `json:"alias,omitempty"`
-	Label     string   `json:"label"`
-	Budget    int      `json:"budget"`
-	Spent     int      `json:"spent"`
-	Remaining int      `json:"remaining"`
-	Ratio     *float64 `json:"ratio"`
-}
-
 type DashboardAnomaly struct {
 	Date      string `json:"date"`
 	Payee     string `json:"payee"`
@@ -128,7 +114,6 @@ type DashboardSummary struct {
 	WeekdayExpense       []DashboardWeekdayExpense `json:"weekdayExpense"`
 	CategorySeries       []DashboardCategorySeries `json:"categorySeries"`
 	AccountBalanceSeries []DashboardAccountSeries  `json:"accountBalanceSeries"`
-	BudgetPressure       []DashboardBudgetPressure `json:"budgetPressure"`
 	Anomalies            []DashboardAnomaly        `json:"anomalies"`
 	TopPayees            []PayeeAnalytics          `json:"topPayees"`
 	TopPaymentAccounts   []AccountAnalytics        `json:"topPaymentAccounts"`
@@ -159,7 +144,6 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 	balanceRows := AccountBalanceRowsWithPriceIndex(rawBalances, priceIndex, end, valuationCurrency)
 	summary := MonthSummaryWithPriceIndex(start, end, txns, priceIndex, valuationCurrency)
 	accountMap := snapshotAccountMap(snapshot)
-	budgetPressure, budget, budgetSpent := dashboardBudgetPressure(snapshot.Budgets, summary.Categories, priceIndex, end, accountMap, valuationCurrency)
 	seriesSummaries := dashboardBucketSummaries(txns, priceIndex, seriesStart, seriesEnd, valuationCurrency, includeYearLabels)
 	assets, liabilities := balanceTotals(balanceRows)
 	var savingsRate *float64
@@ -167,25 +151,19 @@ func BuildDashboardSummaryWithFiltersInCurrency(snapshot *LedgerSnapshot, start,
 		value := float64(summary.Net) / float64(summary.Income)
 		savingsRate = &value
 	}
-	var budgetUsage *float64
-	if budget > 0 {
-		value := float64(budgetSpent) / float64(budget)
-		budgetUsage = &value
-	}
 	_, topPayees, topPaymentAccounts := ExpenseAnalyticsInCurrency(txns, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
 
 	return DashboardSummary{
 		Start:                start,
 		End:                  end,
 		Currency:             valuationCurrency,
-		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate, Budget: budget, BudgetSpent: budgetSpent, BudgetRemaining: budget - budgetSpent, BudgetUsage: budgetUsage},
+		KPIs:                 DashboardKPI{Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities, Income: summary.Income, Expense: summary.Expense, Net: summary.Net, SavingsRate: savingsRate},
 		NetWorthSeries:       dashboardNetWorthSeries(dashboardSortedTransactions(snapshot, txns, filters), priceIndex, seriesStart, seriesEnd, valuationCurrency, includeYearLabels),
 		CashflowSeries:       dashboardCashflowSeries(seriesSummaries),
 		DailyExpenseSeries:   dashboardDailyExpenseSeries(txns, priceIndex, start, end, valuationCurrency),
 		WeekdayExpense:       dashboardWeekdayExpense(txns, priceIndex, start, end, valuationCurrency),
 		CategorySeries:       dashboardCategorySeries(seriesSummaries, 8, accountMap),
 		AccountBalanceSeries: dashboardAccountBalanceSeries(txns, snapshot.Accounts, balanceRows, priceIndex, seriesStart, seriesEnd, 6, valuationCurrency, includeYearLabels),
-		BudgetPressure:       budgetPressure,
 		Anomalies:            dashboardAnomalies(txns, priceIndex, start, end, 10, valuationCurrency),
 		TopPayees:            topPayees,
 		TopPaymentAccounts:   topPaymentAccounts,
@@ -737,63 +715,6 @@ func accountBucketEndValuations(txns []Transaction, accounts []string, buckets [
 		}
 	}
 	return out
-}
-
-func dashboardBudgetPressure(budgets []Budget, actual map[string]int, priceIndex PriceIndex, end string, accounts map[string]Account, valuationCurrency string) ([]DashboardBudgetPressure, int, int) {
-	latest := map[string]Budget{}
-	for _, budget := range budgets {
-		if budget.Date <= end {
-			if cur, ok := latest[budget.Account]; !ok || budget.Date >= cur.Date {
-				latest[budget.Account] = budget
-			}
-		}
-	}
-	keys := make([]string, 0, len(latest))
-	var totalBudget, totalSpent int
-	for account := range latest {
-		keys = append(keys, account)
-		totalBudget += budgetValuation(latest[account], priceIndex, end, valuationCurrency)
-		totalSpent += actual[account]
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		leftRatio, rightRatio := 0.0, 0.0
-		leftBudget := budgetValuation(latest[keys[i]], priceIndex, end, valuationCurrency)
-		rightBudget := budgetValuation(latest[keys[j]], priceIndex, end, valuationCurrency)
-		if leftBudget != 0 {
-			leftRatio = float64(actual[keys[i]]) / float64(leftBudget)
-		}
-		if rightBudget != 0 {
-			rightRatio = float64(actual[keys[j]]) / float64(rightBudget)
-		}
-		if leftRatio == rightRatio {
-			return keys[i] < keys[j]
-		}
-		return leftRatio > rightRatio
-	})
-	if len(keys) > 8 {
-		keys = keys[:8]
-	}
-	out := make([]DashboardBudgetPressure, 0, len(keys))
-	for _, account := range keys {
-		budget := budgetValuation(latest[account], priceIndex, end, valuationCurrency)
-		spent := actual[account]
-		var ratio *float64
-		if budget != 0 {
-			value := float64(spent) / float64(budget)
-			ratio = &value
-		}
-		label, alias := accountLabelAlias(account, accounts)
-		out = append(out, DashboardBudgetPressure{Account: account, Alias: alias, Label: label, Budget: budget, Spent: spent, Remaining: budget - spent, Ratio: ratio})
-	}
-	return out, totalBudget, totalSpent
-}
-
-func budgetValuation(budget Budget, priceIndex PriceIndex, date, valuationCurrency string) int {
-	value, ok := priceIndex.Valuation(budget.Amount, budget.Currency, valuationCurrency, "")
-	if !ok {
-		return 0
-	}
-	return value
 }
 
 func dashboardAnomalies(txns []Transaction, priceIndex PriceIndex, start, end string, limit int, valuationCurrency string) []DashboardAnomaly {

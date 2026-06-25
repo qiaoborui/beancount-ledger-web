@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountBalance, AccountStatus, AccountView, BudgetRow, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -44,7 +44,6 @@ export type LedgerBootstrapResponse = {
   creditCards?: CreditCardAnalytics[];
   investments?: InvestmentSummary | null;
   transactions?: Txn[];
-  budgetRows?: BudgetRow[];
   reconciliationRows?: ReconcileRow[];
   accounts?: AccountView[];
   commodities?: string[];
@@ -76,7 +75,6 @@ export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, cli
     creditCards: cacheUnlocked ? (data.creditCards ?? []) : [],
     investments: cacheUnlocked ? (data.investments ?? null) : null,
     txns: cacheUnlocked ? transactions : transactions.filter((txn) => !transactionHasIncome(txn)),
-    budgetRows: data.budgetRows ?? [],
     reconciliationRows: cacheUnlocked ? (data.reconciliationRows ?? []) : [],
     accounts: data.accounts ?? [],
     commodities: data.commodities ?? ["CNY"],
@@ -96,7 +94,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialRuntimeCache?.accountBalances ?? []);
   const [txns, setTxns] = useState<Txn[]>(() => initialRuntimeCache?.txns ?? []);
-  const [budgetRows, setBudgetRows] = useState<BudgetRow[]>(() => initialRuntimeCache?.budgetRows ?? []);
   const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.netWorthRows ?? []);
   const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.monthEndNetWorthRows ?? []);
   const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialRuntimeCache?.netWorthWindows ?? null);
@@ -127,7 +124,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setCreditCards([]);
     setInvestments(null);
     setTxns([]);
-    setBudgetRows([]);
     setReconciliationRows([]);
     setAccounts([]);
     setCommodities(["CNY"]);
@@ -153,7 +149,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setCreditCards(cache.creditCards ?? []);
     setInvestments(cache.investments ?? null);
     setTxns(cache.txns);
-    setBudgetRows(cache.budgetRows);
     setReconciliationRows(cache.reconciliationRows ?? []);
     setAccounts(cache.accounts ?? []);
     setCommodities(cache.commodities?.length ? cache.commodities : ["CNY"]);
@@ -291,7 +286,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     balances,
     accountBalances,
     txns,
-    budgetRows,
     netWorthRows,
     monthEndNetWorthRows,
     netWorthWindows,

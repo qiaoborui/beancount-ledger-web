@@ -8,7 +8,6 @@ Minimum structure:
 main.bean
 accounts.bean
 commodities.bean
-budgets.bean
 prices.bean
 transactions/
 ```
@@ -22,7 +21,6 @@ option "booking_method" "FIFO"
 
 include "commodities.bean"
 include "accounts.bean"
-include "budgets.bean"
 include "prices.bean"
 include "transactions/2026.bean"
 ```

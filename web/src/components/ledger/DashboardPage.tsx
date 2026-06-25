@@ -32,7 +32,6 @@ type DashboardPanelId =
   | "categoryRank"
   | "payeeRank"
   | "paymentAccounts"
-  | "budgetPressure"
   | "anomalies"
   | "categoryTrend"
   | "privateKpis"
@@ -90,7 +89,6 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
 
   const compact = (value: number) => formatCompactValuation(value, data.currency);
   const maxExpense = data.anomalies[0]?.amount ?? 0;
-  const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(compact(topCategory.total / 100))}` : "暂无";
   const privateSummary = visible
@@ -121,11 +119,6 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
       title: "消费来源",
       subtitle: `${data.topPaymentAccounts.length} 个账户`,
       render: () => <PaymentAccounts data={data} visible={visible} onOpenTransactions={onOpenTransactions} />,
-    },
-    budgetPressure: {
-      title: "预算压力",
-      subtitle: visible ? `剩余 ${compact(data.kpis.budgetRemaining / 100)}` : "金额已隐藏",
-      render: () => <BudgetPressure rows={data.budgetPressure} currency={data.currency} visible={visible} onSelectCategory={(account) => onOpenTransactions(transactionHref({ category: account }))} />,
     },
     anomalies: {
       title: "高额支出",
@@ -168,11 +161,10 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
 
     <DashboardOverview data={data} visible={overviewVisible} onToggleVisible={() => setOverviewVisible((value) => !value)} />
 
-    <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、预算、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {budgetUsed} 预算</RowSummary>}>
+    <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {data.anomalies.length} 笔高额</RowSummary>}>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
+        <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden rounded-lg border border-line sm:grid-cols-3 xl:grid-cols-5 xl:divide-y-0">
           <Kpi label="本期支出" value={mask(compact(data.kpis.expense / 100))} tone="amount-expense" />
-          <Kpi label="预算使用" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} />
           <Kpi label="最大单笔" value={mask(compact(maxExpense / 100))} tone="amount-expense" />
           <Kpi label="高额支出" value={`${data.anomalies.length} 笔`} tone="text-warm" />
           <Kpi label="Top 分类" value={topCategoryText} tone="text-warm" />
@@ -204,15 +196,12 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     </div>
     </DashboardRow>
 
-    <DashboardRow rowId="risk" title="预算与异常" subtitle="看超预算风险、异常大额和分类趋势" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
+    <DashboardRow rowId="risk" title="异常与趋势" subtitle="看高额支出和分类变化" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
     <div className="dashboard-panel-grid">
-      <Panel panelId="budgetPressure" className="xl:col-span-6" onView={setViewPanelId} title={panels.budgetPressure.title} subtitle={panels.budgetPressure.subtitle}>
-        {panels.budgetPressure.render()}
-      </Panel>
-      <Panel panelId="anomalies" className="xl:col-span-6" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
+      <Panel panelId="anomalies" className="xl:col-span-4" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
         {panels.anomalies.render()}
       </Panel>
-      <Panel panelId="categoryTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
+      <Panel panelId="categoryTrend" className="xl:col-span-8" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
         {panels.categoryTrend.render()}
       </Panel>
     </div>
@@ -387,7 +376,7 @@ function DashboardEmptyState({ filtered, onClearFilters, onRetry }: { filtered: 
     <div className="mx-auto max-w-xl text-center">
       <h2 className="font-serif text-2xl text-warm">{filtered ? "没有匹配当前筛选的交易" : "当前时间范围暂无看板数据"}</h2>
       <p className="mt-2 text-sm text-stone">
-        {filtered ? "可以放宽分类、账户、商户、标签或金额条件，再查看趋势和排行。" : "这个时间范围还没有可汇总的收入、支出、资产或预算记录。"}
+        {filtered ? "可以放宽分类、账户、商户、标签或金额条件，再查看趋势和排行。" : "这个时间范围还没有可汇总的收入、支出或资产记录。"}
       </p>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         {filtered && <button type="button" className="inline-flex h-9 items-center justify-center rounded-lg border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onClearFilters}>清空筛选</button>}
@@ -409,7 +398,6 @@ function isDashboardEmpty(data: DashboardSummary) {
     && data.dailyExpenseSeries.length === 0
     && data.categorySeries.length === 0
     && data.accountBalanceSeries.length === 0
-    && data.budgetPressure.length === 0
     && data.anomalies.length === 0
     && data.topPayees.length === 0
     && data.topPaymentAccounts.length === 0
@@ -571,14 +559,12 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: strin
 
 function DashboardOverview({ data, visible, onToggleVisible }: { data: DashboardSummary; visible: boolean; onToggleVisible: () => void }) {
   const mask = (value: string) => visible ? value : "••••••";
-  const budgetUsed = data.kpis.budgetUsage == null ? "暂无" : `${Math.round(data.kpis.budgetUsage * 100)}%`;
   const toggleLabel = visible ? "隐藏首行金额" : "显示首行金额";
-  return <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+  return <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
     <OverviewMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="amount-income" detail={`${data.cashflowSeries.length} 个趋势点`} action={<button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-paper text-stone hover:bg-tag hover:text-brand" onClick={onToggleVisible} title={toggleLabel} aria-label={toggleLabel} aria-pressed={visible}>{visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button>} />
     <OverviewMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="amount-expense" detail={`${data.dailyExpenseSeries.length} 个支出日`} />
     <OverviewMetric label="结余" value={mask(formatCompactValuation(data.kpis.net / 100, data.currency))} tone={tone(data.kpis.net)} detail={visible ? ratioLabel(data.kpis.savingsRate) : "金额已隐藏"} />
     <OverviewMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} detail={data.netWorthSeries.at(-1)?.date ?? "暂无"} />
-    <OverviewMetric label="预算" value={visible ? budgetUsed : "••••••"} tone={data.kpis.budgetUsage != null && data.kpis.budgetUsage >= 1 ? "amount-expense" : "amount-gold"} detail={visible ? formatCompactValuation(data.kpis.budgetRemaining / 100, data.currency) : "金额已隐藏"} />
   </section>;
 }
 
@@ -833,23 +819,6 @@ function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSumma
   </div>;
 }
 
-function BudgetPressure({ rows, currency, visible, onSelectCategory }: { rows: DashboardSummary["budgetPressure"]; currency: string; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
-  if (!rows.length) return <EmptyPanel text="暂无预算数据" />;
-  return <div className="mt-4 space-y-3">
-    {rows.slice(0, 7).map((row) => {
-      const pct = Math.max(0, Math.min(140, (row.ratio ?? 0) * 100));
-      return <button key={row.account} className="w-full rounded-xl border border-line bg-panel p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
-          <strong className={pct >= 100 ? "amount-expense" : pct >= 80 ? "amount-gold" : "amount-income"}>{row.ratio == null ? "暂无" : `${Math.round(pct)}%`}</strong>
-        </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-line"><div className={pct >= 100 ? "h-full bg-[rgb(var(--color-expense))]" : "h-full bg-brand"} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
-        <div className="mt-1 text-xs text-stone">{visible ? `已用 ${formatCompactValuation(row.spent / 100, currency)} · 剩余 ${formatCompactValuation(row.remaining / 100, currency)}` : "金额已隐藏"}</div>
-      </button>;
-    })}
-  </div>;
-}
-
 function AnomalyList({ rows, currency, visible, onSelectCategory }: { rows: DashboardSummary["anomalies"]; currency: string; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   if (!rows.length) return <EmptyPanel text="暂无高额支出" />;
   return <div className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
@@ -885,8 +854,8 @@ function PrivateKpis({ data, visible }: { data: DashboardSummary; visible: boole
     <SmallMetric label="负债" value={mask(formatCompactValuation(data.kpis.liabilities / 100, data.currency))} tone="amount-expense" />
     <SmallMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} />
     <SmallMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="amount-income" />
+    <SmallMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="amount-expense" />
     <SmallMetric label="结余率" value={visible ? ratioLabel(data.kpis.savingsRate) : "••••••"} tone={tone(data.kpis.net)} />
-    <SmallMetric label="预算剩余" value={mask(formatCompactValuation(data.kpis.budgetRemaining / 100, data.currency))} tone={data.kpis.budgetRemaining >= 0 ? "amount-income" : "amount-expense"} />
   </div>;
 }
 

@@ -136,7 +136,6 @@ func TestBeanParserDirectiveCoverage(t *testing.T) {
 		{File: "main.bean", Line: 1, Text: `2026/1/1 commodity TLT_040921C144`},
 		{File: "main.bean", Line: 2, Text: `2026/1/1 price TLT_040921C144 (1 + 2) USD`},
 		{File: "main.bean", Line: 3, Text: `2026/1/2 balance Assets:Broker 3.00 ~ 0.01 USD`},
-		{File: "main.bean", Line: 4, Text: `2026/1/1 custom "budget" Expenses:Food "monthly" 10.00 USD`},
 	}
 
 	if got := ParseCommodities(lines); len(got) != 1 || got[0] != "TLT_040921C144" {
@@ -149,10 +148,6 @@ func TestBeanParserDirectiveCoverage(t *testing.T) {
 	balances := ParseBalances(lines)
 	if len(balances) != 1 || balances[0].Date != "2026-01-02" || balances[0].Amount != 300 {
 		t.Fatalf("balances = %#v", balances)
-	}
-	budgets := ParseBudgets(lines)
-	if len(budgets) != 1 || budgets[0].Account != "Expenses:Food" || budgets[0].Amount != 1000 || budgets[0].Currency != "USD" {
-		t.Fatalf("budgets = %#v", budgets)
 	}
 	parsed := ParseBeanLines(lines)
 	if parsed.Entries[0].Kind != "option" || parsed.Entries[0].Name != "title" || parsed.Entries[0].Value != "Parser Test" {

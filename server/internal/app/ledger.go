@@ -66,13 +66,6 @@ type BalanceAssertion struct {
 	Currency string `json:"currency"`
 }
 
-type Budget struct {
-	Date     string `json:"date"`
-	Account  string `json:"account"`
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency"`
-}
-
 type Price struct {
 	Date          string `json:"date"`
 	Currency      string `json:"currency"`
@@ -311,27 +304,6 @@ func BalanceAssertionsFromBeanEntries(entries []BeanEntry) []BalanceAssertion {
 	for _, entry := range entries {
 		if entry.Kind == "balance" {
 			out = append(out, BalanceAssertion{Date: entry.Date, Account: entry.Account, Amount: entry.Amount, Currency: entry.Currency})
-		}
-	}
-	return out
-}
-
-func ParseBudgets(lines []BeanLine) []Budget {
-	return BudgetsFromBeanEntries(ParseBeanLines(lines).Entries)
-}
-
-func BudgetsFromBeanEntries(entries []BeanEntry) []Budget {
-	var out []Budget
-	for _, entry := range entries {
-		if entry.Kind != "custom" || entry.CustomType != "budget" || len(entry.CustomValues) < 3 {
-			continue
-		}
-		account, _ := entry.CustomValues[0].(string)
-		period, _ := entry.CustomValues[1].(string)
-		amountCurrency, _ := entry.CustomValues[2].(string)
-		amountText, currency, ok := strings.Cut(amountCurrency, " ")
-		if account != "" && period == "monthly" && ok {
-			out = append(out, Budget{Date: entry.Date, Account: account, Amount: cents(amountText), Currency: currency})
 		}
 	}
 	return out

@@ -8,7 +8,6 @@ const STATIC_CACHE_MAX_ENTRIES = 96;
 // the server returns different payloads before/after Face ID / Passkey unlock. Caching them
 // in the service worker can leak unlocked data after the app locks again.
 const STALE_WHILE_REVALIDATE_API_PATHS = new Set([
-  "/api/ledger/budget",
   "/api/ledger/accounts",
   "/api/ledger/version",
 ]);
