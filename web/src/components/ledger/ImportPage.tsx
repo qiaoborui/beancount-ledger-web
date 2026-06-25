@@ -32,7 +32,7 @@ import {
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
-type Provider = "alipay" | "wechat" | "cmb" | "ccb-credit" | "cmb-checking";
+type Provider = "alipay" | "alipay-small-purse" | "wechat" | "cmb" | "ccb-credit" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
 type ProviderChoice = { value: ProviderOverride; label: string; detail: string; accept: string };
 type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string; engine?: string };
@@ -97,6 +97,7 @@ const importDraftKey = "ledger_import_review_draft";
 const fallbackProviderChoices: ProviderChoice[] = [
   { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
   { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
+  { value: "alipay-small-purse", label: "支付宝小荷包", detail: "小荷包余额收支明细 XLSX，共同资金池消费", accept: ".xlsx" },
   { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
   { value: "cmb", label: "招商银行信用卡", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
   { value: "ccb-credit", label: "建设银行信用卡", detail: "信用卡邮件 EML、HTML 或标准 CSV", accept: ".eml / .html / .htm / .csv" },
@@ -121,7 +122,7 @@ function providerLabel(provider: Provider, choices: ProviderChoice[]) {
 }
 
 function isProvider(value: string | undefined): value is Provider {
-  return value === "alipay" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "cmb-checking";
+  return value === "alipay" || value === "alipay-small-purse" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "cmb-checking";
 }
 
 function importDocumentCoverageValue(document: ImportDocument) {
