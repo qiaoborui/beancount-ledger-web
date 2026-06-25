@@ -34,7 +34,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   }
 }
 
-type LedgerBootstrapResponse = {
+export type LedgerBootstrapResponse = {
   summary?: Summary;
   balances?: Record<string, number>;
   accountBalances?: AccountBalance[];
@@ -54,6 +54,39 @@ type LedgerBootstrapResponse = {
   ledgerVersion?: LedgerVersion;
   sensitiveUnlocked?: boolean;
 };
+
+function transactionHasIncome(txn: Txn) {
+  return txn.postings.some((posting) => posting.account.startsWith("Income:"));
+}
+
+export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now()) {
+  const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
+  const cacheUnlocked = clientUnlocked && serverSensitiveUnlocked;
+  const responseValuationCurrency = data.valuationCurrency ?? fallbackValuationCurrency;
+  const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, valuationCurrency: responseValuationCurrency, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
+  const transactions = data.transactions ?? [];
+  const cache: LedgerCache = {
+    summary: data.summary ?? null,
+    balances: cacheUnlocked ? (data.balances ?? {}) : {},
+    accountBalances: cacheUnlocked ? (data.accountBalances ?? []) : [],
+    netWorthRows: cacheUnlocked ? (data.netWorthHistory ?? []) : [],
+    monthEndNetWorthRows: cacheUnlocked ? (data.monthEndNetWorth ?? []) : [],
+    netWorthWindows: cacheUnlocked ? (data.netWorthWindows ?? null) : null,
+    creditCards: cacheUnlocked ? (data.creditCards ?? []) : [],
+    investments: cacheUnlocked ? (data.investments ?? null) : null,
+    txns: cacheUnlocked ? transactions : transactions.filter((txn) => !transactionHasIncome(txn)),
+    reconciliationRows: cacheUnlocked ? (data.reconciliationRows ?? []) : [],
+    accounts: data.accounts ?? [],
+    commodities: data.commodities ?? ["CNY"],
+    prices: data.prices ?? [],
+    valuationCurrency: responseValuationCurrency,
+    accountStatuses: cacheUnlocked ? (data.accountStatuses ?? []) : [],
+    incomeStatement: { income: cacheUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: cacheUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: cacheUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
+    ledgerVersion: version ?? undefined,
+    savedAt,
+  };
+  return { cache, cacheUnlocked, serverSensitiveUnlocked, responseValuationCurrency };
+}
 
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
@@ -157,33 +190,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       if (!options.background) setLoadingFresh(true);
       try {
         const data = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${query}`);
-        const sensitiveUnlocked = Boolean(data.sensitiveUnlocked);
-        const responseValuationCurrency = data.valuationCurrency ?? valuationCurrency;
-        if (unlocked && !sensitiveUnlocked) onSensitiveLocked();
-        const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, valuationCurrency: responseValuationCurrency, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
+        const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
+        if (unlocked && !serverSensitiveUnlocked) onSensitiveLocked();
         const version = data.ledgerVersion ?? await fetchLedgerVersion();
-        const fresh: LedgerCache = {
-          summary: data.summary ?? null,
-          balances: sensitiveUnlocked ? (data.balances ?? {}) : {},
-          accountBalances: sensitiveUnlocked ? (data.accountBalances ?? []) : [],
-          netWorthRows: sensitiveUnlocked ? (data.netWorthHistory ?? []) : [],
-          monthEndNetWorthRows: sensitiveUnlocked ? (data.monthEndNetWorth ?? []) : [],
-          netWorthWindows: sensitiveUnlocked ? (data.netWorthWindows ?? null) : null,
-          creditCards: sensitiveUnlocked ? (data.creditCards ?? []) : [],
-          investments: sensitiveUnlocked ? (data.investments ?? null) : null,
-          txns: data.transactions ?? [],
-          reconciliationRows: sensitiveUnlocked ? (data.reconciliationRows ?? []) : [],
-          accounts: data.accounts ?? [],
-          commodities: data.commodities ?? ["CNY"],
-          prices: data.prices ?? [],
-          valuationCurrency: responseValuationCurrency,
-          accountStatuses: sensitiveUnlocked ? (data.accountStatuses ?? []) : [],
-          incomeStatement: { income: sensitiveUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: sensitiveUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: sensitiveUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
-          ledgerVersion: version ?? undefined,
-          savedAt: Date.now(),
-        };
-        applyCache(fresh, sensitiveUnlocked, range, responseValuationCurrency, valuationCurrency);
-        if (sensitiveUnlocked) {
+        const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, unlocked, valuationCurrency, version);
+        applyCache(fresh, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
+        if (cacheUnlocked) {
           writeLedgerCache(range, fresh, responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);
         }
