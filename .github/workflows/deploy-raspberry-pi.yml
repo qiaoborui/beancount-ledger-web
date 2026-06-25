@@ -319,9 +319,9 @@ jobs:
 
   deploy_backend:
     name: Deploy backend to Ubuntu Server
-    needs: [plan, build_backend, deploy_frontend]
+    needs: [plan, build_backend]
     runs-on: [self-hosted, mibook]
-    if: ${{ always() && needs.plan.outputs.deploy_allowed == 'true' && needs.plan.outputs.deploy_backend == 'true' && ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && needs.build_backend.result == 'success')) && (needs.plan.outputs.deploy_frontend != 'true' || needs.deploy_frontend.result == 'success') }}
+    if: ${{ always() && needs.plan.outputs.deploy_allowed == 'true' && needs.plan.outputs.deploy_backend == 'true' && ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && needs.build_backend.result == 'success')) }}
     environment:
       name: ${{ needs.plan.outputs.target }}
     steps:

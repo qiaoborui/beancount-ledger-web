@@ -187,8 +187,10 @@ Preview should proxy to the preview app port.
 - Changes under `web/**` or the frontend deploy script build and deploy only the
   frontend.
 - Changes to the deploy workflow deploy both components.
-- When both components changed, frontend deploy completes before backend deploy,
-  so a backend restart sees the latest frontend symlink.
+- When both components changed, backend and frontend deploy jobs can run at the
+  same time. The backend serves the stable frontend symlink at request time, so
+  the newest frontend becomes available as soon as its deploy job advances the
+  symlink.
 - Backend deploy checks `http://127.0.0.1:<port>/api/health` after systemd
   restart and fails the run when the app cannot read the selected ledger root.
 
