@@ -305,6 +305,43 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 	}
 }
 
+func TestAlipaySmallPurseFallbackRulesSkipGenericAlipayMethodIgnore(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Unknown",
+		"defaultCurrency: CNY",
+		"alipay:",
+		"  rules:",
+		"    - method: 支付宝小荷包",
+		"      ignore: true",
+		"    - method: 余额",
+		"      methodAccount: Assets:CN:Alipay:Balance",
+		"    - item: 盒马",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseXLSX(t, input)
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	if got := strings.Count(generated, `source: "支付宝小荷包"`); got != 2 {
+		t.Fatalf("generated %d small purse entries, want 2:\n%s", got, generated)
+	}
+	if !strings.Contains(generated, `Expenses:Food`) {
+		t.Fatalf("fallback item classification was not applied:\n%s", generated)
+	}
+}
+
 func TestImportCommitAllowsRemovedPreviewEntries(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
