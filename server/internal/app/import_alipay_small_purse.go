@@ -284,12 +284,22 @@ func alipaySmallPurseRules(config alipaySmallPurseConfig) []alipaySmallPurseRule
 	}
 	rules := make([]alipaySmallPurseRule, 0, len(config.Alipay.Rules))
 	for _, rule := range config.Alipay.Rules {
-		if strings.TrimSpace(rule.Type) == "收入" {
+		if !alipaySmallPurseCanInheritAlipayRule(rule) {
 			continue
 		}
 		rules = append(rules, rule)
 	}
 	return rules
+}
+
+func alipaySmallPurseCanInheritAlipayRule(rule alipaySmallPurseRule) bool {
+	if rule.Ignore || rule.Method != "" || rule.MethodAccount != "" || rule.Category != "" {
+		return false
+	}
+	if strings.TrimSpace(rule.Type) == "收入" {
+		return false
+	}
+	return rule.TargetAccount != "" || rule.Tag != ""
 }
 
 func alipaySmallPurseRuleMatches(rule alipaySmallPurseRule, row alipaySmallPurseRow, payee string, amount int, txType string) bool {
