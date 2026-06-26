@@ -84,6 +84,50 @@ func TestParseTransactionsInfersSingleBlankPostingWithCost(t *testing.T) {
 	}
 }
 
+func TestParseTransactionsIncludesPaddingFromPadBalance(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "commodities.bean"), strings.Join([]string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity USD",
+		"2026-01-01 commodity NVDA",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts.bean"), strings.Join([]string{
+		"2026-01-01 open Assets:Broker:USD USD",
+		"2026-01-01 open Assets:Broker:Investments:NVDA NVDA",
+		"2026-01-01 open Expenses:Investment:Fee USD",
+		"2026-01-01 open Income:Investment:Gain USD",
+		"2026-01-01 open Equity:Opening-Balances USD",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"), strings.Join([]string{
+		`2026-05-15 * "Broker" "Opening transfer"`,
+		"  Assets:Broker:USD 802.35 USD",
+		"  Equity:Opening-Balances -802.35 USD",
+		"",
+		"2026-05-15 pad Assets:Broker:USD Income:Investment:Gain",
+		"2026-05-16 balance Assets:Broker:USD 802.95 USD",
+		"",
+		`2026-05-16 * "Broker" "Buy NVDA"`,
+		"  Assets:Broker:Investments:NVDA 3 NVDA {209.50 USD}",
+		"  Expenses:Investment:Fee 0.99 USD",
+		"  Assets:Broker:USD",
+		"",
+	}, "\n"))
+
+	snapshot, err := NewLedgerCache(cfg).Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RawBalances["Assets:Broker:USD"]["USD"] != 17346 {
+		t.Fatalf("USD balance = %#v, want 173.46 USD", snapshot.RawBalances["Assets:Broker:USD"])
+	}
+	detail := AccountDetail("Assets:Broker:USD", snapshot.Transactions)
+	if len(detail) != 3 || detail[1].Change != 60 || detail[1].Txn.Narration == "" {
+		t.Fatalf("padding transaction missing from account detail: %#v", detail)
+	}
+}
+
 func TestBeanParserAcceptsPythonBeancountTransactionForms(t *testing.T) {
 	lines := []BeanLine{
 		{File: "main.bean", Line: 1, Text: `2026/5/1 txn "Dinner only narration" #food ^receipt-1`},

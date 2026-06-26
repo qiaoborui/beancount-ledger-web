@@ -213,22 +213,61 @@ func ParseTransactions(lines []BeanLine) []Transaction {
 
 func TransactionsFromBeanEntries(entries []BeanEntry) []Transaction {
 	txns := make([]Transaction, 0, len(entries))
+	balances := map[string]map[string]int{}
+	pads := map[string]BeanEntry{}
 	for _, entry := range entries {
-		if entry.Kind != "transaction" {
-			continue
+		switch entry.Kind {
+		case "transaction":
+			txn := Transaction{
+				Date:      entry.Date,
+				Payee:     entry.Payee,
+				Narration: entry.Narration,
+				Metadata:  entry.Metadata,
+				Tags:      entry.Tags,
+				Links:     entry.Links,
+				Postings:  finalizeParsedPostings(entry.Postings),
+				Source:    TransactionSource{File: entry.File, Line: entry.Line, Hash: transactionHash(entry.RawLines)},
+			}
+			txns = append(txns, txn)
+			applyPostingsToBalances(balances, txn.Postings)
+		case "pad":
+			pads[entry.Account] = entry
+		case "balance":
+			pad, ok := pads[entry.Account]
+			if !ok {
+				continue
+			}
+			diff := entry.Amount - balances[entry.Account][entry.Currency]
+			if diff != 0 {
+				txn := Transaction{
+					Date:      pad.Date,
+					Narration: "Padding inserted for Balance of " + fromCents(entry.Amount) + " " + entry.Currency + " for difference " + fromCents(diff) + " " + entry.Currency,
+					Postings: []Posting{
+						{Account: entry.Account, Amount: diff, Currency: entry.Currency},
+						{Account: pad.Account2, Amount: -diff, Currency: entry.Currency},
+					},
+					Source: TransactionSource{File: pad.File, Line: pad.Line, Hash: transactionHash(pad.RawLines)},
+				}
+				txns = append(txns, txn)
+				applyPostingsToBalances(balances, txn.Postings)
+			}
+			delete(pads, entry.Account)
 		}
-		txns = append(txns, Transaction{
-			Date:      entry.Date,
-			Payee:     entry.Payee,
-			Narration: entry.Narration,
-			Metadata:  entry.Metadata,
-			Tags:      entry.Tags,
-			Links:     entry.Links,
-			Postings:  finalizeParsedPostings(entry.Postings),
-			Source:    TransactionSource{File: entry.File, Line: entry.Line, Hash: transactionHash(entry.RawLines)},
-		})
 	}
 	return txns
+}
+
+func applyPostingsToBalances(balances map[string]map[string]int, postings []Posting) {
+	for _, posting := range postings {
+		currency := posting.Currency
+		if currency == "" {
+			currency = "CNY"
+		}
+		if balances[posting.Account] == nil {
+			balances[posting.Account] = map[string]int{}
+		}
+		balances[posting.Account][currency] += posting.Amount
+	}
 }
 
 func finalizeParsedPostings(parsed []parsedPosting) []Posting {
