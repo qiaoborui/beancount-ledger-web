@@ -84,7 +84,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     setSelectedAccount(group.rows[0]?.account ?? null);
   }
 
-  return <section className="card mt-6 p-4">
+  return <section className="card relative mt-6 p-4">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <h2 className="font-serif text-2xl">账户余额</h2>
@@ -107,7 +107,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     </div>
 
     {rows.length ? groups.length ? <>
-      <div className={`mt-4 hidden gap-4 xl:grid ${desktopDetailOpen ? "xl:grid-cols-[236px_minmax(520px,1fr)_minmax(280px,340px)]" : "xl:grid-cols-[236px_minmax(0,1fr)_72px]"}`}>
+      <div className="mt-4 hidden gap-4 xl:grid xl:grid-cols-[236px_minmax(0,1fr)]">
         <div className="rounded-xl border border-line bg-panel p-2">
           <div className="flex h-10 items-center justify-between px-2 text-sm font-medium text-olive">
             <span>分组</span>
@@ -219,10 +219,12 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
           </>}
         </div>
 
-        {desktopDetailOpen ? (
-          <AccountDetailPanel row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} lastActivity={desktopDetailRow ? lastActivityMap.get(desktopDetailRow.account) : undefined} points={desktopDetailRow ? trendMap[desktopDetailRow.account] ?? [] : []} onToggleAccount={onToggleAccount} onClose={() => setDesktopDetailOpen(false)} />
-        ) : (
-          <CollapsedAccountDetailRail row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} onOpen={() => setDesktopDetailOpen(true)} />
+        {desktopDetailOpen && desktopDetailRow && (
+          <div className="pointer-events-none fixed right-6 top-28 z-[80] hidden w-[340px] max-w-[calc(100vw-3rem)] xl:block">
+            <div className="pointer-events-auto rounded-2xl shadow-[var(--float-shadow)]">
+              <AccountDetailPanel row={desktopDetailRow} visible={rowVisible(desktopDetailRow)} status={statusMap.get(desktopDetailRow.account)} lastActivity={lastActivityMap.get(desktopDetailRow.account)} points={trendMap[desktopDetailRow.account] ?? []} onToggleAccount={onToggleAccount} onClose={() => setDesktopDetailOpen(false)} floating />
+            </div>
+          </div>
         )}
       </div>
 
@@ -439,31 +441,11 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
   );
 }
 
-function CollapsedAccountDetailRail({ row, visible, status, onOpen }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; onOpen: () => void }) {
-  return <aside className="flex min-h-[520px] flex-col items-center gap-3 rounded-xl border border-line bg-panel p-2">
-    <button
-      type="button"
-      className="grid h-11 w-11 place-items-center rounded-xl border border-line bg-paper text-olive hover:bg-tag"
-      onClick={onOpen}
-      aria-label="展开账户详情"
-      title="展开账户详情"
-    >
-      <PanelRightOpen className="h-4 w-4" />
-    </button>
-    <div className="ledger-label [writing-mode:vertical-rl]">详情</div>
-    {row && <div className="mt-auto flex min-h-64 w-full flex-col items-center justify-end gap-3 rounded-lg bg-paper px-1.5 py-3">
-      <span className={`h-2.5 w-2.5 rounded-full ${status ? statusColor(status.status) : "bg-stone"}`} title={status ? statusTitle(status) : "未检查"} />
-      <span className="max-h-28 text-center text-xs font-medium leading-snug text-olive [writing-mode:vertical-rl]">{row.label}</span>
-      <span className={`text-center text-[11px] font-semibold leading-tight ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"} [writing-mode:vertical-rl]`}>{formatRowAmount(row, visible)}</span>
-    </div>}
-  </aside>;
-}
-
-function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; onClose?: () => void }) {
+function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, floating, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; floating?: boolean; onClose?: () => void }) {
   if (!row) {
     return <aside className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
   }
-  return <aside className={`${compact ? "" : "rounded-xl border border-line bg-panel p-4"}`}>
+  return <aside className={`${compact ? "" : "rounded-xl border border-line bg-panel p-4"} ${floating ? "bg-panel/95 backdrop-blur" : ""}`}>
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h3 className="truncate text-xl font-semibold text-warm">{row.label}</h3>
