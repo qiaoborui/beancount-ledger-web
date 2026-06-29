@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ClientNavLink } from "./ClientNavLink";
-import { Bot, ChevronDown, Eye, EyeOff, ListChecks, Pencil, X } from "lucide-react";
+import { Bot, ChevronDown, Eye, EyeOff, GripVertical, ListChecks, Pencil, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/money";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ const statusFilters: { key: BalanceStatusFilter; label: string }[] = [
   { key: "yellow", label: "未断言" },
   { key: "grey", label: "长期未更新" },
 ];
+const accountGroupOrderStorageKey = "ledger-account-prefix-group-order";
 
 export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap = {}, onToggleAll, onToggleAccount, statuses, txns = [] }: { rows: BalanceRow[]; full?: boolean; allVisible?: boolean; visibleAccountMap?: Record<string, boolean>; onToggleAll?: () => void; onToggleAccount?: (account: string) => void; statuses?: AccountStatus[]; txns?: Txn[] }) {
   const trendMap = useMemo(() => Object.fromEntries(rows.map((row) => [row.account, accountTrendPoints(row, txns)])), [rows, txns]);
@@ -39,9 +40,11 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [mobileAccount, setMobileAccount] = useState<string | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [groupOrder, setGroupOrder] = useState<string[]>(() => readAccountGroupOrder());
+  const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
   const filteredRows = useMemo(() => rows.filter((row) => accountMatchesStatusFilter(statusMap.get(row.account), statusFilter)), [rows, statusFilter, statusMap]);
-  const groups = useMemo(() => buildBalancePrefixGroups(filteredRows, statusMap), [filteredRows, statusMap]);
+  const groups = useMemo(() => orderBalancePrefixGroups(buildBalancePrefixGroups(filteredRows, statusMap), groupOrder), [filteredRows, groupOrder, statusMap]);
   const mobileDetailRow = mobileAccount ? rows.find((row) => row.account === mobileAccount) ?? null : null;
 
   function rowVisible(row: BalanceRow) {
@@ -60,11 +63,18 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     }
   }
 
+  function moveGroup(targetKey: string) {
+    if (!draggedGroupKey || draggedGroupKey === targetKey) return;
+    const next = reorderKeys(groups.map((group) => group.key), groupOrder, draggedGroupKey, targetKey);
+    setGroupOrder(next);
+    writeAccountGroupOrder(next);
+  }
+
   return <section className="card relative mt-6 p-4">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <h2 className="font-serif text-2xl">账户余额</h2>
-        <p className="mt-1 text-sm text-stone">按账户用途收纳余额；桌面端用分组目录，移动端用抽屉展开。</p>
+        <p className="mt-1 text-sm text-stone">按账户前缀和机构折叠；拖拽分组可调整常用顺序。</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-xl border border-line bg-panel p-1">
@@ -85,10 +95,38 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     {rows.length ? groups.length ? <>
       <div className="mt-4 space-y-3">
         {groups.map((group, index) => {
-          const open = openGroups[group.key] ?? (index < 4 || group.issueCount > 0);
-          return <div key={group.key} className="overflow-hidden rounded-xl border border-line bg-panel">
-            <button className="flex w-full items-start justify-between gap-3 p-4 text-left hover:bg-paper" onClick={() => setOpenGroups((current) => ({ ...current, [group.key]: !open }))}>
+          const open = openGroups[group.key] ?? false;
+          const dragging = draggedGroupKey === group.key;
+          return <div key={group.key} className={`overflow-hidden rounded-xl border border-line bg-panel transition-colors ${dragging ? "border-brand bg-brand/5" : ""}`}>
+            <div
+              role="button"
+              tabIndex={0}
+              className="flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left outline-none hover:bg-paper focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel"
+              draggable
+              onDragStart={(event) => {
+                setDraggedGroupKey(group.key);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", group.key);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                moveGroup(group.key);
+              }}
+              onDragEnd={() => setDraggedGroupKey(null)}
+              onClick={() => setOpenGroups((current) => ({ ...current, [group.key]: !open }))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setOpenGroups((current) => ({ ...current, [group.key]: !open }));
+                }
+              }}
+            >
               <span className="flex min-w-0 items-center gap-3">
+                <GripVertical className="hidden h-4 w-4 shrink-0 text-stone xl:block" aria-hidden="true" />
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">{institutionInitial(group.label)}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-lg font-semibold text-warm">{group.label}</span>
@@ -102,9 +140,9 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                 </span>
                 <ChevronDown className={`h-5 w-5 text-olive transition ${open ? "rotate-180" : ""}`} />
               </span>
-            </button>
+            </div>
             {open && <div className="border-t border-line">
-              <div className="ledger-table-head hidden grid-cols-[minmax(0,1fr)_84px_minmax(108px,148px)_112px_120px] items-center gap-3 border-b border-line px-4 py-2 xl:grid">
+              <div className="ledger-table-head hidden grid-cols-[minmax(0,1fr)_84px_minmax(108px,148px)_112px_168px] items-center gap-3 border-b border-line px-4 py-2 xl:grid">
                 <span>账户</span>
                 <span>币种</span>
                 <span className="text-right">余额</span>
@@ -119,7 +157,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                   <div
                     role="button"
                     tabIndex={0}
-                    className={`grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left outline-none hover:bg-paper focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel xl:grid-cols-[minmax(0,1fr)_84px_minmax(108px,148px)_112px_120px] ${expanded ? "bg-[var(--selected-bg)]" : ""}`}
+                    className={`grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left outline-none hover:bg-paper focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel xl:grid-cols-[minmax(0,1fr)_84px_minmax(108px,148px)_112px_168px] ${expanded ? "bg-[var(--selected-bg)]" : ""}`}
                     onClick={() => selectAccount(row)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -139,10 +177,10 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                     <span className="rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive xl:w-fit">{row.currency || "多币种"}</span>
                     <span className={`hidden text-right text-sm font-medium xl:block ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
                     <span className="hidden truncate text-xs text-stone xl:block">{status ? statusTitle(status) : "未检查"}</span>
-                    <span className="hidden items-center justify-end gap-2 xl:flex">
-                      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive hover:bg-tag" onClick={(event) => event.stopPropagation()}>流水</ClientNavLink>
-                      <ClientNavLink href="/reconcile" className="rounded-lg bg-brand px-2 py-1 text-xs text-paper hover:bg-brand-light" onClick={(event) => event.stopPropagation()}>对账</ClientNavLink>
-                      {onToggleAccount && <button type="button" className="rounded-lg border border-line bg-panel p-1.5 text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+                    <span className="hidden h-9 items-center justify-end gap-2 xl:flex">
+                      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-paper px-3 text-xs font-medium text-olive hover:bg-tag" onClick={(event) => event.stopPropagation()}>流水</ClientNavLink>
+                      <ClientNavLink href="/reconcile" className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg bg-brand px-3 text-xs font-medium text-paper hover:bg-brand-light" onClick={(event) => event.stopPropagation()}>对账</ClientNavLink>
+                      {onToggleAccount && <button type="button" className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-panel text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
                     </span>
                   </div>
                   {expanded && <div className="hidden border-t border-line bg-paper/80 px-4 py-4 xl:block">
@@ -196,6 +234,47 @@ function buildBalancePrefixGroups(rows: BalanceRow[], statusMap: Map<string, Acc
       issueCount: statusCounts.red + statusCounts.yellow + statusCounts.grey,
     };
   });
+}
+
+function orderBalancePrefixGroups(groups: BalancePrefixGroup[], order: string[]) {
+  const index = new Map(order.map((key, position) => [key, position]));
+  return [...groups].sort((a, b) => {
+    const aIndex = index.get(a.key);
+    const bIndex = index.get(b.key);
+    if (aIndex != null && bIndex != null) return aIndex - bIndex;
+    if (aIndex != null) return -1;
+    if (bIndex != null) return 1;
+    return a.label.localeCompare(b.label, "zh-Hans-CN");
+  });
+}
+
+function reorderKeys(visibleKeys: string[], savedOrder: string[], sourceKey: string, targetKey: string) {
+  const visibleSet = new Set(visibleKeys);
+  const orderedVisible = [...savedOrder.filter((key) => visibleSet.has(key)), ...visibleKeys.filter((key) => !savedOrder.includes(key))];
+  const from = orderedVisible.indexOf(sourceKey);
+  const to = orderedVisible.indexOf(targetKey);
+  if (from < 0 || to < 0) return savedOrder;
+  const nextVisible = [...orderedVisible];
+  const [moved] = nextVisible.splice(from, 1);
+  nextVisible.splice(to, 0, moved);
+  const hiddenSaved = savedOrder.filter((key) => !visibleSet.has(key));
+  return [...nextVisible, ...hiddenSaved];
+}
+
+function readAccountGroupOrder() {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = window.localStorage.getItem(accountGroupOrderStorageKey);
+    const parsed = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAccountGroupOrder(order: string[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(accountGroupOrderStorageKey, JSON.stringify(order));
 }
 
 function accountMatchesStatusFilter(status: AccountStatus | undefined, filter: BalanceStatusFilter) {
