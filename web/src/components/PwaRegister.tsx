@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { haptic } from "./ledger/haptics";
+import { shouldShowServiceWorkerUpdate } from "./pwaUpdate";
 
 export function PwaRegister() {
   const [updateReady, setUpdateReady] = useState(false);
+  const dismissedWaitingRef = useRef<ServiceWorker | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
@@ -31,7 +33,7 @@ export function PwaRegister() {
     };
 
     const markUpdateReady = (registration: ServiceWorkerRegistration) => {
-      if (registration.waiting && navigator.serviceWorker.controller) setUpdateReady(true);
+      setUpdateReady(shouldShowServiceWorkerUpdate(registration.waiting, navigator.serviceWorker.controller, dismissedWaitingRef.current));
     };
 
     const checkForUpdate = () => {
@@ -49,7 +51,7 @@ export function PwaRegister() {
           const worker = registration.installing;
           if (!worker) return;
           worker.addEventListener("statechange", () => {
-            if (worker.state === "installed" && navigator.serviceWorker.controller) setUpdateReady(true);
+            if (worker.state === "installed") markUpdateReady(registration);
           });
         });
       }).catch((error) => {
@@ -79,9 +81,14 @@ export function PwaRegister() {
     const registration = await navigator.serviceWorker.getRegistration();
     const waiting = registration?.waiting;
     if (!waiting) {
-      window.location.reload();
+      setUpdateReady(false);
+      await registration?.update().catch((error) => {
+        console.warn("Service worker update check failed", error);
+      });
       return;
     }
+    dismissedWaitingRef.current = waiting;
+    setUpdateReady(false);
     waiting.postMessage({ type: "SKIP_WAITING" });
   };
 

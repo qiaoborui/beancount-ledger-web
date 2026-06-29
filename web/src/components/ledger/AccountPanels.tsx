@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ClientNavLink } from "./ClientNavLink";
-import { Archive, ArrowLeftRight, Bot, ChevronDown, CreditCard, Eye, EyeOff, ListChecks, Pencil, TrendingUp, WalletCards, X } from "lucide-react";
+import { Archive, ArrowLeftRight, Bot, ChevronDown, CreditCard, Eye, EyeOff, ListChecks, PanelRightClose, PanelRightOpen, Pencil, TrendingUp, WalletCards, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/money";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
   const [statusFilter, setStatusFilter] = useState<BalanceStatusFilter>("all");
   const [selectedGroupKey, setSelectedGroupKey] = useState<AccountGroup>("cash");
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [desktopDetailOpen, setDesktopDetailOpen] = useState(true);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const filteredRows = useMemo(() => rows.filter((row) => accountMatchesStatusFilter(statusMap.get(row.account), statusFilter)), [rows, statusFilter, statusMap]);
@@ -106,7 +107,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     </div>
 
     {rows.length ? groups.length ? <>
-      <div className="mt-4 hidden gap-4 lg:grid lg:grid-cols-[260px_minmax(0,1fr)_320px]">
+      <div className={`mt-4 hidden gap-4 xl:grid ${desktopDetailOpen ? "xl:grid-cols-[236px_minmax(520px,1fr)_minmax(280px,340px)]" : "xl:grid-cols-[236px_minmax(0,1fr)_72px]"}`}>
         <div className="rounded-xl border border-line bg-panel p-2">
           <div className="flex h-10 items-center justify-between px-2 text-sm font-medium text-olive">
             <span>分组</span>
@@ -146,7 +147,18 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                     <p className="mt-1 text-xs text-stone">{selectedGroup.rows.length} 个账户 · {selectedGroup.currencies.length > 1 ? `${selectedGroup.currencies.length} 个币种` : selectedGroup.currencies[0] ?? "无币种"}</p>
                   </div>
                 </div>
-                <div className={`text-right text-2xl font-semibold ${selectedGroup.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(selectedGroup, groupVisible(selectedGroup))}</div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <div className={`text-right text-2xl font-semibold ${selectedGroup.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(selectedGroup, groupVisible(selectedGroup))}</div>
+                  <button
+                    type="button"
+                    className="hidden h-10 w-10 place-items-center rounded-xl border border-line bg-paper text-olive hover:bg-tag xl:grid"
+                    onClick={() => setDesktopDetailOpen((open) => !open)}
+                    aria-label={desktopDetailOpen ? "收起账户详情" : "展开账户详情"}
+                    title={desktopDetailOpen ? "收起账户详情" : "展开账户详情"}
+                  >
+                    {desktopDetailOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
                 <BalanceMetric label="账户数量" value={`${selectedGroup.rows.length}`} />
@@ -207,10 +219,14 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
           </>}
         </div>
 
-        <AccountDetailPanel row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} lastActivity={desktopDetailRow ? lastActivityMap.get(desktopDetailRow.account) : undefined} points={desktopDetailRow ? trendMap[desktopDetailRow.account] ?? [] : []} onToggleAccount={onToggleAccount} />
+        {desktopDetailOpen ? (
+          <AccountDetailPanel row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} lastActivity={desktopDetailRow ? lastActivityMap.get(desktopDetailRow.account) : undefined} points={desktopDetailRow ? trendMap[desktopDetailRow.account] ?? [] : []} onToggleAccount={onToggleAccount} onClose={() => setDesktopDetailOpen(false)} />
+        ) : (
+          <CollapsedAccountDetailRail row={desktopDetailRow} visible={desktopDetailRow ? rowVisible(desktopDetailRow) : false} status={desktopDetailRow ? statusMap.get(desktopDetailRow.account) : undefined} onOpen={() => setDesktopDetailOpen(true)} />
+        )}
       </div>
 
-      <div className="mt-4 space-y-3 lg:hidden">
+      <div className="mt-4 space-y-3 xl:hidden">
         {groups.map((group, index) => {
           const open = openGroups[group.key] ?? (index === 0 || group.issueCount > 0);
           return <div key={group.key} className="overflow-hidden rounded-xl border border-line bg-panel">
@@ -412,7 +428,7 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
   if (!mounted || !row) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] lg:hidden">
+    <div className="fixed inset-0 z-[120] xl:hidden">
       <button className="absolute inset-0 bg-[var(--overlay)]" aria-label="关闭账户详情" onClick={onClose} />
       <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-[var(--float-shadow)]" role="dialog" aria-modal="true" aria-label="账户详情">
         <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-line" />
@@ -423,6 +439,26 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
   );
 }
 
+function CollapsedAccountDetailRail({ row, visible, status, onOpen }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; onOpen: () => void }) {
+  return <aside className="flex min-h-[520px] flex-col items-center gap-3 rounded-xl border border-line bg-panel p-2">
+    <button
+      type="button"
+      className="grid h-11 w-11 place-items-center rounded-xl border border-line bg-paper text-olive hover:bg-tag"
+      onClick={onOpen}
+      aria-label="展开账户详情"
+      title="展开账户详情"
+    >
+      <PanelRightOpen className="h-4 w-4" />
+    </button>
+    <div className="ledger-label [writing-mode:vertical-rl]">详情</div>
+    {row && <div className="mt-auto flex min-h-64 w-full flex-col items-center justify-end gap-3 rounded-lg bg-paper px-1.5 py-3">
+      <span className={`h-2.5 w-2.5 rounded-full ${status ? statusColor(status.status) : "bg-stone"}`} title={status ? statusTitle(status) : "未检查"} />
+      <span className="max-h-28 text-center text-xs font-medium leading-snug text-olive [writing-mode:vertical-rl]">{row.label}</span>
+      <span className={`text-center text-[11px] font-semibold leading-tight ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"} [writing-mode:vertical-rl]`}>{formatRowAmount(row, visible)}</span>
+    </div>}
+  </aside>;
+}
+
 function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; onClose?: () => void }) {
   if (!row) {
     return <aside className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
@@ -431,14 +467,14 @@ function AccountDetailPanel({ row, visible, status, lastActivity, points, onTogg
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h3 className="truncate text-xl font-semibold text-warm">{row.label}</h3>
-        <p className="mt-1 truncate text-xs text-stone">{row.account}</p>
+        <p className="mt-1 break-all text-xs text-stone">{row.account}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {onToggleAccount && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
         {onClose && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title="关闭账户详情"><X className="h-4 w-4" /></button>}
       </div>
     </div>
-    <div className="mt-5 grid grid-cols-3 gap-3">
+    <div className={`mt-5 grid gap-3 ${compact ? "grid-cols-3" : "grid-cols-1 2xl:grid-cols-3"}`}>
       <BalanceMetric label="余额" value={formatRowAmount(row, visible)} />
       <BalanceMetric label="状态" value={status ? statusTitle(status) : "未检查"} />
       <BalanceMetric label="币种" value={row.currency || "多币种"} />
