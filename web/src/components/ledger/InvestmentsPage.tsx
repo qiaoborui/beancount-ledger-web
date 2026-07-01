@@ -2,18 +2,23 @@ import { formatCny, formatCompactCny, formatMoney } from "@/lib/money";
 import { ChevronDown, LineChart as LineChartIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
-import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentSummary } from "./types";
+import { useInvestmentQuoteStream } from "./hooks/useInvestmentQuoteStream";
+import type { CommodityPrice, InvestmentHolding, InvestmentLiveQuote, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentSummary } from "./types";
 
 type PricePoint = { date: string; price: number };
 type MoneyValue = { value: number; currency: string };
+type DisplayInvestmentHolding = InvestmentHolding & { liveQuote?: InvestmentLiveQuote };
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
-  const holdings = useMemo(() => investmentHoldings(investments), [investments]);
+  const ledgerHoldings = useMemo(() => investmentHoldings(investments), [investments]);
+  const stream = useInvestmentQuoteStream(Boolean(investments && ledgerHoldings.length));
+  const holdings = useMemo(() => applyLiveQuotes(ledgerHoldings, stream.quotes), [ledgerHoldings, stream.quotes]);
   const [openHolding, setOpenHolding] = useState<string | null>(null);
   const positions = investments?.positions ?? [];
   const heldHoldings = holdings.filter((holding) => Math.abs(holding.totalQuantity) > 0);
   const latestDate = investments?.updatedAt || latestPriceDate(holdings);
   const accountCount = new Set(positions.map((position) => position.account)).size;
+  const displayMarketValueCny = summarizeHoldingMarketValue(heldHoldings) ?? investments?.totalMarketValueCny ?? 0;
   const costSummary = summarizeHoldingCosts(heldHoldings);
   const profitSummary = summarizeHoldingProfit(heldHoldings);
   const holdingsWithCost = countHoldingsWithCost(heldHoldings);
@@ -24,8 +29,8 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
     <div className="space-y-6">
       <section className="overflow-hidden rounded-xl border border-line bg-panel">
         <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <SummaryMetric label="持仓市值" value={formatCompactCny((investments?.totalMarketValueCny ?? 0) / 100)} detail={latestDate ? latestDate : "暂无价格"} tone="amount-gold" />
-          <SummaryMetric label="原币成本" value={formatMoneyValue(costSummary)} detail={`${holdingsWithCost}/${heldHoldings.length} 有成本 · ${lotCount} 笔买入`} tone="text-warm" />
+          <SummaryMetric label="持仓市值" value={formatCompactCny(displayMarketValueCny / 100)} detail={quoteSummaryDetail(stream.connected, stream.lastUpdatedAt, latestDate, stream.error)} tone="amount-gold" />
+          <SummaryMetric label="折算成本" value={formatMoneyValue(costSummary)} detail={`${holdingsWithCost}/${heldHoldings.length} 有成本 · ${lotCount} 笔买入`} tone="text-warm" />
           <SummaryMetric label="账面盈亏" value={formatProfit(profitSummary)} detail={`${holdingsWithProfit}/${heldHoldings.length} 可计算`} tone={profitTone(profitSummary)} />
           <SummaryMetric label="持仓股票" value={`${heldHoldings.length}`} detail={`${accountCount} 个账户`} tone="text-olive" />
         </div>
@@ -63,7 +68,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
   );
 }
 
-function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHolding; expanded: boolean; onToggle: () => void }) {
+function HoldingRow({ holding, expanded, onToggle }: { holding: DisplayInvestmentHolding; expanded: boolean; onToggle: () => void }) {
   const points = pricePoints(holding.priceHistory).slice(-90);
   const lots = holding.lots ?? [];
   const positions = holding.positions ?? [];
@@ -78,6 +83,7 @@ function HoldingRow({ holding, expanded, onToggle }: { holding: InvestmentHoldin
             <div className="mt-2 flex flex-wrap gap-2 text-xs text-stone">
               <Badge>{lots.length ? `最近买入 ${lots[0]?.date}` : "暂无买入批次"}</Badge>
               <Badge>{holding.accountCount} 个账户</Badge>
+              {holding.liveQuote ? <Badge>{quoteStatusLabel(holding.liveQuote)}</Badge> : null}
             </div>
           </div>
 
@@ -188,18 +194,19 @@ function PositionBreakdown({ positions }: { positions: InvestmentPosition[] }) {
   );
 }
 
-function PricePanel({ holding, points }: { holding: InvestmentHolding; points: PricePoint[] }) {
+function PricePanel({ holding, points }: { holding: DisplayInvestmentHolding; points: PricePoint[] }) {
   const change = priceChange(points);
+  const liveChange = holding.liveQuote?.changePercent;
   return (
     <aside className="min-w-0">
-      <SectionHeader title="价格" meta={holding.latestPrice?.date ?? "暂无"} />
+      <SectionHeader title="价格" meta={holding.liveQuote?.updatedAt ? formatQuoteTime(holding.liveQuote.updatedAt) : holding.latestPrice?.date ?? "暂无"} />
       <div className="mt-2 rounded-lg border border-line bg-panel p-3">
         <div className="flex items-center justify-between gap-3 text-sm">
           <div className="inline-flex items-center gap-2 text-stone">
             <LineChartIcon className="h-4 w-4 text-brand" />
             <span>{formatPrice(holding.latestPrice)}</span>
           </div>
-          <span className={`tabular-nums ${profitTone(change == null ? null : { value: change, currency: "%" })}`}>{formatPriceChange(change)}</span>
+          <span className={`tabular-nums ${profitTone((liveChange ?? change) == null ? null : { value: liveChange ?? change ?? 0, currency: "%" })}`}>{formatPriceChange(liveChange ?? change)}</span>
         </div>
         <div className="mt-3 h-28 min-w-0">
           {points.length >= 2 ? <PriceSparkline points={points} currency={holding.latestPrice?.currency ?? ""} /> : <EmptyInline text="暂无曲线" />}
@@ -338,9 +345,26 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
         current.averageCost = undefined;
       }
     }
+    if (position.costValueCny != null) current.totalCostValueCny = (current.totalCostValueCny ?? 0) + position.costValueCny;
     byCommodity.set(position.commodity, current);
   }
   return [...byCommodity.values()].filter(isVisibleHolding).sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
+}
+
+export function applyLiveQuotes(holdings: InvestmentHolding[], quotes: Record<string, InvestmentLiveQuote>): DisplayInvestmentHolding[] {
+  return holdings.map((holding) => {
+    const quote = quotes[holding.commodity];
+    if (!quote || quote.amount <= 0 || !quote.currency) return holding;
+    const latestPrice = { date: quote.updatedAt.slice(0, 10), commodity: holding.commodity, amount: quote.amount, currency: quote.currency };
+    return {
+      ...holding,
+      latestPrice,
+      marketCurrency: quote.currency,
+      totalMarketValue: quote.marketValue ?? holding.totalQuantity * quote.amount,
+      totalMarketValueCny: quote.marketValueCny ?? holding.totalMarketValueCny,
+      liveQuote: quote,
+    };
+  });
 }
 
 function isVisibleHolding(holding: InvestmentHolding) {
@@ -367,6 +391,11 @@ function holdingProfit(holding: InvestmentHolding): MoneyValue | null {
 }
 
 function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null {
+  const cnyCents = holdings.reduce((total, holding) => holding.totalCostValueCny == null ? total : total + holding.totalCostValueCny, 0);
+  const cnyCount = holdings.filter((holding) => holding.totalCostValueCny != null).length;
+  const costCount = countHoldingsWithCost(holdings);
+  if (cnyCount > 0 && cnyCount === costCount) return { value: cnyCents / 100, currency: "CNY" };
+
   const totals = new Map<string, number>();
   for (const holding of holdings) {
     if (holding.totalCostValue == null || !holding.costCurrency) continue;
@@ -378,6 +407,9 @@ function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null
 }
 
 function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | null {
+  const cnyProfits = holdings.flatMap((holding) => holding.totalMarketValueCny != null && holding.totalCostValueCny != null ? [(holding.totalMarketValueCny - holding.totalCostValueCny) / 100] : []);
+  if (cnyProfits.length > 0 && cnyProfits.length === countHoldingsWithProfit(holdings)) return { value: cnyProfits.reduce((total, value) => total + value, 0), currency: "CNY" };
+
   const totals = new Map<string, number>();
   for (const holding of holdings) {
     const profit = holdingProfit(holding);
@@ -389,12 +421,18 @@ function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | nul
   return { value, currency };
 }
 
+function summarizeHoldingMarketValue(holdings: InvestmentHolding[]) {
+  const values = holdings.flatMap((holding) => holding.totalMarketValueCny == null ? [] : [holding.totalMarketValueCny]);
+  if (values.length === 0) return null;
+  return values.reduce((total, value) => total + value, 0);
+}
+
 function countHoldingsWithCost(holdings: InvestmentHolding[]) {
-  return holdings.filter((holding) => holding.totalCostValue != null && Boolean(holding.costCurrency)).length;
+  return holdings.filter((holding) => holding.totalCostValueCny != null || (holding.totalCostValue != null && Boolean(holding.costCurrency))).length;
 }
 
 function countHoldingsWithProfit(holdings: InvestmentHolding[]) {
-  return holdings.filter((holding) => holdingProfit(holding) != null).length;
+  return holdings.filter((holding) => (holding.totalMarketValueCny != null && holding.totalCostValueCny != null) || holdingProfit(holding) != null).length;
 }
 
 function formatQuantity(value: number) {
@@ -403,12 +441,12 @@ function formatQuantity(value: number) {
 
 function formatPrice(price?: CommodityPrice) {
   if (!price) return "暂无";
-  return formatMoney(price.amount, price.currency);
+  return formatUnitMoney(price.amount, price.currency);
 }
 
 function formatCostPrice(value?: number, currency?: string) {
   if (value == null || !currency) return "暂无";
-  return formatMoney(value, currency);
+  return formatUnitMoney(value, currency);
 }
 
 function formatMarketValue(value?: number, currency?: string) {
@@ -426,6 +464,14 @@ function formatMoneyValue(value: MoneyValue | null) {
   return formatMoney(value.value, value.currency);
 }
 
+function formatUnitMoney(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("zh-CN", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
+  } catch {
+    return `${value.toFixed(6).replace(/\.?0+$/, "")} ${currency}`;
+  }
+}
+
 function formatProfit(value: MoneyValue | null) {
   if (!value) return "暂无";
   const sign = value.value > 0 ? "+" : "";
@@ -436,6 +482,25 @@ function formatPriceChange(change: number | null) {
   if (change == null) return "暂无";
   const sign = change > 0 ? "+" : "";
   return `${sign}${(change * 100).toFixed(2)}%`;
+}
+
+function quoteStatusLabel(quote: InvestmentLiveQuote) {
+  const source = quote.source === "ledger" ? "账本" : quote.source;
+  const status = quote.status === "live" ? "实时" : quote.status === "delayed" ? "延迟" : quote.status === "close" ? "收盘" : quote.status === "error" ? "异常" : "账本";
+  return `${status} · ${source}`;
+}
+
+function quoteSummaryDetail(connected: boolean, liveUpdatedAt: string, ledgerDate: string, error: string) {
+  if (error) return "行情回退到账本价";
+  if (liveUpdatedAt) return `${connected ? "行情" : "重连中"} · ${formatQuoteTime(liveUpdatedAt)}`;
+  if (ledgerDate) return ledgerDate;
+  return "暂无价格";
+}
+
+function formatQuoteTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
 }
 
 function profitTone(value: MoneyValue | null) {

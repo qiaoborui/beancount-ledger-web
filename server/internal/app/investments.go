@@ -2,6 +2,7 @@ package app
 
 import (
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 )
@@ -30,6 +31,7 @@ type InvestmentPosition struct {
 	AverageCost    *float64        `json:"averageCost,omitempty"`
 	CostValue      *float64        `json:"costValue,omitempty"`
 	CostCurrency   string          `json:"costCurrency,omitempty"`
+	CostValueCNY   *int            `json:"costValueCny,omitempty"`
 	MarketValue    *float64        `json:"marketValue,omitempty"`
 	MarketCurrency string          `json:"marketCurrency,omitempty"`
 	MarketValueCNY *int            `json:"marketValueCny,omitempty"`
@@ -67,6 +69,7 @@ type InvestmentHolding struct {
 	AverageCost         *float64             `json:"averageCost,omitempty"`
 	TotalCostValue      *float64             `json:"totalCostValue,omitempty"`
 	CostCurrency        string               `json:"costCurrency,omitempty"`
+	TotalCostValueCNY   *int                 `json:"totalCostValueCny,omitempty"`
 	TotalMarketValue    *float64             `json:"totalMarketValue,omitempty"`
 	MarketCurrency      string               `json:"marketCurrency,omitempty"`
 	TotalMarketValueCNY *int                 `json:"totalMarketValueCny,omitempty"`
@@ -120,7 +123,7 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 		}
 	}
 
-	priceIndex := NewPriceIndex(prices)
+	priceIndex := newInvestmentPriceIndex(prices)
 	latestPrices := latestInvestmentPrices(prices)
 	priceHistory := investmentPriceHistory(prices)
 	positionQuantities := investmentQuantities(entries, securities)
@@ -156,6 +159,9 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 			position.CostValue = &value
 			position.AverageCost = &average
 			position.CostCurrency = cost.currency
+			if cny := marketValueCNY(value, cost.currency, priceIndex); cny != nil {
+				position.CostValueCNY = cny
+			}
 		}
 		if position.LatestPrice != nil {
 			value := quantity * position.LatestPrice.Amount
@@ -247,7 +253,7 @@ func parseCommodityDetails(entries []BeanEntry) []Commodity {
 func latestInvestmentPrices(prices []Price) map[string]*CommodityPrice {
 	latest := map[string]*CommodityPrice{}
 	for _, price := range prices {
-		candidate := CommodityPrice{Date: price.Date, Commodity: price.Currency, Amount: float64(price.Amount) / 100, Currency: price.QuoteCurrency}
+		candidate := CommodityPrice{Date: price.Date, Commodity: price.Currency, Amount: investmentPriceAmount(price), Currency: price.QuoteCurrency}
 		current := latest[candidate.Commodity]
 		if current == nil || candidate.Date >= current.Date {
 			latest[candidate.Commodity] = &candidate
@@ -259,7 +265,7 @@ func latestInvestmentPrices(prices []Price) map[string]*CommodityPrice {
 func investmentPriceHistory(prices []Price) map[string][]CommodityPrice {
 	history := map[string][]CommodityPrice{}
 	for _, price := range prices {
-		point := CommodityPrice{Date: price.Date, Commodity: price.Currency, Amount: float64(price.Amount) / 100, Currency: price.QuoteCurrency}
+		point := CommodityPrice{Date: price.Date, Commodity: price.Currency, Amount: investmentPriceAmount(price), Currency: price.QuoteCurrency}
 		history[point.Commodity] = append(history[point.Commodity], point)
 	}
 	for commodity := range history {
@@ -273,7 +279,7 @@ func investmentPriceHistory(prices []Price) map[string][]CommodityPrice {
 	return history
 }
 
-func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[string]*CommodityPrice, priceHistory map[string][]CommodityPrice, positions []InvestmentPosition, quantities map[string]float64, priceIndex PriceIndex) []InvestmentHolding {
+func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[string]*CommodityPrice, priceHistory map[string][]CommodityPrice, positions []InvestmentPosition, quantities map[string]float64, priceIndex investmentPriceIndex) []InvestmentHolding {
 	byCommodity := map[string]*InvestmentHolding{}
 	for _, position := range positions {
 		holding := byCommodity[position.Commodity]
@@ -349,6 +355,14 @@ func addPositionCost(holding *InvestmentHolding, position InvestmentPosition) {
 	if position.CostValue == nil || position.CostCurrency == "" {
 		return
 	}
+	if position.CostValueCNY != nil {
+		totalCNY := 0
+		if holding.TotalCostValueCNY != nil {
+			totalCNY = *holding.TotalCostValueCNY
+		}
+		totalCNY += *position.CostValueCNY
+		holding.TotalCostValueCNY = &totalCNY
+	}
 	if holding.CostCurrency != "" && holding.CostCurrency != position.CostCurrency {
 		holding.TotalCostValue = nil
 		holding.AverageCost = nil
@@ -378,7 +392,7 @@ func investmentQuantities(entries []BeanEntry, securities map[string]bool) map[s
 			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
 				continue
 			}
-			positions[posting.Account+"\x00"+posting.Currency] += float64(posting.Amount) / 100
+			positions[posting.Account+"\x00"+posting.Currency] += investmentPostingQuantity(posting)
 		}
 	}
 	return positions
@@ -413,10 +427,11 @@ func investmentCosts(entries []BeanEntry, securities map[string]bool) map[string
 				continue
 			}
 			current.currency = currency
+			quantity := investmentPostingQuantity(posting)
 			if posting.TotalCost {
-				current.value += float64(posting.CostAmount) / 100
+				current.value += investmentBeanAmountValue(posting.Cost, posting.CostAmount)
 			} else {
-				current.value += (float64(posting.Amount) / 100) * (float64(posting.CostAmount) / 100)
+				current.value += quantity * investmentBeanAmountValue(posting.Cost, posting.CostAmount)
 			}
 			costs[key] = current
 		}
@@ -434,7 +449,7 @@ func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap 
 			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
 				continue
 			}
-			quantity := float64(posting.Amount) / 100
+			quantity := investmentPostingQuantity(posting)
 			if quantity <= 0 || roundedZero(quantity) {
 				continue
 			}
@@ -453,12 +468,12 @@ func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap 
 			}
 			if posting.CostCurrency != "" {
 				if posting.TotalCost {
-					value := float64(posting.CostAmount) / 100
+					value := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
 					unit := value / quantity
 					lot.UnitCost = &unit
 					lot.CostValue = &value
 				} else {
-					unit := float64(posting.CostAmount) / 100
+					unit := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
 					value := quantity * unit
 					lot.UnitCost = &unit
 					lot.CostValue = &value
@@ -487,15 +502,12 @@ func sortInvestmentLots(lots []InvestmentLot) {
 	})
 }
 
-func marketValueCNY(value float64, currency string, priceIndex PriceIndex) *int {
-	if currency == "CNY" {
-		cny := int(math.Round(value * 100))
-		return &cny
-	}
-	cny, ok := priceIndex.Valuation(int(math.Round(value*100)), currency, "CNY", "")
+func marketValueCNY(value float64, currency string, priceIndex investmentPriceIndex) *int {
+	value, ok := priceIndex.Valuation(value, currency, "CNY", "")
 	if !ok {
 		return nil
 	}
+	cny := int(math.Round(value * 100))
 	return &cny
 }
 
@@ -515,4 +527,119 @@ func cnyValue(value *int) int {
 
 func roundedZero(value float64) bool {
 	return math.Abs(value) < 0.00000001
+}
+
+func investmentPostingQuantity(posting parsedPosting) float64 {
+	return investmentBeanAmountValue(posting.Quantity, posting.Amount)
+}
+
+func investmentPriceAmount(price Price) float64 {
+	return investmentBeanAmountValue(price.AmountValue, price.Amount)
+}
+
+func investmentBeanAmountValue(amount BeanAmount, fallbackCents int) float64 {
+	if value, ok := investmentDecimalValue(amount.Number); ok {
+		return value
+	}
+	return float64(fallbackCents) / 100
+}
+
+func investmentDecimalValue(raw string) (float64, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, false
+	}
+	rat, ok := new(big.Rat).SetString(strings.ReplaceAll(strings.TrimSpace(raw), ",", ""))
+	if !ok {
+		return 0, false
+	}
+	value, _ := rat.Float64()
+	return value, true
+}
+
+type investmentPriceIndex struct {
+	byPair   map[string][]Price
+	pairKeys []string
+}
+
+func newInvestmentPriceIndex(prices []Price) investmentPriceIndex {
+	index := investmentPriceIndex{byPair: map[string][]Price{}}
+	for _, price := range prices {
+		key := pricePairKey(price.Currency, price.QuoteCurrency)
+		if _, ok := index.byPair[key]; !ok {
+			index.pairKeys = append(index.pairKeys, key)
+		}
+		index.byPair[key] = append(index.byPair[key], price)
+	}
+	sort.Strings(index.pairKeys)
+	for key := range index.byPair {
+		rows := index.byPair[key]
+		sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
+		index.byPair[key] = rows
+	}
+	return index
+}
+
+func (index investmentPriceIndex) Valuation(amount float64, currency, targetCurrency string, date string) (float64, bool) {
+	return index.valuation(amount, currency, targetCurrency, date, map[string]bool{})
+}
+
+func (index investmentPriceIndex) valuation(amount float64, currency, targetCurrency string, date string, seen map[string]bool) (float64, bool) {
+	currency = normalizeValuationCurrency(currency)
+	targetCurrency = normalizeValuationCurrency(targetCurrency)
+	if currency == targetCurrency {
+		return amount, true
+	}
+	if price, ok := index.latestPrice(currency, targetCurrency, date); ok {
+		return amount * investmentPriceAmount(*price), true
+	}
+	if price, ok := index.latestPrice(targetCurrency, currency, date); ok {
+		rate := investmentPriceAmount(*price)
+		if rate != 0 {
+			return amount / rate, true
+		}
+	}
+	if seen[currency] {
+		return 0, false
+	}
+	seen[currency] = true
+	for _, key := range index.pairKeys {
+		base, quote := splitPricePairKey(key)
+		if base == currency {
+			price, ok := index.latestPrice(base, quote, date)
+			if ok {
+				value := amount * investmentPriceAmount(*price)
+				if converted, ok := index.valuation(value, quote, targetCurrency, date, cloneSeenCurrencies(seen)); ok {
+					return converted, true
+				}
+			}
+		}
+		if quote == currency {
+			price, ok := index.latestPrice(base, quote, date)
+			if ok {
+				rate := investmentPriceAmount(*price)
+				if rate != 0 {
+					value := amount / rate
+					if converted, ok := index.valuation(value, base, targetCurrency, date, cloneSeenCurrencies(seen)); ok {
+						return converted, true
+					}
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+func (index investmentPriceIndex) latestPrice(currency, quoteCurrency string, date string) (*Price, bool) {
+	prices := index.byPair[pricePairKey(currency, quoteCurrency)]
+	if len(prices) == 0 {
+		return nil, false
+	}
+	if date == "" {
+		return &prices[len(prices)-1], true
+	}
+	i := sort.Search(len(prices), func(i int) bool { return prices[i].Date > date })
+	if i > 0 {
+		return &prices[i-1], true
+	}
+	return nil, false
 }

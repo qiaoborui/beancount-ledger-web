@@ -1,7 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { InvestmentsPage } from "./InvestmentsPage";
-import type { InvestmentSummary } from "./types";
+import { applyLiveQuotes, InvestmentsPage } from "./InvestmentsPage";
+import type { InvestmentHolding, InvestmentSummary } from "./types";
 
 describe("InvestmentsPage", () => {
   it("ignores cached holdings without a real held security", () => {
@@ -242,5 +242,98 @@ describe("InvestmentsPage", () => {
     expect(html).not.toContain("买入日期");
     expect(html).not.toContain("账户拆分");
     expect(html).not.toContain("$636");
+  });
+
+  it("renders CNY security unit prices without dropping decimal precision", () => {
+    const investments: InvestmentSummary = {
+      totalMarketValueCny: 214800,
+      updatedAt: "2026-06-30",
+      positions: [
+        {
+          account: "Assets:CN:CMB:Securities:SZ159350",
+          accountLabel: "招商证券深证50 ETF 富国 (159350)",
+          commodity: "SZ159350",
+          commodityName: "Fullgoal Shenzhen 50 Index ETF (159350)",
+          quantity: 1200,
+          latestPrice: { date: "2026-06-30", commodity: "SZ159350", amount: 1.79, currency: "CNY" },
+          averageCost: 1.7702,
+          costValue: 2124.24,
+          costCurrency: "CNY",
+          costValueCny: 212424,
+          marketValue: 2148,
+          marketCurrency: "CNY",
+          marketValueCny: 214800,
+          lots: [],
+        },
+      ],
+      lots: [],
+      quotes: [],
+      holdings: [
+        {
+          commodity: "SZ159350",
+          commodityName: "Fullgoal Shenzhen 50 Index ETF (159350)",
+          latestPrice: { date: "2026-06-30", commodity: "SZ159350", amount: 1.79, currency: "CNY" },
+          priceHistory: [],
+          totalQuantity: 1200,
+          averageCost: 1.7702,
+          totalCostValue: 2124.24,
+          costCurrency: "CNY",
+          totalCostValueCny: 212424,
+          totalMarketValue: 2148,
+          marketCurrency: "CNY",
+          totalMarketValueCny: 214800,
+          accountCount: 1,
+          positions: [],
+          lots: [],
+        },
+      ],
+    };
+
+    const html = renderToString(<InvestmentsPage investments={investments} />);
+
+    expect(html).toContain("¥1.7702");
+    expect(html).toContain("¥2,124.24");
+    expect(html).toContain("+¥23.76");
+    expect(html).toContain("折算成本");
+  });
+
+  it("overlays live quote values without changing ledger cost basis", () => {
+    const holding: InvestmentHolding = {
+      commodity: "QQQ",
+      commodityName: "Invesco QQQ Trust",
+      latestPrice: { date: "2026-06-30", commodity: "QQQ", amount: 736.4, currency: "USD" },
+      priceHistory: [],
+      totalQuantity: 0.0056,
+      averageCost: 725.2,
+      totalCostValue: 4.06112,
+      costCurrency: "USD",
+      totalCostValueCny: 2757,
+      totalMarketValue: 4.12384,
+      marketCurrency: "USD",
+      totalMarketValueCny: 2800,
+      accountCount: 1,
+      positions: [],
+      lots: [],
+    };
+
+    const [live] = applyLiveQuotes([holding], {
+      QQQ: {
+        commodity: "QQQ",
+        commodityName: "Invesco QQQ Trust",
+        amount: 740,
+        currency: "USD",
+        source: "mock",
+        status: "live",
+        marketValue: 4.144,
+        marketValueCny: 2814,
+        updatedAt: "2026-06-30T14:30:00Z",
+      },
+    });
+
+    expect(live.latestPrice?.amount).toBe(740);
+    expect(live.totalMarketValue).toBe(4.144);
+    expect(live.totalMarketValueCny).toBe(2814);
+    expect(live.totalCostValue).toBe(4.06112);
+    expect(live.totalCostValueCny).toBe(2757);
   });
 });
