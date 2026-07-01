@@ -63,7 +63,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.GET("/income-statement", s.incomeStatement)
 	ledger.GET("/dashboard", s.dashboard)
 	ledger.GET("/investments", s.investments)
-	ledger.GET("/investments/quotes/ws", s.investmentQuotesWS)
 	ledger.GET("/accounts", s.accounts)
 	ledger.POST("/accounts", s.appendAccount)
 	ledger.POST("/accounts/operations", s.applyAccountOperations)

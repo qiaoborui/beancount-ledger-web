@@ -1,7 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { applyLiveQuotes, InvestmentsPage } from "./InvestmentsPage";
-import type { InvestmentHolding, InvestmentSummary } from "./types";
+import { InvestmentsPage } from "./InvestmentsPage";
+import type { InvestmentSummary } from "./types";
 
 describe("InvestmentsPage", () => {
   it("ignores cached holdings without a real held security", () => {
@@ -297,43 +297,4 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("折算成本");
   });
 
-  it("overlays live quote values without changing ledger cost basis", () => {
-    const holding: InvestmentHolding = {
-      commodity: "QQQ",
-      commodityName: "Invesco QQQ Trust",
-      latestPrice: { date: "2026-06-30", commodity: "QQQ", amount: 736.4, currency: "USD" },
-      priceHistory: [],
-      totalQuantity: 0.0056,
-      averageCost: 725.2,
-      totalCostValue: 4.06112,
-      costCurrency: "USD",
-      totalCostValueCny: 2757,
-      totalMarketValue: 4.12384,
-      marketCurrency: "USD",
-      totalMarketValueCny: 2800,
-      accountCount: 1,
-      positions: [],
-      lots: [],
-    };
-
-    const [live] = applyLiveQuotes([holding], {
-      QQQ: {
-        commodity: "QQQ",
-        commodityName: "Invesco QQQ Trust",
-        amount: 740,
-        currency: "USD",
-        source: "mock",
-        status: "live",
-        marketValue: 4.144,
-        marketValueCny: 2814,
-        updatedAt: "2026-06-30T14:30:00Z",
-      },
-    });
-
-    expect(live.latestPrice?.amount).toBe(740);
-    expect(live.totalMarketValue).toBe(4.144);
-    expect(live.totalMarketValueCny).toBe(2814);
-    expect(live.totalCostValue).toBe(4.06112);
-    expect(live.totalCostValueCny).toBe(2757);
-  });
 });
