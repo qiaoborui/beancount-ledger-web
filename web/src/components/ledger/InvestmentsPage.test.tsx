@@ -243,4 +243,58 @@ describe("InvestmentsPage", () => {
     expect(html).not.toContain("账户拆分");
     expect(html).not.toContain("$636");
   });
+
+  it("renders CNY security unit prices without dropping decimal precision", () => {
+    const investments: InvestmentSummary = {
+      totalMarketValueCny: 214800,
+      updatedAt: "2026-06-30",
+      positions: [
+        {
+          account: "Assets:CN:CMB:Securities:SZ159350",
+          accountLabel: "招商证券深证50 ETF 富国 (159350)",
+          commodity: "SZ159350",
+          commodityName: "Fullgoal Shenzhen 50 Index ETF (159350)",
+          quantity: 1200,
+          latestPrice: { date: "2026-06-30", commodity: "SZ159350", amount: 1.79, currency: "CNY" },
+          averageCost: 1.7702,
+          costValue: 2124.24,
+          costCurrency: "CNY",
+          costValueCny: 212424,
+          marketValue: 2148,
+          marketCurrency: "CNY",
+          marketValueCny: 214800,
+          lots: [],
+        },
+      ],
+      lots: [],
+      quotes: [],
+      holdings: [
+        {
+          commodity: "SZ159350",
+          commodityName: "Fullgoal Shenzhen 50 Index ETF (159350)",
+          latestPrice: { date: "2026-06-30", commodity: "SZ159350", amount: 1.79, currency: "CNY" },
+          priceHistory: [],
+          totalQuantity: 1200,
+          averageCost: 1.7702,
+          totalCostValue: 2124.24,
+          costCurrency: "CNY",
+          totalCostValueCny: 212424,
+          totalMarketValue: 2148,
+          marketCurrency: "CNY",
+          totalMarketValueCny: 214800,
+          accountCount: 1,
+          positions: [],
+          lots: [],
+        },
+      ],
+    };
+
+    const html = renderToString(<InvestmentsPage investments={investments} />);
+
+    expect(html).toContain("¥1.7702");
+    expect(html).toContain("¥2,124.24");
+    expect(html).toContain("+¥23.76");
+    expect(html).toContain("折算成本");
+  });
+
 });

@@ -25,7 +25,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
       <section className="overflow-hidden rounded-xl border border-line bg-panel">
         <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           <SummaryMetric label="持仓市值" value={formatCompactCny((investments?.totalMarketValueCny ?? 0) / 100)} detail={latestDate ? latestDate : "暂无价格"} tone="amount-gold" />
-          <SummaryMetric label="原币成本" value={formatMoneyValue(costSummary)} detail={`${holdingsWithCost}/${heldHoldings.length} 有成本 · ${lotCount} 笔买入`} tone="text-warm" />
+          <SummaryMetric label="折算成本" value={formatMoneyValue(costSummary)} detail={`${holdingsWithCost}/${heldHoldings.length} 有成本 · ${lotCount} 笔买入`} tone="text-warm" />
           <SummaryMetric label="账面盈亏" value={formatProfit(profitSummary)} detail={`${holdingsWithProfit}/${heldHoldings.length} 可计算`} tone={profitTone(profitSummary)} />
           <SummaryMetric label="持仓股票" value={`${heldHoldings.length}`} detail={`${accountCount} 个账户`} tone="text-olive" />
         </div>
@@ -338,6 +338,7 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
         current.averageCost = undefined;
       }
     }
+    if (position.costValueCny != null) current.totalCostValueCny = (current.totalCostValueCny ?? 0) + position.costValueCny;
     byCommodity.set(position.commodity, current);
   }
   return [...byCommodity.values()].filter(isVisibleHolding).sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
@@ -367,6 +368,11 @@ function holdingProfit(holding: InvestmentHolding): MoneyValue | null {
 }
 
 function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null {
+  const cnyCents = holdings.reduce((total, holding) => holding.totalCostValueCny == null ? total : total + holding.totalCostValueCny, 0);
+  const cnyCount = holdings.filter((holding) => holding.totalCostValueCny != null).length;
+  const costCount = countHoldingsWithCost(holdings);
+  if (cnyCount > 0 && cnyCount === costCount) return { value: cnyCents / 100, currency: "CNY" };
+
   const totals = new Map<string, number>();
   for (const holding of holdings) {
     if (holding.totalCostValue == null || !holding.costCurrency) continue;
@@ -378,6 +384,9 @@ function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null
 }
 
 function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | null {
+  const cnyProfits = holdings.flatMap((holding) => holding.totalMarketValueCny != null && holding.totalCostValueCny != null ? [(holding.totalMarketValueCny - holding.totalCostValueCny) / 100] : []);
+  if (cnyProfits.length > 0 && cnyProfits.length === countHoldingsWithProfit(holdings)) return { value: cnyProfits.reduce((total, value) => total + value, 0), currency: "CNY" };
+
   const totals = new Map<string, number>();
   for (const holding of holdings) {
     const profit = holdingProfit(holding);
@@ -390,11 +399,11 @@ function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | nul
 }
 
 function countHoldingsWithCost(holdings: InvestmentHolding[]) {
-  return holdings.filter((holding) => holding.totalCostValue != null && Boolean(holding.costCurrency)).length;
+  return holdings.filter((holding) => holding.totalCostValueCny != null || (holding.totalCostValue != null && Boolean(holding.costCurrency))).length;
 }
 
 function countHoldingsWithProfit(holdings: InvestmentHolding[]) {
-  return holdings.filter((holding) => holdingProfit(holding) != null).length;
+  return holdings.filter((holding) => (holding.totalMarketValueCny != null && holding.totalCostValueCny != null) || holdingProfit(holding) != null).length;
 }
 
 function formatQuantity(value: number) {
@@ -403,12 +412,12 @@ function formatQuantity(value: number) {
 
 function formatPrice(price?: CommodityPrice) {
   if (!price) return "暂无";
-  return formatMoney(price.amount, price.currency);
+  return formatUnitMoney(price.amount, price.currency);
 }
 
 function formatCostPrice(value?: number, currency?: string) {
   if (value == null || !currency) return "暂无";
-  return formatMoney(value, currency);
+  return formatUnitMoney(value, currency);
 }
 
 function formatMarketValue(value?: number, currency?: string) {
@@ -424,6 +433,14 @@ function formatCnyValue(value?: number) {
 function formatMoneyValue(value: MoneyValue | null) {
   if (!value) return "暂无";
   return formatMoney(value.value, value.currency);
+}
+
+function formatUnitMoney(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("zh-CN", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
+  } catch {
+    return `${value.toFixed(6).replace(/\.?0+$/, "")} ${currency}`;
+  }
 }
 
 function formatProfit(value: MoneyValue | null) {

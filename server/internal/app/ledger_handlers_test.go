@@ -226,6 +226,67 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 	}
 }
 
+func TestInvestmentSummaryPreservesSecurityDecimalPrecision(t *testing.T) {
+	text := []string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity USD",
+		"2026-01-01 commodity QQQ",
+		"2026-01-01 commodity SZ159350",
+		`  name: "Fullgoal Shenzhen 50 Index ETF (159350)"`,
+		"2026-01-01 open Assets:Cash CNY",
+		"2026-01-01 open Assets:Broker:QQQ QQQ",
+		"2026-01-01 open Assets:CN:CMB:Securities:SZ159350 SZ159350",
+		"2026-01-01 open Equity:Opening-Balances CNY",
+		"2026-06-30 price USD 6.789900 CNY",
+		"2026-06-30 price QQQ 736.40 USD",
+		"2026-06-30 price SZ159350 1.79 CNY",
+		`2026-06-30 * "Broker" "fractional QQQ"`,
+		"  Assets:Broker:QQQ 0.0056 QQQ {725.20 USD}",
+		"  Equity:Opening-Balances -0.0056 QQQ",
+		`2026-06-30 * "CMB" "A share ETF"`,
+		"  Assets:CN:CMB:Securities:SZ159350 1200 SZ159350 {1.7702 CNY}",
+		"  Assets:Cash -2124.24 CNY",
+		"",
+	}
+	lines := make([]BeanLine, 0, len(text))
+	for index, line := range text {
+		lines = append(lines, BeanLine{File: "main.bean", Line: index + 1, Text: line})
+	}
+	entries := ParseBeanLines(lines).Entries
+	summary := BuildInvestmentSummaryFromBeanEntries(entries, AccountsFromBeanEntries(entries), PricesFromBeanEntries(entries))
+
+	if len(summary.Holdings) != 2 {
+		t.Fatalf("expected two holdings, got %#v", summary.Holdings)
+	}
+	if summary.TotalMarketValueCNY != 217600 {
+		t.Fatalf("total CNY market value = %d, want 217600", summary.TotalMarketValueCNY)
+	}
+	byCommodity := map[string]InvestmentHolding{}
+	for _, holding := range summary.Holdings {
+		byCommodity[holding.Commodity] = holding
+	}
+	aShare := byCommodity["SZ159350"]
+	if aShare.TotalQuantity != 1200 || aShare.LatestPrice == nil || aShare.LatestPrice.Amount != 1.79 || aShare.TotalMarketValueCNY == nil || *aShare.TotalMarketValueCNY != 214800 {
+		t.Fatalf("unexpected A share valuation: %#v", aShare)
+	}
+	if aShare.TotalCostValue == nil || math.Abs(*aShare.TotalCostValue-2124.24) > 0.000001 || aShare.AverageCost == nil || math.Abs(*aShare.AverageCost-1.7702) > 0.000001 {
+		t.Fatalf("A share cost lost decimal precision: %#v", aShare)
+	}
+	if aShare.TotalCostValueCNY == nil || *aShare.TotalCostValueCNY != 212424 {
+		t.Fatalf("A share CNY cost = %#v, want 212424", aShare.TotalCostValueCNY)
+	}
+	if len(aShare.Lots) != 1 || aShare.Lots[0].UnitCost == nil || math.Abs(*aShare.Lots[0].UnitCost-1.7702) > 0.000001 || aShare.Lots[0].CostValue == nil || math.Abs(*aShare.Lots[0].CostValue-2124.24) > 0.000001 {
+		t.Fatalf("A share lot lost decimal precision: %#v", aShare.Lots)
+	}
+	qqq := byCommodity["QQQ"]
+	if math.Abs(qqq.TotalQuantity-0.0056) > 0.000000001 || qqq.TotalMarketValue == nil || math.Abs(*qqq.TotalMarketValue-4.12384) > 0.000001 || qqq.TotalMarketValueCNY == nil || *qqq.TotalMarketValueCNY != 2800 {
+		t.Fatalf("fractional QQQ valuation lost precision: %#v", qqq)
+	}
+	if qqq.TotalCostValueCNY == nil || *qqq.TotalCostValueCNY != 2757 {
+		t.Fatalf("fractional QQQ CNY cost = %#v, want 2757", qqq.TotalCostValueCNY)
+	}
+}
+
 func TestAccountsParseAdditionalIncludedFiles(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts_stocks.bean"), strings.Join([]string{

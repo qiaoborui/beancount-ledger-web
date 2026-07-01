@@ -67,10 +67,11 @@ type BalanceAssertion struct {
 }
 
 type Price struct {
-	Date          string `json:"date"`
-	Currency      string `json:"currency"`
-	Amount        int    `json:"amount"`
-	QuoteCurrency string `json:"quoteCurrency"`
+	Date          string     `json:"date"`
+	Currency      string     `json:"currency"`
+	Amount        int        `json:"amount"`
+	AmountValue   BeanAmount `json:"-"`
+	QuoteCurrency string     `json:"quoteCurrency"`
 }
 
 type AccountBalance struct {
@@ -375,7 +376,7 @@ func PricesFromBeanEntries(entries []BeanEntry) []Price {
 	var out []Price
 	for _, entry := range entries {
 		if entry.Kind == "price" {
-			out = append(out, Price{Date: entry.Date, Currency: entry.Currency, Amount: entry.Amount, QuoteCurrency: entry.QuoteCurrency})
+			out = append(out, Price{Date: entry.Date, Currency: entry.Currency, Amount: entry.Amount, AmountValue: entry.AmountValue, QuoteCurrency: entry.QuoteCurrency})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
