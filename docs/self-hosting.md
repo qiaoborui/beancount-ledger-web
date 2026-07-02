@@ -110,3 +110,23 @@ LEDGER_GIT_COMMIT_INTERVAL_MINUTES=60
 Alternatively, set `user.name` and `user.email` in the private ledger
 repository itself with `git config user.name "Your Name"` and
 `git config user.email "you@example.com"`.
+
+### Remote Git storage
+
+For stateless container hosts, set `LEDGER_STORAGE=remote_git` instead of
+mounting a persistent `LEDGER_ROOT`. The server clones the private ledger repo
+into `LEDGER_GIT_WORKDIR/repo`, resets that checkout to the configured branch
+before each write, runs `bean-check`, then commits and pushes successful writes.
+
+```bash
+LEDGER_STORAGE=remote_git
+LEDGER_GIT_REMOTE=https://x-access-token:${LEDGER_GIT_TOKEN}@github.com/OWNER/private-ledger.git
+LEDGER_GIT_BRANCH=main
+LEDGER_GIT_WORKDIR=/tmp/beancount-ledger-web/ledger
+LEDGER_GIT_AUTHOR_NAME=Ledger Bot
+LEDGER_GIT_AUTHOR_EMAIL=ledger-bot@example.com
+```
+
+`RUNTIME_DIR` is separate from the ledger checkout. On stateless hosts, keep in
+mind that passkeys, web push subscriptions, notifications, and import preview
+state still need a persistent runtime-store strategy.

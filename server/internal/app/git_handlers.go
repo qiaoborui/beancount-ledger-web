@@ -11,6 +11,10 @@ func (s *Server) gitStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
 	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
 	output, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
 	if err != nil {
@@ -23,6 +27,10 @@ func (s *Server) gitStatus(c *gin.Context) {
 
 func (s *Server) gitDiff(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	path := c.Query("path")
@@ -43,6 +51,19 @@ func (s *Server) gitPull(c *gin.Context) {
 		return
 	}
 	publishJobStatus("git.pull", "running", "")
+	if remoteGitEnabled(s.cfg) {
+		if err := syncLedgerNow(s.cfg); err != nil {
+			publishJobStatus("git.pull", "error", err.Error())
+			errorJSON(c, http.StatusBadRequest, err)
+			return
+		}
+		out := "Remote Git checkout synced.\n"
+		publishJobStatus("git.pull", "ok", out)
+		publishLedgerUpdated(s.cfg, "git-pull")
+		publishGitStatus(s.cfg, "git-pull")
+		c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
+		return
+	}
 	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
 	if err != nil {
 		publishJobStatus("git.pull", "error", err.Error())
@@ -63,6 +84,14 @@ func (s *Server) gitCommit(c *gin.Context) {
 	_ = c.ShouldBindJSON(&input)
 	if strings.TrimSpace(input.Message) == "" {
 		input.Message = "chore: update ledger"
+	}
+	if remoteGitEnabled(s.cfg) {
+		if err := ensureLedgerReady(s.cfg); err != nil {
+			errorJSON(c, http.StatusBadRequest, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Remote Git mode commits and pushes each ledger write automatically."})
+		return
 	}
 	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
 	before, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)

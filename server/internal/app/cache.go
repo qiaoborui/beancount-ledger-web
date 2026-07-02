@@ -56,6 +56,9 @@ func (c *LedgerCache) Version() (LedgerVersion, error) {
 }
 
 func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
+	if err := ensureLedgerReady(c.cfg); err != nil {
+		return nil, err
+	}
 	version, err := c.currentVersion()
 	if err != nil {
 		return nil, err
@@ -71,6 +74,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	compiled := CompileBeanLines(lines)
 	entries := compiled.Entries
+	normalizeEntryFilenames(c.cfg, entries)
 	txns := TransactionsFromBeanEntries(entries)
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
@@ -115,6 +119,9 @@ func (c *LedgerCache) Clear() {
 const ledgerVersionCacheTTL = 250 * time.Millisecond
 
 func (c *LedgerCache) currentVersion() (LedgerVersion, error) {
+	if err := ensureLedgerReady(c.cfg); err != nil {
+		return LedgerVersion{}, err
+	}
 	c.mu.Lock()
 	if c.snapshot != nil && !c.versionReadAt.IsZero() && time.Since(c.versionReadAt) < ledgerVersionCacheTTL {
 		version := c.version
@@ -133,6 +140,27 @@ func (c *LedgerCache) currentVersion() (LedgerVersion, error) {
 	c.versionReadAt = time.Now()
 	c.mu.Unlock()
 	return version, nil
+}
+
+func normalizeEntryFilenames(cfg Config, entries []BeanEntry) {
+	if !remoteGitEnabled(cfg) {
+		return
+	}
+	root, err := filepath.Abs(cfg.LedgerRoot)
+	if err != nil {
+		return
+	}
+	for i := range entries {
+		full, err := filepath.Abs(entries[i].File)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(root, full)
+		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			continue
+		}
+		entries[i].File = filepath.ToSlash(rel)
+	}
 }
 
 func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {
