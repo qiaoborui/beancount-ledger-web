@@ -69,7 +69,10 @@ jobs:
 
           vercel pull "${pull_args[@]}"
           deploy_output="$(mktemp)"
+          set +e
           vercel deploy "${deploy_args[@]}" | tee "$deploy_output"
+          deploy_status="${PIPESTATUS[0]}"
+          set -e
           url="$(
             awk '{
               for (i = 1; i <= NF; i++) {
@@ -82,6 +85,10 @@ jobs:
             exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
+
+          if [[ "$deploy_status" -ne 0 ]]; then
+            echo "Vercel deploy command exited with status $deploy_status; inspecting deployment $url" >&2
+          fi
 
           if ! vercel inspect "$url" --wait --timeout 20m --token="$VERCEL_TOKEN"; then
             vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
