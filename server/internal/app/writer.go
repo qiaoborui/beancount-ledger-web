@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,9 +16,10 @@ import (
 )
 
 type LedgerWriter struct {
-	cfg   Config
-	cache *LedgerCache
-	mu    sync.Mutex
+	cfg          Config
+	cache        *LedgerCache
+	runtimeStore RuntimeStore
+	mu           sync.Mutex
 }
 
 type AccountInput struct {
@@ -87,7 +89,14 @@ const (
 )
 
 func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
-	return &LedgerWriter{cfg: cfg, cache: cache}
+	return NewLedgerWriterWithRuntimeStore(cfg, cache, MustRuntimeStore(cfg))
+}
+
+func NewLedgerWriterWithRuntimeStore(cfg Config, cache *LedgerCache, runtimeStore RuntimeStore) *LedgerWriter {
+	if runtimeStore == nil {
+		runtimeStore = MustRuntimeStore(cfg)
+	}
+	return &LedgerWriter{cfg: cfg, cache: cache, runtimeStore: runtimeStore}
 }
 
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
@@ -113,6 +122,15 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 }
 
 func (w *LedgerWriter) runRemoteGitTransaction(source string, apply func(*LedgerWriteTransaction) error) error {
+	if w.runtimeStore != nil {
+		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func() error {
+			return w.runRemoteGitTransactionLocked(source, apply)
+		})
+	}
+	return w.runRemoteGitTransactionLocked(source, apply)
+}
+
+func (w *LedgerWriter) runRemoteGitTransactionLocked(source string, apply func(*LedgerWriteTransaction) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	state := remoteGitStateFor(w.cfg)

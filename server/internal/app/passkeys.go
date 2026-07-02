@@ -1,13 +1,12 @@
 package app
 
 import (
+	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -212,17 +211,10 @@ func (s *Server) webAuthn(c *gin.Context) (*webauthn.WebAuthn, error) {
 	})
 }
 
-func (s *Server) passkeyPath() string {
-	return filepath.Join(s.cfg.RuntimeDir, "passkeys.json")
-}
-
 func (s *Server) readPasskeyStore() passkeyStore {
-	content, err := os.ReadFile(s.passkeyPath())
-	if err != nil {
-		return passkeyStore{Credentials: []StoredPasskey{}}
-	}
 	var store passkeyStore
-	if err := json.Unmarshal(content, &store); err != nil {
+	ok, err := s.runtimeStore.GetJSON(context.Background(), "auth", "passkeys", &store)
+	if err != nil || !ok {
 		return passkeyStore{Credentials: []StoredPasskey{}}
 	}
 	if store.Credentials == nil {
@@ -232,15 +224,7 @@ func (s *Server) readPasskeyStore() passkeyStore {
 }
 
 func (s *Server) writePasskeyStore(store passkeyStore) error {
-	if err := os.MkdirAll(s.cfg.RuntimeDir, 0o700); err != nil {
-		return err
-	}
-	content, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	content = append(content, '\n')
-	return os.WriteFile(s.passkeyPath(), content, 0o600)
+	return s.runtimeStore.PutJSON(context.Background(), "auth", "passkeys", store)
 }
 
 func (s *Server) savePasskeySession(session *webauthn.SessionData) error {

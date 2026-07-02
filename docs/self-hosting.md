@@ -128,5 +128,22 @@ LEDGER_GIT_AUTHOR_EMAIL=ledger-bot@example.com
 ```
 
 `RUNTIME_DIR` is separate from the ledger checkout. On stateless hosts, keep in
-mind that passkeys, web push subscriptions, notifications, and import preview
-state still need a persistent runtime-store strategy.
+mind that passkeys, web push subscriptions, notifications, write locks, and
+import preview files need persistent runtime-state handling.
+
+### Postgres runtime store
+
+Set `RUNTIME_STORE=postgres` to persist small runtime state in Postgres instead
+of local JSON files under `RUNTIME_DIR`. This covers passkeys, web push
+subscriptions, notifications, and the advisory lock used to serialize remote Git
+ledger writes.
+
+```bash
+RUNTIME_STORE=postgres
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+```
+
+The app creates its `runtime_json` table automatically. Import preview uploads
+and generated intermediate files still use the filesystem path configured by
+`RUNTIME_DIR`; use a persistent runtime directory for import-heavy production
+deployments until a Blob/Object Storage runtime file store is configured.
