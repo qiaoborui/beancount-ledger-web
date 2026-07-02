@@ -60,7 +60,7 @@ jobs:
             pull_args+=(--git-branch="$GITHUB_HEAD_REF")
           fi
 
-          deploy_args=(--yes --token="$VERCEL_TOKEN")
+          deploy_args=(--yes --force --no-wait --format=json --token="$VERCEL_TOKEN")
           if [[ "$target" == "production" ]]; then
             deploy_args+=(--prod)
           else
@@ -68,8 +68,18 @@ jobs:
           fi
 
           vercel pull "${pull_args[@]}"
-          url="$(vercel deploy "${deploy_args[@]}")"
+          url="$(vercel deploy "${deploy_args[@]}" | jq -r '.deployment.url')"
+          if [[ -z "$url" || "$url" == "null" ]]; then
+            echo "Vercel CLI did not return a deployment URL" >&2
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
+
+          if ! vercel inspect "$url" --wait --timeout 20m --token="$VERCEL_TOKEN"; then
+            vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
+            exit 1
+          fi
+
           {
             echo "## Vercel deployment"
             echo
