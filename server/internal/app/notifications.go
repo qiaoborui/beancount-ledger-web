@@ -311,7 +311,7 @@ func (s *Server) unreadNotificationCount() int {
 
 func (s *Server) readNotificationStore() notificationStore {
 	var store notificationStore
-	ok, err := s.runtimeStore.GetJSON(context.Background(), "notifications", "store", &store)
+	ok, err := s.runtime().GetJSON(context.Background(), "notifications", "store", &store)
 	if err != nil || !ok {
 		return notificationStore{Version: 1, Notifications: []StoredNotification{}}
 	}
@@ -325,7 +325,7 @@ func (s *Server) readNotificationStore() notificationStore {
 }
 
 func (s *Server) writeNotificationStore(store notificationStore) error {
-	return s.runtimeStore.PutJSON(context.Background(), "notifications", "store", store)
+	return s.runtime().PutJSON(context.Background(), "notifications", "store", store)
 }
 
 func (s *Server) notificationsForMonth(notifications []StoredNotification, month string) []StoredNotification {

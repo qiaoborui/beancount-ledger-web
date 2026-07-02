@@ -11,6 +11,7 @@ import (
 type Server struct {
 	cfg              Config
 	runtimeStore     RuntimeStore
+	runtimeFileStore RuntimeFileStore
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
@@ -23,9 +24,10 @@ type Server struct {
 
 func NewRouter(cfg Config) *gin.Engine {
 	runtimeStore := MustRuntimeStore(cfg)
+	runtimeFileStore := MustRuntimeFileStore(cfg)
 	cache := NewLedgerCache(cfg)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
-	server := &Server{cfg: cfg, runtimeStore: runtimeStore, cache: cache, writer: writer, accountService: NewAccountService(cache, writer), readService: NewLedgerReadService(cache), reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
+	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, cache: cache, writer: writer, accountService: NewAccountService(cache, writer), readService: NewLedgerReadService(cache), reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
 	server.registerAPI(router.Group("/api"))

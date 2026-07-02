@@ -1,10 +1,10 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -271,24 +271,76 @@ func (s *Server) importAccountOptions() ([]ginH, error) {
 	return options, nil
 }
 
-func (s *Server) writeImportMeta(importID string, meta importMeta) error {
-	raw, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(importRuntimeDir(s.cfg, importID), "meta.json"), raw, 0o600)
+func (s *Server) writeImportMeta(ctx context.Context, importID string, meta importMeta) error {
+	return s.runtime().PutJSON(ctx, "imports", importFileKey(importID, "meta"), meta)
 }
 
-func (s *Server) readImportMeta(importID string) (importMeta, error) {
-	raw, err := os.ReadFile(filepath.Join(importRuntimeDir(s.cfg, importID), "meta.json"))
+func (s *Server) readImportMeta(ctx context.Context, importID string) (importMeta, error) {
+	var meta importMeta
+	ok, err := s.runtime().GetJSON(ctx, "imports", importFileKey(importID, "meta"), &meta)
 	if err != nil {
 		return importMeta{}, err
 	}
-	var meta importMeta
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return importMeta{}, err
+	if !ok {
+		return importMeta{}, os.ErrNotExist
 	}
 	return meta, nil
+}
+
+func importFileKey(importID, name string) string {
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
+		importID = "invalid"
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(name) {
+		name = safeSuffix(name)
+	}
+	if name == "" {
+		name = "file"
+	}
+	return importID + "/" + name
+}
+
+func (s *Server) putImportFile(ctx context.Context, importID, name string, content []byte) (string, error) {
+	key := importFileKey(importID, name)
+	if err := s.runtimeFiles().PutFile(ctx, "imports", key, content); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+func (s *Server) materializeImportFile(ctx context.Context, key, localPath string) (bool, error) {
+	if key == "" || localPath == "" {
+		return false, nil
+	}
+	return s.runtimeFiles().MaterializeFile(ctx, "imports", key, localPath)
+}
+
+func (s *Server) materializeImportMetaFiles(ctx context.Context, importID string, meta *importMeta) error {
+	if meta.InputFileKey != "" {
+		if meta.InputFile == "" {
+			meta.InputFile = previewPath(s.cfg, importID, "original")
+		}
+		ok, err := s.materializeImportFile(ctx, meta.InputFileKey, meta.InputFile)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return os.ErrNotExist
+		}
+	}
+	if meta.DocumentFileKey != "" {
+		if meta.DocumentFile == "" {
+			meta.DocumentFile = previewPath(s.cfg, importID, "document")
+		}
+		ok, err := s.materializeImportFile(ctx, meta.DocumentFileKey, meta.DocumentFile)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return os.ErrNotExist
+		}
+	}
+	return nil
 }
 
 func importRuntimeDir(cfg Config, importID string) string {
