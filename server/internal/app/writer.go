@@ -95,6 +95,9 @@ func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error)
 }
 
 func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*LedgerWriteTransaction) error) error {
+	if remoteGitEnabled(w.cfg) {
+		return w.runRemoteGitTransaction(source, apply)
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
@@ -107,6 +110,53 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 		return err
 	}
 	return nil
+}
+
+func (w *LedgerWriter) runRemoteGitTransaction(source string, apply func(*LedgerWriteTransaction) error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state := remoteGitStateFor(w.cfg)
+	state.mu.Lock()
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ensureRemoteGitCheckoutLocked(w.cfg, state, true); err != nil {
+			state.mu.Unlock()
+			return err
+		}
+		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
+		if err := apply(tx); err != nil {
+			tx.Restore()
+			state.mu.Unlock()
+			return err
+		}
+		if err := runBeanCheck(w.cfg); err != nil {
+			tx.Restore()
+			state.mu.Unlock()
+			return err
+		}
+		if _, err := remoteGitCommitAndPush(w.cfg, remoteGitCommitMessage(source)); err != nil {
+			lastErr = err
+			_, _ = gitLedgerOutput(w.cfg, "reset", "--hard", remoteGitRemoteRef(w.cfg))
+			_, _ = gitLedgerOutput(w.cfg, "clean", "-fd")
+			continue
+		}
+		state.checkedAt = time.Now()
+		if w.cache != nil {
+			w.cache.Clear()
+		}
+		if strings.TrimSpace(source) == "" {
+			source = ledgerWriteSourceDefault
+		}
+		state.mu.Unlock()
+		publishLedgerUpdated(w.cfg, source)
+		publishGitStatus(w.cfg, source)
+		return nil
+	}
+	state.mu.Unlock()
+	if lastErr == nil {
+		lastErr = errors.New("remote git write failed")
+	}
+	return lastErr
 }
 
 func (tx *LedgerWriteTransaction) Snapshot(file string) error {
@@ -334,6 +384,13 @@ func (w *LedgerWriter) validateCurrencies(currencies []string) error {
 }
 
 func (w *LedgerWriter) knownCommodities() ([]string, error) {
+	if remoteGitEnabled(w.cfg) {
+		lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+		if err != nil {
+			return nil, err
+		}
+		return CommoditiesFromBeanEntries(ParseBeanLines(lines).Entries), nil
+	}
 	if w.cache != nil {
 		snapshot, err := w.cache.Snapshot()
 		if err != nil {
@@ -349,6 +406,13 @@ func (w *LedgerWriter) knownCommodities() ([]string, error) {
 }
 
 func (w *LedgerWriter) knownAccounts() ([]Account, error) {
+	if remoteGitEnabled(w.cfg) {
+		lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+		if err != nil {
+			return nil, err
+		}
+		return AccountsFromBeanEntries(ParseBeanLines(lines).Entries), nil
+	}
 	if w.cache != nil {
 		snapshot, err := w.cache.Snapshot()
 		if err != nil {
@@ -478,6 +542,37 @@ func (w *LedgerWriter) validateAndClear(source string) error {
 	return err
 }
 
+func remoteGitCommitAndPush(cfg Config, message string) (string, error) {
+	trackedPaths := ledgerGitTrackedPathspecs(cfg)
+	status, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
+	if err != nil {
+		return "", err
+	}
+	if len(parseGitChanges(status)) == 0 {
+		return "No ledger changes to commit.", nil
+	}
+	if _, err := gitLedgerOutput(cfg, append([]string{"add", "--"}, trackedPaths...)...); err != nil {
+		return "", err
+	}
+	commitOut, err := gitLedgerOutput(cfg, append([]string{"commit", "-m", message, "--"}, trackedPaths...)...)
+	if err != nil {
+		return commitOut, err
+	}
+	pushOut, err := gitLedgerOutput(cfg, "push", "origin", "HEAD:"+cfg.LedgerGitBranch)
+	if err != nil {
+		return commitOut + pushOut, err
+	}
+	return commitOut + pushOut, nil
+}
+
+func remoteGitCommitMessage(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "chore: update ledger"
+	}
+	return "chore: update ledger (" + source + ")"
+}
+
 func (w *LedgerWriter) ReplaceLedgerFile(file string, content []byte) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceEditorSave, func(tx *LedgerWriteTransaction) error {
 		return tx.WriteFile(file, content, 0o644)
@@ -520,6 +615,9 @@ func runBeanCheck(cfg Config) error {
 }
 
 func editableLedgerFile(cfg Config, file string) (string, error) {
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(cfg.LedgerRoot, filepath.FromSlash(file))
+	}
 	full, err := filepath.Abs(file)
 	if err != nil {
 		return "", err

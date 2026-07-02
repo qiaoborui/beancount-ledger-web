@@ -99,6 +99,10 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 }
 
 func (s *Server) health(c *gin.Context) {
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "error": err.Error()})
+		return
+	}
 	_, ledgerErr := os.Stat(s.cfg.LedgerRoot)
 	_, mainErr := os.Stat(mainBeanPath(s.cfg))
 	_, runtimeErr := os.Stat(s.cfg.RuntimeDir)

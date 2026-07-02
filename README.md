@@ -126,6 +126,7 @@ Important variables:
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if it is not on `PATH`.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — optional Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
+- `LEDGER_STORAGE=remote_git` — experimental stateless-host mode. The server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check` in that temporary checkout, and commits/pushes every successful ledger write to `LEDGER_GIT_BRANCH`.
 
 ## Ledger layout
 

@@ -22,11 +22,17 @@ func StartLedgerScheduler(cfg Config) {
 			if gitRemoteDisabled() {
 				return "Git remote sync disabled\n", nil
 			}
+			if remoteGitEnabled(cfg) {
+				return "Remote Git checkout synced.\n", syncLedgerNow(cfg)
+			}
 			return gitLedgerOutput(cfg, "pull", "--rebase")
 		}, cfg)
 	}
 	if commitInterval > 0 {
 		go runSchedulerLoop("commit-push", commitInterval, commitInterval, func() (string, error) {
+			if remoteGitEnabled(cfg) {
+				return "Remote Git mode commits each ledger write automatically.\n", nil
+			}
 			return ledgerGitCommitPullPush(cfg, "chore: autosave ledger")
 		}, cfg)
 	}
@@ -61,6 +67,12 @@ func runSchedulerJob(name string, job func() (string, error), cfg Config) {
 }
 
 func ledgerGitCommitPullPush(cfg Config, message string) (string, error) {
+	if remoteGitEnabled(cfg) {
+		if err := ensureLedgerReady(cfg); err != nil {
+			return "", err
+		}
+		return remoteGitCommitAndPush(cfg, message)
+	}
 	trackedPaths := ledgerGitTrackedPathspecs(cfg)
 	before, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
 	if err != nil {
