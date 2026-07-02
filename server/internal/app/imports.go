@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -56,7 +57,11 @@ type importMeta struct {
 	OriginalFilename   string            `json:"originalFilename"`
 	InputFilename      string            `json:"inputFilename,omitempty"`
 	InputFile          string            `json:"inputFile"`
+	InputFileKey       string            `json:"inputFileKey,omitempty"`
 	DocumentFile       string            `json:"documentFile,omitempty"`
+	DocumentFileKey    string            `json:"documentFileKey,omitempty"`
+	GeneratedFileKey   string            `json:"generatedFileKey,omitempty"`
+	DedupedFileKey     string            `json:"dedupedFileKey,omitempty"`
 	ProviderDetection  providerDetection `json:"providerDetection"`
 	StatementHash      string            `json:"statementHash"`
 	DateStart          string            `json:"dateStart,omitempty"`
@@ -92,9 +97,9 @@ type ImportDocument struct {
 	ModTime   string `json:"modTime"`
 }
 
-func (s *Server) createImportPreview(providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
+func (s *Server) createImportPreview(ctx context.Context, providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
 	importID := randomID()
-	upload, err := s.saveImportUpload(header, originalHeader, providerOverride, importID)
+	upload, err := s.saveImportUpload(ctx, header, originalHeader, providerOverride, importID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +125,11 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	if err != nil {
 		return nil, err
 	}
+	generatedKey, err := s.putImportFile(ctx, importID, "generated", rawGeneratedBean)
+	if err != nil {
+		return nil, err
+	}
+	upload.GeneratedFileKey = generatedKey
 	sourceAnalysis, sourceWarnings := importer.AnalyzeSource(s, prepared, string(rawGeneratedBean))
 	prepared.Warnings = append(prepared.Warnings, sourceWarnings...)
 	generatedBean := transactionOnlyBeanText(string(rawGeneratedBean))
@@ -145,6 +155,11 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	dedupedKey, err := s.putImportFile(ctx, importID, "deduped", dedupedRaw)
+	if err != nil {
+		return nil, err
+	}
+	upload.DedupedFileKey = dedupedKey
 
 	dedupedBean := transactionOnlyBeanText(string(dedupedRaw))
 	entries, err := parsePreviewEntries(dedupedBean)
@@ -176,7 +191,7 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	upload.ExpectedEntryCount = &expected
 	upload.DateStart = dateStart
 	upload.DateEnd = dateEnd
-	if err := s.writeImportMeta(importID, upload); err != nil {
+	if err := s.writeImportMeta(ctx, importID, upload); err != nil {
 		return nil, err
 	}
 	accountOptions, err := s.importAccountOptions()
@@ -205,16 +220,19 @@ func (s *Server) createImportPreview(providerOverride string, alipayFundRounding
 	}, nil
 }
 
-func (s *Server) commitImport(importID, provider string, entries []ImportEntry) (ginH, error) {
+func (s *Server) commitImport(ctx context.Context, importID, provider string, entries []ImportEntry) (ginH, error) {
 	if _, err := s.ensureImportRequirements(provider); err != nil {
 		return nil, err
 	}
-	meta, err := s.readImportMeta(importID)
+	meta, err := s.readImportMeta(ctx, importID)
 	if err != nil {
 		return nil, errors.New("找不到导入预览，请重新上传账单")
 	}
 	if meta.Provider != provider {
 		return nil, errors.New("导入 provider 与预览不一致")
+	}
+	if err := s.materializeImportMetaFiles(ctx, importID, &meta); err != nil {
+		return nil, err
 	}
 	hash, err := fileSHA256(meta.InputFile)
 	if err != nil {
@@ -374,7 +392,7 @@ func cleanImportDocumentPath(cfg Config, rawPath string) (string, string, error)
 	return path, full, nil
 }
 
-func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
+func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
 	if header.Size > 10*1024*1024 {
 		return importMeta{}, errors.New("账单文件超过 10MB")
 	}
@@ -400,10 +418,14 @@ func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, 
 		return importMeta{}, err
 	}
 	inputFile := filepath.Join(dir, "original"+ext)
+	inputFileKey, err := s.putImportFile(ctx, importID, "original", content)
+	if err != nil {
+		return importMeta{}, err
+	}
 	if err := os.WriteFile(inputFile, content, 0o600); err != nil {
 		return importMeta{}, err
 	}
-	meta := importMeta{Provider: detection.Provider, OriginalFilename: originalName, InputFilename: originalName, InputFile: inputFile, ProviderDetection: detection, StatementHash: sha256Hex(content)}
+	meta := importMeta{Provider: detection.Provider, OriginalFilename: originalName, InputFilename: originalName, InputFile: inputFile, InputFileKey: inputFileKey, ProviderDetection: detection, StatementHash: sha256Hex(content)}
 	if originalHeader != nil {
 		if originalHeader.Size > 10*1024*1024 {
 			return importMeta{}, errors.New("原始账单文件超过 10MB")
@@ -421,13 +443,18 @@ func (s *Server) saveImportUpload(header, originalHeader *multipart.FileHeader, 
 			originalExt = ".pdf"
 		}
 		documentFile := filepath.Join(dir, "document"+originalExt)
+		documentFileKey, err := s.putImportFile(ctx, importID, "document", originalContent)
+		if err != nil {
+			return importMeta{}, err
+		}
 		if err := os.WriteFile(documentFile, originalContent, 0o600); err != nil {
 			return importMeta{}, err
 		}
 		meta.OriginalFilename = originalDocumentName
 		meta.DocumentFile = documentFile
+		meta.DocumentFileKey = documentFileKey
 	}
-	if err := s.writeImportMeta(importID, meta); err != nil {
+	if err := s.writeImportMeta(ctx, importID, meta); err != nil {
 		return importMeta{}, err
 	}
 	return meta, nil

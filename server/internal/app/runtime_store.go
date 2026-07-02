@@ -43,6 +43,13 @@ func MustRuntimeStore(cfg Config) RuntimeStore {
 	return store
 }
 
+func (s *Server) runtime() RuntimeStore {
+	if s.runtimeStore == nil {
+		s.runtimeStore = MustRuntimeStore(s.cfg)
+	}
+	return s.runtimeStore
+}
+
 type errorRuntimeStore struct {
 	err error
 }
@@ -110,6 +117,9 @@ func (s *filesystemRuntimeStore) path(scope, key string) string {
 	case "notifications/store":
 		return filepath.Join(s.root, "notifications.json")
 	default:
+		if scope == "imports" {
+			return filepath.Join(s.root, filepath.FromSlash(cleanRuntimeFileStorePath(scope, key)+".json"))
+		}
 		return filepath.Join(s.root, cleanRuntimeStorePathPart(scope), cleanRuntimeStorePathPart(key)+".json")
 	}
 }

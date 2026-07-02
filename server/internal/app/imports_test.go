@@ -3,7 +3,9 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -356,13 +358,12 @@ func TestImportCommitAllowsRemovedPreviewEntries(t *testing.T) {
 	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
 	server.writer = NewLedgerWriter(cfg, server.cache)
 
+	ctx := context.Background()
 	importID := "removeentry1"
-	sourceFile := filepath.Join(importRuntimeDir(cfg, importID), "original.csv")
-	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	sourceFile := previewPath(cfg, importID, "original.csv")
 	sourceRaw := []byte("交易创建时间,交易对方,金额\n2026-05-03,便利店,6.50\n")
-	if err := os.WriteFile(sourceFile, sourceRaw, 0o600); err != nil {
+	sourceFileKey, err := server.putImportFile(ctx, importID, "original", sourceRaw)
+	if err != nil {
 		t.Fatal(err)
 	}
 	expected := 2
@@ -370,12 +371,16 @@ func TestImportCommitAllowsRemovedPreviewEntries(t *testing.T) {
 		Provider:           "alipay",
 		OriginalFilename:   "alipay.csv",
 		InputFile:          sourceFile,
+		InputFileKey:       sourceFileKey,
 		ProviderDetection:  providerDetection{Provider: "alipay", Reason: "test", Confidence: "high"},
 		StatementHash:      sha256Hex(sourceRaw),
 		ExpectedEntryCount: &expected,
 	}
-	if err := server.writeImportMeta(importID, meta); err != nil {
+	if err := server.writeImportMeta(ctx, importID, meta); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(sourceFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source file should start missing, stat err = %v", err)
 	}
 
 	entries := []ImportEntry{{
@@ -392,7 +397,7 @@ func TestImportCommitAllowsRemovedPreviewEntries(t *testing.T) {
 		Currency:        "CNY",
 		Metadata:        map[string]string{"orderId": "alipay-1", "source": "alipay"},
 	}}
-	result, err := server.commitImport(importID, "alipay", entries)
+	result, err := server.commitImport(ctx, importID, "alipay", entries)
 	if err != nil {
 		t.Fatal(err)
 	}

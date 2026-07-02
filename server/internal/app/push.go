@@ -160,7 +160,7 @@ func publicVapidKey() string {
 
 func (s *Server) readPushStore() pushStore {
 	var store pushStore
-	ok, err := s.runtimeStore.GetJSON(context.Background(), "push", "subscriptions", &store)
+	ok, err := s.runtime().GetJSON(context.Background(), "push", "subscriptions", &store)
 	if err != nil || !ok {
 		return pushStore{Version: 1, Subscriptions: []StoredPushSubscription{}}
 	}
@@ -174,7 +174,7 @@ func (s *Server) readPushStore() pushStore {
 }
 
 func (s *Server) writePushStore(store pushStore) error {
-	return s.runtimeStore.PutJSON(context.Background(), "push", "subscriptions", store)
+	return s.runtime().PutJSON(context.Background(), "push", "subscriptions", store)
 }
 
 func (s *Server) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
