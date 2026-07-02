@@ -37,7 +37,7 @@ jobs:
           node-version: 24
 
       - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+        run: npm install --global vercel@54.9.1
 
       - name: Deploy
         id: deploy
@@ -90,7 +90,17 @@ jobs:
             echo "Vercel deploy command exited with status $deploy_status; inspecting deployment $url" >&2
           fi
 
-          if ! vercel inspect "$url" --wait --timeout 20m --token="$VERCEL_TOKEN"; then
+          inspect_output="$(mktemp)"
+          if ! vercel inspect "$url" --wait --timeout 20m --format=json --token="$VERCEL_TOKEN" | tee "$inspect_output"; then
+            vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
+            exit 1
+          fi
+
+          ready_state="$(
+            sed -n '/^{/,$p' "$inspect_output" | jq -r '.readyState // empty'
+          )"
+          if [[ "$ready_state" != "READY" ]]; then
+            echo "Vercel deployment did not become READY; readyState=$ready_state" >&2
             vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
             exit 1
           fi
