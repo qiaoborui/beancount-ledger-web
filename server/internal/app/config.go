@@ -17,6 +17,8 @@ type Config struct {
 	LedgerGitRemote  string
 	LedgerGitBranch  string
 	LedgerGitWorkDir string
+	RuntimeStore     string
+	DatabaseURL      string
 }
 
 func LoadConfig() Config {
@@ -52,6 +54,8 @@ func LoadConfig() Config {
 		LedgerGitRemote:  strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
 		LedgerGitBranch:  env("LEDGER_GIT_BRANCH", "main"),
 		LedgerGitWorkDir: filepath.Clean(gitWorkDir),
+		RuntimeStore:     strings.ToLower(env("RUNTIME_STORE", "filesystem")),
+		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
 	}
 }
 

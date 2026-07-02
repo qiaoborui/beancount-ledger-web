@@ -1,12 +1,12 @@
 package app
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -158,17 +158,10 @@ func publicVapidKey() string {
 	return strings.TrimSpace(os.Getenv("WEB_PUSH_VAPID_PUBLIC_KEY"))
 }
 
-func (s *Server) pushStorePath() string {
-	return filepath.Join(s.cfg.RuntimeDir, "webpush-subscriptions.json")
-}
-
 func (s *Server) readPushStore() pushStore {
-	content, err := os.ReadFile(s.pushStorePath())
-	if err != nil {
-		return pushStore{Version: 1, Subscriptions: []StoredPushSubscription{}}
-	}
 	var store pushStore
-	if err := json.Unmarshal(content, &store); err != nil {
+	ok, err := s.runtimeStore.GetJSON(context.Background(), "push", "subscriptions", &store)
+	if err != nil || !ok {
 		return pushStore{Version: 1, Subscriptions: []StoredPushSubscription{}}
 	}
 	if store.Version == 0 {
@@ -181,15 +174,7 @@ func (s *Server) readPushStore() pushStore {
 }
 
 func (s *Server) writePushStore(store pushStore) error {
-	if err := os.MkdirAll(s.cfg.RuntimeDir, 0o700); err != nil {
-		return err
-	}
-	content, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	content = append(content, '\n')
-	return os.WriteFile(s.pushStorePath(), content, 0o600)
+	return s.runtimeStore.PutJSON(context.Background(), "push", "subscriptions", store)
 }
 
 func (s *Server) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
