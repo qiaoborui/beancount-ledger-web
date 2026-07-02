@@ -1,11 +1,10 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -310,17 +309,10 @@ func (s *Server) unreadNotificationCount() int {
 	return countUnreadNotifications(s.readNotificationStore().Notifications)
 }
 
-func (s *Server) notificationsPath() string {
-	return filepath.Join(s.cfg.RuntimeDir, "notifications.json")
-}
-
 func (s *Server) readNotificationStore() notificationStore {
-	content, err := os.ReadFile(s.notificationsPath())
-	if err != nil {
-		return notificationStore{Version: 1, Notifications: []StoredNotification{}}
-	}
 	var store notificationStore
-	if err := json.Unmarshal(content, &store); err != nil {
+	ok, err := s.runtimeStore.GetJSON(context.Background(), "notifications", "store", &store)
+	if err != nil || !ok {
 		return notificationStore{Version: 1, Notifications: []StoredNotification{}}
 	}
 	if store.Version == 0 {
@@ -333,15 +325,7 @@ func (s *Server) readNotificationStore() notificationStore {
 }
 
 func (s *Server) writeNotificationStore(store notificationStore) error {
-	if err := os.MkdirAll(s.cfg.RuntimeDir, 0o700); err != nil {
-		return err
-	}
-	content, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	content = append(content, '\n')
-	return os.WriteFile(s.notificationsPath(), content, 0o600)
+	return s.runtimeStore.PutJSON(context.Background(), "notifications", "store", store)
 }
 
 func (s *Server) notificationsForMonth(notifications []StoredNotification, month string) []StoredNotification {

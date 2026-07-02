@@ -127,6 +127,7 @@ Important variables:
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — optional Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
 - `LEDGER_STORAGE=remote_git` — experimental stateless-host mode. The server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check` in that temporary checkout, and commits/pushes every successful ledger write to `LEDGER_GIT_BRANCH`.
+- `RUNTIME_STORE=postgres` / `DATABASE_URL` — optional runtime state backend for stateless hosts. Persists passkeys, web push subscriptions, notifications, and remote-git write locks in Postgres instead of `RUNTIME_DIR`.
 
 ## Ledger layout
 
