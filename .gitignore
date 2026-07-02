@@ -18,6 +18,7 @@ server/ledger-web
 web/.env
 web/.env.*
 !web/.env.example
+.vercel/
 
 # Runtime state
 .runtime/
@@ -51,3 +52,4 @@ __pycache__/
 /transactions/
 /imports/
 /ledgers/
+.vercel
