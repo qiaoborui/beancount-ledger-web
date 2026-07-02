@@ -147,3 +147,27 @@ DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
 The app creates its `runtime_json` and `runtime_files` tables automatically. To
 store runtime JSON in one backend and runtime files in another, set
 `RUNTIME_FILE_STORE=filesystem` or `RUNTIME_FILE_STORE=postgres` explicitly.
+
+### Vercel Docker deployment
+
+Vercel can build the app from the root `Dockerfile.vercel`. Because the runtime
+container is stateless, use remote Git ledger storage and Postgres-backed
+runtime stores:
+
+```bash
+LEDGER_STORAGE=remote_git
+LEDGER_GIT_REMOTE=https://x-access-token:${LEDGER_GIT_TOKEN}@github.com/OWNER/private-ledger.git
+LEDGER_GIT_BRANCH=main
+RUNTIME_STORE=postgres
+RUNTIME_FILE_STORE=postgres
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+AUTH_SECRET=...
+APP_PASSWORD=...
+PUBLIC_ORIGIN=https://your-app.vercel.app
+WEBAUTHN_RP_ID=your-app.vercel.app
+LEDGER_GIT_SCHEDULER=false
+```
+
+GitHub Actions can deploy through `.github/workflows/deploy-vercel.yml` after
+these repository secrets are configured: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and
+`VERCEL_PROJECT_ID`.
