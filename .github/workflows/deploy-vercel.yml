@@ -55,40 +55,63 @@ jobs:
             target="${{ inputs.target }}"
           fi
 
-          pull_args=(--yes --environment="$target" --token="$VERCEL_TOKEN")
-          if [[ "$target" == "preview" && -n "${GITHUB_HEAD_REF:-}" ]]; then
-            pull_args+=(--git-branch="$GITHUB_HEAD_REF")
+          git_ref="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git_ref="${{ github.event.pull_request.head.ref }}"
           fi
 
-          deploy_args=(--yes --force --no-wait --token="$VERCEL_TOKEN")
+          request_body="$(mktemp)"
           if [[ "$target" == "production" ]]; then
-            deploy_args+=(--prod)
+            jq -n \
+              --arg name "${{ github.event.repository.name }}" \
+              --arg project "$VERCEL_PROJECT_ID" \
+              --arg ref "$git_ref" \
+              --argjson repoId "${{ github.event.repository.id }}" \
+              '{
+                name: $name,
+                project: $project,
+                target: "production",
+                gitSource: {
+                  type: "github",
+                  repoId: $repoId,
+                  ref: $ref
+                }
+              }' > "$request_body"
           else
-            deploy_args+=(--target="$target")
+            jq -n \
+              --arg name "${{ github.event.repository.name }}" \
+              --arg project "$VERCEL_PROJECT_ID" \
+              --arg ref "$git_ref" \
+              --argjson repoId "${{ github.event.repository.id }}" \
+              '{
+                name: $name,
+                project: $project,
+                gitSource: {
+                  type: "github",
+                  repoId: $repoId,
+                  ref: $ref
+                }
+              }' > "$request_body"
           fi
 
-          vercel pull "${pull_args[@]}"
-          deploy_output="$(mktemp)"
-          set +e
-          vercel deploy "${deploy_args[@]}" | tee "$deploy_output"
-          deploy_status="${PIPESTATUS[0]}"
-          set -e
-          url="$(
-            awk '{
-              for (i = 1; i <= NF; i++) {
-                if ($i ~ /^https:\/\/[^[:space:]]+\.vercel\.app$/) print $i
-              }
-            }' "$deploy_output" | tail -n 1
+          response="$(
+            curl --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer $VERCEL_TOKEN" \
+              --header "Content-Type: application/json" \
+              --data @"$request_body" \
+              "https://api.vercel.com/v13/deployments?teamId=$VERCEL_ORG_ID"
           )"
+          url="$(jq -r '.url // empty' <<< "$response")"
           if [[ -z "$url" || "$url" == "null" ]]; then
-            echo "Vercel CLI did not return a deployment URL" >&2
+            echo "Vercel API did not return a deployment URL" >&2
+            jq . <<< "$response" >&2
             exit 1
           fi
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-          if [[ "$deploy_status" -ne 0 ]]; then
-            echo "Vercel deploy command exited with status $deploy_status; inspecting deployment $url" >&2
+          if [[ "$url" != https://* ]]; then
+            url="https://$url"
           fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
           inspect_output="$(mktemp)"
           if ! vercel inspect "$url" --wait --timeout 20m --format=json --token="$VERCEL_TOKEN" | tee "$inspect_output"; then
@@ -97,7 +120,7 @@ jobs:
           fi
 
           ready_state="$(
-            sed -n '/^{/,$p' "$inspect_output" | jq -r '.readyState // empty'
+            awk 'found { print } /{/ { found = 1; sub(/^[^{]*/, ""); print }' "$inspect_output" | jq -r '.readyState // empty'
           )"
           if [[ "$ready_state" != "READY" ]]; then
             echo "Vercel deployment did not become READY; readyState=$ready_state" >&2
