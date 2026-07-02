@@ -213,7 +213,7 @@ func (s *Server) webAuthn(c *gin.Context) (*webauthn.WebAuthn, error) {
 
 func (s *Server) readPasskeyStore() passkeyStore {
 	var store passkeyStore
-	ok, err := s.runtimeStore.GetJSON(context.Background(), "auth", "passkeys", &store)
+	ok, err := s.runtime().GetJSON(context.Background(), "auth", "passkeys", &store)
 	if err != nil || !ok {
 		return passkeyStore{Credentials: []StoredPasskey{}}
 	}
@@ -224,7 +224,7 @@ func (s *Server) readPasskeyStore() passkeyStore {
 }
 
 func (s *Server) writePasskeyStore(store passkeyStore) error {
-	return s.runtimeStore.PutJSON(context.Background(), "auth", "passkeys", store)
+	return s.runtime().PutJSON(context.Background(), "auth", "passkeys", store)
 }
 
 func (s *Server) savePasskeySession(session *webauthn.SessionData) error {

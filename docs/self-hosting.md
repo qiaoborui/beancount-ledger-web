@@ -136,14 +136,14 @@ import preview files need persistent runtime-state handling.
 Set `RUNTIME_STORE=postgres` to persist small runtime state in Postgres instead
 of local JSON files under `RUNTIME_DIR`. This covers passkeys, web push
 subscriptions, notifications, and the advisory lock used to serialize remote Git
-ledger writes.
+ledger writes. Import preview metadata and uploaded/generated import files also
+use Postgres by default when `RUNTIME_STORE=postgres`.
 
 ```bash
 RUNTIME_STORE=postgres
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
 ```
 
-The app creates its `runtime_json` table automatically. Import preview uploads
-and generated intermediate files still use the filesystem path configured by
-`RUNTIME_DIR`; use a persistent runtime directory for import-heavy production
-deployments until a Blob/Object Storage runtime file store is configured.
+The app creates its `runtime_json` and `runtime_files` tables automatically. To
+store runtime JSON in one backend and runtime files in another, set
+`RUNTIME_FILE_STORE=filesystem` or `RUNTIME_FILE_STORE=postgres` explicitly.

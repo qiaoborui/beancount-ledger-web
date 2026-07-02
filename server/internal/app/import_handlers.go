@@ -27,7 +27,7 @@ func (s *Server) importsPreview(c *gin.Context) {
 	} else {
 		originalHeader = nil
 	}
-	result, err := s.createImportPreview(c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header, originalHeader)
+	result, err := s.createImportPreview(c.Request.Context(), c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header, originalHeader)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -78,7 +78,7 @@ func (s *Server) importsCommit(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	result, err := s.commitImport(input.ImportID, input.Provider, input.Entries)
+	result, err := s.commitImport(c.Request.Context(), input.ImportID, input.Provider, input.Entries)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

@@ -119,7 +119,7 @@ See [web/.env.example](web/.env.example) for the complete list.
 Important variables:
 
 - `LEDGER_ROOT` — path to your private Beancount ledger repository. Defaults to `../examples/minimal-ledger` for local development.
-- `RUNTIME_DIR` — path for runtime-only state such as passkeys, web push subscriptions, notifications, and write locks. Defaults to `$LEDGER_ROOT/.runtime`.
+- `RUNTIME_DIR` — path for runtime-only state such as passkeys, web push subscriptions, notifications, write locks, and import preview files when filesystem runtime stores are used. Defaults to `$LEDGER_ROOT/.runtime`.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID when served behind a proxy or custom domain.
@@ -127,7 +127,8 @@ Important variables:
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — optional Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — set to `true` to periodically pull/commit/push the private ledger repo.
 - `LEDGER_STORAGE=remote_git` — experimental stateless-host mode. The server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check` in that temporary checkout, and commits/pushes every successful ledger write to `LEDGER_GIT_BRANCH`.
-- `RUNTIME_STORE=postgres` / `DATABASE_URL` — optional runtime state backend for stateless hosts. Persists passkeys, web push subscriptions, notifications, and remote-git write locks in Postgres instead of `RUNTIME_DIR`.
+- `RUNTIME_STORE=postgres` / `DATABASE_URL` — optional runtime state backend for stateless hosts. Persists passkeys, web push subscriptions, notifications, remote-git write locks, and import preview metadata/files in Postgres instead of `RUNTIME_DIR`.
+- `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files such as import uploads and generated previews. Defaults to `RUNTIME_STORE`.
 
 ## Ledger layout
 

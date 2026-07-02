@@ -18,6 +18,7 @@ type Config struct {
 	LedgerGitBranch  string
 	LedgerGitWorkDir string
 	RuntimeStore     string
+	RuntimeFileStore string
 	DatabaseURL      string
 }
 
@@ -43,6 +44,11 @@ func LoadConfig() Config {
 			runtimeDir = filepath.Join(os.TempDir(), "beancount-ledger-web", "runtime")
 		}
 	}
+	runtimeStore := strings.ToLower(env("RUNTIME_STORE", "filesystem"))
+	runtimeFileStore := strings.ToLower(env("RUNTIME_FILE_STORE", ""))
+	if runtimeFileStore == "" {
+		runtimeFileStore = runtimeStore
+	}
 	return Config{
 		AppRoot:          appRoot,
 		LedgerRoot:       filepath.Clean(ledgerRoot),
@@ -54,7 +60,8 @@ func LoadConfig() Config {
 		LedgerGitRemote:  strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
 		LedgerGitBranch:  env("LEDGER_GIT_BRANCH", "main"),
 		LedgerGitWorkDir: filepath.Clean(gitWorkDir),
-		RuntimeStore:     strings.ToLower(env("RUNTIME_STORE", "filesystem")),
+		RuntimeStore:     runtimeStore,
+		RuntimeFileStore: runtimeFileStore,
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
 	}
 }
