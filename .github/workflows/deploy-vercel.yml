@@ -32,14 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@54.9.1
-
-      - name: Deploy
+      - name: Wait for Vercel deployment
         id: deploy
         shell: bash
         run: |
@@ -56,75 +49,56 @@ jobs:
           fi
 
           git_ref="${GITHUB_REF_NAME}"
+          git_sha="${GITHUB_SHA}"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git_ref="${{ github.event.pull_request.head.ref }}"
+            git_sha="${{ github.event.pull_request.head.sha }}"
           fi
 
-          request_body="$(mktemp)"
-          if [[ "$target" == "production" ]]; then
-            jq -n \
-              --arg name "${{ github.event.repository.name }}" \
-              --arg project "$VERCEL_PROJECT_ID" \
-              --arg ref "$git_ref" \
-              --argjson repoId "${{ github.event.repository.id }}" \
-              '{
-                name: $name,
-                project: $project,
-                target: "production",
-                gitSource: {
-                  type: "github",
-                  repoId: $repoId,
-                  ref: $ref
-                }
-              }' > "$request_body"
-          else
-            jq -n \
-              --arg name "${{ github.event.repository.name }}" \
-              --arg project "$VERCEL_PROJECT_ID" \
-              --arg ref "$git_ref" \
-              --argjson repoId "${{ github.event.repository.id }}" \
-              '{
-                name: $name,
-                project: $project,
-                gitSource: {
-                  type: "github",
-                  repoId: $repoId,
-                  ref: $ref
-                }
-              }' > "$request_body"
-          fi
+          echo "Waiting for Vercel $target deployment for $git_ref@$git_sha"
+          deadline=$((SECONDS + 1200))
+          deployment=""
+          while (( SECONDS < deadline )); do
+            deployments="$(
+              curl --silent --show-error \
+                --header "Authorization: Bearer $VERCEL_TOKEN" \
+                "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=20"
+            )"
+            deployment="$(
+              jq -c \
+                --arg sha "$git_sha" \
+                --arg ref "$git_ref" \
+                --arg target "$target" \
+                '.deployments
+                  | map(select(.meta.githubCommitSha == $sha and .meta.githubCommitRef == $ref))
+                  | map(select(if $target == "production" then .target == "production" else .target != "production" end))
+                  | sort_by(.createdAt)
+                  | reverse
+                  | .[0] // empty' <<< "$deployments"
+            )"
+            if [[ -n "$deployment" ]]; then
+              state="$(jq -r '.state // empty' <<< "$deployment")"
+              url="$(jq -r '.url // empty' <<< "$deployment")"
+              echo "Vercel deployment state: ${state:-unknown} ${url:+https://$url}"
+              case "$state" in
+                READY)
+                  url="https://$url"
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+                  break
+                  ;;
+                ERROR|CANCELED|BLOCKED)
+                  jq . <<< "$deployment" >&2
+                  exit 1
+                  ;;
+              esac
+            else
+              echo "No matching Vercel deployment yet."
+            fi
+            sleep 15
+          done
 
-          response="$(
-            curl --silent --show-error \
-              --request POST \
-              --header "Authorization: Bearer $VERCEL_TOKEN" \
-              --header "Content-Type: application/json" \
-              --data @"$request_body" \
-              "https://api.vercel.com/v13/deployments?teamId=$VERCEL_ORG_ID"
-          )"
-          url="$(jq -r '.url // empty' <<< "$response")"
-          if [[ -z "$url" || "$url" == "null" ]]; then
-            echo "Vercel API did not return a deployment URL" >&2
-            jq . <<< "$response" >&2
-            exit 1
-          fi
-          if [[ "$url" != https://* ]]; then
-            url="https://$url"
-          fi
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-          inspect_output="$(mktemp)"
-          if ! vercel inspect "$url" --wait --timeout 20m --format=json --token="$VERCEL_TOKEN" | tee "$inspect_output"; then
-            vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
-            exit 1
-          fi
-
-          ready_state="$(
-            awk 'found { print } /{/ { found = 1; sub(/^[^{]*/, ""); print }' "$inspect_output" | jq -r '.readyState // empty'
-          )"
-          if [[ "$ready_state" != "READY" ]]; then
-            echo "Vercel deployment did not become READY; readyState=$ready_state" >&2
-            vercel inspect "$url" --logs --token="$VERCEL_TOKEN" || true
+          if [[ -z "$deployment" || "$(jq -r '.state // empty' <<< "$deployment")" != "READY" ]]; then
+            echo "Timed out waiting for Vercel deployment for $git_ref@$git_sha" >&2
             exit 1
           fi
 
