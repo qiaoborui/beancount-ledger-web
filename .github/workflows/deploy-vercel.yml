@@ -1,0 +1,62 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Vercel target environment
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'production' || inputs.target }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy
+        id: deploy
+        shell: bash
+        run: |
+          if [[ -z "$VERCEL_TOKEN" || -z "$VERCEL_ORG_ID" || -z "$VERCEL_PROJECT_ID" ]]; then
+            echo "Missing VERCEL_TOKEN, VERCEL_ORG_ID, or VERCEL_PROJECT_ID secret" >&2
+            exit 1
+          fi
+
+          target="${{ github.event_name == 'push' && 'production' || inputs.target }}"
+          prod_arg=()
+          if [[ "$target" == "production" ]]; then
+            prod_arg=(--prod)
+          fi
+
+          vercel pull --yes --environment="$target" --token="$VERCEL_TOKEN"
+          url="$(vercel deploy --yes --token="$VERCEL_TOKEN" "${prod_arg[@]}")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Vercel deployment"
+            echo
+            echo "- Target: \`$target\`"
+            echo "- URL: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
