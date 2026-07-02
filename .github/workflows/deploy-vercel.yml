@@ -3,6 +3,8 @@ name: Deploy to Vercel
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       target:
@@ -20,8 +22,9 @@ env:
 jobs:
   deploy:
     name: Deploy
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'push' && 'production' || inputs.target }}
+    environment: ${{ github.event_name == 'push' && 'production' || github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -45,14 +48,27 @@ jobs:
             exit 1
           fi
 
-          target="${{ github.event_name == 'push' && 'production' || inputs.target }}"
-          prod_arg=()
-          if [[ "$target" == "production" ]]; then
-            prod_arg=(--prod)
+          target="preview"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            target="production"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            target="${{ inputs.target }}"
           fi
 
-          vercel pull --yes --environment="$target" --token="$VERCEL_TOKEN"
-          url="$(vercel deploy --yes --token="$VERCEL_TOKEN" "${prod_arg[@]}")"
+          pull_args=(--yes --environment="$target" --token="$VERCEL_TOKEN")
+          if [[ "$target" == "preview" && -n "${GITHUB_HEAD_REF:-}" ]]; then
+            pull_args+=(--git-branch="$GITHUB_HEAD_REF")
+          fi
+
+          deploy_args=(--yes --token="$VERCEL_TOKEN")
+          if [[ "$target" == "production" ]]; then
+            deploy_args+=(--prod)
+          else
+            deploy_args+=(--target="$target")
+          fi
+
+          vercel pull "${pull_args[@]}"
+          url="$(vercel deploy "${deploy_args[@]}")"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "## Vercel deployment"
