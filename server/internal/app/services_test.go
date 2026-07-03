@@ -133,7 +133,7 @@ func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	t.Setenv("APP_PASSWORD", "secret")
 	t.Setenv("PUBLIC_ORIGIN", "https://ledger.example.com")
 	t.Setenv("WEBAUTHN_RP_ID", "ledger.example.com")
-	t.Setenv("WEBAUTHN_RP_ORIGINS", "https://ledger.example.com, https://other.example.com")
+	t.Setenv("WEBAUTHN_PUBLIC_ORIGIN", "https://ledger.example.com, https://other.example.com")
 	router := NewRouter(cfg)
 
 	wellKnown := httptest.NewRecorder()

@@ -92,7 +92,7 @@ Important variables:
 - `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files. Defaults to `RUNTIME_STORE`.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
-- `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID.
+- `PUBLIC_ORIGIN` / `WEBAUTHN_PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin, allowed passkey origins, and passkey RP ID. Keep `WEBAUTHN_RP_ID` on the original registration domain to preserve existing passkeys after a domain move.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if not on `PATH`.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — enable periodic git pull of the private ledger repo.
