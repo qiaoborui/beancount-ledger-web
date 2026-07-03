@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/net/websocket"
 )
 
 type RealtimeEvent struct {
@@ -107,24 +106,4 @@ func publishJobStatus(name, status, message string) {
 		data["message"] = message
 	}
 	ledgerEventHub.Publish("job.status", data)
-}
-
-func (s *Server) eventsWS(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	websocket.Handler(func(conn *websocket.Conn) {
-		defer conn.Close()
-		sub := s.events.Subscribe()
-		defer sub.Close()
-		if err := websocket.JSON.Send(conn, RealtimeEvent{Type: "hello", At: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
-			return
-		}
-		publishGitStatus(s.cfg, "connect")
-		for event := range sub.ch {
-			if err := websocket.JSON.Send(conn, event); err != nil {
-				return
-			}
-		}
-	}).ServeHTTP(c.Writer, c.Request)
 }

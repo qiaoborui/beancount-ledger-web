@@ -48,7 +48,6 @@ through `LEDGER_ROOT`.
   and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
 - `.github/workflows/ci.yml` runs selective backend and frontend checks.
-- `.github/workflows/deploy-raspberry-pi.yml` builds deploy artifacts and PR
   preview environments.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.

@@ -109,7 +109,6 @@ pnpm run dev
 ## Deployment
 
 - [Self-hosting](docs/self-hosting.md)
-- [Ubuntu server GitHub Actions deployment](docs/raspberry-pi.md)
 - [Docker Compose example](docker/docker-compose.example.yml)
 
 ## Environment variables

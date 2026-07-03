@@ -46,7 +46,6 @@ func NewRouter(cfg Config) *gin.Engine {
 
 func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.GET("/health", s.health)
-	api.GET("/events/ws", s.eventsWS)
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)

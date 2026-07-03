@@ -131,9 +131,9 @@ func TestRequestOriginUsesForwardedProtoButNotForwardedHostByDefault(t *testing.
 func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	t.Setenv("PUBLIC_ORIGIN", "https://beancount-ledger-web.vercel.app")
-	t.Setenv("WEBAUTHN_RP_ID", "beancount-ledger-web.vercel.app")
-	t.Setenv("WEBAUTHN_RP_ORIGINS", "https://beancount-ledger-web.vercel.app, https://ledger.example.com")
+	t.Setenv("PUBLIC_ORIGIN", "https://ledger.example.com")
+	t.Setenv("WEBAUTHN_RP_ID", "ledger.example.com")
+	t.Setenv("WEBAUTHN_RP_ORIGINS", "https://ledger.example.com, https://other.example.com")
 	router := NewRouter(cfg)
 
 	wellKnown := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	if err := json.Unmarshal(wellKnown.Body.Bytes(), &related); err != nil {
 		t.Fatal(err)
 	}
-	if len(related.Origins) != 1 || related.Origins[0] != "https://ledger.example.com" {
+	if len(related.Origins) != 1 || related.Origins[0] != "https://other.example.com" {
 		t.Fatalf("unexpected related origins: %#v", related)
 	}
 
@@ -171,7 +171,7 @@ func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	if err := json.Unmarshal(options.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.RP.ID != "beancount-ledger-web.vercel.app" {
+	if body.RP.ID != "ledger.example.com" {
 		t.Fatalf("rp id = %q", body.RP.ID)
 	}
 }

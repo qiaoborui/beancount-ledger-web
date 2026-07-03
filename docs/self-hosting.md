@@ -1,97 +1,75 @@
 # Self-hosting
 
-The recommended production setup builds the Go API and the Vite frontend as
-separate deployable artifacts while keeping one public app port. The Go service
-serves `/api/*` and the latest frontend `dist/` symlink from the same port.
+The recommended deployment uses Docker, either locally with Docker Compose or
+on Vercel with the root `Dockerfile.vercel`. The Go service serves `/api/*` and
+the built frontend from the same container port.
 
-## Directory layout
+## Docker Compose (local)
 
-Recommended production layout:
-
-```text
-/opt/beancount-ledger-web/backend/     # Go API releases
-/opt/beancount-ledger-web/frontend/    # static frontend releases
-/srv/beancount-ledger/                 # private ledger repository
-/srv/beancount-ledger-runtime/         # runtime state
-```
-
-Environment for the backend service:
+The quickest local deployment uses the provided Docker Compose example:
 
 ```bash
-PORT=3001
-STATIC_DIR=/opt/beancount-ledger-web/frontend/current/dist
-SERVE_STATIC=true
-LEDGER_ROOT=/srv/beancount-ledger
-RUNTIME_DIR=/srv/beancount-ledger-runtime
+cp docker/docker-compose.example.yml docker-compose.yml
+# edit docker-compose.yml to set AUTH_SECRET, APP_PASSWORD, and volume paths
+docker compose up -d
+```
+
+Your private ledger is mounted as a volume at `/ledger`, and runtime state
+lives under `/runtime`. See [docker/docker-compose.example.yml](../docker/docker-compose.example.yml)
+for the full configuration.
+
+### Environment variables for Docker
+
+```bash
+LEDGER_ROOT=/ledger
+RUNTIME_DIR=/runtime
 AUTH_SECRET=...
 APP_PASSWORD=...
 PUBLIC_ORIGIN=https://ledger.example.com
 WEBAUTHN_RP_ID=ledger.example.com
-BEAN_CHECK_BIN=/path/to/bean-check
 ```
 
-Use the same port your public reverse proxy or router already exposes. The
-frontend can still be deployed independently by updating `frontend/current`; the
-Go process reads that stable symlink when serving static files.
+## Vercel
 
-## Install Beancount
-
-Install Beancount so `bean-check` is available to the API service:
+Vercel builds the app from the root `Dockerfile.vercel`. Because the runtime
+container is stateless, use remote Git ledger storage and Postgres-backed
+runtime stores:
 
 ```bash
-uv tool install beancount
+LEDGER_STORAGE=remote_git
+LEDGER_GIT_REMOTE=https://x-access-token:${LEDGER_GIT_TOKEN}@github.com/OWNER/private-ledger.git
+LEDGER_GIT_BRANCH=main
+RUNTIME_STORE=postgres
+RUNTIME_FILE_STORE=postgres
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+AUTH_SECRET=...
+APP_PASSWORD=...
+PUBLIC_ORIGIN=https://your-app.vercel.app
+WEBAUTHN_RP_ID=your-app.vercel.app
+LEDGER_GIT_SCHEDULER=false
 ```
 
-If the service cannot find it, set `BEAN_CHECK_BIN` explicitly.
+Connect the Vercel project to GitHub and let Vercel create production
+deployments from `main` and preview deployments for pull requests. GitHub
+Actions runs CI only; Vercel is the deployment source of truth.
 
-## Build and run the backend
+When moving from a Vercel preview/production domain to a custom domain, passkeys
+created under the old relying party ID cannot automatically become credentials
+for an unrelated custom-domain relying party ID. To keep using the old RP ID
+during migration, keep `WEBAUTHN_RP_ID` set to the original domain and list both
+origins:
 
 ```bash
-cd /opt/beancount-ledger-web/source/server
-go test ./...
-go build -o /opt/beancount-ledger-web/backend/ledger-web ./cmd/ledger-web
-PORT=3001 STATIC_DIR=/opt/beancount-ledger-web/frontend/current/dist SERVE_STATIC=true /opt/beancount-ledger-web/backend/ledger-web
+PUBLIC_ORIGIN=https://your-app.vercel.app
+WEBAUTHN_RP_ID=your-app.vercel.app
+WEBAUTHN_RP_ORIGINS=https://your-app.vercel.app,https://ledger.example.com
 ```
 
-For systemd, point `ExecStart` to the built binary and put the environment above
-in an `EnvironmentFile`.
-
-## Build and serve the frontend
-
-```bash
-cd /opt/beancount-ledger-web/source/web
-pnpm install --frozen-lockfile
-pnpm run typecheck
-pnpm run test
-pnpm run build
-```
-
-Publish the generated `web/dist` directory to the stable frontend release path,
-for example `/opt/beancount-ledger-web/frontend/current/dist`.
-
-## Public routing
-
-Route public traffic to the Go service on the existing app port:
-
-```nginx
-location / {
-  proxy_pass http://127.0.0.1:3001;
-  proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
-```
-
-## Single-process compatibility
-
-The Go binary can still serve `STATIC_DIR` when `SERVE_STATIC` is unset or true.
-That mode is useful for Docker and small local deployments:
-
-```bash
-cd /opt/beancount-ledger-web/source/web && pnpm install --frozen-lockfile && pnpm run build
-cd /opt/beancount-ledger-web/source/server
-STATIC_DIR=../web/dist PORT=3000 go run ./cmd/ledger-web
-```
+The app serves `/.well-known/webauthn` for WebAuthn related-origin requests so
+supporting browsers can allow the custom domain to use that stable RP ID. For a
+permanent custom-domain RP ID, sign in with the password and register a new
+passkey after switching `PUBLIC_ORIGIN` and `WEBAUTHN_RP_ID` to the custom
+domain.
 
 ## Ledger Git sync
 
@@ -148,44 +126,12 @@ The app creates its `runtime_json` and `runtime_files` tables automatically. To
 store runtime JSON in one backend and runtime files in another, set
 `RUNTIME_FILE_STORE=filesystem` or `RUNTIME_FILE_STORE=postgres` explicitly.
 
-### Vercel Docker deployment
+## Build and run from source
 
-Vercel can build the app from the root `Dockerfile.vercel`. Because the runtime
-container is stateless, use remote Git ledger storage and Postgres-backed
-runtime stores:
+For development only, you can build and run directly without Docker:
 
 ```bash
-LEDGER_STORAGE=remote_git
-LEDGER_GIT_REMOTE=https://x-access-token:${LEDGER_GIT_TOKEN}@github.com/OWNER/private-ledger.git
-LEDGER_GIT_BRANCH=main
-RUNTIME_STORE=postgres
-RUNTIME_FILE_STORE=postgres
-DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
-AUTH_SECRET=...
-APP_PASSWORD=...
-PUBLIC_ORIGIN=https://your-app.vercel.app
-WEBAUTHN_RP_ID=your-app.vercel.app
-LEDGER_GIT_SCHEDULER=false
+cd web && pnpm install --frozen-lockfile && pnpm run build
+cd ../server && go build -o ../ledger-web ./cmd/ledger-web
+LEDGER_ROOT=../examples/minimal-ledger ./ledger-web
 ```
-
-When moving from a Vercel preview/production domain to a custom domain, passkeys
-created under the old relying party ID cannot automatically become credentials
-for an unrelated custom-domain relying party ID. To keep using the old RP ID
-during migration, keep `WEBAUTHN_RP_ID` set to the original domain and list both
-origins:
-
-```bash
-PUBLIC_ORIGIN=https://your-app.vercel.app
-WEBAUTHN_RP_ID=your-app.vercel.app
-WEBAUTHN_RP_ORIGINS=https://your-app.vercel.app,https://ledger.example.com
-```
-
-The app serves `/.well-known/webauthn` for WebAuthn related-origin requests so
-supporting browsers can allow the custom domain to use that stable RP ID. For a
-permanent custom-domain RP ID, sign in with the password and register a new
-passkey after switching `PUBLIC_ORIGIN` and `WEBAUTHN_RP_ID` to the custom
-domain.
-
-Connect the Vercel project to GitHub and let Vercel create production
-deployments from `main` and preview deployments for pull requests. GitHub
-Actions only runs CI; Vercel should remain the deployment source of truth.

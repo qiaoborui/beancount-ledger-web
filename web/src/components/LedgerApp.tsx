@@ -11,7 +11,6 @@ import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useGitStatus } from "./ledger/hooks/useGitStatus";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
 import { useLedgerData } from "./ledger/hooks/useLedgerData";
-import { useLedgerEvents } from "./ledger/hooks/useLedgerEvents";
 import { useLedgerDerivedData } from "./ledger/hooks/useLedgerDerivedData";
 import { useLedgerLock } from "./ledger/hooks/useLedgerLock";
 import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
@@ -275,20 +274,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
   useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => router.push("/accounts") });
-  useLedgerEvents({
-    enabled: authed === true,
-    onLedgerUpdated: async (event) => {
-      const incoming = event.version?.version;
-      const current = ledgerVersion?.version;
-      if (incoming && current && incoming === current) return;
-      if (!refreshing && !loadingFresh) await load(true);
-    },
-    onGitStatus: applyGitStatus,
-    onJobStatus: (job) => {
-      if (job.status === "error") showToast("error", `${job.name ?? "后台任务"}失败：${job.message ?? ""}`.trim());
-    },
-    showToast,
-  });
 
   function setPreset(preset: TimePreset) {
     if (preset === "custom") {
