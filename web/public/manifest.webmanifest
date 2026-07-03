@@ -9,7 +9,7 @@
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#f5f4ed",
-  "theme_color": "#1B365D",
+  "theme_color": "#f5f4ed",
   "categories": ["finance", "productivity"],
   "shortcuts": [
     {
