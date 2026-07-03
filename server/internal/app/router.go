@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -363,21 +364,63 @@ func (s *Server) staticFallback(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	if path == "/" || !strings.Contains(filepath.Base(path), ".") {
+	if path == "/" {
 		setStaticCacheHeaders(c, "index.html")
 		c.File(filepath.Join(s.cfg.StaticDir, "index.html"))
 		return
 	}
-	cleanPath := filepath.Clean(path)
+	if isSensitiveStaticProbe(path) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	if !strings.Contains(filepath.Base(path), ".") {
+		setStaticCacheHeaders(c, "index.html")
+		c.File(filepath.Join(s.cfg.StaticDir, "index.html"))
+		return
+	}
+	cleanPath, ok := cleanStaticAssetPath(path)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	fullPath := filepath.Join(s.cfg.StaticDir, cleanPath)
+	if info, err := os.Stat(fullPath); err != nil || info.IsDir() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
 	setStaticCacheHeaders(c, cleanPath)
-	c.File(filepath.Join(s.cfg.StaticDir, cleanPath))
+	c.File(fullPath)
+}
+
+func cleanStaticAssetPath(path string) (string, bool) {
+	cleanPath := filepath.Clean(strings.TrimPrefix(path, "/"))
+	if cleanPath == "." || cleanPath == ".." || filepath.IsAbs(cleanPath) || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return cleanPath, true
+}
+
+func isSensitiveStaticProbe(path string) bool {
+	cleanPath, ok := cleanStaticAssetPath(path)
+	if !ok {
+		return true
+	}
+	for _, part := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+		switch {
+		case part == ".git", part == ".ssh", part == ".runtime", part == ".env":
+			return true
+		case strings.HasPrefix(part, ".env."):
+			return true
+		}
+	}
+	return false
 }
 
 func setStaticCacheHeaders(c *gin.Context, path string) {
 	switch {
 	case path == "index.html", strings.HasSuffix(path, "/index.html"), strings.HasSuffix(path, "sw.js"):
 		c.Header("Cache-Control", "no-cache")
-	case strings.Contains(path, "/assets/"):
+	case strings.HasPrefix(path, "assets/"), strings.Contains(path, "/assets/"):
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	default:
 		c.Header("Cache-Control", "public, max-age=3600")

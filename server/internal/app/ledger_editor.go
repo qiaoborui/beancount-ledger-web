@@ -46,6 +46,10 @@ func (s *Server) editorFiles(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
 	files, err := listLedgerEditorFiles(s.cfg)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -56,6 +60,10 @@ func (s *Server) editorFiles(c *gin.Context) {
 
 func (s *Server) editorFile(c *gin.Context) {
 	if !requireSensitive(c) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	rel, full, err := cleanLedgerEditorPath(s.cfg, c.Query("path"))
@@ -77,6 +85,10 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 	}
 	var input LedgerEditorSaveRequest
 	if !bindJSON(c, &input) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	rel, full, err := cleanLedgerEditorPath(s.cfg, input.Path)

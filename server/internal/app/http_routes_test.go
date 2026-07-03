@@ -187,6 +187,12 @@ func TestStaticFallbackCacheHeaders(t *testing.T) {
 	if got := serviceWorker.Header().Get("Cache-Control"); got != "no-cache" {
 		t.Fatalf("sw Cache-Control=%q", got)
 	}
+
+	gitProbe := httptest.NewRecorder()
+	router.ServeHTTP(gitProbe, httptest.NewRequest(http.MethodGet, "/.git/HEAD", nil))
+	if gitProbe.Code != http.StatusNotFound {
+		t.Fatalf("git probe status=%d body=%s", gitProbe.Code, gitProbe.Body.String())
+	}
 }
 
 func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
