@@ -27,12 +27,14 @@ func LoadConfig() Config {
 	if storage == "git" {
 		storage = "remote_git"
 	}
-	ledgerRoot := os.Getenv("LEDGER_ROOT")
+	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
 	gitWorkDir := env("LEDGER_GIT_WORKDIR", "")
 	if gitWorkDir == "" {
 		gitWorkDir = filepath.Join(os.TempDir(), "beancount-ledger-web", "ledger")
 	}
-	ledgerRoot = filepath.Join(gitWorkDir, "repo")
+	if storage == "remote_git" || ledgerRoot == "" {
+		ledgerRoot = filepath.Join(gitWorkDir, "repo")
+	}
 	runtimeDir := os.Getenv("RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = filepath.Join(os.TempDir(), "beancount-ledger-web", "runtime")

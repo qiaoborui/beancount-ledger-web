@@ -53,13 +53,20 @@ The app never needs your ledger data to be committed to this repository.
 
 ## Quick start
 
-Deploy to Vercel with the root `Dockerfile.vercel` and `vercel.json`. The Go container serves `/api/*`; Vercel's CDN serves the frontend with rewrites.
+Deploy to Vercel with the root `vercel.json`. The project defines two Vercel
+Services in one deployment: the Vite frontend under `web/` and the Go backend
+container from `Dockerfile.vercel`. Requests to `/api/*` route to the backend
+service; every other path routes to the frontend service. Pull-request previews
+therefore test the frontend and backend from the same deployment instead of
+calling the production API from a standalone frontend preview.
 
 See [web/.env.example](web/.env.example) for the full environment configuration.
 
 ## Deployment
 
-Deploy to Vercel by connecting the GitHub repository. The app runs as a container from `Dockerfile.vercel`. Configure environment variables in the Vercel dashboard:
+Deploy to Vercel by connecting the GitHub repository. The app runs as a single
+Vercel project with frontend and backend services. Configure environment
+variables in the Vercel dashboard:
 
 - `LEDGER_STORAGE=remote_git` — the server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check`, and commits/pushes every successful ledger write.
 - `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
@@ -67,6 +74,11 @@ Deploy to Vercel by connecting the GitHub repository. The app runs as a containe
 - `DATABASE_URL` — Postgres connection string.
 
 See [web/.env.example](web/.env.example) for the complete list.
+
+If you previously used a separate `web/` Vercel project for frontend-only
+previews, disable it or remove its pull-request comments after switching to the
+root services project. The standalone frontend config no longer proxies `/api/*`
+to production.
 
 ## Environment variables
 

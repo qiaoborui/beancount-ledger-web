@@ -1,4 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "container"
+  "services": {
+    "frontend": {
+      "root": "web/"
+    },
+    "backend": {
+      "root": ".",
+      "entrypoint": "Dockerfile.vercel"
+    }
+  },
+  "rewrites": [
+    { "source": "/.well-known/webauthn", "destination": { "service": "backend" } },
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
+  ]
 }

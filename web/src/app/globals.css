@@ -247,7 +247,7 @@ html {
   min-height: 100%;
   max-width: 100%;
   overflow-x: clip;
-  background: var(--brand);
+  background: var(--ivory);
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
