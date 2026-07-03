@@ -37,11 +37,11 @@ func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 	if snapshot.RawBalances["Assets:Cash"]["CNY"] != 98800 {
 		t.Fatalf("raw balances not cached correctly: %#v", snapshot.RawBalances)
 	}
-	if len(snapshot.TransactionsAsc) != 2 || snapshot.TransactionsAsc[0].Payee != "Cafe" || snapshot.TransactionsAsc[1].Payee != "Employer" {
-		t.Fatalf("ascending transaction cache changed order: %#v", snapshot.TransactionsAsc)
+	if len(snapshotTransactionsAsc(snapshot)) != 2 || snapshotTransactionsAsc(snapshot)[0].Payee != "Cafe" || snapshotTransactionsAsc(snapshot)[1].Payee != "Employer" {
+		t.Fatalf("ascending transaction cache changed order: %#v", snapshotTransactionsAsc(snapshot))
 	}
-	if len(snapshot.TransactionsDesc) != 2 || snapshot.TransactionsDesc[0].Payee != "Employer" || snapshot.TransactionsDesc[1].Payee != "Cafe" {
-		t.Fatalf("descending transaction cache changed order: %#v", snapshot.TransactionsDesc)
+	if len(snapshotTransactionsDesc(snapshot)) != 2 || snapshotTransactionsDesc(snapshot)[0].Payee != "Employer" || snapshotTransactionsDesc(snapshot)[1].Payee != "Cafe" {
+		t.Fatalf("descending transaction cache changed order: %#v", snapshotTransactionsDesc(snapshot))
 	}
 	_, sameDayDesc := sortedTransactionViews([]Transaction{
 		{Date: "2026-05-02", Payee: "Second line", Source: TransactionSource{Line: 20}},
@@ -156,6 +156,5 @@ func benchmarkLedgerSnapshot(count int) *LedgerSnapshot {
 			Source: TransactionSource{Line: i + 1},
 		})
 	}
-	snapshot.TransactionsAsc, snapshot.TransactionsDesc = sortedTransactionViews(snapshot.Transactions)
 	return snapshot
 }

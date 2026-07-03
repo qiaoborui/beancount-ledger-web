@@ -159,6 +159,7 @@ var (
 	commodityPattern    = `[A-Z][A-Z0-9._-]*`
 	includeRe           = regexp.MustCompile(`^include\s+"([^"]+)"\s*$`)
 	creditCardAccountRe = regexp.MustCompile(`(?i)(^|:)(CreditCard|Credit|Card)(:|$)|信用卡|贷记卡`)
+	wealthAccountRe     = regexp.MustCompile(`(?i)(^|:)(Wealth|Fund|Stock|Bond|HousingFund|Insurance)(:|$)|理财|稳利宝|增利宝|余利宝|余额宝|零钱通|基金|债券|股票|保险|黄金|存单|定期`)
 )
 
 func mainBeanPath(cfg Config) string     { return filepath.Join(cfg.LedgerRoot, "main.bean") }
@@ -488,7 +489,7 @@ func accountGroup(account string, metadata map[string]MetadataValue, alias *stri
 		return "credit"
 	case strings.HasPrefix(account, "Liabilities:"):
 		return "liability"
-	case regexp.MustCompile(`(?i)(^|:)(Wealth|Fund|Stock|Bond|HousingFund|Insurance)(:|$)|理财|稳利宝|增利宝|余利宝|余额宝|零钱通|基金|债券|股票|保险|黄金|存单|定期`).MatchString(haystack):
+	case wealthAccountRe.MatchString(haystack):
 		return "wealth"
 	case strings.HasPrefix(account, "Assets:"):
 		return "cash"

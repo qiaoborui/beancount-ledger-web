@@ -20,13 +20,10 @@ type LedgerVersion struct {
 
 type LedgerSnapshot struct {
 	LedgerVersion
-	Lines             []BeanLine                `json:"lines"`
 	BeanEntries       []BeanEntry               `json:"-"`
 	BeanErrors        []BeanParseError          `json:"-"`
 	OptionsMap        map[string]string         `json:"-"`
 	Transactions      []Transaction             `json:"transactions"`
-	TransactionsAsc   []Transaction             `json:"-"`
-	TransactionsDesc  []Transaction             `json:"-"`
 	RawBalances       map[string]map[string]int `json:"-"`
 	PriceIndex        PriceIndex                `json:"-"`
 	AccountMap        map[string]Account        `json:"-"`
@@ -81,18 +78,14 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	balanceAssertions := BalanceAssertionsFromBeanEntries(entries)
 	commodities := CommoditiesFromBeanEntries(entries)
 	rawBalances := CurrentBalances(txns)
-	transactionsAsc, transactionsDesc := sortedTransactionViews(txns)
 	priceIndex := NewPriceIndex(prices)
 	accountMap := accountByName(accounts)
 	snapshot := &LedgerSnapshot{
 		LedgerVersion:     version,
-		Lines:             lines,
 		BeanEntries:       entries,
 		BeanErrors:        compiled.Errors,
 		OptionsMap:        OptionsMapFromBeanEntries(entries),
 		Transactions:      txns,
-		TransactionsAsc:   transactionsAsc,
-		TransactionsDesc:  transactionsDesc,
 		RawBalances:       rawBalances,
 		PriceIndex:        priceIndex,
 		AccountMap:        accountMap,
@@ -203,17 +196,11 @@ func snapshotAccountMap(snapshot *LedgerSnapshot) map[string]Account {
 }
 
 func snapshotTransactionsAsc(snapshot *LedgerSnapshot) []Transaction {
-	if snapshot.TransactionsAsc != nil {
-		return snapshot.TransactionsAsc
-	}
 	asc, _ := sortedTransactionViews(snapshot.Transactions)
 	return asc
 }
 
 func snapshotTransactionsDesc(snapshot *LedgerSnapshot) []Transaction {
-	if snapshot.TransactionsDesc != nil {
-		return snapshot.TransactionsDesc
-	}
 	_, desc := sortedTransactionViews(snapshot.Transactions)
 	return desc
 }
