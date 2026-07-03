@@ -70,37 +70,12 @@ func (s *Server) gitPull(c *gin.Context) {
 		return
 	}
 	publishJobStatus("git.pull", "running", "")
-	if remoteGitEnabled(s.cfg) {
-		if err := syncLedgerNow(s.cfg); err != nil {
-			publishJobStatus("git.pull", "error", err.Error())
-			errorJSON(c, http.StatusBadRequest, err)
-			return
-		}
-		out := "Remote Git checkout synced.\n"
-		publishJobStatus("git.pull", "ok", out)
-		publishLedgerUpdated(s.cfg, "git-pull")
-		publishGitStatus(s.cfg, "git-pull")
-		c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
-		return
-	}
-	available, err := ledgerGitAvailable(s.cfg)
-	if err != nil {
+	if err := syncLedgerNow(s.cfg); err != nil {
 		publishJobStatus("git.pull", "error", err.Error())
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if !available {
-		out := "Ledger Git is not available for this ledger.\n"
-		publishJobStatus("git.pull", "ok", out)
-		c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
-		return
-	}
-	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
-	if err != nil {
-		publishJobStatus("git.pull", "error", err.Error())
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
+	out := "Remote Git checkout synced.\n"
 	publishJobStatus("git.pull", "ok", out)
 	publishLedgerUpdated(s.cfg, "git-pull")
 	publishGitStatus(s.cfg, "git-pull")
@@ -116,48 +91,9 @@ func (s *Server) gitCommit(c *gin.Context) {
 	if strings.TrimSpace(input.Message) == "" {
 		input.Message = "chore: update ledger"
 	}
-	if remoteGitEnabled(s.cfg) {
-		if err := ensureLedgerReady(s.cfg); err != nil {
-			errorJSON(c, http.StatusBadRequest, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Remote Git mode commits and pushes each ledger write automatically."})
-		return
-	}
-	available, err := ledgerGitAvailable(s.cfg)
-	if err != nil {
+	if err := ensureLedgerReady(s.cfg); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if !available {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Ledger Git is not available for this ledger."})
-		return
-	}
-	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
-	before, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	beforeChanges := parseGitChanges(before)
-	if len(beforeChanges) == 0 {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "output": "No ledger changes to commit."})
-		return
-	}
-	publishJobStatus("git.commit", "running", "")
-	output, err := ledgerGitCommitPullPush(s.cfg, input.Message)
-	if err != nil {
-		publishJobStatus("git.commit", "error", err.Error())
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	after, err := gitLedger(s.cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	publishJobStatus("git.commit", "ok", output)
-	publishGitStatus(s.cfg, "git-commit")
-	publishLedgerUpdated(s.cfg, "git-commit")
-	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": len(beforeChanges), "remainingChangedFileCount": len(parseGitChanges(after)), "output": output})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Remote Git mode commits and pushes each ledger write automatically."})
 }

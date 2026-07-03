@@ -22,18 +22,12 @@ func StartLedgerScheduler(cfg Config) {
 			if gitRemoteDisabled() {
 				return "Git remote sync disabled\n", nil
 			}
-			if remoteGitEnabled(cfg) {
-				return "Remote Git checkout synced.\n", syncLedgerNow(cfg)
-			}
-			return gitLedgerOutput(cfg, "pull", "--rebase")
+			return "Remote Git checkout synced.\n", syncLedgerNow(cfg)
 		}, cfg)
 	}
 	if commitInterval > 0 {
 		go runSchedulerLoop("commit-push", commitInterval, commitInterval, func() (string, error) {
-			if remoteGitEnabled(cfg) {
-				return "Remote Git mode commits each ledger write automatically.\n", nil
-			}
-			return ledgerGitCommitPullPush(cfg, "chore: autosave ledger")
+			return "Remote Git mode commits each ledger write automatically.\n", nil
 		}, cfg)
 	}
 	log.Printf("[ledger-scheduler] started pull=%sm commit=%sm", minutesForLog(pullInterval), minutesForLog(commitInterval))
@@ -67,42 +61,10 @@ func runSchedulerJob(name string, job func() (string, error), cfg Config) {
 }
 
 func ledgerGitCommitPullPush(cfg Config, message string) (string, error) {
-	if remoteGitEnabled(cfg) {
-		if err := ensureLedgerReady(cfg); err != nil {
-			return "", err
-		}
-		return remoteGitCommitAndPush(cfg, message)
-	}
-	trackedPaths := ledgerGitTrackedPathspecs(cfg)
-	before, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
+	if err := ensureLedgerReady(cfg); err != nil {
 		return "", err
 	}
-	beforeChanges := parseGitChanges(before)
-	if len(beforeChanges) == 0 {
-		return "No ledger changes to commit.", nil
-	}
-	if _, err := gitLedgerOutput(cfg, append([]string{"add", "--"}, trackedPaths...)...); err != nil {
-		return "", err
-	}
-	commitOut, err := gitLedgerOutput(cfg, append([]string{"commit", "-m", message, "--"}, trackedPaths...)...)
-	if err != nil {
-		return "", err
-	}
-	output := commitOut
-	if gitRemoteDisabled() {
-		return output + "\nGit remote sync disabled\n", nil
-	}
-	pullOut, pullErr := gitLedgerOutput(cfg, "pull", "--rebase", "--autostash")
-	pushOut, pushErr := gitLedgerOutput(cfg, "push")
-	output += pullOut + pushOut
-	if pullErr != nil {
-		return output, pullErr
-	}
-	if pushErr != nil {
-		return output, pushErr
-	}
-	return output, nil
+	return remoteGitCommitAndPush(cfg, message)
 }
 
 func gitSchedulerEnabled() bool {
