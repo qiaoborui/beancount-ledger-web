@@ -30,6 +30,7 @@ func NewRouter(cfg Config) *gin.Engine {
 	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, cache: cache, writer: writer, accountService: NewAccountService(cache, writer), readService: NewLedgerReadService(cache), reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
+	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {
 		router.NoRoute(server.staticFallback)
@@ -109,12 +110,27 @@ func (s *Server) health(c *gin.Context) {
 	}
 	_, ledgerErr := os.Stat(s.cfg.LedgerRoot)
 	_, mainErr := os.Stat(mainBeanPath(s.cfg))
-	_, runtimeErr := os.Stat(s.cfg.RuntimeDir)
+	runtimeDirRequired := filesystemRuntimeBackend(s.cfg.RuntimeStore) || filesystemRuntimeBackend(s.cfg.RuntimeFileStore)
+	runtimeDirExists := true
+	if runtimeDirRequired {
+		_, runtimeErr := os.Stat(s.cfg.RuntimeDir)
+		runtimeDirExists = runtimeErr == nil
+	}
 	ok := ledgerErr == nil && mainErr == nil
-	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), gin.H{
+	body := gin.H{
 		"ok": ok, "uptimeSeconds": int(time.Since(startedAt).Seconds()),
-		"ledgerRootExists": ledgerErr == nil, "mainBeanExists": mainErr == nil, "runtimeDirExists": runtimeErr == nil,
-	})
+		"ledgerRootExists": ledgerErr == nil, "mainBeanExists": mainErr == nil,
+		"runtimeStore": s.cfg.RuntimeStore, "runtimeFileStore": s.cfg.RuntimeFileStore,
+		"runtimeDirRequired": runtimeDirRequired,
+	}
+	if runtimeDirRequired {
+		body["runtimeDirExists"] = runtimeDirExists
+	}
+	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
+}
+
+func filesystemRuntimeBackend(value string) bool {
+	return value == "" || value == "file" || value == "filesystem"
 }
 
 var startedAt = time.Now()

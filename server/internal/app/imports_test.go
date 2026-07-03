@@ -206,6 +206,47 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestImportPreviewRemoteGitCheckoutBeforeRequirements(t *testing.T) {
+	seed := testLedger(t)
+	writeAlipayImportRequirements(t, seed)
+	remote := initBareLedgerRemote(t, seed)
+	cfg := remoteGitTestConfig(t, seed, remote)
+	t.Setenv("PYTHON_BIN", fakeDedupPython(t))
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	part, err := writer.CreateFormFile("file", "alipay.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(alipayCSVFixture())
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/ledger/imports/preview", &form)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var preview struct {
+		Entries []ImportEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Entries) != 1 || preview.Entries[0].OrderID != "module-order" {
+		t.Fatalf("unexpected preview from remote_git checkout: %#v", preview)
+	}
+}
+
 func TestImportProvidersEndpoint(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
@@ -237,6 +278,77 @@ func TestImportProvidersEndpoint(t *testing.T) {
 	if response.Providers[5].Label != "招商银行储蓄卡" || response.Providers[5].Accept != ".pdf / .csv" {
 		t.Fatalf("unexpected checking metadata: %#v", response.Providers[5])
 	}
+}
+
+func writeAlipayImportRequirements(t *testing.T, cfg Config) {
+	t.Helper()
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Income:Other",
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipay:",
+		"  rules:",
+		"    - method: 网商银行储蓄卡",
+		"      methodAccount: Assets:Cash",
+		"    - category: 日用百货",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+}
+
+func fakeDedupPython(t *testing.T) string {
+	t.Helper()
+	fakePython := filepath.Join(t.TempDir(), "python3")
+	mustWrite(t, fakePython, strings.Join([]string{
+		"#!/bin/sh",
+		"generated=\"$2\"",
+		"out=\"\"",
+		"prev=\"\"",
+		"dry=\"\"",
+		"for arg in \"$@\"; do",
+		"  if [ \"$arg\" = \"--dry-run\" ]; then dry=1; fi",
+		"  if [ \"$prev\" = \"-o\" ]; then out=\"$arg\"; fi",
+		"  prev=\"$arg\"",
+		"done",
+		"if [ -n \"$dry\" ]; then echo \"dedup dry run: 1 candidate\"; exit 0; fi",
+		"cp \"$generated\" \"$out\"",
+		"",
+	}, "\n"))
+	if err := os.Chmod(fakePython, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return fakePython
+}
+
+func alipayCSVFixture() []byte {
+	return []byte(strings.Join([]string{
+		"------------------------------------------------------------------------------------",
+		"导出信息：",
+		"姓名：测试",
+		"支付宝账户：test@example.com",
+		"起始时间：[2026-05-24 00:00:00]    终止时间：[2026-05-24 23:59:59]",
+		"导出交易类型：[全部]",
+		"导出时间：[2026-05-24 23:24:06]",
+		"共1笔记录",
+		"收入：0笔 0.00元",
+		"支出：1笔 6.50元",
+		"不计收支：0笔 0.00元",
+		"",
+		"特别提示：",
+		"1.提示",
+		"2.提示",
+		"3.提示",
+		"4.提示",
+		"5.提示",
+		"6.提示",
+		"7.提示",
+		"8.提示",
+		"",
+		"------------------------支付宝支付科技有限公司  电子客户回单------------------------",
+		"交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注,",
+		"2026-05-24 17:55:17,日用百货,便利店,157******14,零食,支出,6.50,网商银行储蓄卡(0691),交易成功,module-order,merchant-1,,",
+	}, "\n"))
 }
 
 func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {

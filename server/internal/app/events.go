@@ -74,6 +74,17 @@ func publishGitStatus(cfg Config, source string) {
 		ledgerEventHub.Publish("git.status", gin.H{"source": source, "error": err.Error()})
 		return
 	}
+	available, err := ledgerGitAvailable(cfg)
+	if err != nil {
+		ledgerEventHub.Publish("git.status", gin.H{"source": source, "error": err.Error()})
+		return
+	}
+	if !available {
+		data := ledgerGitUnavailablePayload()
+		data["source"] = source
+		ledgerEventHub.Publish("git.status", data)
+		return
+	}
 	trackedPaths := ledgerGitTrackedPathspecs(cfg)
 	output, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
 	data := gin.H{"source": source}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,15 +27,23 @@ type StoredPasskey struct {
 }
 
 type passkeyStore struct {
-	CurrentChallenge string                `json:"currentChallenge,omitempty"`
-	CurrentSession   *webauthn.SessionData `json:"currentSession,omitempty"`
-	Credentials      []StoredPasskey       `json:"credentials"`
+	CurrentChallenge string                          `json:"currentChallenge,omitempty"`
+	CurrentSession   *webauthn.SessionData           `json:"currentSession,omitempty"`
+	Sessions         map[string]storedPasskeySession `json:"sessions,omitempty"`
+	Credentials      []StoredPasskey                 `json:"credentials"`
+}
+
+type storedPasskeySession struct {
+	Session   *webauthn.SessionData `json:"session"`
+	CreatedAt time.Time             `json:"createdAt"`
 }
 
 type passkeyUser struct {
 	id          []byte
 	credentials []webauthn.Credential
 }
+
+const passkeySessionTTL = 10 * time.Minute
 
 var passkeyMu sync.Mutex
 
@@ -104,12 +113,26 @@ func (s *Server) passkeyRegisterVerify(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	session, err := s.consumePasskeySession()
+	if !s.hasPasskeySession() {
+		errorJSON(c, http.StatusBadRequest, errors.New("No active passkey challenge"))
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	credential, err := wa.FinishRegistration(s.passkeyUser(), *session, c.Request)
+	parsedResponse, err := protocol.ParseCredentialCreationResponseBytes(body)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	session, err := s.consumePasskeySession(parsedResponse.Response.CollectedClientData.Challenge)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	credential, err := wa.CreateCredential(s.passkeyUser(), *session, parsedResponse)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -163,12 +186,21 @@ func (s *Server) passkeyLoginVerify(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	session, err := s.consumePasskeySession()
+	if !s.hasPasskeySession() {
+		errorJSON(c, http.StatusBadRequest, errors.New("No active passkey challenge"))
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	parsedResponse, err := protocol.ParseCredentialRequestResponse(c.Request)
+	parsedResponse, err := protocol.ParseCredentialRequestResponseBytes(body)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	session, err := s.consumePasskeySession(parsedResponse.Response.CollectedClientData.Challenge)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -196,19 +228,25 @@ func (s *Server) passkeyLoginVerify(c *gin.Context) {
 }
 
 func (s *Server) webAuthn(c *gin.Context) (*webauthn.WebAuthn, error) {
-	origin := configuredPublicOrigin()
-	if origin == "" {
-		origin = requestOrigin(c)
-	}
+	origins := configuredWebAuthnOrigins(c)
 	rpID := strings.TrimSpace(os.Getenv("WEBAUTHN_RP_ID"))
 	if rpID == "" {
-		rpID = rpIDFromOrigin(origin)
+		rpID = rpIDFromOrigin(origins[0])
 	}
 	return webauthn.New(&webauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: "我的账本",
-		RPOrigins:     []string{origin},
+		RPOrigins:     origins,
 	})
+}
+
+func (s *Server) webAuthnRelatedOrigins(c *gin.Context) {
+	origins := relatedWebAuthnOrigins(c)
+	if len(origins) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No related WebAuthn origins configured"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"origins": origins})
 }
 
 func (s *Server) readPasskeyStore() passkeyStore {
@@ -220,6 +258,7 @@ func (s *Server) readPasskeyStore() passkeyStore {
 	if store.Credentials == nil {
 		store.Credentials = []StoredPasskey{}
 	}
+	store.normalizePasskeySessions(time.Now())
 	return store
 }
 
@@ -230,28 +269,76 @@ func (s *Server) writePasskeyStore(store passkeyStore) error {
 func (s *Server) savePasskeySession(session *webauthn.SessionData) error {
 	passkeyMu.Lock()
 	defer passkeyMu.Unlock()
-	store := s.readPasskeyStore()
-	store.CurrentSession = session
-	if session != nil {
-		store.CurrentChallenge = session.Challenge
+	if session == nil || strings.TrimSpace(session.Challenge) == "" {
+		return errors.New("No active passkey challenge")
 	}
+	store := s.readPasskeyStore()
+	store.normalizePasskeySessions(time.Now())
+	store.Sessions[session.Challenge] = storedPasskeySession{Session: session, CreatedAt: time.Now()}
 	return s.writePasskeyStore(store)
 }
 
-func (s *Server) consumePasskeySession() (*webauthn.SessionData, error) {
+func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData, error) {
 	passkeyMu.Lock()
 	defer passkeyMu.Unlock()
-	store := s.readPasskeyStore()
-	if store.CurrentSession == nil {
+	if strings.TrimSpace(challenge) == "" {
 		return nil, errors.New("No active passkey challenge")
 	}
-	session := store.CurrentSession
-	store.CurrentSession = nil
-	store.CurrentChallenge = ""
+	store := s.readPasskeyStore()
+	store.normalizePasskeySessions(time.Now())
+	stored, ok := store.Sessions[challenge]
+	if !ok || stored.Session == nil {
+		return nil, errors.New("No active passkey challenge")
+	}
+	session := stored.Session
+	delete(store.Sessions, challenge)
 	if err := s.writePasskeyStore(store); err != nil {
 		return nil, err
 	}
 	return session, nil
+}
+
+func (s *Server) hasPasskeySession() bool {
+	passkeyMu.Lock()
+	defer passkeyMu.Unlock()
+	store := s.readPasskeyStore()
+	store.normalizePasskeySessions(time.Now())
+	return len(store.Sessions) > 0
+}
+
+func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
+	if store.Sessions == nil {
+		store.Sessions = map[string]storedPasskeySession{}
+	}
+	if store.CurrentSession != nil {
+		challenge := store.CurrentChallenge
+		if challenge == "" {
+			challenge = store.CurrentSession.Challenge
+		}
+		if challenge != "" {
+			store.Sessions[challenge] = storedPasskeySession{Session: store.CurrentSession, CreatedAt: now}
+		}
+		store.CurrentChallenge = ""
+		store.CurrentSession = nil
+	}
+	for challenge, stored := range store.Sessions {
+		if challenge == "" || stored.Session == nil {
+			delete(store.Sessions, challenge)
+			continue
+		}
+		if !stored.Session.Expires.IsZero() && stored.Session.Expires.Before(now) {
+			delete(store.Sessions, challenge)
+			continue
+		}
+		if stored.CreatedAt.IsZero() {
+			stored.CreatedAt = now
+			store.Sessions[challenge] = stored
+			continue
+		}
+		if now.Sub(stored.CreatedAt) > passkeySessionTTL {
+			delete(store.Sessions, challenge)
+		}
+	}
 }
 
 func (s *Server) savePasskey(credential *webauthn.Credential) error {
@@ -376,7 +463,78 @@ func configuredPublicOrigin() string {
 	if origin == "" {
 		origin = strings.TrimSpace(os.Getenv("LEDGER_PUBLIC_ORIGIN"))
 	}
-	return strings.TrimRight(origin, "/")
+	return normalizeWebOrigin(origin)
+}
+
+func configuredWebAuthnOrigins(c *gin.Context) []string {
+	origins := []string{}
+	origins = appendWebAuthnOrigin(origins, configuredPublicOrigin())
+	origins = appendConfiguredWebAuthnOrigins(origins, os.Getenv("WEBAUTHN_RP_ORIGINS"))
+	origins = appendConfiguredWebAuthnOrigins(origins, os.Getenv("PUBLIC_ORIGINS"))
+	if len(origins) == 0 {
+		origins = appendWebAuthnOrigin(origins, requestOrigin(c))
+	}
+	return origins
+}
+
+func relatedWebAuthnOrigins(c *gin.Context) []string {
+	origins := configuredWebAuthnOrigins(c)
+	rpID := strings.TrimSpace(os.Getenv("WEBAUTHN_RP_ID"))
+	if rpID == "" {
+		rpID = rpIDFromOrigin(origins[0])
+	}
+	related := []string{}
+	for _, origin := range origins {
+		if webAuthnOriginMatchesRPID(origin, rpID) {
+			continue
+		}
+		related = appendWebAuthnOrigin(related, origin)
+	}
+	return related
+}
+
+func appendConfiguredWebAuthnOrigins(origins []string, value string) []string {
+	for _, origin := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\t' || r == ' '
+	}) {
+		origins = appendWebAuthnOrigin(origins, origin)
+	}
+	return origins
+}
+
+func appendWebAuthnOrigin(origins []string, origin string) []string {
+	origin = normalizeWebOrigin(origin)
+	if origin == "" {
+		return origins
+	}
+	for _, existing := range origins {
+		if existing == origin {
+			return origins
+		}
+	}
+	return append(origins, origin)
+}
+
+func normalizeWebOrigin(origin string) string {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return ""
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+}
+
+func webAuthnOriginMatchesRPID(origin string, rpID string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(strings.Split(parsed.Host, ":")[0])
+	rpID = strings.ToLower(strings.TrimSpace(rpID))
+	return host == rpID || strings.HasSuffix(host, "."+rpID)
 }
 
 func requestOrigin(c *gin.Context) string {

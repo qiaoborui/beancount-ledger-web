@@ -108,7 +108,7 @@ func TestPasskeyStatusAndOptionsPersistSession(t *testing.T) {
 		t.Fatalf("unexpected options: %#v", optionBody)
 	}
 	storeText := string(mustRead(t, filepath.Join(cfg.RuntimeDir, "passkeys.json")))
-	if !strings.Contains(storeText, `"currentSession"`) || !strings.Contains(storeText, optionBody.Challenge) {
+	if !strings.Contains(storeText, `"sessions"`) || !strings.Contains(storeText, optionBody.Challenge) {
 		t.Fatalf("passkey session was not persisted:\n%s", storeText)
 	}
 }
@@ -125,6 +125,54 @@ func TestRequestOriginUsesForwardedProtoButNotForwardedHostByDefault(t *testing.
 
 	if got := requestOrigin(c); got != "https://ledger.example" {
 		t.Fatalf("request origin = %q, want https://ledger.example", got)
+	}
+}
+
+func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("PUBLIC_ORIGIN", "https://beancount-ledger-web.vercel.app")
+	t.Setenv("WEBAUTHN_RP_ID", "beancount-ledger-web.vercel.app")
+	t.Setenv("WEBAUTHN_RP_ORIGINS", "https://beancount-ledger-web.vercel.app, https://ledger.example.com")
+	router := NewRouter(cfg)
+
+	wellKnown := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/webauthn", nil)
+	router.ServeHTTP(wellKnown, req)
+	if wellKnown.Code != http.StatusOK {
+		t.Fatalf("well-known=%d body=%s", wellKnown.Code, wellKnown.Body.String())
+	}
+	var related struct {
+		Origins []string `json:"origins"`
+	}
+	if err := json.Unmarshal(wellKnown.Body.Bytes(), &related); err != nil {
+		t.Fatal(err)
+	}
+	if len(related.Origins) != 1 || related.Origins[0] != "https://ledger.example.com" {
+		t.Fatalf("unexpected related origins: %#v", related)
+	}
+
+	cookies := loginCookies(t, router)
+	options := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/passkey/register/options", nil)
+	req.Host = "ledger.example.com"
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	router.ServeHTTP(options, req)
+	if options.Code != http.StatusOK {
+		t.Fatalf("options=%d body=%s", options.Code, options.Body.String())
+	}
+	var body struct {
+		RP struct {
+			ID string `json:"id"`
+		} `json:"rp"`
+	}
+	if err := json.Unmarshal(options.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.RP.ID != "beancount-ledger-web.vercel.app" {
+		t.Fatalf("rp id = %q", body.RP.ID)
 	}
 }
 

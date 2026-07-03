@@ -573,6 +573,46 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	}
 }
 
+func TestGitEndpointsHandleNonGitLedger(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodGet, "/api/git/status", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("git status=%d body=%s", res.Code, res.Body.String())
+	}
+	var statusBody struct {
+		GitAvailable     bool        `json:"gitAvailable"`
+		Dirty            bool        `json:"dirty"`
+		ChangedFileCount int         `json:"changedFileCount"`
+		Changes          []GitChange `json:"changes"`
+		Message          string      `json:"message"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &statusBody); err != nil {
+		t.Fatal(err)
+	}
+	if statusBody.GitAvailable || statusBody.Dirty || statusBody.ChangedFileCount != 0 || len(statusBody.Changes) != 0 || !strings.Contains(statusBody.Message, "not available") {
+		t.Fatalf("non-git ledger should report unavailable clean status: %#v", statusBody)
+	}
+
+	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
+	}
+	var commitBody struct {
+		ChangedFileCount int    `json:"changedFileCount"`
+		Output           string `json:"output"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
+		t.Fatal(err)
+	}
+	if commitBody.ChangedFileCount != 0 || !strings.Contains(commitBody.Output, "not available") {
+		t.Fatalf("unexpected non-git commit response: %#v", commitBody)
+	}
+}
+
 func TestAppendEntryPublishesAppendEntrySource(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
