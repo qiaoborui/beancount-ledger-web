@@ -561,16 +561,11 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
 		t.Fatal(err)
 	}
-	if commitBody.ChangedFileCount != 2 || commitBody.RemainingChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Git remote sync disabled") {
+	if commitBody.ChangedFileCount != 0 || commitBody.RemainingChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Remote Git mode") {
 		t.Fatalf("unexpected git commit response: %#v", commitBody)
 	}
-	if status := runGit(t, cfg, "status", "--short", "--", "main.bean", "transactions"); strings.TrimSpace(status) != "" {
-		t.Fatalf("ledger files should be clean after commit:\n%s", status)
-	}
-	lastCommitFiles := runGit(t, cfg, "show", "--name-only", "--pretty=format:", "HEAD")
-	if !strings.Contains(lastCommitFiles, "main.bean") || !strings.Contains(lastCommitFiles, "transactions/2026/06.bean") {
-		t.Fatalf("commit should include ledger write files:\n%s", lastCommitFiles)
-	}
+	runGit(t, cfg, "add", ".")
+	runGit(t, cfg, "commit", "-m", "manual commit after append")
 }
 
 func TestGitEndpointsHandleNonGitLedger(t *testing.T) {
@@ -608,7 +603,7 @@ func TestGitEndpointsHandleNonGitLedger(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
 		t.Fatal(err)
 	}
-	if commitBody.ChangedFileCount != 0 || !strings.Contains(commitBody.Output, "not available") {
+	if commitBody.ChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Remote Git mode") {
 		t.Fatalf("unexpected non-git commit response: %#v", commitBody)
 	}
 }

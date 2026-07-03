@@ -114,10 +114,17 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 		tx.Restore()
 		return err
 	}
-	if err := w.validateAndClear(source); err != nil {
+	if err := runBeanCheck(w.cfg); err != nil {
 		tx.Restore()
 		return err
 	}
+	if w.cache != nil {
+		w.cache.Clear()
+	}
+	if strings.TrimSpace(source) == "" {
+		source = ledgerWriteSourceDefault
+	}
+	publishLedgerUpdated(w.cfg, source)
 	return nil
 }
 
@@ -402,20 +409,6 @@ func (w *LedgerWriter) validateCurrencies(currencies []string) error {
 }
 
 func (w *LedgerWriter) knownCommodities() ([]string, error) {
-	if remoteGitEnabled(w.cfg) {
-		lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
-		if err != nil {
-			return nil, err
-		}
-		return CommoditiesFromBeanEntries(ParseBeanLines(lines).Entries), nil
-	}
-	if w.cache != nil {
-		snapshot, err := w.cache.Snapshot()
-		if err != nil {
-			return nil, err
-		}
-		return snapshot.Commodities, nil
-	}
 	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
@@ -424,20 +417,6 @@ func (w *LedgerWriter) knownCommodities() ([]string, error) {
 }
 
 func (w *LedgerWriter) knownAccounts() ([]Account, error) {
-	if remoteGitEnabled(w.cfg) {
-		lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
-		if err != nil {
-			return nil, err
-		}
-		return AccountsFromBeanEntries(ParseBeanLines(lines).Entries), nil
-	}
-	if w.cache != nil {
-		snapshot, err := w.cache.Snapshot()
-		if err != nil {
-			return nil, err
-		}
-		return snapshot.Accounts, nil
-	}
 	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
@@ -546,20 +525,6 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, f
 	return tx.WriteFile(main, []byte(string(mainBefore)+sep+includeLine+"\n"), 0o644)
 }
 
-func (w *LedgerWriter) validateAndClear(source string) error {
-	start := time.Now()
-	err := runBeanCheck(w.cfg)
-	logDuration("bean-check", start, map[string]any{"ok": err == nil})
-	if err == nil {
-		w.cache.Clear()
-		if strings.TrimSpace(source) == "" {
-			source = ledgerWriteSourceDefault
-		}
-		publishLedgerUpdated(w.cfg, source)
-	}
-	return err
-}
-
 func remoteGitCommitAndPush(cfg Config, message string) (string, error) {
 	trackedPaths := ledgerGitTrackedPathspecs(cfg)
 	status, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
@@ -575,6 +540,9 @@ func remoteGitCommitAndPush(cfg Config, message string) (string, error) {
 	commitOut, err := gitLedgerOutput(cfg, append([]string{"commit", "-m", message, "--"}, trackedPaths...)...)
 	if err != nil {
 		return commitOut, err
+	}
+	if gitRemoteDisabled() {
+		return commitOut + "\nGit remote sync disabled\n", nil
 	}
 	pushOut, err := gitLedgerOutput(cfg, "push", "origin", "HEAD:"+cfg.LedgerGitBranch)
 	if err != nil {

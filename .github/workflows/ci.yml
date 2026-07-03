@@ -37,12 +37,12 @@ jobs:
           web=false
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*)
+              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*)
                 backend=true
                 ;;
             esac
             case "$file" in
-              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|web/*|web/**/*|docker/*|docker/**/*)
+              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|web/*|web/**/*)
                 web=true
                 ;;
             esac

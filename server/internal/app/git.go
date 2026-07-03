@@ -110,11 +110,10 @@ func isGitRepositoryError(message string) bool {
 }
 
 func gitCredentialHelp(cfg Config) string {
-	return `GitHub 认证失败，服务进程无法读取当前 Git 凭据。请确认服务运行用户能访问 GitHub 凭据，或将账本仓库 remote 改为已配置 SSH key 的地址：
+	return `GitHub 认证失败。请确认服务运行用户能访问 GitHub 凭据，或将账本仓库 remote 改为已配置 SSH key 的地址：
 cd ` + cfg.LedgerRoot + `
 git remote -v
-git remote set-url origin git@github.com:OWNER/REPO.git
-如果使用 HTTPS，请让 systemd 服务以已登录 GitHub CLI 的用户运行，并确认该用户的 HOME 指向正确。`
+git remote set-url origin git@github.com:OWNER/REPO.git`
 }
 
 func gitRemoteDisabled() bool {
