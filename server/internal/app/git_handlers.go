@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,15 @@ func (s *Server) gitStatus(c *gin.Context) {
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	available, err := ledgerGitAvailable(s.cfg)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if !available {
+		c.JSON(http.StatusOK, ledgerGitUnavailablePayload())
 		return
 	}
 	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)
@@ -31,6 +41,15 @@ func (s *Server) gitDiff(c *gin.Context) {
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	available, err := ledgerGitAvailable(s.cfg)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if !available {
+		errorJSON(c, http.StatusBadRequest, errors.New("Ledger Git is not available for this ledger"))
 		return
 	}
 	path := c.Query("path")
@@ -64,6 +83,18 @@ func (s *Server) gitPull(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
 		return
 	}
+	available, err := ledgerGitAvailable(s.cfg)
+	if err != nil {
+		publishJobStatus("git.pull", "error", err.Error())
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if !available {
+		out := "Ledger Git is not available for this ledger.\n"
+		publishJobStatus("git.pull", "ok", out)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
+		return
+	}
 	out, err := gitLedgerOutput(s.cfg, "pull", "--rebase")
 	if err != nil {
 		publishJobStatus("git.pull", "error", err.Error())
@@ -91,6 +122,15 @@ func (s *Server) gitCommit(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Remote Git mode commits and pushes each ledger write automatically."})
+		return
+	}
+	available, err := ledgerGitAvailable(s.cfg)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if !available {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Ledger Git is not available for this ledger."})
 		return
 	}
 	trackedPaths := ledgerGitTrackedPathspecs(s.cfg)

@@ -45,6 +45,27 @@ func gitLedgerOutput(cfg Config, args ...string) (string, error) {
 	return text, nil
 }
 
+func ledgerGitAvailable(cfg Config) (bool, error) {
+	if remoteGitEnabled(cfg) {
+		return true, nil
+	}
+	output, err := gitLedgerOutput(cfg, "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		if isGitRepositoryError(err.Error()) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(output) == "true", nil
+}
+
+func ledgerGitUnavailablePayload() map[string]any {
+	return map[string]any{
+		"status": "", "dirty": false, "changedFileCount": 0, "changes": []GitChange{},
+		"gitAvailable": false, "message": "Ledger Git is not available for this ledger.",
+	}
+}
+
 func gitLedgerBaseArgs(cfg Config) []string {
 	base := []string{"-c", "safe.directory=" + cfg.LedgerRoot}
 	if name := env("LEDGER_GIT_AUTHOR_NAME", ""); name != "" {
@@ -77,6 +98,14 @@ func isGitCredentialError(message string) bool {
 	lower := strings.ToLower(message)
 	return strings.Contains(lower, "could not read username for") ||
 		strings.Contains(lower, "authentication failed")
+}
+
+func isGitRepositoryError(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "not a git repository") ||
+		strings.Contains(lower, "not a git repo") ||
+		strings.Contains(lower, "fatal: bad revision") ||
+		strings.Contains(message, "不是 git 仓库")
 }
 
 func gitCredentialHelp(cfg Config) string {
