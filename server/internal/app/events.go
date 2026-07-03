@@ -30,6 +30,12 @@ func NewEventHub() *EventHub {
 	return &EventHub{clients: map[*eventSubscriber]bool{}}
 }
 
+func (h *EventHub) HasSubscribers() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients) > 0
+}
+
 func (h *EventHub) Subscribe() *eventSubscriber {
 	sub := &eventSubscriber{hub: h, ch: make(chan RealtimeEvent, 16)}
 	h.mu.Lock()
@@ -61,6 +67,9 @@ func (sub *eventSubscriber) Close() {
 }
 
 func publishLedgerUpdated(cfg Config, source string) {
+	if !ledgerEventHub.HasSubscribers() {
+		return
+	}
 	data := gin.H{"source": source}
 	if version, err := ledgerVersion(cfg); err == nil {
 		data["version"] = version
@@ -69,6 +78,9 @@ func publishLedgerUpdated(cfg Config, source string) {
 }
 
 func publishGitStatus(cfg Config, source string) {
+	if !ledgerEventHub.HasSubscribers() {
+		return
+	}
 	if err := ensureLedgerReady(cfg); err != nil {
 		ledgerEventHub.Publish("git.status", gin.H{"source": source, "error": err.Error()})
 		return

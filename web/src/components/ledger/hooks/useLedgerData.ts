@@ -27,8 +27,7 @@ function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency
 
 async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
   try {
-    const data = await fetchJson<{ version?: LedgerVersion }>("/api/ledger/version", undefined, {});
-    return data.version ?? null;
+    return await fetchJson<LedgerVersion>("/api/ledger/version");
   } catch {
     return null;
   }
@@ -247,14 +246,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     }
 
     if (!forceFresh && unlocked) {
-      const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
+      const currentVersion = await fetchLedgerVersion();
       const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
-      if (cached) {
+      if (cached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
+        const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
         applyCache(cached);
-        if (freshLedgerCacheKeys.has(cacheKey)) return;
-        fetchFreshLedger(timeRange, { background: true }).catch(() => {
-          // Keep showing cached data if background refresh fails.
-        });
+        freshLedgerCacheKeys.add(cacheKey);
         return;
       }
     }
