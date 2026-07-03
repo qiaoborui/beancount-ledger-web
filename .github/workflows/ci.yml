@@ -37,12 +37,12 @@ jobs:
           web=false
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/ci.yml|.github/workflows/deploy-raspberry-pi.yml|.github/workflows/deploy-vercel.yml|Dockerfile.vercel|vercel.json|.dockerignore|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
+              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*|docker/*|docker/**/*|scripts/deploy-backend-artifact.sh)
                 backend=true
                 ;;
             esac
             case "$file" in
-              .github/workflows/ci.yml|.github/workflows/deploy-raspberry-pi.yml|.github/workflows/deploy-vercel.yml|Dockerfile.vercel|vercel.json|.dockerignore|web/*|web/**/*|docker/*|docker/**/*|scripts/deploy-frontend-artifact.sh)
+              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|web/*|web/**/*|docker/*|docker/**/*|scripts/deploy-frontend-artifact.sh)
                 web=true
                 ;;
             esac

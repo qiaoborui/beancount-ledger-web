@@ -168,6 +168,24 @@ WEBAUTHN_RP_ID=your-app.vercel.app
 LEDGER_GIT_SCHEDULER=false
 ```
 
-GitHub Actions can deploy through `.github/workflows/deploy-vercel.yml` after
-these repository secrets are configured: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and
-`VERCEL_PROJECT_ID`.
+When moving from a Vercel preview/production domain to a custom domain, passkeys
+created under the old relying party ID cannot automatically become credentials
+for an unrelated custom-domain relying party ID. To keep using the old RP ID
+during migration, keep `WEBAUTHN_RP_ID` set to the original domain and list both
+origins:
+
+```bash
+PUBLIC_ORIGIN=https://your-app.vercel.app
+WEBAUTHN_RP_ID=your-app.vercel.app
+WEBAUTHN_RP_ORIGINS=https://your-app.vercel.app,https://ledger.example.com
+```
+
+The app serves `/.well-known/webauthn` for WebAuthn related-origin requests so
+supporting browsers can allow the custom domain to use that stable RP ID. For a
+permanent custom-domain RP ID, sign in with the password and register a new
+passkey after switching `PUBLIC_ORIGIN` and `WEBAUTHN_RP_ID` to the custom
+domain.
+
+Connect the Vercel project to GitHub and let Vercel create production
+deployments from `main` and preview deployments for pull requests. GitHub
+Actions only runs CI; Vercel should remain the deployment source of truth.
