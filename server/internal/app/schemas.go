@@ -79,6 +79,8 @@ var (
 	currencyPattern    = regexp.MustCompile(`^` + commodityPattern + `$`)
 	tagPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	metadataKeyPattern = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*$`)
+	decimal2Re         = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
+	decimal6Re         = regexp.MustCompile(`^-?\d+(\.\d{1,6})?$`)
 )
 
 func (r LoginRequest) Validate() error {
@@ -353,7 +355,15 @@ func validateAmount(field, value string) error {
 }
 
 func validateDecimalAmount(field, value string, places int) error {
-	pattern := regexp.MustCompile(fmt.Sprintf(`^-?\d+(\.\d{1,%d})?$`, places))
+	var pattern *regexp.Regexp
+	switch places {
+	case 2:
+		pattern = decimal2Re
+	case 6:
+		pattern = decimal6Re
+	default:
+		pattern = regexp.MustCompile(fmt.Sprintf(`^-?\d+(\.\d{1,%d})?$`, places))
+	}
 	if !pattern.MatchString(strings.TrimSpace(value)) {
 		return fmt.Errorf("%s must be a decimal amount with at most %d places", field, places)
 	}
