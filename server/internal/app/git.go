@@ -105,7 +105,8 @@ func isGitRepositoryError(message string) bool {
 	return strings.Contains(lower, "not a git repository") ||
 		strings.Contains(lower, "not a git repo") ||
 		strings.Contains(lower, "fatal: bad revision") ||
-		strings.Contains(message, "不是 git 仓库")
+		strings.Contains(lower, "不是 git") ||
+		strings.Contains(lower, "不是git")
 }
 
 func gitCredentialHelp(cfg Config) string {

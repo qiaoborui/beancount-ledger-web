@@ -69,15 +69,15 @@ function cacheableApiRequest(request, url) {
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(API_CACHE_NAME);
   const cached = await cache.match(request);
+
   const network = fetch(request).then((response) => {
     if (response && response.ok && response.type === "basic") cache.put(request, response.clone());
     return response;
   });
 
-  if (cached) {
-    network.catch(() => undefined);
-    return cached;
-  }
+  network.catch(() => undefined);
+
+  if (cached) return cached;
 
   return network.catch(() => new Response(JSON.stringify({ error: "离线且暂无缓存" }), {
     status: 503,

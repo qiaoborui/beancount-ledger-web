@@ -1,10 +1,12 @@
 package app
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,7 +31,7 @@ func NewRouter(cfg Config) *gin.Engine {
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
 	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, cache: cache, writer: writer, accountService: NewAccountService(cache, writer), readService: NewLedgerReadService(cache), reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware())
+	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {
@@ -48,59 +50,82 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
-	api.GET("/auth/me", s.me)
-	api.GET("/passkey/status", s.passkeyStatus)
+
+	readOnly30s := api.Group("", cacheControl(30))
+	readOnly60s := api.Group("", cacheControl(60))
+
+	readOnly30s.GET("/auth/me", s.me)
+	readOnly60s.GET("/passkey/status", s.passkeyStatus)
+
 	api.POST("/passkey/login/options", s.passkeyLoginOptions)
 	api.POST("/passkey/login/verify", s.passkeyLoginVerify)
 	api.POST("/passkey/register/options", s.passkeyRegisterOptions)
 	api.POST("/passkey/register/verify", s.passkeyRegisterVerify)
 
 	ledger := api.Group("/ledger")
-	ledger.GET("/bootstrap", s.ledgerBootstrap)
-	ledger.GET("/version", s.ledgerVersion)
-	ledger.GET("/entries", s.ledgerEntries)
-	ledger.GET("/summary", s.summary)
-	ledger.GET("/transactions", s.transactions)
+
+	ledgerRead30s := ledger.Group("", cacheControl(30))
+	ledgerRead30s.GET("/bootstrap", s.ledgerBootstrap)
+	ledgerRead30s.GET("/summary", s.summary)
+	ledgerRead30s.GET("/transactions", s.transactions)
+	ledgerRead30s.GET("/income-statement", s.incomeStatement)
+	ledgerRead30s.GET("/dashboard", s.dashboard)
+	ledgerRead30s.GET("/reconciliation", s.reconciliation)
+	ledgerRead30s.GET("/notifications", s.notifications)
+
+	ledgerRead60s := ledger.Group("", cacheControl(60))
+	ledgerRead60s.GET("/version", s.ledgerVersion)
+	ledgerRead60s.GET("/entries", s.ledgerEntries)
+	ledgerRead60s.GET("/balances", s.balances)
+	ledgerRead60s.GET("/investments", s.investments)
+	ledgerRead60s.GET("/accounts/detail", s.accountDetail)
+	ledgerRead60s.GET("/account-status", s.accountStatus)
+
+	ledgerRead300s := ledger.Group("", cacheControl(300))
+	ledgerRead300s.GET("/accounts", s.accounts)
+	ledgerRead300s.GET("/insights", s.insights)
+
 	ledger.POST("/transactions", s.reverseTransaction)
 	ledger.PUT("/transactions", s.updateTransaction)
 	ledger.DELETE("/transactions", s.deleteTransaction)
-	ledger.GET("/balances", s.balances)
-	ledger.GET("/income-statement", s.incomeStatement)
-	ledger.GET("/dashboard", s.dashboard)
-	ledger.GET("/investments", s.investments)
-	ledger.GET("/accounts", s.accounts)
 	ledger.POST("/accounts", s.appendAccount)
 	ledger.POST("/accounts/operations", s.applyAccountOperations)
-	ledger.GET("/accounts/detail", s.accountDetail)
-	ledger.GET("/account-status", s.accountStatus)
-	ledger.GET("/reconciliation", s.reconciliation)
 	ledger.POST("/reconciliation", s.reconcile)
 	ledger.POST("/append", s.appendEntry)
 	ledger.POST("/append-batch", s.appendBatch)
-	ledger.GET("/insights", s.insights)
-	ledger.GET("/notifications", s.notifications)
 	ledger.PATCH("/notifications", s.updateNotifications)
-	ledger.GET("/imports/providers", s.importsProviders)
-	ledger.GET("/imports/documents", s.importsDocuments)
-	ledger.GET("/imports/documents/file", s.importsDocumentFile)
+
+	ledgerRead30s.GET("/imports/providers", s.importsProviders)
+	ledgerRead30s.GET("/imports/documents", s.importsDocuments)
+	ledgerRead30s.GET("/imports/documents/file", s.importsDocumentFile)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)
-	ledger.GET("/editor/files", s.editorFiles)
-	ledger.GET("/editor/file", s.editorFile)
+
+	ledgerRead30s.GET("/editor/files", s.editorFiles)
+	ledgerRead30s.GET("/editor/file", s.editorFile)
 	ledger.PUT("/editor/file", s.saveEditorFile)
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/chat", s.aiChat)
 	api.POST("/ai/accounts-chat", s.aiAccountsChat)
-	api.GET("/git/status", s.gitStatus)
-	api.GET("/git/diff", s.gitDiff)
+
+	readOnly30s.GET("/git/status", s.gitStatus)
+	readOnly30s.GET("/git/diff", s.gitDiff)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)
-	api.GET("/push/subscription", s.pushStatus)
+
+	readOnly60s.GET("/push/subscription", s.pushStatus)
 	api.POST("/push/subscription", s.pushSave)
 	api.DELETE("/push/subscription", s.pushDelete)
 	api.PUT("/push/subscription", s.pushTest)
 	api.POST("/push/notify", s.pushNotify)
+}
+
+func cacheControl(maxAge int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", maxAge))
+		c.Next()
+	}
 }
 
 func (s *Server) health(c *gin.Context) {
