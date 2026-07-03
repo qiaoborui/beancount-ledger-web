@@ -39,6 +39,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function eventWebSocketURL() {
+  if (import.meta.env.VITE_API_WS_URL) {
+    return import.meta.env.VITE_API_WS_URL;
+  }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/api/events/ws`;
 }
