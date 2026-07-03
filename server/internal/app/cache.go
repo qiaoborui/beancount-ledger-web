@@ -49,14 +49,14 @@ func NewLedgerCache(cfg Config) *LedgerCache {
 }
 
 func (c *LedgerCache) Version() (LedgerVersion, error) {
-	return c.currentVersion()
+	return c.currentVersion(false)
 }
 
 func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err := ensureLedgerReady(c.cfg); err != nil {
 		return nil, err
 	}
-	version, err := c.currentVersion()
+	version, err := c.currentVersion(false)
 	if err != nil {
 		return nil, err
 	}
@@ -109,19 +109,32 @@ func (c *LedgerCache) Clear() {
 	c.versionReadAt = time.Time{}
 }
 
-const ledgerVersionCacheTTL = 250 * time.Millisecond
+func (c *LedgerCache) MarkDirty() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot = nil
+	h := sha256.New()
+	h.Write([]byte(c.version.Version))
+	h.Write([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
+	c.version.Version = hex.EncodeToString(h.Sum(nil))
+	c.versionReadAt = time.Now()
+}
 
-func (c *LedgerCache) currentVersion() (LedgerVersion, error) {
+const ledgerVersionCacheTTL = 1000 * time.Millisecond
+
+func (c *LedgerCache) currentVersion(forceRefresh bool) (LedgerVersion, error) {
 	if err := ensureLedgerReady(c.cfg); err != nil {
 		return LedgerVersion{}, err
 	}
-	c.mu.Lock()
-	if c.snapshot != nil && !c.versionReadAt.IsZero() && time.Since(c.versionReadAt) < ledgerVersionCacheTTL {
-		version := c.version
+	if !forceRefresh {
+		c.mu.Lock()
+		if c.snapshot != nil && !c.versionReadAt.IsZero() && time.Since(c.versionReadAt) < ledgerVersionCacheTTL {
+			version := c.version
+			c.mu.Unlock()
+			return version, nil
+		}
 		c.mu.Unlock()
-		return version, nil
 	}
-	c.mu.Unlock()
 
 	version, err := ledgerVersion(c.cfg)
 	if err != nil {

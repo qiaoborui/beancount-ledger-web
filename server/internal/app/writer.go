@@ -119,7 +119,7 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 		return err
 	}
 	if w.cache != nil {
-		w.cache.Clear()
+		w.cache.MarkDirty()
 	}
 	if strings.TrimSpace(source) == "" {
 		source = ledgerWriteSourceDefault
@@ -167,7 +167,7 @@ func (w *LedgerWriter) runRemoteGitTransactionLocked(source string, apply func(*
 		}
 		state.checkedAt = time.Now()
 		if w.cache != nil {
-			w.cache.Clear()
+			w.cache.MarkDirty()
 		}
 		if strings.TrimSpace(source) == "" {
 			source = ledgerWriteSourceDefault
