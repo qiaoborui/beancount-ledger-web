@@ -113,14 +113,44 @@ function entryToPendingTxn(source: Txn["source"], entry: ParsedTransaction, oper
   };
 }
 
+function entryToPendingAppendTxn(entry: ParsedTransaction, operationId: string): Txn {
+  return {
+    date: entry.date,
+    payee: entry.payee,
+    narration: entry.narration,
+    metadata: entry.metadata,
+    tags: entry.tags,
+    postings: entry.postings.map((posting) => ({
+      account: posting.account,
+      amount: amountToCents(posting.amount),
+      currency: posting.currency,
+    })),
+    source: { file: `local://pending/${operationId}`, line: 0, hash: operationId },
+    pending: { kind: "append", operationId },
+  };
+}
+
 function inRange(txn: Txn, range?: TimeRange) {
   return !range || (txn.date >= range.start && txn.date < range.end);
+}
+
+function insertPendingAppend(rows: Txn[], txn: Txn): Txn[] {
+  const index = rows.findIndex((row) => row.date <= txn.date);
+  if (index < 0) return [...rows, txn];
+  return [...rows.slice(0, index), txn, ...rows.slice(index)];
 }
 
 export function applyPendingLedgerOperations(txns: Txn[], operations: PendingLedgerOperation[], range?: TimeRange): Txn[] {
   let rows = [...txns];
 
   for (const operation of operations) {
+    if (operation.kind === "append") {
+      if (operation.entry.kind !== "transaction") continue;
+      const next = entryToPendingAppendTxn(operation.entry, operation.id);
+      if (inRange(next, range)) rows = insertPendingAppend(rows, next);
+      continue;
+    }
+
     if (!isTransactionOperation(operation)) continue;
     const key = sourceKey(operation.source);
     const index = rows.findIndex((txn) => sourceKey(txn.source) === key);

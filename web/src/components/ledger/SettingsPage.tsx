@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -8,6 +9,31 @@ const themeOptions: { value: ThemeMode; label: string; description: string }[] =
   { value: "light", label: "浅色", description: "固定使用纸张浅色" },
   { value: "dark", label: "深色", description: "固定使用夜间深色" },
 ];
+
+type LocalAccessState = {
+  origin: string;
+  hostname: string;
+  secure: boolean;
+  standalone: boolean;
+  localOnly: boolean;
+  privateLan: boolean;
+};
+
+function readLocalAccessState(): LocalAccessState | null {
+  if (typeof window === "undefined") return null;
+  const hostname = window.location.hostname;
+  const localOnly = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const privateLan = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return {
+    origin: window.location.origin,
+    hostname,
+    secure: window.isSecureContext,
+    standalone,
+    localOnly,
+    privateLan,
+  };
+}
 
 export function SettingsPage({
   settings,
@@ -35,6 +61,8 @@ export function SettingsPage({
   const currencyOptions = Array.from(new Set(["CNY", ...commodities, settings.valuationCurrency].filter(Boolean))).sort();
 
   return <div className="space-y-6">
+    <LocalAccessPanel />
+
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">valuation</div>
@@ -112,6 +140,56 @@ export function SettingsPage({
         <SettingToggle id="show-income-statement-by-default" title="损益表金额" description="控制进入损益表时是否默认显示各分类的具体金额。" checked={settings.showIncomeStatementByDefault} onChange={(checked) => onChange("showIncomeStatementByDefault", checked)} />
       </div>
     </section>
+  </div>;
+}
+
+function LocalAccessPanel() {
+  const [state, setState] = useState<LocalAccessState | null>(() => readLocalAccessState());
+
+  useEffect(() => {
+    const sync = () => setState(readLocalAccessState());
+    sync();
+    const media = window.matchMedia("(display-mode: standalone)");
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  if (!state) return null;
+
+  const accessLabel = state.localOnly ? "仅本机" : state.privateLan ? "局域网" : "公网 / 隧道";
+  const readiness = state.secure
+    ? "当前 Origin 可用于 PWA 安装与 Passkey。"
+    : "当前不是安全上下文；手机安装、Passkey 和通知建议切到 HTTPS。";
+  const phoneHint = state.localOnly
+    ? "手机无法直接访问 localhost；请使用局域网域名/IP、Tailscale、Cloudflare Tunnel 或 Caddy HTTPS。"
+    : state.privateLan
+      ? "手机可在同一网络下访问；若要使用 Passkey，请给这个地址配置稳定 HTTPS。"
+      : "适合跨网络访问；请确认这个域名会长期保留，避免 Passkey Origin 变化。";
+
+  return <section className="card p-5 md:p-6">
+    <div className="border-l-4 border-brand pl-4">
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">local access</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">本地优先访问</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{phoneHint}</p>
+    </div>
+    <div className="mt-6 grid gap-3 md:grid-cols-3">
+      <StatusTile title="当前 Origin" value={state.origin} />
+      <StatusTile title="访问范围" value={accessLabel} />
+      <StatusTile title="PWA 模式" value={state.standalone ? "已独立打开" : "浏览器标签页"} />
+    </div>
+    <div className={`mt-4 rounded-xl border px-4 py-3 text-sm leading-6 ${state.secure ? "border-brand/30 bg-brand/10 text-brand" : "border-[var(--danger)]/30 bg-[var(--danger)]/10 text-[var(--danger)]"}`}>
+      {readiness}
+    </div>
+    <a className="mt-4 inline-flex rounded-xl border border-line bg-panel px-3 py-2 text-sm text-brand hover:bg-tag" href="https://github.com/qiaoborui/beancount-ledger-web/blob/main/docs/local-first-pwa.md" target="_blank" rel="noreferrer">
+      打开本地优先部署指南
+    </a>
+  </section>;
+}
+
+function StatusTile({ title, value }: { title: string; value: string }) {
+  return <div className="rounded-xl border border-line bg-panel px-4 py-3">
+    <div className="text-xs text-stone">{title}</div>
+    <div className="mt-1 min-w-0 break-all text-sm font-medium text-ink">{value}</div>
   </div>;
 }
 
