@@ -3,6 +3,7 @@ import {
   applyPendingLedgerOperations,
   mergePendingOperation,
   migrateLegacyPendingWrites,
+  normalizePendingLedgerOperations,
   type PendingLedgerOperation,
 } from "./pendingLedgerOperations";
 import type { ParsedTransaction } from "@/lib/schemas";
@@ -101,5 +102,11 @@ describe("pending ledger operations", () => {
     const migrated = migrateLegacyPendingWrites([{ id: "old-1", createdAt: 123, entry: entry() }]);
 
     expect(migrated).toEqual([{ id: "old-1", createdAt: 123, kind: "append", entry: entry() }]);
+  });
+
+  it("normalizes interrupted syncing operations back to pending", () => {
+    const normalized = normalizePendingLedgerOperations([{ id: "op-1", createdAt: 1, kind: "append", entry: entry(), status: "syncing" }]);
+
+    expect(normalized).toEqual([{ id: "op-1", createdAt: 1, kind: "append", entry: entry(), status: "pending" }]);
   });
 });

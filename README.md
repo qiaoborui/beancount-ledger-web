@@ -53,20 +53,28 @@ The app never needs your ledger data to be committed to this repository.
 
 ## Quick start
 
-Deploy to Vercel with the root `vercel.json`. The project defines two Vercel
-Services in one deployment: the Vite frontend under `web/` and the Go backend
-container from `Dockerfile.vercel`. Requests to `/api/*` route to the backend
-service; every other path routes to the frontend service. Pull-request previews
-therefore test the frontend and backend from the same deployment instead of
-calling the production API from a standalone frontend preview.
+Run the Go server close to your private ledger and install the web client as a
+PWA from that local origin. The browser caches the app shell, cached ledger
+snapshots, and pending write queue, while every final ledger write still goes
+through the Go API, `bean-check`, rollback handling, and optional Git sync.
+
+See [docs/local-first-pwa.md](docs/local-first-pwa.md) for the recommended
+local-first topology and offline behavior.
 
 See [web/.env.example](web/.env.example) for the full environment configuration.
 
 ## Deployment
 
-Deploy to Vercel by connecting the GitHub repository. The app runs as a single
-Vercel project with frontend and backend services. Configure environment
-variables in the Vercel dashboard:
+The recommended personal deployment is a self-hosted `ledger-web` server with
+`LEDGER_ROOT` pointing at a private ledger repository and `RUNTIME_DIR` pointing
+at private runtime storage.
+
+Vercel remains useful for pull-request previews or hosted deployments. Connect
+the GitHub repository with the root `vercel.json`; the project defines two
+Vercel Services in one deployment: the Vite frontend under `web/` and the Go
+backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
+backend service; every other path routes to the frontend service. Configure
+environment variables in the Vercel dashboard:
 
 - `LEDGER_STORAGE=remote_git` — the server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check`, and commits/pushes every successful ledger write.
 - `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
