@@ -1,4 +1,4 @@
-const CACHE_NAME = "beancount-ledger-shell-v9";
+const CACHE_NAME = "beancount-ledger-shell-v10";
 const API_CACHE_NAME = "beancount-ledger-api-v2";
 const APP_SHELL = "/";
 const APP_STATIC_ASSETS = [APP_SHELL, "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
@@ -13,7 +13,7 @@ const STALE_WHILE_REVALIDATE_API_PATHS = new Set([
 ]);
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_STATIC_ASSETS)));
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => precacheAppShell(cache)));
 });
 
 self.addEventListener("message", (event) => {
@@ -64,6 +64,42 @@ function cacheableApiRequest(request, url) {
   if (request.method !== "GET") return false;
   if (request.credentials === "omit") return false;
   return STALE_WHILE_REVALIDATE_API_PATHS.has(url.pathname);
+}
+
+function appShellAssetPaths(html) {
+  const paths = new Set(APP_STATIC_ASSETS);
+  const attrPattern = /\b(?:href|src)=["']([^"']+)["']/g;
+  for (const match of html.matchAll(attrPattern)) {
+    const value = match[1];
+    if (!value) continue;
+    let url;
+    try {
+      url = new URL(value, self.location.origin);
+    } catch {
+      continue;
+    }
+    if (url.origin !== self.location.origin) continue;
+    if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/") || url.pathname === "/manifest.webmanifest") {
+      paths.add(url.pathname + url.search);
+    }
+  }
+  return Array.from(paths);
+}
+
+async function precacheAppShell(cache) {
+  try {
+    const response = await fetch(APP_SHELL, { cache: "reload" });
+    if (response && response.ok) {
+      await cache.put(APP_SHELL, response.clone());
+      const html = await response.text();
+      await Promise.all(appShellAssetPaths(html).filter((path) => path !== APP_SHELL).map((path) => cache.add(path).catch(() => undefined)));
+      await trimCache(cache, STATIC_CACHE_MAX_ENTRIES);
+      return;
+    }
+  } catch {
+    // Fall back to the static list below.
+  }
+  await Promise.all(APP_STATIC_ASSETS.map((path) => cache.add(path).catch(() => undefined)));
 }
 
 async function staleWhileRevalidate(request) {

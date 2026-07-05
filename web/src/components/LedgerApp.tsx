@@ -19,6 +19,7 @@ import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { usePendingLedgerWrites } from "./ledger/hooks/usePendingLedgerWrites";
 import { applyPendingLedgerOperations } from "./ledger/pendingLedgerOperations";
+import { hasKnownLedgerAuthentication, readInitialLedgerAuthState } from "./ledger/authState";
 import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
@@ -46,6 +47,7 @@ import {
   loadReconcilePage,
   loadSettingsPage,
   loadTransactionList,
+  preloadOfflineCoreRoutes,
   preloadLedgerRoute,
 } from "./ledger/routePreload";
 import type { LedgerNavHref, LedgerPage } from "./ledger/types";
@@ -140,11 +142,6 @@ const TRANSACTION_QUICK_VIEWS = [
   { id: "reimburse", label: "报销相关", detail: "搜索报销线索", search: "报销" },
 ];
 
-function readSessionAuthed(): boolean | null {
-  if (typeof window === "undefined") return null;
-  return sessionStorage.getItem("ledger_authed") === "1" ? true : null;
-}
-
 function isTypingTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
   if (!element) return false;
@@ -157,7 +154,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
-  const [authed, setAuthed] = useState<boolean | null>(() => readSessionAuthed());
+  const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
   const [customStart, setCustomStart] = useState(timeRange.start);
@@ -204,6 +201,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   useEffect(() => {
     if (unlocked) revealAllAmounts();
   }, [revealAllAmounts, unlocked]);
+
+  useEffect(() => {
+    if (!authed || !online) return;
+    preloadOfflineCoreRoutes();
+  }, [authed, online]);
 
   const handleSensitiveLocked = useCallback(() => {
     sessionStorage.removeItem("ledger_unlocked");
@@ -430,6 +432,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [page, router, timeRange]);
 
+  if (authed === null && !online && hasKnownLedgerAuthentication()) return <AppSkeleton />;
   if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;

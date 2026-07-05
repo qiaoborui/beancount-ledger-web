@@ -1,5 +1,6 @@
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
+import { rememberLedgerAuthenticated } from "../authState";
 
 export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, showToast, clearToast }: { password: string; setPassword: (value: string) => void; setAuthed: (authenticated: boolean) => void; setUnlocked: (unlocked: boolean) => void; setPasskeyRegistered: (registered: boolean) => void; load: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; clearToast: () => void }) {
   async function login() {
@@ -8,7 +9,7 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
       sessionStorage.removeItem("ledger_locked_at");
       sessionStorage.removeItem("ledger_hidden_at");
       sessionStorage.setItem("ledger_unlocked", "1");
-      sessionStorage.setItem("ledger_authed", "1");
+      rememberLedgerAuthenticated();
       setUnlocked(true);
       setAuthed(true);
     } else {
@@ -28,7 +29,7 @@ export function useLedgerAuth({ password, setPassword, setAuthed, setUnlocked, s
       sessionStorage.removeItem("ledger_locked_at");
       sessionStorage.removeItem("ledger_hidden_at");
       sessionStorage.setItem("ledger_unlocked", "1");
-      sessionStorage.setItem("ledger_authed", "1");
+      rememberLedgerAuthenticated();
       setUnlocked(true);
       setAuthed(true);
       clearToast();

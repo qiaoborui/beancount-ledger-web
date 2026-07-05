@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
+import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
 import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
@@ -56,6 +57,32 @@ export type LedgerBootstrapResponse = {
 
 function transactionHasIncome(txn: Txn) {
   return txn.postings.some((posting) => posting.account.startsWith("Income:"));
+}
+
+function offlineOrNetworkError(error: unknown) {
+  return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
+}
+
+export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
+  return {
+    ...cache,
+    balances: {},
+    accountBalances: [],
+    netWorthRows: [],
+    monthEndNetWorthRows: [],
+    netWorthWindows: null,
+    creditCards: [],
+    investments: null,
+    txns: cache.txns.filter((txn) => !transactionHasIncome(txn)),
+    reconciliationRows: [],
+    accountStatuses: [],
+    incomeStatement: cache.incomeStatement ? {
+      ...cache.incomeStatement,
+      income: [],
+      totalIncome: 0,
+      netIncome: 0,
+    } : null,
+  };
 }
 
 export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now()) {
@@ -211,16 +238,35 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked, valuationCurrency]);
 
   const load = useCallback(async (forceFresh = false) => {
-    const [me, passkey] = await Promise.all([
-      fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
-      fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
-    ]);
+    let me: { authenticated?: boolean; sensitiveUnlocked?: boolean };
+    let passkey: { registered?: boolean };
+    try {
+      [me, passkey] = await Promise.all([
+        fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
+        fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
+      ]);
+    } catch (error) {
+      if (offlineOrNetworkError(error) && hasKnownLedgerAuthentication()) {
+        rememberLedgerAuthenticated();
+        onAuthChange(true);
+        const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
+        if (cached) {
+          const cache = unlocked ? cached : maskSensitiveLedgerCache(cached);
+          applyCache(cache, unlocked, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
+          showToast("info", "当前离线，已显示上次缓存的数据");
+        } else {
+          showToast("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
+        }
+        return;
+      }
+      throw error;
+    }
     const hasPasskey = Boolean(passkey.registered);
     onPasskeyRegistered(hasPasskey);
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
     if (authenticated) {
-      sessionStorage.setItem("ledger_authed", "1");
+      rememberLedgerAuthenticated();
       if (me.sensitiveUnlocked && !sessionStorage.getItem("ledger_locked_at")) {
         sessionStorage.setItem("ledger_unlocked", "1");
         onSensitiveUnlockChange(true);
@@ -230,8 +276,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       }
     }
     else {
-      sessionStorage.removeItem("ledger_authed");
-      sessionStorage.removeItem("ledger_unlocked");
+      forgetLedgerAuthentication();
       onSensitiveUnlockChange(false);
       clearLedgerData();
     }

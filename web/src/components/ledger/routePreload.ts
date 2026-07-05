@@ -73,3 +73,15 @@ export function preloadLedgerRoute(href: string) {
     });
   }
 }
+
+export function preloadOfflineCoreRoutes() {
+  if (typeof window === "undefined") return;
+  const coreRoutes = ["/transactions", "/accounts", "/settings"];
+  for (const href of coreRoutes) preloadLedgerRoute(href);
+  void loadEntryModal().catch((error) => {
+    console.warn("Ledger entry preload failed", error);
+  });
+  void loadQuickActionsSheet().catch((error) => {
+    console.warn("Ledger quick actions preload failed", error);
+  });
+}
