@@ -44,6 +44,9 @@ export function SettingsPage({
   onThemeModeChange,
   mobileTabHrefs,
   onMobileTabHrefsChange,
+  sensitiveUnlocked,
+  offlineUnlockEnabled,
+  onEnableOfflineUnlock,
 }: {
   settings: PrivacySettings;
   commodities: string[];
@@ -53,6 +56,9 @@ export function SettingsPage({
   onThemeModeChange: (mode: ThemeMode) => void;
   mobileTabHrefs: LedgerNavHref[];
   onMobileTabHrefsChange: (hrefs: LedgerNavHref[]) => void;
+  sensitiveUnlocked: boolean;
+  offlineUnlockEnabled: boolean;
+  onEnableOfflineUnlock: (secret: string) => void | Promise<void>;
 }) {
   function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
     if (checked) onMobileTabHrefsChange(Array.from(new Set([...mobileTabHrefs, href])).slice(0, 5));
@@ -62,6 +68,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} />
 
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
@@ -141,6 +148,52 @@ export function SettingsPage({
       </div>
     </section>
   </div>;
+}
+
+function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable }: { enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void> }) {
+  const [secret, setSecret] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit() {
+    if (saving) return;
+    if (!sensitiveUnlocked) {
+      setMessage("请先使用 Face ID / Passkey 解锁敏感数据。");
+      return;
+    }
+    if (secret !== confirm) {
+      setMessage("两次输入不一致。");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      await onEnable(secret);
+      setSecret("");
+      setConfirm("");
+      setMessage("已启用离线解锁。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "启用失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="card p-5 md:p-6">
+    <div className="border-l-4 border-brand pl-4">
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">offline unlock</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">离线解锁</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "已为这个浏览器保存加密缓存；断网时可用离线解锁码查看余额和净资产。" : "设置后，完整敏感缓存会加密保存在当前浏览器，用于断网冷启动查看。"}</p>
+    </div>
+    <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="离线解锁码" disabled={!sensitiveUnlocked || saving} />
+      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="再次输入" disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
+      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? "保存中…" : enabled ? "更新" : "启用"}</button>
+    </div>
+    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">离线解锁码只能在敏感数据已解锁时设置。</p>}
+    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
+  </section>;
 }
 
 function LocalAccessPanel() {

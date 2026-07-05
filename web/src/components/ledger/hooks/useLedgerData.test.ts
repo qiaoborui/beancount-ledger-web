@@ -50,6 +50,7 @@ describe("buildLedgerCacheFromBootstrap", () => {
     expect(cache.txns[0].postings[0].account).toBe("Expenses:Food");
     expect(cache.ledgerVersion).toEqual(version);
     expect(cache.savedAt).toBe(1_234);
+    expect(cache.sensitiveCached).toBe(false);
   });
 });
 
@@ -87,5 +88,6 @@ describe("maskSensitiveLedgerCache", () => {
     expect(masked.incomeStatement?.totalIncome).toBe(0);
     expect(masked.incomeStatement?.totalExpense).toBe(20);
     expect(masked.ledgerVersion).toEqual(version);
+    expect(masked.sensitiveCached).toBe(false);
   });
 });

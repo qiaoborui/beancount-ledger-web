@@ -3,6 +3,7 @@ import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
 import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
+import { readEncryptedLedgerCache, writeEncryptedLedgerCache } from "../offlineUnlock";
 import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
@@ -82,6 +83,7 @@ export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
       totalIncome: 0,
       netIncome: 0,
     } : null,
+    sensitiveCached: false,
   };
 }
 
@@ -110,6 +112,7 @@ export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, cli
     incomeStatement: { income: cacheUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: cacheUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: cacheUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
     ledgerVersion: version ?? undefined,
     savedAt,
+    sensitiveCached: cacheUnlocked,
   };
   return { cache, cacheUnlocked, serverSensitiveUnlocked, responseValuationCurrency };
 }
@@ -222,7 +225,8 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, unlocked, valuationCurrency, version);
         applyCache(fresh, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
         if (cacheUnlocked) {
-          writeLedgerCache(range, fresh, responseValuationCurrency);
+          void writeEncryptedLedgerCache(range, fresh, responseValuationCurrency);
+          writeLedgerCache(range, maskSensitiveLedgerCache(fresh), responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);
         }
         onGitStatusRefresh();
@@ -293,7 +297,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     if (!forceFresh && unlocked) {
       const currentVersion = await fetchLedgerVersion();
       const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
-      if (cached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
+      if (cached?.sensitiveCached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
         const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
         applyCache(cached);
         freshLedgerCacheKeys.add(cacheKey);
@@ -303,6 +307,21 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
 
     await fetchFreshLedger(timeRange);
   }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onSensitiveUnlockChange, unlocked, valuationCurrency]);
+
+  const unlockOfflineSensitiveCache = useCallback(async (secret: string) => {
+    const cache = await readEncryptedLedgerCache(timeRange, valuationCurrency, secret);
+    if (!cache) {
+      showToast("error", "这个时间范围还没有可解密的离线缓存");
+      return false;
+    }
+    sessionStorage.removeItem("ledger_locked_at");
+    sessionStorage.removeItem("ledger_hidden_at");
+    sessionStorage.setItem("ledger_unlocked", "1");
+    onSensitiveUnlockChange(true);
+    applyCache({ ...cache, sensitiveCached: true }, true, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
+    showToast("success", "已离线解锁缓存数据");
+    return true;
+  }, [applyCache, onSensitiveUnlockChange, showToast, timeRange, valuationCurrency]);
 
   async function refreshLedger() {
     if (refreshing || loadingFresh) return;
@@ -345,5 +364,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     load,
     accountStatuses,
     refreshLedger,
+    unlockOfflineSensitiveCache,
   };
 }
