@@ -156,6 +156,16 @@ function MetadataBadges({ txn, limit }: { txn: Txn; limit?: number }) {
   return <div className="mt-2 flex flex-wrap gap-1">{shown.map((item) => <span key={item.key} className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{item.label}</span>)}{limit && items.length > limit && <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">+{items.length - limit}</span>}</div>;
 }
 
+function pendingLabel(txn: Txn) {
+  if (!txn.pending) return "";
+  return txn.pending.kind === "append" ? "待同步新增" : "待同步修改";
+}
+
+function sourceLabel(txn: Txn) {
+  if (txn.pending?.kind === "append") return "本地待同步";
+  return `${txn.source.file}:${txn.source.line}`;
+}
+
 /** 从 account 路径中提取简短名称（最后一个冒号后的部分） */
 function shortAccount(account: string): string {
   const idx = account.lastIndexOf(":");
@@ -232,12 +242,13 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
 function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
   const primary = primaryPosting(txn);
   const amt = primary?.amount ?? null;
+  const pending = pendingLabel(txn);
   return (
     <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <strong className="block truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
-          {txn.pending && <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步修改</span>}
+          {pending && <span className="mt-1 inline-block rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>
         {amt != null && <span className={`shrink-0 text-base font-semibold tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt, primary?.currency)}</span>}
       </div>
@@ -264,6 +275,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
   const meta = metadataPairs(txn);
+  const pending = pendingLabel(txn);
   return (
     <button
       id={rowId}
@@ -279,7 +291,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <strong className="truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
-          {txn.pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">待同步</span>}
+          {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>
         <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
@@ -628,6 +640,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const optionLabel = (account: AccountView) => formatAccountOptionLabel(account);
   const reverseDate = new Date().toISOString().slice(0, 10);
   const primary = primaryPosting(txn);
+  const pending = pendingLabel(txn);
+  const pendingAppend = txn.pending?.kind === "append";
   const resetForm = () => {
     setDate(txn.date);
     setPayee(txn.payee);
@@ -682,7 +696,9 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     onClose();
   }
 
-  const footer = editing ? <div className="grid grid-cols-2 gap-2">
+  const footer = pendingAppend ? <div className="rounded-xl border border-line bg-panel px-4 py-3 text-sm leading-6 text-olive">
+    这笔交易还在本地待同步，落账后可编辑、删除或冲销。
+  </div> : editing ? <div className="grid grid-cols-2 gap-2">
     <Button variant="outline" className="h-11 bg-panel" onClick={() => { resetForm(); setEditing(false); }}>取消</Button>
     <Button className="h-11" onClick={save}>保存修改</Button>
   </div> : <div className="grid gap-2 sm:grid-cols-3">
@@ -693,8 +709,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
 
   const body = <>
     <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
-      <span className="min-w-0 [overflow-wrap:anywhere]">{txn.source.file}:{txn.source.line}</span>
-      {txn.pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-brand">待同步修改</span>}
+      <span className="min-w-0 [overflow-wrap:anywhere]">{sourceLabel(txn)}</span>
+      {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-brand">{pending}</span>}
     </div>
     {editing ? <div className="grid min-w-0 gap-4">
       {formError && <Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert>}

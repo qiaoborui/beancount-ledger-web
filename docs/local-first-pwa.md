@@ -63,6 +63,25 @@ keep. If the browser-facing origin changes, configure `PUBLIC_ORIGIN`,
 `WEBAUTHN_PUBLIC_ORIGIN`, and `WEBAUTHN_RP_ID` deliberately so existing passkeys
 continue to match the registration domain.
 
+## Local and LAN access options
+
+Choose the browser-facing origin based on where you use the app most:
+
+- Single machine: `http://localhost:<port>` is enough for local development, but
+  phones cannot use another machine's `localhost`.
+- Home LAN: run `ledger-web` on a NAS, Mac mini, or Raspberry Pi and expose it
+  through a stable LAN hostname. Add HTTPS before relying on passkeys or web
+  push.
+- Private mesh: use Tailscale or a similar private network when you want phone
+  access away from home without exposing the ledger app publicly.
+- Public tunnel: use Cloudflare Tunnel, Caddy with a real domain, or another
+  HTTPS reverse proxy when you need a stable public origin. Keep
+  `WEBAUTHN_RP_ID` on the long-lived domain so passkeys survive server moves.
+
+Avoid changing the installed PWA origin casually. Browsers scope service worker
+cache, IndexedDB, and passkeys to the origin, so moving from `localhost` to a LAN
+IP or from one domain to another creates a separate browser app state.
+
 ## Validation checklist
 
 1. Start `ledger-web` with `LEDGER_ROOT` pointing outside this repository and
