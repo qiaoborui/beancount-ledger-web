@@ -46,7 +46,7 @@ export function IncomeStatementPage({ income, expense, expenseAnalytics, topPaye
       </div>
       </>
     ) : (
-      <HiddenPanel text="损益表金额默认隐藏。支出可直接显示；收入和净利需要使用 Face ID / Passkey 解锁。" />
+      <HiddenPanel text="损益表金额默认隐藏。支出可直接显示；收入和净利需要解锁后查看。" />
     )}
 
 
@@ -54,7 +54,7 @@ export function IncomeStatementPage({ income, expense, expenseAnalytics, topPaye
 }
 
 function IncomeLockedPanel({ onUnlock }: { onUnlock: () => void }) {
-  return <div className="rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone"><p>收入分类和收入金额已隐藏。</p><button className="mt-4 rounded-xl bg-brand px-4 py-2 text-paper" onClick={onUnlock}>使用 Face ID / Passkey 查看收入</button></div>;
+  return <div className="rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone"><p>收入分类和收入金额已隐藏。</p><button className="mt-4 rounded-xl bg-brand px-4 py-2 text-paper" onClick={onUnlock}>解锁查看收入</button></div>;
 }
 
 function formatPercent(value: number | null): string {

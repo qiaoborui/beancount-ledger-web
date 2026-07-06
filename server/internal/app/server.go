@@ -61,11 +61,15 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
+	api.POST("/quick-unlock/register", s.quickUnlockRegister)
+	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
+	api.POST("/quick-unlock/revoke", s.quickUnlockRevoke)
 
 	readOnly30s := api.Group("", cacheControl(30))
 	readOnly60s := api.Group("", cacheControl(60))
 
 	readOnly30s.GET("/auth/me", s.me)
+	readOnly30s.GET("/quick-unlock/status", s.quickUnlockStatus)
 	readOnly60s.GET("/passkey/status", s.passkeyStatus)
 
 	api.POST("/passkey/login/options", s.passkeyLoginOptions)

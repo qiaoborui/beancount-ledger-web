@@ -15,6 +15,21 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type QuickUnlockRegisterRequest struct {
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	Mode     string `json:"mode"`
+}
+
+type QuickUnlockVerifyRequest struct {
+	DeviceID string `json:"deviceId"`
+	Token    string `json:"token"`
+}
+
+type QuickUnlockRevokeRequest struct {
+	DeviceID string `json:"deviceId"`
+}
+
 type ReverseTransactionRequest struct {
 	Source TransactionSource `json:"source"`
 	Date   string            `json:"date"`
@@ -75,6 +90,7 @@ type ImportCommitRequest struct {
 
 var (
 	datePattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	deviceIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{8,96}$`)
 	accountNamePattern = regexp.MustCompile(`^(Assets|Liabilities|Equity|Income|Expenses)(:[A-Za-z0-9][A-Za-z0-9_-]*)+$`)
 	currencyPattern    = regexp.MustCompile(`^` + commodityPattern + `$`)
 	tagPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -86,6 +102,38 @@ var (
 func (r LoginRequest) Validate() error {
 	if strings.TrimSpace(r.Password) == "" {
 		return fmt.Errorf("password is required")
+	}
+	return nil
+}
+
+func (r QuickUnlockRegisterRequest) Validate() error {
+	if r.DeviceID != "" && !deviceIDPattern.MatchString(r.DeviceID) {
+		return fmt.Errorf("deviceId is invalid")
+	}
+	switch r.Mode {
+	case "numeric", "text":
+	default:
+		return fmt.Errorf("mode is invalid")
+	}
+	if len(strings.TrimSpace(r.Name)) > 80 {
+		return fmt.Errorf("name is too long")
+	}
+	return nil
+}
+
+func (r QuickUnlockVerifyRequest) Validate() error {
+	if !deviceIDPattern.MatchString(r.DeviceID) {
+		return fmt.Errorf("deviceId is invalid")
+	}
+	if strings.TrimSpace(r.Token) == "" {
+		return fmt.Errorf("token is required")
+	}
+	return nil
+}
+
+func (r QuickUnlockRevokeRequest) Validate() error {
+	if !deviceIDPattern.MatchString(r.DeviceID) {
+		return fmt.Errorf("deviceId is invalid")
 	}
 	return nil
 }

@@ -55,6 +55,21 @@ func TestRouterAuthAndSummary(t *testing.T) {
 		t.Fatalf("unexpected summary: %#v", body)
 	}
 
+	registerQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/register", `{"deviceId":"test-device-1","name":"Phone","mode":"numeric"}`, login.Result().Cookies())
+	if registerQuick.Code != http.StatusOK {
+		t.Fatalf("quick unlock register status=%d body=%s", registerQuick.Code, registerQuick.Body.String())
+	}
+	var quickBody struct {
+		DeviceID string `json:"deviceId"`
+		Token    string `json:"token"`
+	}
+	if err := json.Unmarshal(registerQuick.Body.Bytes(), &quickBody); err != nil {
+		t.Fatal(err)
+	}
+	if quickBody.DeviceID != "test-device-1" || quickBody.Token == "" {
+		t.Fatalf("unexpected quick unlock register response: %#v", quickBody)
+	}
+
 	mergeCookies := func(groups ...[]*http.Cookie) []*http.Cookie {
 		byName := map[string]*http.Cookie{}
 		order := []string{}
@@ -107,6 +122,36 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 	if !meBody.Authenticated || meBody.SensitiveUnlocked {
 		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
+	}
+
+	sessionOnly := []*http.Cookie{}
+	for _, cookie := range mergeCookies(login.Result().Cookies(), lock.Result().Cookies()) {
+		if cookie.Name == sessionCookieName {
+			sessionOnly = append(sessionOnly, cookie)
+		}
+	}
+	verifyQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, sessionOnly)
+	if verifyQuick.Code != http.StatusOK {
+		t.Fatalf("quick unlock verify status=%d body=%s", verifyQuick.Code, verifyQuick.Body.String())
+	}
+	quickSummary := requestWithCookies(router, http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", "", mergeCookies(sessionOnly, verifyQuick.Result().Cookies()))
+	if quickSummary.Code != http.StatusOK {
+		t.Fatalf("quick unlock summary status=%d body=%s", quickSummary.Code, quickSummary.Body.String())
+	}
+	if err := json.Unmarshal(quickSummary.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.SensitiveUnlocked || body.Summary.Income != 100000 {
+		t.Fatalf("quick unlock should restore sensitive access: %#v", body)
+	}
+
+	revokeQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/revoke", `{"deviceId":"test-device-1"}`, sessionOnly)
+	if revokeQuick.Code != http.StatusOK {
+		t.Fatalf("quick unlock revoke status=%d body=%s", revokeQuick.Code, revokeQuick.Body.String())
+	}
+	verifyRevoked := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, sessionOnly)
+	if verifyRevoked.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked quick unlock status=%d body=%s", verifyRevoked.Code, verifyRevoked.Body.String())
 	}
 
 	forgedSensitive := []*http.Cookie{}
@@ -210,6 +255,10 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/auth/lock":                    true,
 		"POST /api/auth/logout":                  true,
 		"GET /api/auth/me":                       true,
+		"GET /api/quick-unlock/status":           true,
+		"POST /api/quick-unlock/register":        true,
+		"POST /api/quick-unlock/verify":          true,
+		"POST /api/quick-unlock/revoke":          true,
 		"GET /api/passkey/status":                true,
 		"POST /api/passkey/login/options":        true,
 		"POST /api/passkey/login/verify":         true,
@@ -217,7 +266,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/passkey/register/verify":      true,
 		"GET /api/ledger/bootstrap":              true,
 		"GET /api/ledger/version":                true,
-		"GET /api/ledger/index-info":            true,
+		"GET /api/ledger/index-info":             true,
 		"GET /api/ledger/entries":                true,
 		"GET /api/ledger/summary":                true,
 		"GET /api/ledger/transactions":           true,
