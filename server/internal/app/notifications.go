@@ -54,7 +54,7 @@ func (s *Server) insights(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -67,7 +67,7 @@ func (s *Server) notifications(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

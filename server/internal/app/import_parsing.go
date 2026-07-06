@@ -258,7 +258,7 @@ func (s *Server) cmbPaymentSourcePrefixes() []string {
 }
 
 func (s *Server) importAccountOptions() ([]ginH, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}

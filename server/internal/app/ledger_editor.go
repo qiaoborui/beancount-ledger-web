@@ -114,7 +114,7 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel, "hash": nextHash, "modTime": nextInfo.ModTime().UTC().Format(time.RFC3339Nano), "size": nextInfo.Size()})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel, "hash": nextHash, "modTime": nextInfo.ModTime().UTC().Format(time.RFC3339Nano), "size": nextInfo.Size(), "readModelPending": ledgerReadModelEnabled(s.cfg)})
 }
 
 func listLedgerEditorFiles(cfg Config) ([]LedgerEditorFile, error) {

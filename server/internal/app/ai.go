@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,7 +57,7 @@ type AccountChatResult struct {
 }
 
 func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func (s *Server) streamChatBookkeeping(message string, messages []ChatMessage, d
 }
 
 func (s *Server) bookkeepingChatPrompt(message string, messages []ChatMessage, draft []LedgerEntry, today string) (string, string, []string, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -304,7 +305,7 @@ func (s *Server) streamChatAccounts(message string, messages []ChatMessage, draf
 }
 
 func (s *Server) accountsChatPrompt(message string, messages []ChatMessage, draft []AccountOperation, today string) (string, string, []Account, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return "", "", nil, err
 	}

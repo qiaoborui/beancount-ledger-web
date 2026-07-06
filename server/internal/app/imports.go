@@ -257,7 +257,7 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if summary.DateStart == "" || summary.DateEnd == "" {
 		return nil, errors.New("账单没有可归档的日期范围，请重新上传账单")
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount); err != nil {
 		return nil, err
 	}
-	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText}, nil
+	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}, nil
 }
 
 func (s *Server) listImportDocuments() ([]ImportDocument, error) {
@@ -598,7 +598,7 @@ func commandEnv() []string {
 }
 
 func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return "", err
 	}

@@ -12,6 +12,10 @@ func (s *Server) gitStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.readModelHostMode() {
+		c.JSON(http.StatusOK, gin.H{"status": "", "dirty": false, "changedFileCount": 0, "changes": []GitChange{}, "gitAvailable": false, "message": "Ledger Git is managed by the local ledger worker."})
+		return
+	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -37,6 +41,9 @@ func (s *Server) gitStatus(c *gin.Context) {
 
 func (s *Server) gitDiff(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "git.diff") {
 		return
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
@@ -65,6 +72,9 @@ func (s *Server) gitPull(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "git.pull") {
+		return
+	}
 	if gitRemoteDisabled() {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "output": "Git remote sync disabled\n"})
 		return
@@ -84,6 +94,9 @@ func (s *Server) gitPull(c *gin.Context) {
 
 func (s *Server) gitCommit(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "git.commit") {
 		return
 	}
 	var input GitCommitRequest

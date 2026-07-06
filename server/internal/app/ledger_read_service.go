@@ -1,21 +1,81 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 type LedgerReadService struct {
-	cache *LedgerCache
+	cache      *LedgerCache
+	indexStore *LedgerIndexStore
+	indexErr   error
+	strict     bool
 }
 
 func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
 	return &LedgerReadService{cache: cache}
 }
 
+func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore *LedgerIndexStore, indexErr error, strict bool) *LedgerReadService {
+	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict}
+}
+
+func (s *LedgerReadService) Snapshot(ctx context.Context) (*LedgerSnapshot, error) {
+	if s.indexErr != nil {
+		return nil, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		snapshot, ok, err := s.indexStore.ActiveSnapshot(indexCtx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return snapshot, nil
+		}
+		if s.strict {
+			return nil, ErrLedgerReadModelUnavailable
+		}
+	}
+	if s.strict {
+		return nil, ErrLedgerReadModelUnavailable
+	}
+	return s.cache.Snapshot()
+}
+
+func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) {
+	if s.indexErr != nil {
+		return LedgerVersion{}, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		revision, ok, err := s.indexStore.ActiveRevision(indexCtx)
+		if err != nil {
+			return LedgerVersion{}, err
+		}
+		if ok {
+			return revision.LedgerVersion, nil
+		}
+		if s.strict {
+			return LedgerVersion{}, ErrLedgerReadModelUnavailable
+		}
+	}
+	if s.strict {
+		return LedgerVersion{}, ErrLedgerReadModelUnavailable
+	}
+	return s.cache.Version()
+}
+
+var ErrLedgerReadModelUnavailable = errors.New("ledger read model has no active revision; run ledger-indexer first")
+
 func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +83,7 @@ func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, rawValua
 }
 
 func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +91,7 @@ func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuati
 }
 
 func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +106,7 @@ func firstValuationCurrency(values []string) string {
 }
 
 func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}

@@ -80,6 +80,9 @@ environment variables in the Vercel dashboard:
 - `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
 - `RUNTIME_STORE=postgres` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
 - `DATABASE_URL` — Postgres connection string.
+- `LEDGER_READ_MODEL=postgres` — optional hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
+- `LEDGER_READ_MODEL_STRICT=true` — default when `LEDGER_READ_MODEL=postgres`; prevents the API host from falling back to local Git checkout and parsing.
+- `LEDGER_INDEX_SOURCE_KEY` — stable namespace shared by the API host and the index worker, for example `personal-ledger#main`.
 
 See [web/.env.example](web/.env.example) for the complete list.
 
@@ -98,12 +101,39 @@ Important variables:
 - `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
 - `RUNTIME_STORE=postgres` / `DATABASE_URL` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
 - `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files. Defaults to `RUNTIME_STORE`.
+- `LEDGER_READ_MODEL=files|postgres` — use `postgres` to serve ledger reads from the normalized Postgres read model.
+- `LEDGER_READ_MODEL_STRICT=true|false` — when true, the API host returns an error if no active indexed revision exists instead of cloning/parsing local files.
+- `LEDGER_INDEX_SOURCE_KEY` — optional stable index namespace. Set the same value on `ledger-web` and `ledger-indexer` so both services read and write the same active ledger projection.
+- `LEDGER_INDEX_INTERVAL_SECONDS` — optional worker loop interval for `ledger-indexer`; unset or non-positive runs one indexing pass and exits.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` if not on `PATH`.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
 - `LEDGER_GIT_SCHEDULER` — enable periodic git pull of the private ledger repo.
+
+### Postgres ledger read model
+
+For hosted deployments where cold Git checkout and full Beancount parsing are too
+slow, run the API and the index worker separately:
+
+```text
+private Beancount Git repo -> ledger-indexer -> Postgres read model -> ledger-web API
+```
+
+The Beancount files remain the only source of truth. `ledger-indexer` clones and
+validates the private ledger, parses it, writes a revision-scoped normalized
+projection to Postgres, then atomically marks the revision active. `ledger-web`
+can then serve `/api/ledger/*` reads from Postgres with
+`LEDGER_READ_MODEL=postgres`.
+
+The API host needs `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`,
+`LEDGER_READ_MODEL_STRICT=true`, and the same `LEDGER_INDEX_SOURCE_KEY` as the
+worker. Ledger read endpoints use Postgres only. Import and editor endpoints can
+still write the Beancount repository from the API host when `LEDGER_STORAGE` and
+Git credentials are configured; those writes mark the read model as pending, and
+the local worker updates Postgres on its next indexing pass. The worker also
+needs `LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`, and any Git credentials.
 
 ## Ledger layout
 
