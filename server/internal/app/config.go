@@ -67,7 +67,7 @@ func LoadConfig() Config {
 		LedgerGitWorkDir:   filepath.Clean(gitWorkDir),
 		LedgerGitHubOwner:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
 		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
-		LedgerGitHubToken:  strings.TrimSpace(env("LEDGER_GITHUB_TOKEN", os.Getenv("GITHUB_TOKEN"))),
+		LedgerGitHubToken:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
 		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
 		RuntimeStore:       runtimeStore,
 		RuntimeFileStore:   runtimeFileStore,
