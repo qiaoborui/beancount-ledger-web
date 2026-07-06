@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { rememberLedgerAuthenticated } from "../authState";
+import { unlockWithQuickLedgerSecret } from "../quickUnlock";
 
 type LedgerAuthLoad = (forceFresh?: boolean, options?: { sensitiveUnlocked?: boolean }) => void | Promise<void>;
 
@@ -19,6 +20,7 @@ type LedgerAuthArgs = {
 type LedgerAuthInFlight = {
   login: Promise<void> | null;
   passkeyLogin: Promise<void> | null;
+  quickUnlock: Promise<void> | null;
   passkeyRegistration: Promise<void> | null;
 };
 
@@ -31,7 +33,7 @@ function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuth
   setAuthed(true);
 }
 
-export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = { login: null, passkeyLogin: null, passkeyRegistration: null }) {
+export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = { login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null }) {
   async function login() {
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
@@ -75,6 +77,25 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
+  async function loginWithQuickUnlock(secret: string) {
+    if (inFlight.quickUnlock) return inFlight.quickUnlock;
+    inFlight.quickUnlock = (async () => {
+      try {
+        await unlockWithQuickLedgerSecret(secret);
+        markSensitiveUnlocked(setUnlocked, setAuthed);
+        await load(true, { sensitiveUnlocked: true });
+        clearToast();
+      } catch (error) {
+        showToast("error", error instanceof Error ? error.message : String(error));
+      }
+    })();
+    try {
+      await inFlight.quickUnlock;
+    } finally {
+      inFlight.quickUnlock = null;
+    }
+  }
+
   async function registerPasskey() {
     if (inFlight.passkeyRegistration) return inFlight.passkeyRegistration;
     inFlight.passkeyRegistration = (async () => {
@@ -99,10 +120,10 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
-  return { password, setPassword, login, loginWithPasskey, registerPasskey };
+  return { password, setPassword, login, loginWithPasskey, loginWithQuickUnlock, registerPasskey };
 }
 
 export function useLedgerAuth(args: LedgerAuthArgs) {
-  const inFlightRef = useRef<LedgerAuthInFlight>({ login: null, passkeyLogin: null, passkeyRegistration: null });
+  const inFlightRef = useRef<LedgerAuthInFlight>({ login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null });
   return createLedgerAuthActions(args, inFlightRef.current);
 }

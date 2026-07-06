@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
 const themeOptions: { value: ThemeMode; label: string; description: string }[] = [
@@ -45,7 +46,11 @@ export function SettingsPage({
   mobileTabHrefs,
   onMobileTabHrefsChange,
   sensitiveUnlocked,
+  quickUnlockEnabled,
+  quickUnlockMode,
   offlineUnlockEnabled,
+  onEnableQuickUnlock,
+  onDisableQuickUnlock,
   onEnableOfflineUnlock,
 }: {
   settings: PrivacySettings;
@@ -57,7 +62,11 @@ export function SettingsPage({
   mobileTabHrefs: LedgerNavHref[];
   onMobileTabHrefsChange: (hrefs: LedgerNavHref[]) => void;
   sensitiveUnlocked: boolean;
+  quickUnlockEnabled: boolean;
+  quickUnlockMode: QuickUnlockMode;
   offlineUnlockEnabled: boolean;
+  onEnableQuickUnlock: (secret: string, mode: QuickUnlockMode) => void | Promise<void>;
+  onDisableQuickUnlock: () => void | Promise<void>;
   onEnableOfflineUnlock: (secret: string) => void | Promise<void>;
 }) {
   function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
@@ -68,6 +77,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} />
     <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} />
 
     <section className="card p-5 md:p-6">
@@ -150,6 +160,102 @@ export function SettingsPage({
   </div>;
 }
 
+function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, onEnable, onDisable }: { enabled: boolean; mode: QuickUnlockMode; sensitiveUnlocked: boolean; onEnable: (secret: string, mode: QuickUnlockMode) => void | Promise<void>; onDisable: () => void | Promise<void> }) {
+  const [mode, setMode] = useState<QuickUnlockMode>(initialMode);
+  const [secret, setSecret] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
+  function updateSecret(value: string) {
+    setSecret(mode === "numeric" ? value.replace(/\D+/g, "") : value);
+  }
+
+  function updateConfirm(value: string) {
+    setConfirm(mode === "numeric" ? value.replace(/\D+/g, "") : value);
+  }
+
+  async function submit() {
+    if (saving) return;
+    if (!sensitiveUnlocked) {
+      setMessage("请先解锁敏感数据，再设置本机快速解锁。");
+      return;
+    }
+    if (!secret) {
+      setMessage(mode === "numeric" ? "请输入数字解锁码。" : "请输入本机解锁口令。");
+      return;
+    }
+    if (secret !== confirm) {
+      setMessage("两次输入不一致。");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      await onEnable(secret, mode);
+      setSecret("");
+      setConfirm("");
+      setMessage("已启用本机快速解锁。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "启用失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function disable() {
+    if (saving) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await onDisable();
+      setMessage("已关闭本机快速解锁。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "关闭失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="card p-5 md:p-6">
+    <div className="border-l-4 border-brand pl-4">
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">quick unlock</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">本机快速解锁</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "当前浏览器已保存一个加密设备凭证；输入本机码即可快速查看敏感数据。" : "为当前浏览器设置一个独立解锁码。移动端可用纯数字，桌面端可用任意口令。"}</p>
+    </div>
+    <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,14rem)_1fr_1fr_auto]">
+      <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-line bg-panel p-1">
+        {(["numeric", "text"] as const).map((item) => <button
+          key={item}
+          type="button"
+          className={`h-10 rounded-lg text-sm ${mode === item ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`}
+          onClick={() => {
+            setMode(item);
+            setSecret("");
+            setConfirm("");
+          }}
+          disabled={!sensitiveUnlocked || saving}
+        >
+          {item === "numeric" ? "数字" : "文本"}
+        </button>)}
+      </div>
+      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => updateSecret(event.target.value)} placeholder={mode === "numeric" ? "本机数字解锁码" : "本机快速解锁口令"} disabled={!sensitiveUnlocked || saving} />
+      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => updateConfirm(event.target.value)} placeholder="再次输入" disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
+      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? "保存中…" : enabled ? "更新" : "启用"}</button>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-stone">
+      <span>{mode === "numeric" ? "数字模式不设最小长度，解锁时会显示九宫格。" : "文本模式允许数字、字母、符号或中文。"}</span>
+      {enabled && <button type="button" className="text-brand disabled:opacity-50" disabled={saving} onClick={() => void disable()}>关闭当前设备快速解锁</button>}
+    </div>
+    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">本机快速解锁只能在敏感数据已解锁时设置。</p>}
+    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
+  </section>;
+}
+
 function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable }: { enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void> }) {
   const [secret, setSecret] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -159,7 +265,7 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable }: { enabl
   async function submit() {
     if (saving) return;
     if (!sensitiveUnlocked) {
-      setMessage("请先使用 Face ID / Passkey 解锁敏感数据。");
+      setMessage("请先解锁敏感数据。");
       return;
     }
     if (secret !== confirm) {
