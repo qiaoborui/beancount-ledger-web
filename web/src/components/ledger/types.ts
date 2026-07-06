@@ -23,6 +23,8 @@ export type PayeeAnalytics = { payee: string; amount: number; txCount: number };
 export type AccountAnalytics = { account: string; alias?: string | null; label?: string; amount: number; txCount: number };
 export type ExpenseCategoryAnalytics = { account: string; alias?: string | null; label: string; amount: number; txCount: number; share: number | null; previousAmount: number; changeRatio: number | null; topPayees: PayeeAnalytics[] };
 export type IncomeStatementCache = { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; totalIncome: number; totalExpense: number; netIncome: number; valuationCurrency?: string; expenseAnalytics?: ExpenseCategoryAnalytics[]; topPayees?: PayeeAnalytics[]; topPaymentAccounts?: AccountAnalytics[] } | null;
+export type LedgerIndexInfo = { readModel: string; enabled: boolean; active?: boolean; gitSHA?: string; source?: string; version?: string; fileCount?: number; indexedAt?: string; error?: string };
+
 export type LedgerVersion = { version?: string; signature?: string; fileCount: number; latestMtimeMs: number; totalSize?: number };
 export type NetWorthPoint = { date: string; assets: number; liabilities: number; netWorth: number };
 export type NetWorthDelta = { baseline: NetWorthPoint | null; change: number | null; changeRatio: number | null };

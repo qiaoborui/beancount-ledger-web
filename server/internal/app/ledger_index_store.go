@@ -37,7 +37,7 @@ func NewLedgerIndexStore(cfg Config) (*LedgerIndexStore, error) {
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	store := &LedgerIndexStore{db: db, sourceKey: ledgerIndexSourceKey(cfg)}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := store.EnsureSchema(ctx); err != nil {
 		_ = db.Close()
@@ -91,8 +91,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_revisions (
   UNIQUE (source_key, ledger_version)
 );
 
-ALTER TABLE ledger_index_revisions ADD COLUMN IF NOT EXISTS bean_entries JSONB NOT NULL DEFAULT '[]'::jsonb;
-ALTER TABLE ledger_index_revisions ADD COLUMN IF NOT EXISTS bean_errors JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_index_revisions_active
   ON ledger_index_revisions (source_key)
@@ -345,20 +343,36 @@ func clearRevisionRows(ctx context.Context, tx *sql.Tx, revisionID int64) error 
 	return nil
 }
 
+const insertBatchSize = 500
+
 func insertAccounts(ctx context.Context, tx *sql.Tx, revisionID int64, accounts []Account) error {
-	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO ledger_index_accounts (revision_id, account, open_date, close_date, currency, alias, label, account_group, active, metadata, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`)
-	if err != nil {
-		return err
+	if len(accounts) == 0 {
+		return nil
 	}
-	defer stmt.Close()
-	for _, account := range accounts {
-		payload, metadata, err := jsonPayloads(account, account.Metadata)
-		if err != nil {
-			return err
+	cols := 11
+	for start := 0; start < len(accounts); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(accounts) {
+			end = len(accounts)
 		}
-		if _, err := stmt.ExecContext(ctx, revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata, payload); err != nil {
+		batch := accounts[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_accounts (revision_id, account, open_date, close_date, currency, alias, label, account_group, active, metadata, payload) VALUES `)
+		args := make([]any, 0, len(batch)*cols)
+		for i, account := range batch {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			payload, metadata, err := jsonPayloads(account, account.Metadata)
+			if err != nil {
+				return err
+			}
+			base := i * cols
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11)
+			args = append(args, revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata, payload)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
 			return err
 		}
 	}
@@ -366,55 +380,123 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`)
 }
 
 func insertTransactions(ctx context.Context, tx *sql.Tx, revisionID int64, txns []Transaction) error {
-	txnStmt, err := tx.PrepareContext(ctx, `
-INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`)
-	if err != nil {
-		return err
+	if len(txns) == 0 {
+		return nil
 	}
-	defer txnStmt.Close()
-	postingStmt, err := tx.PrepareContext(ctx, `
-INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`)
-	if err != nil {
-		return err
+	// Batch transactions
+	cols := 12
+	for start := 0; start < len(txns); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(txns) {
+			end = len(txns)
+		}
+		batch := txns[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links, payload) VALUES `)
+		args := make([]any, 0, len(batch)*cols)
+		for i, txn := range batch {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			payload, metadata, err := jsonPayloads(txn, txn.Metadata)
+			if err != nil {
+				return err
+			}
+			base := i * cols
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12)
+			ordinal := start + i
+			args = append(args, revisionID, ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links), payload)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
+			return err
+		}
 	}
-	defer postingStmt.Close()
+
+	// Batch postings
+	pCols := 8
+	var postingsBatch []struct {
+		revisionID        int64
+		transactionOrdinal int
+		postingOrdinal    int
+		account           string
+		amount            int
+		currency          string
+		flag              string
+		payload           []byte
+	}
 	for i, txn := range txns {
-		payload, metadata, err := jsonPayloads(txn, txn.Metadata)
-		if err != nil {
-			return err
-		}
-		if _, err := txnStmt.ExecContext(ctx, revisionID, i, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links), payload); err != nil {
-			return err
-		}
 		for j, posting := range txn.Postings {
 			postingPayload, err := json.Marshal(posting)
 			if err != nil {
 				return err
 			}
-			if _, err := postingStmt.ExecContext(ctx, revisionID, i, j, posting.Account, posting.Amount, posting.Currency, posting.Flag, postingPayload); err != nil {
-				return err
+			postingsBatch = append(postingsBatch, struct {
+				revisionID        int64
+				transactionOrdinal int
+				postingOrdinal    int
+				account           string
+				amount            int
+				currency          string
+				flag              string
+				payload           []byte
+			}{revisionID, i, j, posting.Account, posting.Amount, posting.Currency, posting.Flag, postingPayload})
+		}
+	}
+	for start := 0; start < len(postingsBatch); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(postingsBatch) {
+			end = len(postingsBatch)
+		}
+		batch := postingsBatch[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag, payload) VALUES `)
+		args := make([]any, 0, len(batch)*pCols)
+		for i, p := range batch {
+			if i > 0 {
+				b.WriteString(", ")
 			}
+			base := i * pCols
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
+			args = append(args, p.revisionID, p.transactionOrdinal, p.postingOrdinal, p.account, p.amount, p.currency, p.flag, p.payload)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func insertBalanceAssertions(ctx context.Context, tx *sql.Tx, revisionID int64, assertions []BalanceAssertion) error {
-	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO ledger_index_balance_assertions (revision_id, ordinal, assertion_date, account, amount, currency, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`)
-	if err != nil {
-		return err
+	if len(assertions) == 0 {
+		return nil
 	}
-	defer stmt.Close()
-	for i, assertion := range assertions {
-		payload, err := json.Marshal(assertion)
-		if err != nil {
-			return err
+	cols := 7
+	for start := 0; start < len(assertions); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(assertions) {
+			end = len(assertions)
 		}
-		if _, err := stmt.ExecContext(ctx, revisionID, i, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency, payload); err != nil {
+		batch := assertions[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_balance_assertions (revision_id, ordinal, assertion_date, account, amount, currency, payload) VALUES `)
+		args := make([]any, 0, len(batch)*cols)
+		for i, assertion := range batch {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			payload, err := json.Marshal(assertion)
+			if err != nil {
+				return err
+			}
+			base := i * cols
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7)
+			ordinal := start + i
+			args = append(args, revisionID, ordinal, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency, payload)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
 			return err
 		}
 	}
@@ -422,19 +504,34 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`)
 }
 
 func insertPrices(ctx context.Context, tx *sql.Tx, revisionID int64, prices []Price) error {
-	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO ledger_index_prices (revision_id, ordinal, price_date, currency, amount, quote_currency, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`)
-	if err != nil {
-		return err
+	if len(prices) == 0 {
+		return nil
 	}
-	defer stmt.Close()
-	for i, price := range prices {
-		payload, err := json.Marshal(price)
-		if err != nil {
-			return err
+	cols := 7
+	for start := 0; start < len(prices); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(prices) {
+			end = len(prices)
 		}
-		if _, err := stmt.ExecContext(ctx, revisionID, i, price.Date, price.Currency, price.Amount, price.QuoteCurrency, payload); err != nil {
+		batch := prices[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_prices (revision_id, ordinal, price_date, currency, amount, quote_currency, payload) VALUES `)
+		args := make([]any, 0, len(batch)*cols)
+		for i, price := range batch {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			payload, err := json.Marshal(price)
+			if err != nil {
+				return err
+			}
+			base := i * cols
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7)
+			ordinal := start + i
+			args = append(args, revisionID, ordinal, price.Date, price.Currency, price.Amount, price.QuoteCurrency, payload)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
 			return err
 		}
 	}
@@ -442,13 +539,28 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`)
 }
 
 func insertCommodities(ctx context.Context, tx *sql.Tx, revisionID int64, commodities []string) error {
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO ledger_index_commodities (revision_id, commodity) VALUES ($1, $2)`)
-	if err != nil {
-		return err
+	if len(commodities) == 0 {
+		return nil
 	}
-	defer stmt.Close()
-	for _, commodity := range commodities {
-		if _, err := stmt.ExecContext(ctx, revisionID, commodity); err != nil {
+	cols := 2
+	for start := 0; start < len(commodities); start += insertBatchSize {
+		end := start + insertBatchSize
+		if end > len(commodities) {
+			end = len(commodities)
+		}
+		batch := commodities[start:end]
+		var b strings.Builder
+		b.WriteString(`INSERT INTO ledger_index_commodities (revision_id, commodity) VALUES `)
+		args := make([]any, 0, len(batch)*cols)
+		for i, commodity := range batch {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			base := i * cols
+			fmt.Fprintf(&b, "($%d, $%d)", base+1, base+2)
+			args = append(args, revisionID, commodity)
+		}
+		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
 			return err
 		}
 	}
@@ -483,3 +595,4 @@ func stringSlice(values []string) []string {
 	}
 	return values
 }
+
