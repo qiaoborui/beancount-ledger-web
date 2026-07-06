@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ type LedgerIndexResult struct {
 	RevisionID    int64
 	GitSHA        string
 	LedgerVersion LedgerVersion
+	Skipped       bool
+	SkipReason    string
 }
 
 func RunLedgerIndexOnce(ctx context.Context, cfg Config) (LedgerIndexResult, error) {
@@ -20,12 +23,42 @@ func RunLedgerIndexOnce(ctx context.Context, cfg Config) (LedgerIndexResult, err
 	}
 	defer store.Close()
 
+	return RunLedgerIndexOnceWithStore(ctx, cfg, store)
+}
+
+func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerIndexStore) (LedgerIndexResult, error) {
+	if store == nil {
+		return LedgerIndexResult{}, errors.New("ledger index store is required")
+	}
+	active, hasActive, err := store.ActiveRevision(ctx)
+	if err != nil {
+		return LedgerIndexResult{}, err
+	}
+	if remoteSHA := ledgerRemoteHeadSHA(cfg); remoteSHA != "" && hasActive && active.GitSHA == remoteSHA {
+		return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "git sha unchanged"}, nil
+	}
+	if err := ensureLedgerReady(cfg); err != nil {
+		return LedgerIndexResult{}, err
+	}
+	gitSHA := ledgerIndexGitSHA(cfg)
+	if gitSHA != "" && hasActive && active.GitSHA == gitSHA {
+		return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "git sha unchanged"}, nil
+	}
+	if gitSHA == "" && hasActive {
+		version, err := ledgerVersion(cfg)
+		if err != nil {
+			return LedgerIndexResult{}, err
+		}
+		if active.LedgerVersion.Version == version.Version {
+			return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "ledger version unchanged"}, nil
+		}
+	}
+
 	cache := NewLedgerCache(cfg)
 	snapshot, err := cache.Snapshot()
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := ledgerIndexGitSHA(cfg)
 	revisionID, err := store.ReplaceActiveSnapshot(ctx, snapshot, gitSHA)
 	if err != nil {
 		return LedgerIndexResult{}, err
@@ -34,15 +67,23 @@ func RunLedgerIndexOnce(ctx context.Context, cfg Config) (LedgerIndexResult, err
 }
 
 func RunLedgerIndexLoop(ctx context.Context, cfg Config, interval time.Duration) error {
+	store, err := NewLedgerIndexStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
 	if interval <= 0 {
-		_, err := RunLedgerIndexOnce(ctx, cfg)
+		_, err := RunLedgerIndexOnceWithStore(ctx, cfg, store)
 		return err
 	}
 	for {
 		started := time.Now()
-		result, err := RunLedgerIndexOnce(ctx, cfg)
+		result, err := RunLedgerIndexOnceWithStore(ctx, cfg, store)
 		if err != nil {
 			log.Printf("[ledger-indexer] failed: %v", err)
+		} else if result.Skipped {
+			log.Printf("[ledger-indexer] skipped revision=%d version=%s git=%s reason=%s in %s", result.RevisionID, result.LedgerVersion.Version, result.GitSHA, result.SkipReason, time.Since(started).Round(time.Millisecond))
 		} else {
 			log.Printf("[ledger-indexer] indexed revision=%d version=%s files=%d git=%s in %s", result.RevisionID, result.LedgerVersion.Version, result.LedgerVersion.FileCount, result.GitSHA, time.Since(started).Round(time.Millisecond))
 		}
@@ -54,6 +95,25 @@ func RunLedgerIndexLoop(ctx context.Context, cfg Config, interval time.Duration)
 		case <-timer.C:
 		}
 	}
+}
+
+func ledgerRemoteHeadSHA(cfg Config) string {
+	if !remoteGitEnabled(cfg) {
+		return ""
+	}
+	branch := strings.TrimSpace(cfg.LedgerGitBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	out, err := gitOutput("", "ls-remote", cfg.LedgerGitRemote, "refs/heads/"+branch)
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func ledgerIndexGitSHA(cfg Config) string {

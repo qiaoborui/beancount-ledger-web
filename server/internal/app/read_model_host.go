@@ -21,6 +21,13 @@ func (s *Server) ledgerSnapshot(ctx context.Context) (*LedgerSnapshot, error) {
 	return s.cache.Snapshot()
 }
 
+func (s *Server) ledgerSnapshotLite(ctx context.Context) (*LedgerSnapshot, error) {
+	if s.readService != nil {
+		return s.readService.SnapshotLite(ctx)
+	}
+	return s.cache.Snapshot()
+}
+
 func (s *Server) rejectWorkerOnly(c *gin.Context, operation string) bool {
 	if !s.readModelHostMode() {
 		return false

@@ -1,14 +1,18 @@
 package app
 
 import (
-	"golang.org/x/sync/errgroup"
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	pgxstdlib "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/sync/errgroup"
 )
 
 type LedgerIndexStore struct {
@@ -131,6 +135,9 @@ CREATE TABLE IF NOT EXISTS ledger_index_transactions (
 CREATE INDEX IF NOT EXISTS ledger_index_transactions_date
   ON ledger_index_transactions (revision_id, txn_date DESC, ordinal DESC);
 
+CREATE INDEX IF NOT EXISTS ledger_index_transactions_range
+  ON ledger_index_transactions (revision_id, txn_date DESC, source_line ASC, ordinal ASC);
+
 CREATE TABLE IF NOT EXISTS ledger_index_postings (
   revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
   transaction_ordinal INTEGER NOT NULL,
@@ -177,13 +184,29 @@ CREATE TABLE IF NOT EXISTS ledger_index_commodities (
 }
 
 func (s *LedgerIndexStore) ActiveRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
+	return s.activeRevision(ctx, false)
+}
+
+func (s *LedgerIndexStore) activeRevision(ctx context.Context, includeBeanPayloads bool) (LedgerIndexRevision, bool, error) {
 	var revision LedgerIndexRevision
-	err := s.db.QueryRowContext(ctx, `
+	query := `
+SELECT id, source_key, git_sha, ledger_version, latest_mtime_ms, file_count, indexed_at
+FROM ledger_index_revisions
+WHERE source_key = $1 AND status = 'active'
+ORDER BY activated_at DESC NULLS LAST, indexed_at DESC
+LIMIT 1`
+	args := []any{s.sourceKey}
+	dest := []any{&revision.ID, &revision.SourceKey, &revision.GitSHA, &revision.LedgerVersion.Version, &revision.LedgerVersion.LatestMtime, &revision.LedgerVersion.FileCount, &revision.IndexedAt}
+	if includeBeanPayloads {
+		query = `
 SELECT id, source_key, git_sha, ledger_version, latest_mtime_ms, file_count, indexed_at, bean_entries, bean_errors
 FROM ledger_index_revisions
 WHERE source_key = $1 AND status = 'active'
 ORDER BY activated_at DESC NULLS LAST, indexed_at DESC
-LIMIT 1`, s.sourceKey).Scan(&revision.ID, &revision.SourceKey, &revision.GitSHA, &revision.LedgerVersion.Version, &revision.LedgerVersion.LatestMtime, &revision.LedgerVersion.FileCount, &revision.IndexedAt, &revision.beanEntries, &revision.beanErrors)
+LIMIT 1`
+		dest = append(dest, &revision.beanEntries, &revision.beanErrors)
+	}
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LedgerIndexRevision{}, false, nil
 	}
@@ -194,16 +217,26 @@ LIMIT 1`, s.sourceKey).Scan(&revision.ID, &revision.SourceKey, &revision.GitSHA,
 }
 
 func (s *LedgerIndexStore) ActiveSnapshot(ctx context.Context) (*LedgerSnapshot, bool, error) {
-	revision, ok, err := s.ActiveRevision(ctx)
+	return s.activeSnapshot(ctx, true)
+}
+
+func (s *LedgerIndexStore) ActiveSnapshotLite(ctx context.Context) (*LedgerSnapshot, bool, error) {
+	return s.activeSnapshot(ctx, false)
+}
+
+func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloads bool) (*LedgerSnapshot, bool, error) {
+	revision, ok, err := s.activeRevision(ctx, includeBeanPayloads)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
 	snapshot := &LedgerSnapshot{LedgerVersion: revision.LedgerVersion, ParsedAt: revision.IndexedAt.UnixMilli()}
-	if err := json.Unmarshal(revision.beanEntries, &snapshot.BeanEntries); err != nil {
-		return nil, false, err
-	}
-	if err := json.Unmarshal(revision.beanErrors, &snapshot.BeanErrors); err != nil {
-		return nil, false, err
+	if includeBeanPayloads {
+		if err := json.Unmarshal(revision.beanEntries, &snapshot.BeanEntries); err != nil {
+			return nil, false, err
+		}
+		if err := json.Unmarshal(revision.beanErrors, &snapshot.BeanErrors); err != nil {
+			return nil, false, err
+		}
 	}
 
 	// Load indexed rows in parallel to amortise Neon round-trip latency.
@@ -236,12 +269,33 @@ func (s *LedgerIndexStore) ActiveSnapshot(ctx context.Context) (*LedgerSnapshot,
 	if err := g.Wait(); err != nil {
 		return nil, false, err
 	}
-	snapshot.RawBalances = CurrentBalances(snapshot.Transactions)
-	snapshot.PriceIndex = NewPriceIndex(snapshot.Prices)
-	snapshot.AccountMap = accountByName(snapshot.Accounts)
-	snapshot.Balances = nativeAccountBalances(snapshot.RawBalances, snapshot.AccountMap)
-	snapshot.AccountBalances = AccountBalanceRowsWithPriceIndex(snapshot.RawBalances, snapshot.PriceIndex, "")
+	prepareLedgerSnapshot(snapshot)
 	return snapshot, true, nil
+}
+
+func (s *LedgerIndexStore) TransactionsForRevision(ctx context.Context, revisionID int64, start, end string) ([]Transaction, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT payload
+FROM ledger_index_transactions
+WHERE revision_id = $1 AND txn_date >= $2 AND txn_date < $3
+ORDER BY txn_date DESC, source_line ASC, ordinal ASC`, revisionID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Transaction{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var txn Transaction
+		if err := json.Unmarshal(raw, &txn); err != nil {
+			return nil, err
+		}
+		out = append(out, txn)
+	}
+	return out, rows.Err()
 }
 
 func loadIndexRows[T any](ctx context.Context, db *sql.DB, query string, revisionID int64) ([]T, error) {
@@ -286,13 +340,45 @@ func (s *LedgerIndexStore) ReplaceActiveSnapshot(ctx context.Context, snapshot *
 	if snapshot == nil {
 		return 0, errors.New("ledger snapshot is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	previousRevisionID := int64(0)
+	if revision, ok, err := s.ActiveRevision(ctx); err != nil {
+		return 0, err
+	} else if ok && revision.LedgerVersion.Version == snapshot.Version && (gitSHA == "" || revision.GitSHA == gitSHA) {
+		return revision.ID, nil
+	} else if ok {
+		previousRevisionID = revision.ID
+	}
+
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer conn.Close()
 
 	var revisionID int64
+	err = conn.Raw(func(driverConn any) error {
+		stdlibConn, ok := driverConn.(*pgxstdlib.Conn)
+		if !ok {
+			return driver.ErrBadConn
+		}
+		pgxTx, err := stdlibConn.Conn().Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer pgxTx.Rollback(ctx)
+		revisionID, err = replaceActiveSnapshotPGX(ctx, pgxTx, s.sourceKey, previousRevisionID, snapshot, gitSHA)
+		if err != nil {
+			return err
+		}
+		return pgxTx.Commit(ctx)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return revisionID, nil
+}
+
+func replaceActiveSnapshotPGX(ctx context.Context, tx pgx.Tx, sourceKey string, previousRevisionID int64, snapshot *LedgerSnapshot, gitSHA string) (int64, error) {
 	beanEntries, err := json.Marshal(snapshot.BeanEntries)
 	if err != nil {
 		return 0, err
@@ -301,49 +387,47 @@ func (s *LedgerIndexStore) ReplaceActiveSnapshot(ctx context.Context, snapshot *
 	if err != nil {
 		return 0, err
 	}
-	err = tx.QueryRowContext(ctx, `
+	var revisionID int64
+	err = tx.QueryRow(ctx, `
 INSERT INTO ledger_index_revisions (source_key, git_sha, ledger_version, latest_mtime_ms, file_count, status, error, bean_entries, bean_errors, indexed_at)
 VALUES ($1, $2, $3, $4, $5, 'indexing', '', $6, $7, now())
 ON CONFLICT (source_key, ledger_version)
 DO UPDATE SET git_sha = EXCLUDED.git_sha, latest_mtime_ms = EXCLUDED.latest_mtime_ms, file_count = EXCLUDED.file_count, status = 'indexing', error = '', bean_entries = EXCLUDED.bean_entries, bean_errors = EXCLUDED.bean_errors, indexed_at = now()
-RETURNING id`, s.sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapshot.FileCount, beanEntries, beanErrors).Scan(&revisionID)
+RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapshot.FileCount, beanEntries, beanErrors).Scan(&revisionID)
 	if err != nil {
 		return 0, err
 	}
-	if err := clearRevisionRows(ctx, tx, revisionID); err != nil {
+	if err := clearRevisionRowsPGX(ctx, tx, revisionID); err != nil {
 		return 0, err
 	}
-	if err := insertAccounts(ctx, tx, revisionID, snapshot.Accounts); err != nil {
+	if err := copyAccounts(ctx, tx, revisionID, snapshot.Accounts); err != nil {
 		return 0, err
 	}
-	if err := insertTransactions(ctx, tx, revisionID, snapshot.Transactions); err != nil {
+	if err := copyTransactions(ctx, tx, revisionID, previousRevisionID, snapshot.Transactions); err != nil {
 		return 0, err
 	}
-	if err := insertBalanceAssertions(ctx, tx, revisionID, snapshot.BalanceAssertions); err != nil {
+	if err := copyBalanceAssertions(ctx, tx, revisionID, snapshot.BalanceAssertions); err != nil {
 		return 0, err
 	}
-	if err := insertPrices(ctx, tx, revisionID, snapshot.Prices); err != nil {
+	if err := copyPrices(ctx, tx, revisionID, snapshot.Prices); err != nil {
 		return 0, err
 	}
-	if err := insertCommodities(ctx, tx, revisionID, snapshot.Commodities); err != nil {
+	if err := copyCommodities(ctx, tx, revisionID, snapshot.Commodities); err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ledger_index_revisions SET status = 'indexed', activated_at = NULL WHERE id = $1`, revisionID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE ledger_index_revisions SET status = 'indexed', activated_at = NULL WHERE id = $1`, revisionID); err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ledger_index_revisions SET status = 'superseded' WHERE source_key = $1 AND status = 'active' AND id <> $2`, s.sourceKey, revisionID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE ledger_index_revisions SET status = 'superseded' WHERE source_key = $1 AND status = 'active' AND id <> $2`, sourceKey, revisionID); err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ledger_index_revisions SET status = 'active', activated_at = now() WHERE id = $1`, revisionID); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE ledger_index_revisions SET status = 'active', activated_at = now() WHERE id = $1`, revisionID); err != nil {
 		return 0, err
 	}
 	return revisionID, nil
 }
 
-func clearRevisionRows(ctx context.Context, tx *sql.Tx, revisionID int64) error {
+func clearRevisionRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
 	for _, table := range []string{
 		"ledger_index_postings",
 		"ledger_index_transactions",
@@ -352,235 +436,225 @@ func clearRevisionRows(ctx context.Context, tx *sql.Tx, revisionID int64) error 
 		"ledger_index_commodities",
 		"ledger_index_accounts",
 	} {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE revision_id = $1", table), revisionID); err != nil {
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE revision_id = $1", table), revisionID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-const insertBatchSize = 500
-
-func insertAccounts(ctx context.Context, tx *sql.Tx, revisionID int64, accounts []Account) error {
+func copyAccounts(ctx context.Context, tx pgx.Tx, revisionID int64, accounts []Account) error {
 	if len(accounts) == 0 {
 		return nil
 	}
-	cols := 11
-	for start := 0; start < len(accounts); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(accounts) {
-			end = len(accounts)
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_accounts"}, []string{"revision_id", "account", "open_date", "close_date", "currency", "alias", "label", "account_group", "active", "metadata", "payload"}, pgx.CopyFromSlice(len(accounts), func(i int) ([]any, error) {
+		account := accounts[i]
+		payload, metadata, err := jsonPayloads(account, account.Metadata)
+		if err != nil {
+			return nil, err
 		}
-		batch := accounts[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_accounts (revision_id, account, open_date, close_date, currency, alias, label, account_group, active, metadata, payload) VALUES `)
-		args := make([]any, 0, len(batch)*cols)
-		for i, account := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			payload, metadata, err := jsonPayloads(account, account.Metadata)
-			if err != nil {
-				return err
-			}
-			base := i * cols
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11)
-			args = append(args, revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata, payload)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
+		return []any{revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata, payload}, nil
+	}))
+	return err
 }
 
-func insertTransactions(ctx context.Context, tx *sql.Tx, revisionID int64, txns []Transaction) error {
+type indexedTransaction struct {
+	ordinal int
+	txn     Transaction
+}
+
+type reusedTransaction struct {
+	newOrdinal int
+	oldOrdinal int
+}
+
+type transactionReuseKey struct {
+	file string
+	line int
+	hash string
+}
+
+func copyTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, previousRevisionID int64, txns []Transaction) error {
 	if len(txns) == 0 {
 		return nil
 	}
-	// Batch transactions
-	cols := 12
-	for start := 0; start < len(txns); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(txns) {
-			end = len(txns)
-		}
-		batch := txns[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links, payload) VALUES `)
-		args := make([]any, 0, len(batch)*cols)
-		for i, txn := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			payload, metadata, err := jsonPayloads(txn, txn.Metadata)
-			if err != nil {
-				return err
-			}
-			base := i * cols
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12)
-			ordinal := start + i
-			args = append(args, revisionID, ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links), payload)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
+	reused, fresh, err := partitionReusableTransactions(ctx, tx, previousRevisionID, txns)
+	if err != nil {
+		return err
 	}
-
-	// Batch postings
-	pCols := 8
-	var postingsBatch []struct {
-		revisionID        int64
-		transactionOrdinal int
-		postingOrdinal    int
-		account           string
-		amount            int
-		currency          string
-		flag              string
-		payload           []byte
+	if err := copyReusedTransactions(ctx, tx, revisionID, previousRevisionID, reused); err != nil {
+		return err
 	}
-	for i, txn := range txns {
-		for j, posting := range txn.Postings {
-			postingPayload, err := json.Marshal(posting)
-			if err != nil {
-				return err
-			}
-			postingsBatch = append(postingsBatch, struct {
-				revisionID        int64
-				transactionOrdinal int
-				postingOrdinal    int
-				account           string
-				amount            int
-				currency          string
-				flag              string
-				payload           []byte
-			}{revisionID, i, j, posting.Account, posting.Amount, posting.Currency, posting.Flag, postingPayload})
-		}
+	if err := copyFreshTransactions(ctx, tx, revisionID, fresh); err != nil {
+		return err
 	}
-	for start := 0; start < len(postingsBatch); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(postingsBatch) {
-			end = len(postingsBatch)
-		}
-		batch := postingsBatch[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag, payload) VALUES `)
-		args := make([]any, 0, len(batch)*pCols)
-		for i, p := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			base := i * pCols
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
-			args = append(args, p.revisionID, p.transactionOrdinal, p.postingOrdinal, p.account, p.amount, p.currency, p.flag, p.payload)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
+	return copyFreshPostings(ctx, tx, revisionID, fresh)
 }
 
-func insertBalanceAssertions(ctx context.Context, tx *sql.Tx, revisionID int64, assertions []BalanceAssertion) error {
+func partitionReusableTransactions(ctx context.Context, tx pgx.Tx, previousRevisionID int64, txns []Transaction) ([]reusedTransaction, []indexedTransaction, error) {
+	if previousRevisionID == 0 {
+		return nil, indexedTransactions(txns), nil
+	}
+	rows, err := tx.Query(ctx, `
+SELECT ordinal, source_file, source_line, source_hash
+FROM ledger_index_transactions
+WHERE revision_id = $1 AND source_hash <> ''`, previousRevisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	oldByKey := map[transactionReuseKey]int{}
+	for rows.Next() {
+		var ordinal int
+		var key transactionReuseKey
+		if err := rows.Scan(&ordinal, &key.file, &key.line, &key.hash); err != nil {
+			return nil, nil, err
+		}
+		if _, exists := oldByKey[key]; !exists {
+			oldByKey[key] = ordinal
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	reused, fresh := classifyReusableTransactions(txns, oldByKey)
+	return reused, fresh, nil
+}
+
+func classifyReusableTransactions(txns []Transaction, oldByKey map[transactionReuseKey]int) ([]reusedTransaction, []indexedTransaction) {
+	reused := []reusedTransaction{}
+	fresh := []indexedTransaction{}
+	for i, txn := range txns {
+		key := transactionReuseKey{file: txn.Source.File, line: txn.Source.Line, hash: txn.Source.Hash}
+		if key.hash != "" {
+			if oldOrdinal, ok := oldByKey[key]; ok {
+				reused = append(reused, reusedTransaction{newOrdinal: i, oldOrdinal: oldOrdinal})
+				continue
+			}
+		}
+		fresh = append(fresh, indexedTransaction{ordinal: i, txn: txn})
+	}
+	return reused, fresh
+}
+
+func indexedTransactions(txns []Transaction) []indexedTransaction {
+	out := make([]indexedTransaction, len(txns))
+	for i, txn := range txns {
+		out[i] = indexedTransaction{ordinal: i, txn: txn}
+	}
+	return out
+}
+
+func copyReusedTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, previousRevisionID int64, reused []reusedTransaction) error {
+	if len(reused) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE ledger_index_txn_reuse_map (new_ordinal INTEGER NOT NULL, old_ordinal INTEGER NOT NULL) ON COMMIT DROP`); err != nil {
+		return err
+	}
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_txn_reuse_map"}, []string{"new_ordinal", "old_ordinal"}, pgx.CopyFromSlice(len(reused), func(i int) ([]any, error) {
+		row := reused[i]
+		return []any{row.newOrdinal, row.oldOrdinal}, nil
+	})); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links, payload)
+SELECT $1, m.new_ordinal, t.txn_date, t.payee, t.narration, t.source_file, t.source_line, t.source_hash, t.metadata, t.tags, t.links, t.payload
+FROM ledger_index_txn_reuse_map m
+JOIN ledger_index_transactions t ON t.revision_id = $2 AND t.ordinal = m.old_ordinal`, revisionID, previousRevisionID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag, payload)
+SELECT $1, m.new_ordinal, p.posting_ordinal, p.account, p.amount, p.currency, p.flag, p.payload
+FROM ledger_index_txn_reuse_map m
+JOIN ledger_index_postings p ON p.revision_id = $2 AND p.transaction_ordinal = m.old_ordinal`, revisionID, previousRevisionID)
+	return err
+}
+
+func copyFreshTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, txns []indexedTransaction) error {
+	if len(txns) == 0 {
+		return nil
+	}
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transactions"}, []string{"revision_id", "ordinal", "txn_date", "payee", "narration", "source_file", "source_line", "source_hash", "metadata", "tags", "links", "payload"}, pgx.CopyFromSlice(len(txns), func(i int) ([]any, error) {
+		indexed := txns[i]
+		txn := indexed.txn
+		payload, metadata, err := jsonPayloads(txn, txn.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		return []any{revisionID, indexed.ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links), payload}, nil
+	}))
+	return err
+}
+
+func copyFreshPostings(ctx context.Context, tx pgx.Tx, revisionID int64, txns []indexedTransaction) error {
+	if len(txns) == 0 {
+		return nil
+	}
+	txnIndex, postingIndex := 0, 0
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_postings"}, []string{"revision_id", "transaction_ordinal", "posting_ordinal", "account", "amount", "currency", "flag", "payload"}, pgx.CopyFromFunc(func() ([]any, error) {
+		for txnIndex < len(txns) && postingIndex >= len(txns[txnIndex].txn.Postings) {
+			txnIndex++
+			postingIndex = 0
+		}
+		if txnIndex >= len(txns) {
+			return nil, nil
+		}
+		indexed := txns[txnIndex]
+		posting := indexed.txn.Postings[postingIndex]
+		currentPostingIndex := postingIndex
+		postingIndex++
+		payload, err := json.Marshal(posting)
+		if err != nil {
+			return nil, err
+		}
+		return []any{revisionID, indexed.ordinal, currentPostingIndex, posting.Account, posting.Amount, posting.Currency, posting.Flag, payload}, nil
+	}))
+	return err
+}
+
+func copyBalanceAssertions(ctx context.Context, tx pgx.Tx, revisionID int64, assertions []BalanceAssertion) error {
 	if len(assertions) == 0 {
 		return nil
 	}
-	cols := 7
-	for start := 0; start < len(assertions); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(assertions) {
-			end = len(assertions)
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_balance_assertions"}, []string{"revision_id", "ordinal", "assertion_date", "account", "amount", "currency", "payload"}, pgx.CopyFromSlice(len(assertions), func(i int) ([]any, error) {
+		assertion := assertions[i]
+		payload, err := json.Marshal(assertion)
+		if err != nil {
+			return nil, err
 		}
-		batch := assertions[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_balance_assertions (revision_id, ordinal, assertion_date, account, amount, currency, payload) VALUES `)
-		args := make([]any, 0, len(batch)*cols)
-		for i, assertion := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			payload, err := json.Marshal(assertion)
-			if err != nil {
-				return err
-			}
-			base := i * cols
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-				base+1, base+2, base+3, base+4, base+5, base+6, base+7)
-			ordinal := start + i
-			args = append(args, revisionID, ordinal, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency, payload)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
+		return []any{revisionID, i, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency, payload}, nil
+	}))
+	return err
 }
 
-func insertPrices(ctx context.Context, tx *sql.Tx, revisionID int64, prices []Price) error {
+func copyPrices(ctx context.Context, tx pgx.Tx, revisionID int64, prices []Price) error {
 	if len(prices) == 0 {
 		return nil
 	}
-	cols := 7
-	for start := 0; start < len(prices); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(prices) {
-			end = len(prices)
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_prices"}, []string{"revision_id", "ordinal", "price_date", "currency", "amount", "quote_currency", "payload"}, pgx.CopyFromSlice(len(prices), func(i int) ([]any, error) {
+		price := prices[i]
+		payload, err := json.Marshal(price)
+		if err != nil {
+			return nil, err
 		}
-		batch := prices[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_prices (revision_id, ordinal, price_date, currency, amount, quote_currency, payload) VALUES `)
-		args := make([]any, 0, len(batch)*cols)
-		for i, price := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			payload, err := json.Marshal(price)
-			if err != nil {
-				return err
-			}
-			base := i * cols
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-				base+1, base+2, base+3, base+4, base+5, base+6, base+7)
-			ordinal := start + i
-			args = append(args, revisionID, ordinal, price.Date, price.Currency, price.Amount, price.QuoteCurrency, payload)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
+		return []any{revisionID, i, price.Date, price.Currency, price.Amount, price.QuoteCurrency, payload}, nil
+	}))
+	return err
 }
 
-func insertCommodities(ctx context.Context, tx *sql.Tx, revisionID int64, commodities []string) error {
+func copyCommodities(ctx context.Context, tx pgx.Tx, revisionID int64, commodities []string) error {
 	if len(commodities) == 0 {
 		return nil
 	}
-	cols := 2
-	for start := 0; start < len(commodities); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(commodities) {
-			end = len(commodities)
-		}
-		batch := commodities[start:end]
-		var b strings.Builder
-		b.WriteString(`INSERT INTO ledger_index_commodities (revision_id, commodity) VALUES `)
-		args := make([]any, 0, len(batch)*cols)
-		for i, commodity := range batch {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			base := i * cols
-			fmt.Fprintf(&b, "($%d, $%d)", base+1, base+2)
-			args = append(args, revisionID, commodity)
-		}
-		if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_commodities"}, []string{"revision_id", "commodity"}, pgx.CopyFromSlice(len(commodities), func(i int) ([]any, error) {
+		return []any{revisionID, commodities[i]}, nil
+	}))
+	return err
 }
 
 func jsonPayloads(payloadValue any, metadataValue any) ([]byte, []byte, error) {
@@ -611,4 +685,3 @@ func stringSlice(values []string) []string {
 	}
 	return values
 }
-
