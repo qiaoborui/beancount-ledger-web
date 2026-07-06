@@ -7,27 +7,34 @@ import (
 )
 
 type Config struct {
-	AppRoot          string
-	LedgerRoot       string
-	RuntimeDir       string
-	StaticDir        string
-	ServeStatic      bool
-	Port             string
-	LedgerStorage    string
-	LedgerGitRemote  string
-	LedgerGitBranch  string
-	LedgerGitWorkDir string
-	RuntimeStore     string
-	RuntimeFileStore string
-	DatabaseURL      string
-	LedgerReadModel  string
-	ReadModelStrict  bool
+	AppRoot            string
+	LedgerRoot         string
+	RuntimeDir         string
+	StaticDir          string
+	ServeStatic        bool
+	Port               string
+	LedgerStorage      string
+	LedgerGitRemote    string
+	LedgerGitBranch    string
+	LedgerGitWorkDir   string
+	LedgerGitHubOwner  string
+	LedgerGitHubRepo   string
+	LedgerGitHubToken  string
+	LedgerGitHubAPIURL string
+	RuntimeStore       string
+	RuntimeFileStore   string
+	DatabaseURL        string
+	LedgerReadModel    string
+	ReadModelStrict    bool
 }
 
 func LoadConfig() Config {
 	storage := strings.ToLower(env("LEDGER_STORAGE", "remote_git"))
 	if storage == "git" {
 		storage = "remote_git"
+	}
+	if storage == "github" {
+		storage = "github_api"
 	}
 	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
 	gitWorkDir := env("LEDGER_GIT_WORKDIR", "")
@@ -48,21 +55,25 @@ func LoadConfig() Config {
 	}
 	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
 	return Config{
-		AppRoot:          "",
-		LedgerRoot:       filepath.Clean(ledgerRoot),
-		RuntimeDir:       filepath.Clean(runtimeDir),
-		StaticDir:        filepath.Clean(env("STATIC_DIR", "")),
-		ServeStatic:      envBool("SERVE_STATIC", false),
-		Port:             env("PORT", "3000"),
-		LedgerStorage:    storage,
-		LedgerGitRemote:  strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
-		LedgerGitBranch:  env("LEDGER_GIT_BRANCH", "main"),
-		LedgerGitWorkDir: filepath.Clean(gitWorkDir),
-		RuntimeStore:     runtimeStore,
-		RuntimeFileStore: runtimeFileStore,
-		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		LedgerReadModel:  ledgerReadModel,
-		ReadModelStrict:  envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
+		AppRoot:            "",
+		LedgerRoot:         filepath.Clean(ledgerRoot),
+		RuntimeDir:         filepath.Clean(runtimeDir),
+		StaticDir:          filepath.Clean(env("STATIC_DIR", "")),
+		ServeStatic:        envBool("SERVE_STATIC", false),
+		Port:               env("PORT", "3000"),
+		LedgerStorage:      storage,
+		LedgerGitRemote:    strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
+		LedgerGitBranch:    env("LEDGER_GIT_BRANCH", "main"),
+		LedgerGitWorkDir:   filepath.Clean(gitWorkDir),
+		LedgerGitHubOwner:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
+		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
+		LedgerGitHubToken:  strings.TrimSpace(env("LEDGER_GITHUB_TOKEN", os.Getenv("GITHUB_TOKEN"))),
+		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		RuntimeStore:       runtimeStore,
+		RuntimeFileStore:   runtimeFileStore,
+		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		LedgerReadModel:    ledgerReadModel,
+		ReadModelStrict:    envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
 	}
 }
 

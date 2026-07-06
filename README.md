@@ -76,8 +76,9 @@ backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
 backend service; every other path routes to the frontend service. Configure
 environment variables in the Vercel dashboard:
 
-- `LEDGER_STORAGE=remote_git` — the server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check`, and commits/pushes every successful ledger write.
-- `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
+- `LEDGER_STORAGE=github_api` — recommended for Vercel + Postgres read model. The API host writes import/editor changes directly to the GitHub repository without cloning the ledger.
+- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name. If omitted, the server can infer them from `LEDGER_GIT_REMOTE` when it is a GitHub URL.
+- `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
 - `RUNTIME_STORE=postgres` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
 - `DATABASE_URL` — Postgres connection string.
 - `LEDGER_READ_MODEL=postgres` — optional hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
@@ -97,8 +98,9 @@ See [web/.env.example](web/.env.example) for the complete list.
 
 Important variables:
 
-- `LEDGER_STORAGE=remote_git` — the server clones `LEDGER_GIT_REMOTE` into `LEDGER_GIT_WORKDIR/repo`, runs `bean-check`, and commits/pushes every successful ledger write.
+- `LEDGER_STORAGE=remote_git|github_api` — `remote_git` clones the private ledger locally and runs `bean-check`; `github_api` writes supported import/editor changes directly through the GitHub API without a local clone.
 - `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
+- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `LEDGER_STORAGE=github_api`.
 - `RUNTIME_STORE=postgres` / `DATABASE_URL` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
 - `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files. Defaults to `RUNTIME_STORE`.
 - `LEDGER_READ_MODEL=files|postgres` — use `postgres` to serve ledger reads from the normalized Postgres read model.
@@ -129,11 +131,15 @@ can then serve `/api/ledger/*` reads from Postgres with
 
 The API host needs `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`,
 `LEDGER_READ_MODEL_STRICT=true`, and the same `LEDGER_INDEX_SOURCE_KEY` as the
-worker. Ledger read endpoints use Postgres only. Import and editor endpoints can
-still write the Beancount repository from the API host when `LEDGER_STORAGE` and
-Git credentials are configured; those writes mark the read model as pending, and
-the local worker updates Postgres on its next indexing pass. The worker also
-needs `LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`, and any Git credentials.
+worker. Ledger read endpoints use Postgres only. For hosted writes, set
+`LEDGER_STORAGE=github_api` plus the GitHub repository/token variables; import
+commit and editor save create GitHub commits directly, mark the read model as
+pending, and the local worker updates Postgres on its next indexing pass. Import
+preview in GitHub API mode does not parse the full ledger or run the ledger-file
+dedup script; instead it dedups against the Postgres read model by statement
+metadata, order IDs, exact transaction signatures, and funding-account postings.
+Review any remaining preview rows before committing. The worker still needs
+`LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`, and any Git credentials.
 
 ## Ledger layout
 

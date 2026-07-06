@@ -33,3 +33,22 @@ func TestLoadConfigRemoteGitUsesWorkdirCheckout(t *testing.T) {
 		t.Fatalf("LedgerRoot=%q, want %q", cfg.LedgerRoot, filepath.Clean(want))
 	}
 }
+
+func TestLoadConfigGitHubAlias(t *testing.T) {
+	t.Setenv("LEDGER_STORAGE", "github")
+	t.Setenv("LEDGER_GIT_REMOTE", "https://github.com/example/ledger.git")
+	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
+
+	cfg := LoadConfig()
+
+	if cfg.LedgerStorage != "github_api" {
+		t.Fatalf("LedgerStorage=%q, want github_api", cfg.LedgerStorage)
+	}
+	client, err := newGitHubLedgerClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.owner != "example" || client.repo != "ledger" {
+		t.Fatalf("github repo=(%q,%q), want example/ledger", client.owner, client.repo)
+	}
+}
