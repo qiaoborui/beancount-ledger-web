@@ -50,7 +50,18 @@ func (s *Server) editorFiles(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	files, err := listLedgerEditorFiles(s.cfg)
+	var files []LedgerEditorFile
+	var err error
+	if githubAPIEnabled(s.cfg) {
+		client, clientErr := newGitHubLedgerClient(s.cfg)
+		if clientErr != nil {
+			errorJSON(c, http.StatusBadRequest, clientErr)
+			return
+		}
+		files, err = client.listEditorFiles(c.Request.Context())
+	} else {
+		files, err = listLedgerEditorFiles(s.cfg)
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -71,7 +82,19 @@ func (s *Server) editorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	content, info, hash, err := readLedgerEditorFile(full)
+	var content string
+	var info os.FileInfo
+	var hash string
+	if githubAPIEnabled(s.cfg) {
+		client, clientErr := newGitHubLedgerClient(s.cfg)
+		if clientErr != nil {
+			errorJSON(c, http.StatusBadRequest, clientErr)
+			return
+		}
+		content, info, hash, err = client.readEditorFile(c.Request.Context(), rel)
+	} else {
+		content, info, hash, err = readLedgerEditorFile(full)
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -96,7 +119,19 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	before, info, currentHash, err := readLedgerEditorFile(full)
+	var before string
+	var info os.FileInfo
+	var currentHash string
+	if githubAPIEnabled(s.cfg) {
+		client, clientErr := newGitHubLedgerClient(s.cfg)
+		if clientErr != nil {
+			errorJSON(c, http.StatusBadRequest, clientErr)
+			return
+		}
+		before, info, currentHash, err = client.readEditorFile(c.Request.Context(), rel)
+	} else {
+		before, info, currentHash, err = readLedgerEditorFile(full)
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -109,7 +144,18 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	_, nextInfo, nextHash, err := readLedgerEditorFile(full)
+	var nextInfo os.FileInfo
+	var nextHash string
+	if githubAPIEnabled(s.cfg) {
+		client, clientErr := newGitHubLedgerClient(s.cfg)
+		if clientErr != nil {
+			errorJSON(c, http.StatusBadRequest, clientErr)
+			return
+		}
+		_, nextInfo, nextHash, err = client.readEditorFile(c.Request.Context(), rel)
+	} else {
+		_, nextInfo, nextHash, err = readLedgerEditorFile(full)
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -192,6 +238,9 @@ func cleanLedgerEditorPath(cfg Config, rawPath string) (string, string, error) {
 	}
 	if full != root && !strings.HasPrefix(full, root+string(filepath.Separator)) {
 		return "", "", errors.New("path is outside ledger root")
+	}
+	if githubAPIEnabled(cfg) {
+		return rel, full, nil
 	}
 	info, err := os.Lstat(full)
 	if err != nil {

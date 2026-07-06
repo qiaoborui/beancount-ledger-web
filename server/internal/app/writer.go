@@ -70,6 +70,7 @@ type fileSnapshot struct {
 
 type LedgerWriteTransaction struct {
 	snapshots map[string]fileSnapshot
+	github    *githubLedgerTransaction
 }
 
 const (
@@ -104,6 +105,9 @@ func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error)
 }
 
 func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*LedgerWriteTransaction) error) error {
+	if githubAPIEnabled(w.cfg) {
+		return w.runGitHubAPITransaction(source, apply)
+	}
 	if remoteGitEnabled(w.cfg) {
 		return w.runRemoteGitTransaction(source, apply)
 	}
@@ -126,6 +130,57 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 	}
 	publishLedgerUpdated(w.cfg, source)
 	return nil
+}
+
+func (w *LedgerWriter) runGitHubAPITransaction(source string, apply func(*LedgerWriteTransaction) error) error {
+	if w.runtimeStore != nil {
+		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func() error {
+			return w.runGitHubAPITransactionLocked(source, apply)
+		})
+	}
+	return w.runGitHubAPITransactionLocked(source, apply)
+}
+
+func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*LedgerWriteTransaction) error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	client, err := newGitHubLedgerClient(w.cfg)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(source) == "" {
+		source = ledgerWriteSourceDefault
+	}
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		remoteTx, err := client.beginTransaction(ctx)
+		if err != nil {
+			cancel()
+			return err
+		}
+		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}, github: remoteTx}
+		if err := apply(tx); err != nil {
+			cancel()
+			return err
+		}
+		if _, err := remoteTx.commit(remoteGitCommitMessage(source)); err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		cancel()
+		if w.cache != nil {
+			w.cache.MarkDirty()
+		}
+		publishLedgerUpdated(w.cfg, source)
+		publishGitStatus(w.cfg, source)
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("github api ledger write failed")
+	}
+	return lastErr
 }
 
 func (w *LedgerWriter) runRemoteGitTransaction(source string, apply func(*LedgerWriteTransaction) error) error {
@@ -188,6 +243,13 @@ func (tx *LedgerWriteTransaction) Snapshot(file string) error {
 	if _, ok := tx.snapshots[file]; ok {
 		return nil
 	}
+	if tx.github != nil {
+		if err := tx.github.snapshot(file); err != nil {
+			return err
+		}
+		tx.snapshots[file] = fileSnapshot{existed: true}
+		return nil
+	}
 	content, err := os.ReadFile(file)
 	if errors.Is(err, os.ErrNotExist) {
 		tx.snapshots[file] = fileSnapshot{existed: false}
@@ -200,9 +262,38 @@ func (tx *LedgerWriteTransaction) Snapshot(file string) error {
 	return nil
 }
 
+func (tx *LedgerWriteTransaction) ReadFile(file string) ([]byte, error) {
+	if tx.github != nil {
+		return tx.github.readFile(file)
+	}
+	return os.ReadFile(file)
+}
+
+func (tx *LedgerWriteTransaction) Exists(file string) (bool, error) {
+	if tx.github != nil {
+		return tx.github.exists(file)
+	}
+	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (tx *LedgerWriteTransaction) UniquePath(file string) (string, error) {
+	if tx.github != nil {
+		return tx.github.uniquePath(file)
+	}
+	return uniquePath(file), nil
+}
+
 func (tx *LedgerWriteTransaction) WriteFile(file string, content []byte, perm os.FileMode) error {
 	if err := tx.Snapshot(file); err != nil {
 		return err
+	}
+	if tx.github != nil {
+		return tx.github.writeFile(file, content)
 	}
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
@@ -279,7 +370,7 @@ func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 	}
 	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
-		before, err := os.ReadFile(file)
+		before, err := tx.ReadFile(file)
 		if err != nil {
 			return err
 		}
@@ -310,7 +401,7 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 	texts := []string{}
 	if err := w.RunTransactionWithSource(ledgerWriteSourceAccountOperations, func(tx *LedgerWriteTransaction) error {
 		file := accountsBeanPath(w.cfg)
-		before, err := os.ReadFile(file)
+		before, err := tx.ReadFile(file)
 		if err != nil {
 			return err
 		}
@@ -359,7 +450,7 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 		if err != nil {
 			return err
 		}
-		before, err := os.ReadFile(file)
+		before, err := tx.ReadFile(file)
 		if err != nil {
 			return err
 		}
@@ -430,7 +521,7 @@ func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason 
 		if err != nil {
 			return err
 		}
-		before, err := os.ReadFile(file)
+		before, err := tx.ReadFile(file)
 		if err != nil {
 			return err
 		}
@@ -476,7 +567,7 @@ func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem) err
 			if err := w.ensureMonthlyFileAndInclude(tx, file, fileItems[0].date); err != nil {
 				return err
 			}
-			before, err := os.ReadFile(file)
+			before, err := tx.ReadFile(file)
 			if err != nil {
 				return err
 			}
@@ -503,13 +594,17 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, f
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+	exists, err := tx.Exists(file)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		if err := tx.WriteFile(file, []byte("; "+date[:7]+" 交易记录\n"), 0o644); err != nil {
 			return err
 		}
 	}
 	includeLine := includeLineFor(w.cfg, file)
-	mainBefore, err := os.ReadFile(main)
+	mainBefore, err := tx.ReadFile(main)
 	if err != nil {
 		return err
 	}
@@ -615,6 +710,9 @@ func editableLedgerFile(cfg Config, file string) (string, error) {
 	main, _ := filepath.Abs(mainBeanPath(cfg))
 	if full != main && !strings.HasPrefix(full, root+string(filepath.Separator)) {
 		return "", errors.New("只能修改当前账本目录内的文件")
+	}
+	if githubAPIEnabled(cfg) {
+		return full, nil
 	}
 	if _, err := os.Stat(full); err != nil {
 		return "", errors.New("找不到交易来源文件")
