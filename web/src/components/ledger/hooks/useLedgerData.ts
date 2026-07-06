@@ -4,7 +4,7 @@ import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
 import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
 import { readEncryptedLedgerCache, writeEncryptedLedgerCache } from "../offlineUnlock";
-import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -25,6 +25,14 @@ function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationC
 
 function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
   return runtimeCacheKey(range, unlocked, valuationCurrency);
+}
+
+export async function fetchLedgerIndexInfo(): Promise<LedgerIndexInfo | null> {
+  try {
+    return await fetchJson<LedgerIndexInfo>("/api/ledger/index-info");
+  } catch {
+    return null;
+  }
 }
 
 async function fetchLedgerVersion(): Promise<LedgerVersion | null> {

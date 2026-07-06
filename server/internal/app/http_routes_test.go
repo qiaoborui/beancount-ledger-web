@@ -217,6 +217,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/passkey/register/verify":      true,
 		"GET /api/ledger/bootstrap":              true,
 		"GET /api/ledger/version":                true,
+		"GET /api/ledger/index-info":            true,
 		"GET /api/ledger/entries":                true,
 		"GET /api/ledger/summary":                true,
 		"GET /api/ledger/transactions":           true,

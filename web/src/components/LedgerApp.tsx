@@ -10,7 +10,8 @@ import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useGitStatus } from "./ledger/hooks/useGitStatus";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
-import { useLedgerData } from "./ledger/hooks/useLedgerData";
+import { fetchLedgerIndexInfo, useLedgerData } from "./ledger/hooks/useLedgerData";
+import type { LedgerIndexInfo } from "./ledger/types";
 import { useLedgerDerivedData } from "./ledger/hooks/useLedgerDerivedData";
 import { useLedgerLock } from "./ledger/hooks/useLedgerLock";
 import { useLedgerMutations } from "./ledger/hooks/useLedgerMutations";
@@ -193,6 +194,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [aiOpenSignal, setAiOpenSignal] = useState(0);
   const [aiChatMounted, setAiChatMounted] = useState(false);
+  const [indexInfo, setIndexInfo] = useState<LedgerIndexInfo | null>(null);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [offlineUnlockEnabled, setOfflineUnlockEnabled] = useState(() => hasOfflineLedgerUnlock());
@@ -610,6 +612,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={syncPendingWrites} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
               <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
+              {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={`索引来源: ${indexInfo.source ?? ""}`}>PG 索引 · {indexInfo.gitSHA.slice(0, 7)}</span>}
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
             </div>

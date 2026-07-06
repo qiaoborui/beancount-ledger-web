@@ -85,6 +85,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	ledgerRead60s := ledger.Group("", cacheControl(60))
 	ledgerRead60s.GET("/version", s.ledgerVersion)
+	ledgerRead60s.GET("/index-info", s.indexInfo)
 	ledgerRead60s.GET("/entries", s.ledgerEntries)
 	ledgerRead60s.GET("/balances", s.balances)
 	ledgerRead60s.GET("/investments", s.investments)
@@ -166,6 +167,7 @@ func (s *Server) health(c *gin.Context) {
 			"ledgerVersion":       revision.LedgerVersion.Version,
 			"ledgerVersionFiles":  revision.LedgerVersion.FileCount,
 			"ledgerIndexedAtUnix": revision.IndexedAt.Unix(),
+			"ledgerIndexGitSHA":    revision.GitSHA,
 		}
 		if err != nil {
 			body["error"] = err.Error()
@@ -196,6 +198,29 @@ func (s *Server) health(c *gin.Context) {
 		body["runtimeDirExists"] = runtimeDirExists
 	}
 	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
+}
+
+
+func (s *Server) indexInfo(c *gin.Context) {
+	if s.indexStore == nil {
+		c.JSON(http.StatusOK, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false})
+		return
+	}
+	revision, indexed, err := s.indexStore.ActiveRevision(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"readModel":    s.cfg.LedgerReadModel,
+		"enabled":      true,
+		"active":       indexed,
+		"gitSHA":       revision.GitSHA,
+		"source":       ledgerIndexSourceKey(s.cfg),
+		"version":      revision.LedgerVersion.Version,
+		"fileCount":    revision.LedgerVersion.FileCount,
+		"indexedAt":    revision.IndexedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func filesystemRuntimeBackend(value string) bool {
