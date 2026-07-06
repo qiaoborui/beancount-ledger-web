@@ -117,6 +117,10 @@ export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, cli
   return { cache, cacheUnlocked, serverSensitiveUnlocked, responseValuationCurrency };
 }
 
+export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKey: string) {
+  return previousKey !== nextKey;
+}
+
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
   const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
@@ -140,6 +144,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
+  const offlineNoticeKeyRef = useRef<string | null>(null);
 
   latestContextRef.current = { range: timeRange, unlocked, valuationCurrency };
 
@@ -249,17 +254,25 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
         fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
       ]);
+      offlineNoticeKeyRef.current = null;
     } catch (error) {
       if (offlineOrNetworkError(error) && hasKnownLedgerAuthentication()) {
         rememberLedgerAuthenticated();
         onAuthChange(true);
         const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
+        const noticeKey = `${timeRangeToParams(timeRange)}:${valuationCurrency}:${cached ? "cached" : "empty"}`;
         if (cached) {
           const cache = unlocked ? cached : maskSensitiveLedgerCache(cached);
           applyCache(cache, unlocked, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
-          showToast("info", "当前离线，已显示上次缓存的数据");
+          if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
+            offlineNoticeKeyRef.current = noticeKey;
+            showToast("info", "当前离线，已显示上次缓存的数据");
+          }
         } else {
-          showToast("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
+          if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
+            offlineNoticeKeyRef.current = noticeKey;
+            showToast("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
+          }
         }
         return;
       }

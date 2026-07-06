@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useTransition, type ComponentProps } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
@@ -197,6 +197,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [offlineUnlockEnabled, setOfflineUnlockEnabled] = useState(() => hasOfflineLedgerUnlock());
   const [offlineUnlockSecret, setOfflineUnlockSecret] = useState("");
+  const offlineUnlockInputRef = useRef<HTMLInputElement | null>(null);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
   const hasPasskey = passkeyRegistered === true;
   const passkeyStatusLoaded = passkeyRegistered !== null;
@@ -450,6 +451,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const unlockedPrivacySettings = unlocked ? { ...privacySettings, showHomeSummaryAmounts: true } : privacySettings;
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
+  const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
   const unlockOfflineSensitive = async () => {
     try {
       const ok = await unlockOfflineSensitiveCache(offlineUnlockSecret);
@@ -457,6 +459,17 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     } catch (error) {
       showToast("error", error instanceof Error ? error.message : "离线解锁失败");
     }
+  };
+  const handleHeaderUnlockSensitive = () => {
+    if (!offlineSensitiveUnlockAvailable) {
+      void loginWithPasskey();
+      return;
+    }
+    if (offlineUnlockSecret.trim()) {
+      void unlockOfflineSensitive();
+      return;
+    }
+    offlineUnlockInputRef.current?.focus();
   };
   const requireSensitiveUnlock = (title?: string, description?: string) => (
     <SensitiveUnlockPanel title={title} description={description} message={sensitiveMessage} offline={!online} offlineUnlockAvailable={offlineUnlockEnabled} offlineSecret={offlineUnlockSecret} onOfflineSecretChange={setOfflineUnlockSecret} onOfflineUnlock={() => void unlockOfflineSensitive()} onUnlock={loginWithPasskey} />
@@ -552,7 +565,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       routePending={isRoutePending}
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
-      onUnlockSensitive={loginWithPasskey}
+      sensitiveUnlockAvailable={hasPasskey || offlineSensitiveUnlockAvailable}
+      sensitiveUnlockLabel={offlineSensitiveUnlockAvailable ? "离线解锁" : "解锁"}
+      sensitiveUnlockTitle={offlineSensitiveUnlockAvailable ? "使用离线解锁码查看敏感数据" : "使用 Face ID / Passkey 解锁敏感数据"}
+      onUnlockSensitive={handleHeaderUnlockSensitive}
       onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
       themeMode={themeMode}
@@ -597,6 +613,20 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
             </div>
+            {offlineSensitiveUnlockAvailable && (
+              <form className="mt-3 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void unlockOfflineSensitive(); }}>
+                <input
+                  ref={offlineUnlockInputRef}
+                  type="password"
+                  className="h-10 min-w-0 rounded-xl border border-line bg-panel px-3 text-sm text-ink"
+                  value={offlineUnlockSecret}
+                  onChange={(event) => setOfflineUnlockSecret(event.target.value)}
+                  placeholder="离线解锁码"
+                  autoComplete="current-password"
+                />
+                <button type="submit" className="h-10 shrink-0 rounded-xl bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>离线解锁</button>
+              </form>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {canNavigate && (

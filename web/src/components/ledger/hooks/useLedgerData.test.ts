@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, type LedgerBootstrapResponse } from "./useLedgerData";
+import { buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
 import type { LedgerVersion, Txn } from "../types";
 
 const version: LedgerVersion = { version: "v1", fileCount: 1, latestMtimeMs: 123 };
@@ -89,5 +89,13 @@ describe("maskSensitiveLedgerCache", () => {
     expect(masked.incomeStatement?.totalExpense).toBe(20);
     expect(masked.ledgerVersion).toEqual(version);
     expect(masked.sensitiveCached).toBe(false);
+  });
+});
+
+describe("shouldShowOfflineLedgerNotice", () => {
+  it("suppresses repeated offline cache notices for the same offline state", () => {
+    expect(shouldShowOfflineLedgerNotice(null, "month=CURRENT:CNY:cached")).toBe(true);
+    expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:cached")).toBe(false);
+    expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:empty")).toBe(true);
   });
 });
