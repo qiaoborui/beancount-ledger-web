@@ -1,7 +1,8 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
-import { RefreshCw, WifiOff } from "lucide-react";
+import { createPortal } from "react-dom";
+import { RefreshCw, WifiOff, X } from "lucide-react";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -196,7 +197,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [quickUnlockEnabled, setQuickUnlockEnabled] = useState(() => hasQuickLedgerUnlock());
   const [quickUnlockMode, setQuickUnlockMode] = useState<QuickUnlockMode>(() => getQuickLedgerUnlockMode());
-  const [quickUnlockSecret, setQuickUnlockSecret] = useState("");
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const [offlineUnlockEnabled, setOfflineUnlockEnabled] = useState(() => hasOfflineLedgerUnlock());
   const [offlineUnlockSecret, setOfflineUnlockSecret] = useState("");
   const offlineUnlockInputRef = useRef<HTMLInputElement | null>(null);
@@ -338,7 +340,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     await enableQuickLedgerUnlock(secret, mode);
     setQuickUnlockEnabled(true);
     setQuickUnlockMode(mode);
-    setQuickUnlockSecret("");
     showToast("success", "本机快速解锁已启用");
   }
 
@@ -346,7 +347,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     await revokeQuickLedgerUnlock();
     setQuickUnlockEnabled(false);
     setQuickUnlockMode(getQuickLedgerUnlockMode());
-    setQuickUnlockSecret("");
     showToast("success", "本机快速解锁已关闭");
   }
 
@@ -494,14 +494,20 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       showToast("error", error instanceof Error ? error.message : "离线解锁失败");
     }
   };
-  const unlockQuickSensitive = async () => {
-    await loginWithQuickUnlock(quickUnlockSecret);
-    setQuickUnlockSecret("");
+  const unlockQuickSensitive = async (secret: string) => {
+    setUnlocking(true);
+    try {
+      await loginWithQuickUnlock(secret);
+      setShowUnlockModal(false);
+    } catch {
+      // Error handled by loginWithQuickUnlock
+    } finally {
+      setUnlocking(false);
+    }
   };
   const unlockOnlineSensitive = () => {
     if (quickUnlockEnabled) {
-      if (quickUnlockSecret) void unlockQuickSensitive();
-      else showToast("info", "请在解锁面板输入本机快速解锁码");
+      setShowUnlockModal(true);
       return;
     }
     void loginWithPasskey();
@@ -529,11 +535,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       onOfflineUnlock={() => void unlockOfflineSensitive()}
       quickUnlockEnabled={quickUnlockEnabled}
       quickUnlockMode={quickUnlockMode}
-      quickUnlockSecret={quickUnlockSecret}
       passkeyRegistered={hasPasskey}
-      onQuickUnlockSecretChange={setQuickUnlockSecret}
-      onQuickUnlock={() => void unlockQuickSensitive()}
+      onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
       onUnlock={loginWithPasskey}
+      unlocking={unlocking}
     />
   );
   const header = pageHeader(page, timeRange);
@@ -622,6 +627,25 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     >
       <Toast toast={toast} />
       {commandOpen && <Suspense fallback={null}><LazyCommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} /></Suspense>}
+      {showUnlockModal && !unlocked && createPortal(
+        <div className="fixed inset-0 z-[120] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="快速解锁" onClick={() => setShowUnlockModal(false)}>
+          <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="absolute right-5 top-5 z-10 grid h-10 w-10 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag" onClick={() => setShowUnlockModal(false)} aria-label="关闭"><X className="h-5 w-5" /></button>
+            <SensitiveUnlockPanel
+              title="快速解锁"
+              description="输入本机快速解锁码查看敏感数据。"
+              message={sensitiveMessage}
+              quickUnlockEnabled={quickUnlockEnabled}
+              quickUnlockMode={quickUnlockMode}
+              passkeyRegistered={hasPasskey}
+              onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
+              onUnlock={loginWithPasskey}
+              unlocking={unlocking}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
       {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} /></Suspense>}
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}

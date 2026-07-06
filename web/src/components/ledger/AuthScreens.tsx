@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { QuickUnlockMode } from "./quickUnlock";
@@ -35,11 +36,10 @@ export function SensitiveUnlockPanel({
   onOfflineUnlock,
   quickUnlockEnabled,
   quickUnlockMode,
-  quickUnlockSecret,
   passkeyRegistered,
-  onQuickUnlockSecretChange,
   onQuickUnlock,
   onUnlock,
+  unlocking,
 }: {
   title?: string;
   description?: string;
@@ -51,11 +51,10 @@ export function SensitiveUnlockPanel({
   onOfflineUnlock?: () => void;
   quickUnlockEnabled?: boolean;
   quickUnlockMode?: QuickUnlockMode;
-  quickUnlockSecret?: string;
   passkeyRegistered?: boolean;
-  onQuickUnlockSecretChange?: (value: string) => void;
-  onQuickUnlock?: () => void;
+  onQuickUnlock?: (secret: string) => void;
   onUnlock: () => void;
+  unlocking?: boolean;
 }) {
   return <section className="card p-6 text-center">
     <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-brand" />
@@ -67,7 +66,7 @@ export function SensitiveUnlockPanel({
         <Button className="h-12 rounded-xl px-5" onClick={onOfflineUnlock}>离线解锁</Button>
       </div>
     ) : quickUnlockEnabled ? (
-      <QuickUnlockControls mode={quickUnlockMode ?? "text"} secret={quickUnlockSecret ?? ""} onSecretChange={onQuickUnlockSecretChange ?? (() => {})} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={passkeyRegistered} onPasskeyUnlock={onUnlock} />
+      <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} />
     ) : (
       <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
         {passkeyRegistered && <Button className="h-12 rounded-xl px-5" onClick={onUnlock}>使用 Face ID / Passkey 查看</Button>}
@@ -84,26 +83,27 @@ export function PasskeyBanner({ onRegister }: { onRegister: () => void }) {
   return <section className="card mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-xl font-medium">启用 Face ID / Passkey</h2><p className="mt-1 text-sm text-olive">添加到桌面后，可用系统 Face ID、Touch ID 或设备密码解锁账页。</p></div><Button className="h-12 rounded-xl px-5" onClick={onRegister}>启用</Button></section>;
 }
 
-function QuickUnlockControls({ mode, secret, passkeyRegistered, onSecretChange, onUnlock, onPasskeyUnlock }: { mode: QuickUnlockMode; secret: string; passkeyRegistered?: boolean; onSecretChange: (value: string) => void; onUnlock: () => void; onPasskeyUnlock: () => void }) {
+function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnlock, unlocking }: { mode: QuickUnlockMode; passkeyRegistered?: boolean; onUnlock: (secret: string) => void; onPasskeyUnlock: () => void; unlocking?: boolean }) {
+  const [secret, setSecret] = useState("");
   if (mode === "numeric") {
     return <div className="mx-auto mt-5 w-full max-w-xs">
       <div className="mb-3 h-12 rounded-xl border border-line bg-panel px-4 text-center text-2xl tracking-[0.35em] text-ink" aria-label="本机数字解锁码">{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
       <div className="grid grid-cols-3 gap-2">
-        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => onSecretChange(secret + digit)} />)}
-        <KeypadButton label="删" onClick={() => onSecretChange(secret.slice(0, -1))} />
-        <KeypadButton label="0" onClick={() => onSecretChange(secret + "0")} />
-        <button type="button" className="h-14 rounded-xl bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret} onClick={onUnlock}>解锁</button>
+        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => setSecret(secret + digit)} disabled={unlocking} />)}
+        <KeypadButton label="删" onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
+        <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
+        <button type="button" className="h-14 rounded-xl bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
       </div>
-      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand" onClick={onPasskeyUnlock}>改用 Face ID / Passkey</button>}
+      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>改用 Face ID / Passkey</button>}
     </div>;
   }
   return <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-    <Input type="password" className="h-12 rounded-xl bg-panel text-center" value={secret} onChange={(event) => onSecretChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock()} placeholder="本机快速解锁口令" />
-    <Button className="h-12 rounded-xl px-5" disabled={!secret} onClick={onUnlock}>快速解锁</Button>
-    {passkeyRegistered && <Button variant="outline" className="h-12 rounded-xl bg-paper text-warm" onClick={onPasskeyUnlock}>改用 Face ID / Passkey</Button>}
+    <Input type="password" className="h-12 rounded-xl bg-panel text-center" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
+    <Button className="h-12 rounded-xl px-5" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "快速解锁"}</Button>
+    {passkeyRegistered && <Button variant="outline" className="h-12 rounded-xl bg-paper text-warm" disabled={unlocking} onClick={onPasskeyUnlock}>改用 Face ID / Passkey</Button>}
   </div>;
 }
 
-function KeypadButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button type="button" className="h-14 rounded-xl border border-line bg-panel text-xl font-medium text-ink active:bg-tag" onClick={onClick}>{label}</button>;
+function KeypadButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return <button type="button" className="h-14 rounded-xl border border-line bg-panel text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label}</button>;
 }
