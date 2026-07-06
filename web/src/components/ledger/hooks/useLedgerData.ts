@@ -142,7 +142,7 @@ export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKe
   return previousKey !== nextKey;
 }
 
-export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
   if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
   const initialCache = initialCacheRef.current;
@@ -262,7 +262,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
           writeLedgerCache(range, maskSensitiveLedgerCache(fresh), responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);
         }
-        onGitStatusRefresh();
       } finally {
         if (!options.background) setLoadingFresh(false);
         freshInFlightRef.current.delete(inFlightKey);
@@ -272,7 +271,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     const promise = run();
     freshInFlightRef.current.set(inFlightKey, promise);
     return promise;
-  }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked, valuationCurrency]);
+  }, [applyCache, onSensitiveLocked, unlocked, valuationCurrency]);
 
   const load = useCallback(async (forceFresh = false, options: LedgerLoadOptions = {}) => {
     const loadSequence = loadSequenceRef.current + 1;

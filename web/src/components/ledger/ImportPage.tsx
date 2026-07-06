@@ -757,7 +757,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />{(commitResult.count ?? 0) > 0 ? `已写入 ${commitResult.count} 条交易` : "已归档账单"}</div>
-                      <div className="mt-1 text-stone">账单已经写入 ledger，可以继续保存到 Git。</div>
+                      <div className="mt-1 text-stone">账单已经写入 ledger，并会随本次写入自动提交。</div>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
                       {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -1214,7 +1214,7 @@ function CommitResultDetails({ result }: { result: CommitResult }) {
       {result.outputFile ? <div className="break-all">导入文件：{result.outputFile}</div> : null}
       {result.includeFile ? <div className="break-all">月份 include：{result.includeFile}</div> : null}
       {result.documentFile ? <div className="break-all">原始账单 document：{result.documentFile}</div> : null}
-      <div className="text-stone">如需保存到远端，请点击右上角「保存到 Git」。</div>
+      <div className="text-stone">写入会自动提交到账本仓库；读模型会在索引更新后同步最新结果。</div>
     </div>
   );
 }

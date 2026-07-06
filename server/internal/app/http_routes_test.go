@@ -217,7 +217,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/passkey/register/verify":      true,
 		"GET /api/ledger/bootstrap":              true,
 		"GET /api/ledger/version":                true,
-		"GET /api/ledger/index-info":            true,
+		"GET /api/ledger/index-info":             true,
 		"GET /api/ledger/entries":                true,
 		"GET /api/ledger/summary":                true,
 		"GET /api/ledger/transactions":           true,
@@ -252,7 +252,6 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ai/chat":                      true,
 		"POST /api/ai/accounts-chat":             true,
 		"GET /api/git/status":                    true,
-		"GET /api/git/diff":                      true,
 		"POST /api/git/pull":                     true,
 		"POST /api/git/commit":                   true,
 		"GET /api/push/subscription":             true,
@@ -332,7 +331,6 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		{http.MethodGet, "/api/ledger/editor/files", ""},
 		{http.MethodGet, "/api/ledger/editor/file?path=main.bean", ""},
 		{http.MethodGet, "/api/git/status", ""},
-		{http.MethodGet, "/api/git/diff?path=main.bean", ""},
 		{http.MethodPost, "/api/git/pull", ""},
 	} {
 		res := requestWithCookies(router, route.method, route.path, route.body, cookies)
