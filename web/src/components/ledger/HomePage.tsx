@@ -97,22 +97,28 @@ function useDeferredChartReady(enabled: boolean) {
     if (!element || ready) return;
 
     let idleId: number | null = null;
+    let delayId: number | null = null;
     const markReady = () => setReady(true);
+    const scheduleReady = () => {
+      if (delayId != null || idleId != null) return;
+      delayId = window.setTimeout(() => {
+        delayId = null;
+        if (window.requestIdleCallback) idleId = window.requestIdleCallback(markReady, { timeout: 2400 });
+        else markReady();
+      }, 900);
+    };
     const observer = "IntersectionObserver" in window ? new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) markReady();
+      if (entries.some((entry) => entry.isIntersecting)) scheduleReady();
     }, { rootMargin: "160px" }) : null;
 
     observer?.observe(element);
     if (!observer) {
-      idleId = window.setTimeout(markReady, 600);
-    } else if (window.requestIdleCallback) {
-      idleId = window.requestIdleCallback(markReady, { timeout: 2200 });
-    } else {
-      idleId = window.setTimeout(markReady, 1800);
+      scheduleReady();
     }
 
     return () => {
       observer?.disconnect();
+      if (delayId != null) window.clearTimeout(delayId);
       if (idleId != null) {
         if (window.cancelIdleCallback) window.cancelIdleCallback(idleId);
         else window.clearTimeout(idleId);

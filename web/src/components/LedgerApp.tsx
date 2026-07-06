@@ -156,6 +156,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
   const page = pageProp ?? pageFromPathname(pathname);
+  const homeSecondaryReady = useDeferredIdleReady(page === "home", 1200);
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
@@ -214,7 +215,20 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   useEffect(() => {
     if (!authed || !online) return;
-    preloadOfflineCoreRoutes();
+    let idleId: number | null = null;
+    let timeoutId: number | null = null;
+    const preload = () => preloadOfflineCoreRoutes();
+    timeoutId = window.setTimeout(() => {
+      if (window.requestIdleCallback) idleId = window.requestIdleCallback(preload, { timeout: 6000 });
+      else preload();
+    }, 2500);
+    return () => {
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+      if (idleId != null) {
+        if (window.cancelIdleCallback) window.cancelIdleCallback(idleId);
+        else window.clearTimeout(idleId);
+      }
+    };
   }, [authed, online]);
 
   const handleSensitiveLocked = useCallback(() => {
@@ -707,7 +721,25 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备账本编辑器…" />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); void refreshGitStatus(); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock("账本编辑器已隐藏", "在线编辑会展示完整 Beancount 文件和金额，需要使用 Face ID / Passkey 后查看。"))}
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要使用 Face ID / Passkey 后查看。"))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
-      {(page === "home" || page === "transactions") && (
+      {page === "home" && (homeSecondaryReady ? (
+        <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
+          <LazyTransactionList
+            txns={projectedTxns}
+            accounts={accounts}
+            searchable={false}
+            categoryQuery=""
+            metadataQuery=""
+            searchQuery=""
+            matchMode="prefix"
+            viewMode={txnViewMode}
+            setViewMode={setTxnViewMode}
+            onUpdate={guardedUpdateTransaction}
+            onDelete={guardedDeleteTransaction}
+            onReverse={guardedReverseTransaction}
+          />
+        </Suspense>
+      ) : <RouteFallback label="流水列表稍后加载…" />)}
+      {page === "transactions" && (
         <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
           <LazyTransactionList
             txns={projectedTxns}
@@ -743,6 +775,37 @@ function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" |
   const label = refreshing || state === "refreshing" ? "正在刷新…" : state === "release" ? "松开刷新" : "下拉刷新";
   const top = Math.max(12, Math.min(76, distance));
   return <div className="pointer-events-none fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-olive shadow-sm backdrop-blur" style={{ top: `calc(${top}px + env(safe-area-inset-top))` }}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 text-brand ${refreshing || state === "refreshing" ? "animate-spin" : ""}`} />{label}</div>;
+}
+
+function useDeferredIdleReady(enabled: boolean, delayMs: number) {
+  const [ready, setReady] = useState(!enabled);
+
+  useEffect(() => {
+    if (!enabled) {
+      setReady(true);
+      return;
+    }
+
+    setReady(false);
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const markReady = () => setReady(true);
+
+    timeoutId = window.setTimeout(() => {
+      if (window.requestIdleCallback) idleId = window.requestIdleCallback(markReady, { timeout: 2400 });
+      else markReady();
+    }, delayMs);
+
+    return () => {
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+      if (idleId != null) {
+        if (window.cancelIdleCallback) window.cancelIdleCallback(idleId);
+        else window.clearTimeout(idleId);
+      }
+    };
+  }, [delayMs, enabled]);
+
+  return ready;
 }
 
 function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {
