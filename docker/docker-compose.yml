@@ -1,6 +1,8 @@
 services:
   ledger-web:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: ledger-web
     restart: unless-stopped
     ports:
