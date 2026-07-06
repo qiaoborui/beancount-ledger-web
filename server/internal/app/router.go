@@ -15,7 +15,7 @@ func (s *Server) ledgerVersion(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	version, err := s.cache.Version()
+	version, err := s.readService.Version(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -31,7 +31,7 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 	} else if !requireAuth(c) {
 		return nil, false
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return nil, false
@@ -53,8 +53,12 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 }
 
 func (s *Server) ledgerEntries(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
+		return
+	}
+	snapshot, err := s.ledgerSnapshot(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, BeanLoadResultFromEntries(snapshot.BeanEntries, snapshot.BeanErrors))
@@ -170,6 +174,9 @@ func (s *Server) appendAccount(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.accounts.append") {
+		return
+	}
 	var input AccountInput
 	if !bindJSON(c, &input) {
 		return
@@ -184,6 +191,9 @@ func (s *Server) appendAccount(c *gin.Context) {
 
 func (s *Server) applyAccountOperations(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.accounts.operations") {
 		return
 	}
 	var input AccountOperationsRequest
@@ -268,6 +278,9 @@ func (s *Server) appendEntry(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.append") {
+		return
+	}
 	var entry LedgerEntry
 	if !bindJSON(c, &entry) {
 		return
@@ -282,6 +295,9 @@ func (s *Server) appendEntry(c *gin.Context) {
 
 func (s *Server) appendBatch(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.append-batch") {
 		return
 	}
 	var input AppendBatchRequest
@@ -300,6 +316,9 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.reverse") {
+		return
+	}
 	var input ReverseTransactionRequest
 	if !bindJSON(c, &input) {
 		return
@@ -314,6 +333,9 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 
 func (s *Server) updateTransaction(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.update") {
 		return
 	}
 	var input UpdateTransactionRequest
@@ -331,6 +353,9 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.delete") {
+		return
+	}
 	var input DeleteTransactionRequest
 	if !bindJSON(c, &input) {
 		return
@@ -344,6 +369,9 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 
 func (s *Server) reconcile(c *gin.Context) {
 	if !requireSensitive(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.reconciliation.write") {
 		return
 	}
 	var input ReconcileRequest

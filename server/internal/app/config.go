@@ -20,6 +20,8 @@ type Config struct {
 	RuntimeStore     string
 	RuntimeFileStore string
 	DatabaseURL      string
+	LedgerReadModel  string
+	ReadModelStrict  bool
 }
 
 func LoadConfig() Config {
@@ -44,6 +46,7 @@ func LoadConfig() Config {
 	if runtimeFileStore == "" {
 		runtimeFileStore = runtimeStore
 	}
+	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
 	return Config{
 		AppRoot:          "",
 		LedgerRoot:       filepath.Clean(ledgerRoot),
@@ -58,6 +61,8 @@ func LoadConfig() Config {
 		RuntimeStore:     runtimeStore,
 		RuntimeFileStore: runtimeFileStore,
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		LedgerReadModel:  ledgerReadModel,
+		ReadModelStrict:  envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
 	}
 }
 

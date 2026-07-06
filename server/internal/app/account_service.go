@@ -8,8 +8,9 @@ var (
 )
 
 type AccountService struct {
-	cache  *LedgerCache
-	writer *LedgerWriter
+	cache    *LedgerCache
+	writer   *LedgerWriter
+	snapshot func() (*LedgerSnapshot, error)
 }
 
 type AccountDetailResult struct {
@@ -24,11 +25,18 @@ type AccountDetailResult struct {
 }
 
 func NewAccountService(cache *LedgerCache, writer *LedgerWriter) *AccountService {
-	return &AccountService{cache: cache, writer: writer}
+	return NewAccountServiceWithSnapshot(cache, writer, cache.Snapshot)
+}
+
+func NewAccountServiceWithSnapshot(cache *LedgerCache, writer *LedgerWriter, snapshot func() (*LedgerSnapshot, error)) *AccountService {
+	if snapshot == nil {
+		snapshot = cache.Snapshot
+	}
+	return &AccountService{cache: cache, writer: writer, snapshot: snapshot}
 }
 
 func (s *AccountService) List() ([]Account, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.snapshot()
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +59,7 @@ func (s *AccountService) Detail(account string) (AccountDetailResult, error) {
 	if account == "" {
 		return AccountDetailResult{}, ErrAccountRequired
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.snapshot()
 	if err != nil {
 		return AccountDetailResult{}, err
 	}
@@ -72,7 +80,7 @@ func (s *AccountService) Detail(account string) (AccountDetailResult, error) {
 }
 
 func (s *AccountService) Statuses() ([]AccountStatus, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.snapshot()
 	if err != nil {
 		return nil, err
 	}
