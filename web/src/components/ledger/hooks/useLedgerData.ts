@@ -64,6 +64,10 @@ export type LedgerBootstrapResponse = {
   sensitiveUnlocked?: boolean;
 };
 
+type LedgerLoadOptions = {
+  sensitiveUnlocked?: boolean;
+};
+
 function transactionHasIncome(txn: Txn) {
   return txn.postings.some((posting) => posting.account.startsWith("Income:"));
 }
@@ -151,6 +155,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialRuntimeCache?.savedAt ?? null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const loadSequenceRef = useRef(0);
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
   const offlineNoticeKeyRef = useRef<string | null>(null);
 
@@ -220,11 +225,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     } : null);
   }, []);
 
-  const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean } = {}) => {
+  const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean; clientUnlocked?: boolean } = {}) => {
+    const clientUnlocked = options.clientUnlocked ?? unlocked;
     const params = new URLSearchParams(timeRangeToParams(range));
     params.set("valuationCurrency", valuationCurrency);
     const query = params.toString();
-    const inFlightKey = `${query}:${unlocked ? "unlocked" : "locked"}`;
+    const inFlightKey = `${query}:${clientUnlocked ? "unlocked" : "locked"}`;
     const existing = freshInFlightRef.current.get(inFlightKey);
     if (existing) return existing;
 
@@ -233,9 +239,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       try {
         const data = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${query}`);
         const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
-        if (unlocked && !serverSensitiveUnlocked) onSensitiveLocked();
+        if (clientUnlocked && !serverSensitiveUnlocked) {
+          latestContextRef.current = { range, unlocked: false, valuationCurrency };
+          onSensitiveLocked();
+        }
         const version = data.ledgerVersion ?? await fetchLedgerVersion();
-        const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, unlocked, valuationCurrency, version);
+        const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, clientUnlocked, valuationCurrency, version);
         applyCache(fresh, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
         if (cacheUnlocked) {
           void writeEncryptedLedgerCache(range, fresh, responseValuationCurrency);
@@ -254,7 +263,10 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     return promise;
   }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked, valuationCurrency]);
 
-  const load = useCallback(async (forceFresh = false) => {
+  const load = useCallback(async (forceFresh = false, options: LedgerLoadOptions = {}) => {
+    const loadSequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = loadSequence;
+    const isCurrentLoad = () => loadSequenceRef.current === loadSequence;
     let me: { authenticated?: boolean; sensitiveUnlocked?: boolean };
     let passkey: { registered?: boolean };
     try {
@@ -262,8 +274,10 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
         fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
       ]);
+      if (!isCurrentLoad()) return;
       offlineNoticeKeyRef.current = null;
     } catch (error) {
+      if (!isCurrentLoad()) return;
       if (offlineOrNetworkError(error) && hasKnownLedgerAuthentication()) {
         rememberLedgerAuthenticated();
         onAuthChange(true);
@@ -290,9 +304,11 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     onPasskeyRegistered(hasPasskey);
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
+    const sensitiveUnlocked = authenticated && Boolean(options.sensitiveUnlocked ?? me.sensitiveUnlocked) && !sessionStorage.getItem("ledger_locked_at");
+    latestContextRef.current = { range: timeRange, unlocked: sensitiveUnlocked, valuationCurrency };
     if (authenticated) {
       rememberLedgerAuthenticated();
-      if (me.sensitiveUnlocked && !sessionStorage.getItem("ledger_locked_at")) {
+      if (sensitiveUnlocked) {
         sessionStorage.setItem("ledger_unlocked", "1");
         onSensitiveUnlockChange(true);
       } else {
@@ -303,30 +319,33 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     else {
       forgetLedgerAuthentication();
       onSensitiveUnlockChange(false);
+      latestContextRef.current = { range: timeRange, unlocked: false, valuationCurrency };
       clearLedgerData();
     }
     if (!authenticated) return;
 
     if (!forceFresh) {
-      const runtimeCached = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
+      const runtimeCached = readRuntimeLedgerCache(timeRange, sensitiveUnlocked, valuationCurrency);
       if (runtimeCached) {
-        applyCache(runtimeCached);
+        applyCache(runtimeCached, sensitiveUnlocked);
         return;
       }
     }
 
-    if (!forceFresh && unlocked) {
+    if (!forceFresh && sensitiveUnlocked) {
       const currentVersion = await fetchLedgerVersion();
+      if (!isCurrentLoad()) return;
       const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
+      if (!isCurrentLoad()) return;
       if (cached?.sensitiveCached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
         const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
-        applyCache(cached);
+        applyCache(cached, true);
         freshLedgerCacheKeys.add(cacheKey);
         return;
       }
     }
 
-    await fetchFreshLedger(timeRange);
+    await fetchFreshLedger(timeRange, { clientUnlocked: sensitiveUnlocked });
   }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onSensitiveUnlockChange, unlocked, valuationCurrency]);
 
   const unlockOfflineSensitiveCache = useCallback(async (secret: string) => {
