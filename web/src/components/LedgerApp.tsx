@@ -203,6 +203,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
   const hasPasskey = passkeyRegistered === true;
   const passkeyStatusLoaded = passkeyRegistered !== null;
+  useEffect(() => {
+    fetchLedgerIndexInfo().then(setIndexInfo).catch(() => setIndexInfo(null));
+  }, []);
+
   const { unlocked, setUnlocked } = useLedgerLock({ passkeyRegistered: hasPasskey, authed });
   useEffect(() => {
     if (unlocked) revealAllAmounts();
