@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -24,6 +25,14 @@ func (s *Server) ledgerVersion(c *gin.Context) {
 }
 
 func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool) {
+	return s.snapshotWithLoader(c, sensitive, s.ledgerSnapshot)
+}
+
+func (s *Server) snapshotLite(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool) {
+	return s.snapshotWithLoader(c, sensitive, s.ledgerSnapshotLite)
+}
+
+func (s *Server) snapshotWithLoader(c *gin.Context, sensitive bool, load func(context.Context) (*LedgerSnapshot, error)) (*LedgerSnapshot, bool) {
 	if sensitive {
 		if !requireSensitive(c) {
 			return nil, false
@@ -31,7 +40,7 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 	} else if !requireAuth(c) {
 		return nil, false
 	}
-	snapshot, err := s.ledgerSnapshot(c.Request.Context())
+	snapshot, err := load(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return nil, false
@@ -91,7 +100,7 @@ func (s *Server) transactions(c *gin.Context) {
 }
 
 func (s *Server) balances(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}
@@ -112,7 +121,7 @@ func (s *Server) incomeStatement(c *gin.Context) {
 }
 
 func (s *Server) dashboard(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}
@@ -241,7 +250,7 @@ func (s *Server) accountStatus(c *gin.Context) {
 }
 
 func (s *Server) reconciliation(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}

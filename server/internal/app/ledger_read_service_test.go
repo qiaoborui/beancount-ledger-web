@@ -28,6 +28,37 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	}
 }
 
+func TestBuildLedgerTransactionsFromIndexedRangeRespectSensitiveUnlock(t *testing.T) {
+	txns := []Transaction{
+		{
+			Date: "2026-05-31", Payee: "Employer",
+			Postings: []Posting{
+				{Account: "Assets:Cash", Amount: 100000, Currency: "CNY"},
+				{Account: "Income:Salary", Amount: -100000, Currency: "CNY"},
+			},
+		},
+		{
+			Date: "2026-05-01", Payee: "Cafe",
+			Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 1200, Currency: "CNY"},
+				{Account: "Assets:Cash", Amount: -1200, Currency: "CNY"},
+			},
+		},
+	}
+
+	locked := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", false)
+	lockedTxns := locked["transactions"].([]Transaction)
+	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
+		t.Fatalf("direct indexed feed should hide income transactions: %#v", lockedTxns)
+	}
+
+	unlocked := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", true)
+	unlockedTxns := unlocked["transactions"].([]Transaction)
+	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
+		t.Fatalf("direct indexed feed should preserve database order: %#v", unlockedTxns)
+	}
+}
+
 func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 	cache := NewLedgerCache(testLedger(t))
 	snapshot, err := cache.Snapshot()
@@ -36,6 +67,9 @@ func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 	}
 	if snapshot.RawBalances["Assets:Cash"]["CNY"] != 98800 {
 		t.Fatalf("raw balances not cached correctly: %#v", snapshot.RawBalances)
+	}
+	if snapshot.transactionsAsc == nil || snapshot.transactionsDesc == nil {
+		t.Fatal("transaction sort views should be prepared with the snapshot")
 	}
 	if len(snapshotTransactionsAsc(snapshot)) != 2 || snapshotTransactionsAsc(snapshot)[0].Payee != "Cafe" || snapshotTransactionsAsc(snapshot)[1].Payee != "Employer" {
 		t.Fatalf("ascending transaction cache changed order: %#v", snapshotTransactionsAsc(snapshot))
@@ -127,6 +161,19 @@ func BenchmarkBuildLedgerTransactionsCached(b *testing.B) {
 	}
 }
 
+func BenchmarkBuildLedgerTransactionsFromIndexedRange(b *testing.B) {
+	snapshot := benchmarkLedgerSnapshot(2000)
+	txns := snapshotTransactionsDesc(snapshot)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		payload := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", true)
+		if len(payload["transactions"].([]Transaction)) != len(snapshot.Transactions) {
+			b.Fatal("missing transactions")
+		}
+	}
+}
+
 func BenchmarkFilterLedgerTransactionsSortEachCall(b *testing.B) {
 	snapshot := benchmarkLedgerSnapshot(2000)
 
@@ -156,5 +203,6 @@ func benchmarkLedgerSnapshot(count int) *LedgerSnapshot {
 			Source: TransactionSource{Line: i + 1},
 		})
 	}
+	prepareLedgerSnapshot(snapshot)
 	return snapshot
 }

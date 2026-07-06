@@ -1,11 +1,11 @@
 package app
 
 import (
-	"strings"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/gzip"
@@ -40,7 +40,7 @@ func NewRouter(cfg Config) *gin.Engine {
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
 	readService := NewLedgerReadServiceWithIndex(cache, indexStore, indexStoreErr, cfg.ReadModelStrict)
 	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, func() (*LedgerSnapshot, error) {
-		return readService.Snapshot(context.Background())
+		return readService.SnapshotLite(context.Background())
 	}), readService: readService, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
@@ -168,7 +168,7 @@ func (s *Server) health(c *gin.Context) {
 			"ledgerVersion":       revision.LedgerVersion.Version,
 			"ledgerVersionFiles":  revision.LedgerVersion.FileCount,
 			"ledgerIndexedAtUnix": revision.IndexedAt.Unix(),
-			"ledgerIndexGitSHA":    revision.GitSHA,
+			"ledgerIndexGitSHA":   revision.GitSHA,
 		}
 		if err != nil {
 			body["error"] = err.Error()
@@ -201,7 +201,6 @@ func (s *Server) health(c *gin.Context) {
 	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
 }
 
-
 func (s *Server) indexInfo(c *gin.Context) {
 	if s.indexStore == nil {
 		c.JSON(http.StatusOK, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false})
@@ -213,14 +212,14 @@ func (s *Server) indexInfo(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"readModel":    s.cfg.LedgerReadModel,
-		"enabled":      true,
-		"active":       indexed,
-		"gitSHA":       revision.GitSHA,
-		"source":       sanitizeLedgerIndexSource(s.cfg),
-		"version":      revision.LedgerVersion.Version,
-		"fileCount":    revision.LedgerVersion.FileCount,
-		"indexedAt":    revision.IndexedAt.UTC().Format(time.RFC3339),
+		"readModel": s.cfg.LedgerReadModel,
+		"enabled":   true,
+		"active":    indexed,
+		"gitSHA":    revision.GitSHA,
+		"source":    sanitizeLedgerIndexSource(s.cfg),
+		"version":   revision.LedgerVersion.Version,
+		"fileCount": revision.LedgerVersion.FileCount,
+		"indexedAt": revision.IndexedAt.UTC().Format(time.RFC3339),
 	})
 }
 
