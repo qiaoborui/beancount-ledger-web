@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"context"
 	"fmt"
 	"net/http"
@@ -160,7 +161,7 @@ func (s *Server) health(c *gin.Context) {
 			"ledgerReadModel":     s.cfg.LedgerReadModel,
 			"readModelStrict":     s.cfg.ReadModelStrict,
 			"ledgerIndexActive":   indexed,
-			"ledgerIndexSource":   ledgerIndexSourceKey(s.cfg),
+			"ledgerIndexSource":   sanitizeLedgerIndexSource(s.cfg),
 			"runtimeStore":        s.cfg.RuntimeStore,
 			"runtimeFileStore":    s.cfg.RuntimeFileStore,
 			"runtimeDirRequired":  filesystemRuntimeBackend(s.cfg.RuntimeStore) || filesystemRuntimeBackend(s.cfg.RuntimeFileStore),
@@ -216,11 +217,22 @@ func (s *Server) indexInfo(c *gin.Context) {
 		"enabled":      true,
 		"active":       indexed,
 		"gitSHA":       revision.GitSHA,
-		"source":       ledgerIndexSourceKey(s.cfg),
+		"source":       sanitizeLedgerIndexSource(s.cfg),
 		"version":      revision.LedgerVersion.Version,
 		"fileCount":    revision.LedgerVersion.FileCount,
 		"indexedAt":    revision.IndexedAt.UTC().Format(time.RFC3339),
 	})
+}
+
+func sanitizeLedgerIndexSource(cfg Config) string {
+	source := ledgerIndexSourceKey(cfg)
+	// Strip credentials from URLs (e.g. https://token@host -> https://host)
+	if idx := strings.Index(source, "@"); idx != -1 {
+		if protoEnd := strings.Index(source, "://"); protoEnd != -1 && protoEnd < idx {
+			source = source[:protoEnd+3] + source[idx+1:]
+		}
+	}
+	return source
 }
 
 func filesystemRuntimeBackend(value string) bool {
