@@ -29,7 +29,7 @@ func (s *LedgerReadService) Snapshot(ctx context.Context) (*LedgerSnapshot, erro
 		return nil, s.indexErr
 	}
 	if s.indexStore != nil {
-		indexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		snapshot, ok, err := s.indexStore.ActiveSnapshot(indexCtx)
 		if err != nil {
@@ -53,7 +53,7 @@ func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) 
 		return LedgerVersion{}, s.indexErr
 	}
 	if s.indexStore != nil {
-		indexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		revision, ok, err := s.indexStore.ActiveRevision(indexCtx)
 		if err != nil {

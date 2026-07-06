@@ -1,6 +1,7 @@
 package app
 
 import (
+	"golang.org/x/sync/errgroup"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -204,20 +205,35 @@ func (s *LedgerIndexStore) ActiveSnapshot(ctx context.Context) (*LedgerSnapshot,
 	if err := json.Unmarshal(revision.beanErrors, &snapshot.BeanErrors); err != nil {
 		return nil, false, err
 	}
-	if snapshot.Accounts, err = loadIndexRows[Account](ctx, s.db, `SELECT payload FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revision.ID); err != nil {
-		return nil, false, err
-	}
-	if snapshot.Transactions, err = loadIndexRows[Transaction](ctx, s.db, `SELECT payload FROM ledger_index_transactions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID); err != nil {
-		return nil, false, err
-	}
-	if snapshot.BalanceAssertions, err = loadIndexRows[BalanceAssertion](ctx, s.db, `SELECT payload FROM ledger_index_balance_assertions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID); err != nil {
-		return nil, false, err
-	}
-	if snapshot.Prices, err = loadIndexRows[Price](ctx, s.db, `SELECT payload FROM ledger_index_prices WHERE revision_id = $1 ORDER BY ordinal`, revision.ID); err != nil {
-		return nil, false, err
-	}
-	snapshot.Commodities, err = loadIndexCommodities(ctx, s.db, revision.ID)
-	if err != nil {
+
+	// Load indexed rows in parallel to amortise Neon round-trip latency.
+	var g errgroup.Group
+	g.Go(func() error {
+		var loadErr error
+		snapshot.Accounts, loadErr = loadIndexRows[Account](ctx, s.db, `SELECT payload FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revision.ID)
+		return loadErr
+	})
+	g.Go(func() error {
+		var loadErr error
+		snapshot.Transactions, loadErr = loadIndexRows[Transaction](ctx, s.db, `SELECT payload FROM ledger_index_transactions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		return loadErr
+	})
+	g.Go(func() error {
+		var loadErr error
+		snapshot.BalanceAssertions, loadErr = loadIndexRows[BalanceAssertion](ctx, s.db, `SELECT payload FROM ledger_index_balance_assertions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		return loadErr
+	})
+	g.Go(func() error {
+		var loadErr error
+		snapshot.Prices, loadErr = loadIndexRows[Price](ctx, s.db, `SELECT payload FROM ledger_index_prices WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		return loadErr
+	})
+	g.Go(func() error {
+		var loadErr error
+		snapshot.Commodities, loadErr = loadIndexCommodities(ctx, s.db, revision.ID)
+		return loadErr
+	})
+	if err := g.Wait(); err != nil {
 		return nil, false, err
 	}
 	snapshot.RawBalances = CurrentBalances(snapshot.Transactions)
