@@ -11,7 +11,12 @@ const webConfig = JSON.parse(readFileSync(new URL("../../vercel.json", import.me
 
 describe("Vercel services routing", () => {
   it("routes API traffic to the backend service in the same deployment", () => {
-    expect(rootConfig.services?.frontend).toEqual(expect.objectContaining({ root: "web/" }));
+    expect(rootConfig.services?.frontend).toEqual(
+      expect.objectContaining({
+        root: "web/",
+        rewrites: [{ source: "/(.*)", destination: "/index.html" }],
+      }),
+    );
     expect(rootConfig.services?.backend).toEqual(
       expect.objectContaining({ root: ".", entrypoint: "Dockerfile.vercel" }),
     );
@@ -22,6 +27,13 @@ describe("Vercel services routing", () => {
         { source: "/(.*)", destination: { service: "frontend" } },
       ]),
     );
+  });
+
+  it("falls back browser-history routes to the frontend index inside each frontend service", () => {
+    const spaFallback = { source: "/(.*)", destination: "/index.html" };
+
+    expect(rootConfig.services?.frontend?.rewrites).toEqual(expect.arrayContaining([spaFallback]));
+    expect(webConfig.rewrites).toEqual(expect.arrayContaining([spaFallback]));
   });
 
   it("does not keep the standalone frontend pointed at production APIs", () => {
