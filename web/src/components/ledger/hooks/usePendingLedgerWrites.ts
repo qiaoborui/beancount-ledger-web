@@ -154,7 +154,7 @@ export async function syncOperation(operation: PendingLedgerOperation) {
   if (!res.ok) throw new Error(data.error || "删除同步失败");
 }
 
-export function usePendingLedgerWrites({ load, refreshGitStatus, showToast, ledgerVersion }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; ledgerVersion?: LedgerVersion | null }) {
+export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; ledgerVersion?: LedgerVersion | null }) {
   const [pendingOperations, setPendingOperations] = useState<PendingLedgerOperation[]>([]);
   const [syncingPendingWrites, setSyncingPendingWrites] = useState(false);
 
@@ -255,14 +255,13 @@ export function usePendingLedgerWrites({ load, refreshGitStatus, showToast, ledg
       if (syncedCount > 0) {
         showToast("success", remaining.length ? `已同步 ${syncedCount} 条，仍有 ${remaining.length} 条待处理` : `已同步 ${syncedCount} 条待同步操作`);
         await load(true);
-        await refreshGitStatus();
       } else {
         showToast(interruptedMessage ? "error" : "info", interruptedMessage || `仍有 ${remaining.length} 条待处理`);
       }
     } finally {
       setSyncingPendingWrites(false);
     }
-  }, [load, persist, refreshGitStatus, showToast, syncingPendingWrites]);
+  }, [load, persist, showToast, syncingPendingWrites]);
 
   useEffect(() => {
     const syncWhenOnline = () => {
