@@ -17,6 +17,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	app.StartLedgerScheduler(cfg)
+	app.StartGitHubEventsPoller(cfg)
+
 	interval := indexInterval()
 	if interval > 0 {
 		log.Printf("ledger indexer running every %s", interval)

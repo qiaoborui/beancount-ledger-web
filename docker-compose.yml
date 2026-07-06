@@ -1,0 +1,72 @@
+services:
+  ledger-web:
+    build: .
+    container_name: ledger-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # ── Ledger source ──
+      # For a local git-cloned private ledger, mount it and set LEDGER_ROOT.
+      # The compose file defaults to the example preview ledger.
+      - LEDGER_ROOT=/data/ledger
+      - LEDGER_STORAGE=filesystem
+
+      # ── Git remote sync (optional) ──
+      # Uncomment and configure for remote_git mode:
+      # - LEDGER_STORAGE=remote_git
+      # - LEDGER_GIT_REMOTE=https://github.com/you/your-ledger.git
+      # - LEDGER_GIT_BRANCH=main
+      # - LEDGER_GIT_SCHEDULER=true
+      # - LEDGER_GIT_PULL_INTERVAL_MINUTES=15
+
+      # ── GitHub Events polling (optional, for near-real-time sync) ──
+      # - LEDGER_GITHUB_OWNER=you
+      # - LEDGER_GITHUB_REPO=your-ledger
+      # - LEDGER_GITHUB_TOKEN=ghp_xxx
+      # - LEDGER_GIT_EVENTS_POLL_SECONDS=30
+
+      # ── Git author ──
+      - LEDGER_GIT_AUTHOR_NAME=Ledger
+      - LEDGER_GIT_AUTHOR_EMAIL=ledger@localhost
+
+      # ── Runtime state ──
+      - RUNTIME_DIR=/data/runtime
+      - RUNTIME_STORE=filesystem
+      - RUNTIME_FILE_STORE=filesystem
+
+      # ── Read model ──
+      - LEDGER_READ_MODEL=files
+      # - LEDGER_READ_MODEL=postgres
+      # - DATABASE_URL=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+
+      # ── Optional ──
+      # - LEDGER_READ_MODEL_STRICT=false
+      # - PPROF_ADDR=:6060
+
+    volumes:
+      # Mount your private ledger repo. Defaults to the preview example.
+      - ./examples/preview-ledger:/data/ledger:ro
+      # For a real private ledger, replace the above with:
+      # - /home/borui/beancount-ledger:/data/ledger:rw
+
+      # Persist runtime state (passkeys, notifications, locks).
+      - ledger-runtime:/data/runtime
+
+  # ── Optional: Postgres for read model ──
+  # postgres:
+  #   image: postgres:17-alpine
+  #   container_name: ledger-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     - POSTGRES_USER=ledger
+  #     - POSTGRES_PASSWORD=ledger
+  #     - POSTGRES_DB=ledger
+  #   volumes:
+  #     - ledger-pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+volumes:
+  ledger-runtime:
+  # ledger-pgdata:
