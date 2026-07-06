@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,12 @@ type LedgerReadService struct {
 	indexStore *LedgerIndexStore
 	indexErr   error
 	strict     bool
+
+	mu              sync.Mutex
+	cachedVersion   string
+	cachedSnapshot  *LedgerSnapshot
+	cachedRevision LedgerIndexRevision
+	cachedRevAt    time.Time
 }
 
 func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
@@ -24,6 +31,31 @@ func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore *LedgerIndexSt
 	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict}
 }
 
+// revisionCacheTTL controls how often we re-query ActiveRevision.
+// The indexer runs every 5 min; a 10s TTL avoids redundant Neon queries.
+const revisionCacheTTL = 10 * time.Second
+
+func (s *LedgerReadService) cachedActiveRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
+	s.mu.Lock()
+	if time.Since(s.cachedRevAt) < revisionCacheTTL {
+		rev := s.cachedRevision
+		s.mu.Unlock()
+		return rev, rev.ID != 0, nil
+	}
+	s.mu.Unlock()
+
+	rev, ok, err := s.indexStore.ActiveRevision(ctx)
+	if err != nil || !ok {
+		return rev, ok, err
+	}
+
+	s.mu.Lock()
+	s.cachedRevision = rev
+	s.cachedRevAt = time.Now()
+	s.mu.Unlock()
+	return rev, true, nil
+}
+
 func (s *LedgerReadService) Snapshot(ctx context.Context) (*LedgerSnapshot, error) {
 	if s.indexErr != nil {
 		return nil, s.indexErr
@@ -31,11 +63,36 @@ func (s *LedgerReadService) Snapshot(ctx context.Context) (*LedgerSnapshot, erro
 	if s.indexStore != nil {
 		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		snapshot, ok, err := s.indexStore.ActiveSnapshot(indexCtx)
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			if s.strict {
+				return nil, ErrLedgerReadModelUnavailable
+			}
+			return s.cache.Snapshot()
+		}
+		// Return cached snapshot when version hasn't changed.
+		s.mu.Lock()
+		if s.cachedSnapshot != nil && s.cachedVersion == revision.LedgerVersion.Version {
+			cached := s.cachedSnapshot
+			s.mu.Unlock()
+			return cached, nil
+		}
+		s.mu.Unlock()
+		// Version changed — reload full snapshot.
+		snapCtx, snapCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer snapCancel()
+		snapshot, ok, err := s.indexStore.ActiveSnapshot(snapCtx)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
+			s.mu.Lock()
+			s.cachedSnapshot = snapshot
+			s.cachedVersion = revision.LedgerVersion.Version
+			s.mu.Unlock()
 			return snapshot, nil
 		}
 		if s.strict {
@@ -55,7 +112,7 @@ func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) 
 	if s.indexStore != nil {
 		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		revision, ok, err := s.indexStore.ActiveRevision(indexCtx)
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
 		if err != nil {
 			return LedgerVersion{}, err
 		}
