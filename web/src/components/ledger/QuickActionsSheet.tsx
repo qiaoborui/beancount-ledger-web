@@ -1,12 +1,10 @@
-import { Bot, FileUp, GitBranch, PenLine, RefreshCw, Scale } from "lucide-react";
+import { Bot, FileUp, PenLine, RefreshCw, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "./haptics";
 import { MobileSheet } from "./MobileSheet";
 
 type QuickActionsSheetProps = {
   open: boolean;
-  gitDirty?: boolean;
-  changedFileCount?: number;
   refreshing?: boolean;
   pendingWriteCount?: number;
   syncingPendingWrites?: boolean;
@@ -15,12 +13,11 @@ type QuickActionsSheetProps = {
   onAiEntry: () => void;
   onImport: () => void;
   onReconcile: () => void;
-  onGitSave: () => void;
   onRefresh: () => void;
   onSyncPendingWrites?: () => void;
 };
 
-export function QuickActionsSheet({ open, gitDirty, changedFileCount = 0, refreshing, pendingWriteCount = 0, syncingPendingWrites, onClose, onManualEntry, onAiEntry, onImport, onReconcile, onGitSave, onRefresh, onSyncPendingWrites }: QuickActionsSheetProps) {
+export function QuickActionsSheet({ open, refreshing, pendingWriteCount = 0, syncingPendingWrites, onClose, onManualEntry, onAiEntry, onImport, onReconcile, onRefresh, onSyncPendingWrites }: QuickActionsSheetProps) {
   const run = (action: () => void) => {
     haptic(8);
     action();
@@ -32,7 +29,6 @@ export function QuickActionsSheet({ open, gitDirty, changedFileCount = 0, refres
     { label: "导入账单", description: "导入支付宝 / 微信等账单文件", icon: FileUp, onClick: onImport },
     { label: "对账", description: "核对实际余额并写入断言", icon: Scale, onClick: onReconcile },
     ...(pendingWriteCount > 0 && onSyncPendingWrites ? [{ label: syncingPendingWrites ? "同步中…" : "同步待写入", description: `${pendingWriteCount} 条离线记录待提交`, icon: RefreshCw, onClick: onSyncPendingWrites, disabled: syncingPendingWrites }] : []),
-    { label: "保存到 Git", description: gitDirty && changedFileCount > 0 ? `${changedFileCount} 个文件待提交` : "查看并提交账本变更", icon: GitBranch, onClick: onGitSave },
     { label: refreshing ? "刷新中…" : "刷新账本", description: "同步最新账本数据", icon: RefreshCw, onClick: onRefresh, disabled: refreshing },
   ];
 

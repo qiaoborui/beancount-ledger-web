@@ -8,7 +8,7 @@ function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
+export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
   const [assertion, setAssertion] = useState<BalanceAssertion>({
     kind: "balance",
     date: new Date().toISOString().slice(0, 10),
@@ -30,7 +30,6 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
       haptic([6, 24, 10]);
       showToast("success", "余额断言已写入");
       load(true);
-      refreshGitStatus();
     } catch (error) {
       if (offlineOrNetworkError(error)) {
         enqueuePendingWrites([assertion]);
@@ -60,7 +59,6 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
     haptic(8);
     showToast("success", "冲销交易已写入");
     load(true);
-    refreshGitStatus();
   }
 
   async function reconcileAccount(input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) {
@@ -70,7 +68,6 @@ export function useLedgerMutations({ appendEntry, load, refreshGitStatus, showTo
     haptic([6, 24, 10]);
     showToast("success", data.diff === 0 ? "余额断言已写入" : "调整分录和余额断言已写入");
     load(true);
-    refreshGitStatus();
   }
 
   return { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount };

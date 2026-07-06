@@ -59,7 +59,7 @@ function PreviewCard({ entry, index, busy, onRemove }: { entry: ParsedTransactio
   );
 }
 
-export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSignal = 0 }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; openSignal?: number }) {
+export function AiBookkeepingChat({ load, showToast, openSignal = 0 }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; openSignal?: number }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ChatStatus>("idle");
@@ -172,7 +172,6 @@ export function AiBookkeepingChat({ load, refreshGitStatus, showToast, openSigna
       setStatus("idle");
       showToast("success", `已写入 ${count} 条账本记录`);
       await load(true);
-      await refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setTools((current) => upsertLedgerAiTool(current, { ...writeLedgerTool, status: "error", error: message }));

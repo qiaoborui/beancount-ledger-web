@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronLeft, ChevronRight, Coins, FileCode2, FileUp, GitBranch, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, PiggyBank, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Coins, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, PiggyBank, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { haptic } from "./ledger/haptics";
@@ -41,7 +41,7 @@ function writeSidebarCollapsed(collapsed: boolean) {
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
 }
 
-export function AppShell({ children, pathname, routePending = false, onAdd, onGit, gitDirty, changedFileCount = 0, sensitiveUnlocked = false, passkeyEnabled = false, sensitiveUnlockAvailable = passkeyEnabled, sensitiveUnlockLabel = "解锁", sensitiveUnlockTitle = "使用 Face ID / Passkey 解锁敏感数据", onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; onGit?: () => void; gitDirty?: boolean; changedFileCount?: number; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; sensitiveUnlockAvailable?: boolean; sensitiveUnlockLabel?: string; sensitiveUnlockTitle?: string; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
+export function AppShell({ children, pathname, routePending = false, onAdd, sensitiveUnlocked = false, passkeyEnabled = false, sensitiveUnlockAvailable = passkeyEnabled, sensitiveUnlockLabel = "解锁", sensitiveUnlockTitle = "使用 Face ID / Passkey 解锁敏感数据", onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; sensitiveUnlockAvailable?: boolean; sensitiveUnlockLabel?: string; sensitiveUnlockTitle?: string; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -167,10 +167,6 @@ export function AppShell({ children, pathname, routePending = false, onAdd, onGi
                 {sensitiveUnlocked ? <UnlockKeyhole className="inline h-4 w-4 text-brand" /> : <LockKeyhole className="inline h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "重新隐藏" : sensitiveUnlockLabel}</span>
               </button>
             )}
-            <button onClick={onGit} className="relative rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag">
-              {gitDirty && changedFileCount > 0 && <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-xs text-paper ring-2 ring-panel">{changedFileCount}</span>}
-              <GitBranch className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">保存到 Git</span>
-            </button>
           </div>
         </div>
       </header>

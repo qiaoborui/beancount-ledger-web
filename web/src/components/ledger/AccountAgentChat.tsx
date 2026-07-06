@@ -33,7 +33,7 @@ function nextId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, showToast }: { open: boolean; onClose: () => void; onChanged: () => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function AccountAgentChat({ open, onClose, onChanged, showToast }: { open: boolean; onClose: () => void; onChanged: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
@@ -138,7 +138,6 @@ export function AccountAgentChat({ open, onClose, onChanged, refreshGitStatus, s
       setStatus("idle");
       showToast("success", `已写入 ${count} 个账户操作`);
       await onChanged();
-      await refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setTools((current) => upsertLedgerAiTool(current, { ...writeAccountsTool, status: "error", error: message }));

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -37,35 +36,6 @@ func (s *Server) gitStatus(c *gin.Context) {
 	}
 	changes := parseGitChanges(output)
 	c.JSON(http.StatusOK, gin.H{"status": output, "dirty": len(changes) > 0, "changedFileCount": len(changes), "changes": changes})
-}
-
-func (s *Server) gitDiff(c *gin.Context) {
-	if !requireAuth(c) {
-		return
-	}
-	if s.rejectWorkerOnly(c, "git.diff") {
-		return
-	}
-	if err := ensureLedgerReady(s.cfg); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	available, err := ledgerGitAvailable(s.cfg)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	if !available {
-		errorJSON(c, http.StatusBadRequest, errors.New("Ledger Git is not available for this ledger"))
-		return
-	}
-	path := c.Query("path")
-	diff, truncated, err := ledgerGitDiffForPath(s.cfg, path)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"path": path, "diff": diff, "truncated": truncated})
 }
 
 func (s *Server) gitPull(c *gin.Context) {

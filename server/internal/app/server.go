@@ -126,7 +126,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/ai/accounts-chat", s.aiAccountsChat)
 
 	readOnly30s.GET("/git/status", s.gitStatus)
-	readOnly30s.GET("/git/diff", s.gitDiff)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)
 

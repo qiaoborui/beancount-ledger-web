@@ -7,7 +7,6 @@ export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
 export const loadAiBookkeepingChat = () => import("./AiBookkeepingChat");
 export const loadCommandPalette = () => import("./CommandPalette");
 export const loadEntryModal = () => import("./EntryModal");
-export const loadGitSaveModal = () => import("./GitSaveModal");
 export const loadQuickActionsSheet = () => import("./QuickActionsSheet");
 export const loadImportPage = () => import("./ImportPage");
 export const loadLedgerEditorPage = () => import("./LedgerEditorPage");
