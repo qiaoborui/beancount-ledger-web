@@ -36,7 +36,8 @@ func TestLoadConfigRemoteGitUsesWorkdirCheckout(t *testing.T) {
 
 func TestLoadConfigGitHubAlias(t *testing.T) {
 	t.Setenv("LEDGER_STORAGE", "github")
-	t.Setenv("LEDGER_GIT_REMOTE", "https://github.com/example/ledger.git")
+	t.Setenv("LEDGER_GITHUB_OWNER", "example")
+	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
 	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
 
 	cfg := LoadConfig()
@@ -50,5 +51,18 @@ func TestLoadConfigGitHubAlias(t *testing.T) {
 	}
 	if client.owner != "example" || client.repo != "ledger" {
 		t.Fatalf("github repo=(%q,%q), want example/ledger", client.owner, client.repo)
+	}
+}
+
+func TestGitHubAPIRequiresExplicitRepoConfig(t *testing.T) {
+	cfg := Config{
+		LedgerStorage:     "github_api",
+		LedgerGitRemote:   "https://github.com/example/ledger.git",
+		LedgerGitHubToken: "secret",
+	}
+
+	_, err := newGitHubLedgerClient(cfg)
+	if err == nil {
+		t.Fatal("expected explicit github owner/repo requirement")
 	}
 }

@@ -53,16 +53,10 @@ func githubAPIEnabled(cfg Config) bool {
 func newGitHubLedgerClient(cfg Config) (*githubLedgerClient, error) {
 	owner, repo := strings.TrimSpace(cfg.LedgerGitHubOwner), strings.TrimSpace(cfg.LedgerGitHubRepo)
 	if owner == "" || repo == "" {
-		parsedOwner, parsedRepo := parseGitHubRemote(cfg.LedgerGitRemote)
-		if owner == "" {
-			owner = parsedOwner
-		}
-		if repo == "" {
-			repo = parsedRepo
-		}
-	}
-	if owner == "" || repo == "" {
 		return nil, errors.New("LEDGER_GITHUB_OWNER and LEDGER_GITHUB_REPO are required when LEDGER_STORAGE=github_api")
+	}
+	if strings.TrimSpace(cfg.LedgerGitHubToken) == "" {
+		return nil, errors.New("LEDGER_GITHUB_TOKEN is required when LEDGER_STORAGE=github_api")
 	}
 	branch := strings.TrimSpace(cfg.LedgerGitBranch)
 	if branch == "" {
@@ -80,33 +74,6 @@ func newGitHubLedgerClient(cfg Config) (*githubLedgerClient, error) {
 		client = client.WithAuthToken(cfg.LedgerGitHubToken)
 	}
 	return &githubLedgerClient{cfg: cfg, client: client, owner: owner, repo: strings.TrimSuffix(repo, ".git"), branch: branch}, nil
-}
-
-func parseGitHubRemote(remote string) (string, string) {
-	remote = strings.TrimSpace(remote)
-	if remote == "" {
-		return "", ""
-	}
-	if strings.HasPrefix(remote, "git@github.com:") {
-		path := strings.TrimPrefix(remote, "git@github.com:")
-		return splitGitHubPath(path)
-	}
-	parsed, err := url.Parse(remote)
-	if err != nil {
-		return "", ""
-	}
-	if !strings.EqualFold(parsed.Hostname(), "github.com") {
-		return "", ""
-	}
-	return splitGitHubPath(strings.TrimPrefix(parsed.Path, "/"))
-}
-
-func splitGitHubPath(path string) (string, string) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 {
-		return "", ""
-	}
-	return parts[0], strings.TrimSuffix(parts[1], ".git")
 }
 
 func (c *githubLedgerClient) beginTransaction(ctx context.Context) (*githubLedgerTransaction, error) {

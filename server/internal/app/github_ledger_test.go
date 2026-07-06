@@ -59,6 +59,7 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 		LedgerGitBranch:    "main",
 		LedgerGitHubOwner:  "owner",
 		LedgerGitHubRepo:   "ledger",
+		LedgerGitHubToken:  "token",
 		LedgerGitHubAPIURL: fake.server.URL + "/",
 	}
 	server := &Server{cfg: cfg, writer: NewLedgerWriter(cfg, nil)}
@@ -98,20 +99,6 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 		!strings.Contains(fake.blobs["blob-2"], `include "imports/alipay.bean"`) &&
 		!strings.Contains(fake.blobs["blob-3"], `include "imports/alipay.bean"`) {
 		t.Fatalf("monthly include not written in blobs: %#v", fake.blobs)
-	}
-}
-
-func TestParseGitHubRemote(t *testing.T) {
-	cases := map[string][2]string{
-		"https://github.com/example/ledger.git":       {"example", "ledger"},
-		"https://token@github.com/example/ledger.git": {"example", "ledger"},
-		"git@github.com:example/ledger.git":           {"example", "ledger"},
-	}
-	for remote, want := range cases {
-		owner, repo := parseGitHubRemote(remote)
-		if owner != want[0] || repo != want[1] {
-			t.Fatalf("parseGitHubRemote(%q)=(%q,%q), want %#v", remote, owner, repo, want)
-		}
 	}
 }
 

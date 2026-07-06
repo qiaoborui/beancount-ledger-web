@@ -30,8 +30,9 @@ This project is designed for a **two-repository setup**:
 ```mermaid
 graph LR
     A[Public app repo] --> B[Go API + Vite Web App]
-    B -->|LEDGER_ROOT| C[Private Beancount ledger repo]
-    B -->|RUNTIME_DIR| D[Runtime state]
+    B -->|self-hosted: LEDGER_ROOT| C[Private Beancount ledger repo]
+    B -->|Vercel: GitHub API| C
+    B -->|Postgres| D[Runtime state and read model]
     D --> E[passkeys]
     D --> F[notifications]
     D --> G[web push subscriptions]
@@ -76,14 +77,19 @@ backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
 backend service; every other path routes to the frontend service. Configure
 environment variables in the Vercel dashboard:
 
-- `LEDGER_STORAGE=github_api` — recommended for Vercel + Postgres read model. The API host writes import/editor changes directly to the GitHub repository without cloning the ledger.
-- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name. If omitted, the server can infer them from `LEDGER_GIT_REMOTE` when it is a GitHub URL.
+- `LEDGER_STORAGE=github_api` — required for Vercel + Postgres read model. The API host writes supported ledger changes directly to GitHub without cloning the ledger.
+- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name.
 - `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
-- `RUNTIME_STORE=postgres` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
+- `LEDGER_GIT_BRANCH=main` — branch to read and update through the GitHub API.
+- `RUNTIME_STORE=postgres` / `RUNTIME_FILE_STORE=postgres` — persist passkeys, web push subscriptions, notifications, write locks, and import preview files in Postgres.
 - `DATABASE_URL` — Postgres connection string.
-- `LEDGER_READ_MODEL=postgres` — optional hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
+- `LEDGER_READ_MODEL=postgres` — hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
 - `LEDGER_READ_MODEL_STRICT=true` — default when `LEDGER_READ_MODEL=postgres`; prevents the API host from falling back to local Git checkout and parsing.
 - `LEDGER_INDEX_SOURCE_KEY` — stable namespace shared by the API host and the index worker, for example `personal-ledger#main`.
+
+Do not set `LEDGER_ROOT`, `LEDGER_GIT_REMOTE`, `LEDGER_GIT_WORKDIR`,
+`BEAN_CHECK_BIN`, or `LEDGER_GIT_SCHEDULER` on the Vercel API service. Those
+belong to local/self-hosted deployments or the index worker.
 
 See [web/.env.example](web/.env.example) for the complete list.
 
@@ -98,9 +104,9 @@ See [web/.env.example](web/.env.example) for the complete list.
 
 Important variables:
 
-- `LEDGER_STORAGE=remote_git|github_api` — `remote_git` clones the private ledger locally and runs `bean-check`; `github_api` writes supported import/editor changes directly through the GitHub API without a local clone.
-- `LEDGER_GIT_REMOTE` — your private ledger repository URL (with credentials if needed).
+- `LEDGER_STORAGE=github_api|remote_git|filesystem` — use `github_api` for hosted Vercel API writes, `remote_git` for the local index worker or self-hosted Git sync, and `filesystem` for local ledgers already present on disk.
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `LEDGER_STORAGE=github_api`.
+- `LEDGER_GIT_REMOTE` — private ledger repository URL for `LEDGER_STORAGE=remote_git`; not used by `github_api`.
 - `RUNTIME_STORE=postgres` / `DATABASE_URL` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
 - `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files. Defaults to `RUNTIME_STORE`.
 - `LEDGER_READ_MODEL=files|postgres` — use `postgres` to serve ledger reads from the normalized Postgres read model.
@@ -110,9 +116,9 @@ Important variables:
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin and passkey RP ID.
-- `BEAN_CHECK_BIN` — optional path to `bean-check` if not on `PATH`.
+- `BEAN_CHECK_BIN` — optional path to `bean-check` for local/self-hosted or index worker validation. It is not needed on Vercel API hosts using `github_api`.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
-- `LEDGER_GIT_SCHEDULER` — enable periodic git pull of the private ledger repo.
+- `LEDGER_GIT_SCHEDULER` — enable periodic git pull of the private ledger repo in self-hosted `remote_git` mode.
 
 ### Postgres ledger read model
 
@@ -129,17 +135,23 @@ projection to Postgres, then atomically marks the revision active. `ledger-web`
 can then serve `/api/ledger/*` reads from Postgres with
 `LEDGER_READ_MODEL=postgres`.
 
-The API host needs `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`,
+The Vercel API host needs `DATABASE_URL`, `RUNTIME_STORE=postgres`,
+`RUNTIME_FILE_STORE=postgres`, `LEDGER_READ_MODEL=postgres`,
 `LEDGER_READ_MODEL_STRICT=true`, and the same `LEDGER_INDEX_SOURCE_KEY` as the
 worker. Ledger read endpoints use Postgres only. For hosted writes, set
-`LEDGER_STORAGE=github_api` plus the GitHub repository/token variables; import
+`LEDGER_STORAGE=github_api` plus the explicit GitHub repository/token variables;
+the API no longer infers repository identity from `LEDGER_GIT_REMOTE`. Import
 commit and editor save create GitHub commits directly, mark the read model as
 pending, and the local worker updates Postgres on its next indexing pass. Import
 preview in GitHub API mode does not parse the full ledger or run the ledger-file
 dedup script; instead it dedups against the Postgres read model by statement
 metadata, order IDs, exact transaction signatures, and funding-account postings.
-Review any remaining preview rows before committing. The worker still needs
-`LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`, and any Git credentials.
+Review any remaining preview rows before committing.
+
+The index worker still needs `LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`,
+`LEDGER_GIT_BRANCH`, `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`, and the same
+`LEDGER_INDEX_SOURCE_KEY`. Keep those local checkout variables off the Vercel
+API service.
 
 ## Ledger layout
 
