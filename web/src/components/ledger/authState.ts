@@ -45,7 +45,7 @@ function removeStorage(storage: AuthStateStorage | null | undefined, key: string
 
 export function readInitialLedgerAuthState(env = browserAuthStateEnvironment()): boolean | null {
   if (readStorage(env.sessionStorage, sessionAuthedKey) === "1") return true;
-  if (env.online === false && readStorage(env.localStorage, knownAuthKey) === "1") return true;
+  if (readStorage(env.localStorage, knownAuthKey) === "1") return true;
   return null;
 }
 

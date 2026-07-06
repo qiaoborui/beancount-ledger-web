@@ -19,14 +19,14 @@ describe("ledger auth state", () => {
     expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: true })).toBe(true);
   });
 
-  it("treats a previous confirmed login as authenticated only while offline", () => {
+  it("uses a previous confirmed login as a local-first startup hint", () => {
     const sessionStorage = memoryStorage();
     const localStorage = memoryStorage();
     rememberLedgerAuthenticated({ sessionStorage, localStorage, online: true });
     sessionStorage.removeItem("ledger_authed");
 
     expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: false })).toBe(true);
-    expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: true })).toBeNull();
+    expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: true })).toBe(true);
   });
 
   it("clears the persistent login hint after the server reports unauthenticated", () => {

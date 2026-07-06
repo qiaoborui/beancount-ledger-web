@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
+import { readLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
 import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
@@ -21,6 +21,15 @@ function readRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCu
 
 function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string, cache: LedgerCache) {
   runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked, valuationCurrency), cache };
+}
+
+function readDisplayLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
+  const runtimeCached = readRuntimeLedgerCache(range, unlocked, valuationCurrency);
+  if (runtimeCached) return runtimeCached;
+  const cached = readLedgerCache(range, valuationCurrency);
+  if (!cached) return null;
+  if (!unlocked) return maskSensitiveLedgerCache(cached);
+  return cached.sensitiveCached ? cached : maskSensitiveLedgerCache(cached);
 }
 
 function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
@@ -134,26 +143,28 @@ export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKe
 }
 
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
-  const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
-  const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
-  const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
-  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialRuntimeCache?.accountBalances ?? []);
-  const [txns, setTxns] = useState<Txn[]>(() => initialRuntimeCache?.txns ?? []);
-  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.netWorthRows ?? []);
-  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.monthEndNetWorthRows ?? []);
-  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialRuntimeCache?.netWorthWindows ?? null);
-  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialRuntimeCache?.creditCards ?? []);
-  const [investments, setInvestments] = useState<InvestmentSummary | null>(() => initialRuntimeCache?.investments ?? null);
-  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialRuntimeCache?.reconciliationRows ?? []);
-  const [accounts, setAccounts] = useState<AccountView[]>(() => initialRuntimeCache?.accounts ?? []);
-  const [commodities, setCommodities] = useState<string[]>(() => initialRuntimeCache?.commodities ?? ["CNY"]);
-  const [prices, setPrices] = useState<Price[]>(() => initialRuntimeCache?.prices ?? []);
-  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialRuntimeCache?.incomeStatement ?? null);
-  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialRuntimeCache?.accountStatuses ?? []);
+  const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
+  if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
+  const initialCache = initialCacheRef.current;
+  const [summary, setSummary] = useState<Summary | null>(() => initialCache?.summary ?? null);
+  const [balances, setBalances] = useState<Record<string, number>>(() => initialCache?.balances ?? {});
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialCache?.accountBalances ?? []);
+  const [txns, setTxns] = useState<Txn[]>(() => initialCache?.txns ?? []);
+  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialCache?.netWorthRows ?? []);
+  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialCache?.monthEndNetWorthRows ?? []);
+  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialCache?.netWorthWindows ?? null);
+  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialCache?.creditCards ?? []);
+  const [investments, setInvestments] = useState<InvestmentSummary | null>(() => initialCache?.investments ?? null);
+  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialCache?.reconciliationRows ?? []);
+  const [accounts, setAccounts] = useState<AccountView[]>(() => initialCache?.accounts ?? []);
+  const [commodities, setCommodities] = useState<string[]>(() => initialCache?.commodities ?? ["CNY"]);
+  const [prices, setPrices] = useState<Price[]>(() => initialCache?.prices ?? []);
+  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialCache?.incomeStatement ?? null);
+  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialCache?.accountStatuses ?? []);
   const [loadingFresh, setLoadingFresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialRuntimeCache?.savedAt ?? null);
-  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialCache?.savedAt ?? null);
+  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const loadSequenceRef = useRef(0);
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
@@ -328,19 +339,17 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       const runtimeCached = readRuntimeLedgerCache(timeRange, sensitiveUnlocked, valuationCurrency);
       if (runtimeCached) {
         applyCache(runtimeCached, sensitiveUnlocked);
+        void fetchFreshLedger(timeRange, { background: true, clientUnlocked: sensitiveUnlocked }).catch(() => {});
         return;
       }
-    }
-
-    if (!forceFresh && sensitiveUnlocked) {
-      const currentVersion = await fetchLedgerVersion();
-      if (!isCurrentLoad()) return;
       const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
       if (!isCurrentLoad()) return;
-      if (cached?.sensitiveCached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
+      if (cached) {
+        const displayCache = sensitiveUnlocked && cached.sensitiveCached ? cached : maskSensitiveLedgerCache(cached);
         const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
-        applyCache(cached, true);
-        freshLedgerCacheKeys.add(cacheKey);
+        applyCache(displayCache, sensitiveUnlocked, timeRange, cached.valuationCurrency ?? valuationCurrency, valuationCurrency);
+        if (cached.sensitiveCached) freshLedgerCacheKeys.add(cacheKey);
+        void fetchFreshLedger(timeRange, { background: true, clientUnlocked: sensitiveUnlocked }).catch(() => {});
         return;
       }
     }
