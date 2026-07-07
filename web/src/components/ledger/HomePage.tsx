@@ -50,7 +50,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
           <DashboardCard label="待整理" value={unknown ? formatValuation(unknown.amount / 100, displayCurrency) : "无"} tone={unknown ? "amount-expense" : "amount-income"} detail={unknown ? `${unknown.txCount} 笔 Unknown` : "Unknown 已清理"} onClick={unknown && onSelectCategory ? () => onSelectCategory("Expenses:Unknown", "exact") : undefined} />
         </section>
       </div>
-      <DailyTrendCard rows={dayRows} showAmounts={showAmounts} valuationCurrency={displayCurrency} />
+      <DailyTrendCard rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
     </div>
 
     <div className={`${dashboardGridClass} mt-4 items-start`}>

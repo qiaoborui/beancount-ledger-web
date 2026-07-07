@@ -20,6 +20,7 @@ import { useNetworkStatus } from "./ledger/hooks/useNetworkStatus";
 import { usePullToRefresh } from "./ledger/hooks/usePullToRefresh";
 import { usePendingLedgerWrites } from "./ledger/hooks/usePendingLedgerWrites";
 import { applyPendingLedgerOperations } from "./ledger/pendingLedgerOperations";
+import { shouldOfferHeaderSensitiveUnlock } from "./ledger/headerUnlock";
 import { hasKnownLedgerAuthentication, readInitialLedgerAuthState } from "./ledger/authState";
 import { enableOfflineLedgerUnlock, hasOfflineLedgerUnlock } from "./ledger/offlineUnlock";
 import { enableQuickLedgerUnlock, getQuickLedgerUnlockMode, hasQuickLedgerUnlock, revokeQuickLedgerUnlock, type QuickUnlockMode } from "./ledger/quickUnlock";
@@ -486,6 +487,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const unlockedPrivacySettings = unlocked ? { ...privacySettings, showHomeSummaryAmounts: true } : privacySettings;
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
+  const headerSensitiveUnlockAvailable = shouldOfferHeaderSensitiveUnlock({
+    hasPasskey,
+    passkeyStatusLoaded,
+    quickUnlockEnabled,
+    offlineSensitiveUnlockAvailable,
+    online,
+    unlocked,
+  });
   const unlockOfflineSensitive = async () => {
     try {
       const ok = await unlockOfflineSensitiveCache(offlineUnlockSecret);
@@ -615,7 +624,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       routePending={isRoutePending}
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
-      sensitiveUnlockAvailable={hasPasskey || offlineSensitiveUnlockAvailable}
+      sensitiveUnlockAvailable={headerSensitiveUnlockAvailable}
       sensitiveUnlockLabel={offlineSensitiveUnlockAvailable ? "离线解锁" : "解锁"}
       sensitiveUnlockTitle={offlineSensitiveUnlockAvailable ? "使用离线解锁码查看敏感数据" : "解锁敏感数据"}
       onUnlockSensitive={handleHeaderUnlockSensitive}
