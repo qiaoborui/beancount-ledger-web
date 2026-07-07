@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -447,7 +448,7 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 		"defaultCurrency: CNY",
 		"alipaySmallPurse:",
 		"  cashAccount: Assets:Cash",
-		"  partnerLiabilityAccount: Liabilities:Payable:Friends",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
 		"  rules:",
 		"    - item: 盒马",
 		"      targetAccount: Expenses:Food",
@@ -487,7 +488,7 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 		`orderId: "topup-order"`,
 		`Assets:Cash`,
 		`500.00 CNY`,
-		`Liabilities:Payable:Friends`,
+		`Liabilities:Payable:Friends:SmallPurse`,
 		`-500.00 CNY`,
 		`orderId: "spend-order"`,
 		`Expenses:Food`,
@@ -506,6 +507,145 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 	if len(entries) != 2 || entries[1].CategoryAccount != "Expenses:Food" || entries[1].FundingAccount != "Assets:Cash" {
 		t.Fatalf("unexpected preview entries: %#v", entries)
 	}
+}
+
+func TestAlipaySmallPurseRunningContributionBalanceUsesTimedTopups(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  ownerNames:",
+		"    - 乔博睿",
+		"  partnerNames:",
+		"    - 何缘立",
+		"  rules:",
+		"    - item: 盒马",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "late-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},
+		{OrderID: "partner-topup", DateTime: "2026-07-04 12:00:00", Description: "转入", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "500.00"},
+		{OrderID: "middle-spend", DateTime: "2026-07-03 18:00:00", Description: "盒马 午饭", OperatorNick: "borui", OperatorName: "乔博睿", Expense: "100.00"},
+		{OrderID: "owner-topup", DateTime: "2026-07-02 12:00:00", Description: "转入", OperatorNick: "borui", OperatorName: "乔博睿", Income: "800.00"},
+		{OrderID: "early-spend", DateTime: "2026-07-01 12:00:00", Description: "盒马 早饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "100.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	for _, want := range []string{
+		`orderId: "early-spend"`,
+		`Expenses:Food                                 50.00 CNY`,
+		`orderId: "middle-spend"`,
+		`Expenses:Food                                100.00 CNY`,
+		`orderId: "partner-topup"`,
+		`orderId: "late-spend"`,
+		`Expenses:Food                                 76.82 CNY`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated bean missing %q:\n%s", want, generated)
+		}
+	}
+	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "50.00")
+	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "-500.00")
+	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "53.18")
+	if strings.Contains(generated, `orderId: "owner-topup"`) {
+		t.Fatalf("owner topup should be ignored after updating contribution balance:\n%s", generated)
+	}
+	middleStart := strings.Index(generated, `orderId: "middle-spend"`)
+	partnerStart := strings.Index(generated, `orderId: "partner-topup"`)
+	if middleStart < 0 || partnerStart < 0 || middleStart > partnerStart {
+		t.Fatalf("small purse entries were not rendered chronologically:\n%s", generated)
+	}
+}
+
+func TestAlipaySmallPurseRunningContributionBalanceUsesLedgerHistory(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  ownerNames:",
+		"    - 乔博睿",
+		"  partnerNames:",
+		"    - 何缘立",
+		"  rules:",
+		"    - item: 盒马",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "small-purse-history.bean"), strings.Join([]string{
+		`2026-06-28 * "支付宝小荷包(草莓汤圆的恋爱开支)" "支付宝小荷包-转入"`,
+		`  source: "支付宝"`,
+		`  Assets:SmallPurse 800.00 CNY`,
+		`  Assets:CN:MYBank:Yulibao -800.00 CNY`,
+		"",
+		`2026-06-29 * "盒马" "历史消费"`,
+		`  source: "支付宝小荷包"`,
+		`  type: "支出"`,
+		`  Expenses:Food 50.00 CNY`,
+		`  Liabilities:Payable:Friends:SmallPurse 50.00 CNY`,
+		`  Assets:SmallPurse -100.00 CNY`,
+		"",
+		`2026-06-30 * "支付宝小荷包(草莓汤圆的恋爱开支)" "转入"`,
+		`  source: "支付宝小荷包"`,
+		`  type: "收入"`,
+		`  Assets:SmallPurse 500.00 CNY`,
+		`  Liabilities:Payable:Friends:SmallPurse -500.00 CNY`,
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "main.bean"), strings.Join([]string{
+		`option "title" "Test Ledger"`,
+		`option "operating_currency" "CNY"`,
+		`include "commodities.bean"`,
+		`include "accounts.bean"`,
+		`include "prices.bean"`,
+		`include "transactions/2026/05.bean"`,
+		`include "transactions/2026/imports/small-purse-history.bean"`,
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "current-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	for _, want := range []string{
+		`orderId: "current-spend"`,
+		`Expenses:Food                                 81.25 CNY`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated bean missing %q:\n%s", want, generated)
+		}
+	}
+	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "48.75")
 }
 
 func TestAlipaySmallPurseFallbackRulesSkipGenericAlipayMethodIgnore(t *testing.T) {
@@ -1388,7 +1528,26 @@ func TestCmbPDFLayoutTextParser(t *testing.T) {
 	}
 }
 
+type alipaySmallPurseTestRow struct {
+	OrderID      string
+	DateTime     string
+	Description  string
+	Remark       string
+	OperatorNick string
+	OperatorName string
+	Income       string
+	Expense      string
+}
+
 func mustWriteAlipaySmallPurseXLSX(t *testing.T, file string) {
+	t.Helper()
+	mustWriteAlipaySmallPurseRowsXLSX(t, file, []alipaySmallPurseTestRow{
+		{OrderID: "topup-order", DateTime: "2026-06-22 21:58:03", Description: "转入", Remark: "", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "500.00", Expense: ""},
+		{OrderID: "spend-order", DateTime: "2026-06-25 17:26:07", Description: "盒马 4.0低脂高钙鲜牛奶 950ml等多件", Remark: "", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "", Expense: "135.89"},
+	})
+}
+
+func mustWriteAlipaySmallPurseRowsXLSX(t *testing.T, file string, rows []alipaySmallPurseTestRow) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		t.Fatal(err)
@@ -1410,33 +1569,105 @@ func mustWriteAlipaySmallPurseXLSX(t *testing.T, file string) {
 			t.Fatal(err)
 		}
 	}
-	shared := []string{
-		"支付宝小荷包名称：草莓汤圆的恋爱开支",
-		"支付宝小荷包账户ID：2088780263501952",
-		"收支明细对应的期间：自[2026年06月22日]至[2026年06月25日]",
-		"订单号", "交易时间", "交易说明", "备注", "操作人昵称", "操作人姓名", "收入金额", "支出金额",
-		"topup-order", "2026-06-22 21:58:03", "转入", "阿一哒哒", "何缘立", "500.00", "",
-		"spend-order", "2026-06-25 17:26:07", "盒马 4.0低脂高钙鲜牛奶 950ml等多件", "135.89",
+	shared := []string{}
+	sharedIndex := func(value string) int {
+		for index, item := range shared {
+			if item == value {
+				return index
+			}
+		}
+		shared = append(shared, value)
+		return len(shared) - 1
 	}
 	var sharedXML strings.Builder
+	periodStart, periodEnd := alipaySmallPurseTestPeriod(rows)
+	metadataRows := [][]string{
+		{"支付宝小荷包名称：草莓汤圆的恋爱开支"},
+		{"支付宝小荷包账户ID：2088780263501952"},
+		{fmt.Sprintf("收支明细对应的期间：自[%s]至[%s]", periodStart, periodEnd)},
+		{"订单号", "交易时间", "交易说明", "备注", "操作人昵称", "操作人姓名", "收入金额", "支出金额"},
+	}
+	dataRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		dataRows = append(dataRows, []string{row.OrderID, row.DateTime, row.Description, row.Remark, row.OperatorNick, row.OperatorName, row.Income, row.Expense})
+	}
 	sharedXML.WriteString(`<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+	for _, row := range append(metadataRows, dataRows...) {
+		for _, value := range row {
+			sharedIndex(value)
+		}
+	}
 	for _, value := range shared {
 		sharedXML.WriteString(`<si><t>`)
-		sharedXML.WriteString(value)
+		sharedXML.WriteString(escapeTestXML(value))
 		sharedXML.WriteString(`</t></si>`)
 	}
 	sharedXML.WriteString(`</sst>`)
 	writeZipText("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`)
 	writeZipText("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets></workbook>`)
 	writeZipText("xl/sharedStrings.xml", sharedXML.String())
-	writeZipText("xl/worksheets/sheet1.xml", strings.Join([]string{
-		`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`,
-		`<row r="1"><c r="A1" t="s"><v>0</v></c></row>`,
-		`<row r="2"><c r="A2" t="s"><v>1</v></c></row>`,
-		`<row r="3"><c r="A3" t="s"><v>2</v></c></row>`,
-		`<row r="4"><c r="A4" t="s"><v>3</v></c><c r="B4" t="s"><v>4</v></c><c r="C4" t="s"><v>5</v></c><c r="D4" t="s"><v>6</v></c><c r="E4" t="s"><v>7</v></c><c r="F4" t="s"><v>8</v></c><c r="G4" t="s"><v>9</v></c><c r="H4" t="s"><v>10</v></c></row>`,
-		`<row r="5"><c r="A5" t="s"><v>11</v></c><c r="B5" t="s"><v>12</v></c><c r="C5" t="s"><v>13</v></c><c r="D5" t="s"><v>17</v></c><c r="E5" t="s"><v>14</v></c><c r="F5" t="s"><v>15</v></c><c r="G5" t="s"><v>16</v></c><c r="H5" t="s"><v>17</v></c></row>`,
-		`<row r="6"><c r="A6" t="s"><v>18</v></c><c r="B6" t="s"><v>19</v></c><c r="C6" t="s"><v>20</v></c><c r="D6" t="s"><v>17</v></c><c r="E6" t="s"><v>14</v></c><c r="F6" t="s"><v>15</v></c><c r="G6" t="s"><v>17</v></c><c r="H6" t="s"><v>21</v></c></row>`,
-		`</sheetData></worksheet>`,
-	}, ""))
+	var sheet strings.Builder
+	sheet.WriteString(`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`)
+	allRows := append(metadataRows, dataRows...)
+	for rowIndex, row := range allRows {
+		rowNumber := rowIndex + 1
+		sheet.WriteString(fmt.Sprintf(`<row r="%d">`, rowNumber))
+		for colIndex, value := range row {
+			ref := fmt.Sprintf("%s%d", xlsxTestColumnName(colIndex), rowNumber)
+			sheet.WriteString(fmt.Sprintf(`<c r="%s" t="s"><v>%d</v></c>`, ref, sharedIndex(value)))
+		}
+		sheet.WriteString(`</row>`)
+	}
+	sheet.WriteString(`</sheetData></worksheet>`)
+	writeZipText("xl/worksheets/sheet1.xml", sheet.String())
+}
+
+func xlsxTestColumnName(index int) string {
+	return string(rune('A' + index))
+}
+
+func escapeTestXML(value string) string {
+	value = strings.ReplaceAll(value, "&", "&amp;")
+	value = strings.ReplaceAll(value, "<", "&lt;")
+	value = strings.ReplaceAll(value, ">", "&gt;")
+	return value
+}
+
+func alipaySmallPurseTestPeriod(rows []alipaySmallPurseTestRow) (string, string) {
+	start, end := "", ""
+	for _, row := range rows {
+		date := alipaySmallPurseDate(row.DateTime)
+		if date == "" {
+			continue
+		}
+		if start == "" || date < start {
+			start = date
+		}
+		if end == "" || date > end {
+			end = date
+		}
+	}
+	if start == "" {
+		start = "2026-06-22"
+	}
+	if end == "" {
+		end = start
+	}
+	return alipaySmallPurseTestChineseDate(start), alipaySmallPurseTestChineseDate(end)
+}
+
+func alipaySmallPurseTestChineseDate(date string) string {
+	parts := strings.Split(date, "-")
+	if len(parts) != 3 {
+		return "2026年06月22日"
+	}
+	return fmt.Sprintf("%s年%s月%s日", parts[0], parts[1], parts[2])
+}
+
+func requirePostingLine(t *testing.T, beanText, account, amount string) {
+	t.Helper()
+	pattern := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(account) + `\s+` + regexp.QuoteMeta(amount) + `\s+CNY\b`)
+	if !pattern.MatchString(beanText) {
+		t.Fatalf("generated bean missing posting %s %s CNY:\n%s", account, amount, beanText)
+	}
 }

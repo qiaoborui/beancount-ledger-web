@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,6 +32,12 @@ type alipaySmallPurseConfigSection struct {
 	CashAccount             string                 `yaml:"cashAccount"`
 	PartnerLiabilityAccount string                 `yaml:"partnerLiabilityAccount"`
 	SharedExpenseSplit      *bool                  `yaml:"sharedExpenseSplit"`
+	AllocationMode          string                 `yaml:"allocationMode"`
+	OwnerNames              []string               `yaml:"ownerNames"`
+	PartnerNames            []string               `yaml:"partnerNames"`
+	OwnerInitialBalance     *float64               `yaml:"ownerInitialBalance"`
+	PartnerInitialBalance   *float64               `yaml:"partnerInitialBalance"`
+	OwnerTopupHandling      string                 `yaml:"ownerTopupHandling"`
 	Rules                   []alipaySmallPurseRule `yaml:"rules"`
 }
 
@@ -106,8 +114,14 @@ func (s *Server) generateAlipaySmallPurseBean(inputFile, outputFile string) erro
 		return err
 	}
 	blocks := make([]string, 0, len(statement.Rows))
-	for _, row := range statement.Rows {
-		block, ignore, err := renderAlipaySmallPurseEntry(statement, row, config)
+	rows := alipaySmallPurseRowsForRendering(statement.Rows, config)
+	ownInitial, partnerInitial, err := s.alipaySmallPurseInitialContributionBalances(statement, config)
+	if err != nil {
+		return err
+	}
+	allocator := newAlipaySmallPurseContributionAllocator(config, ownInitial, partnerInitial)
+	for _, row := range rows {
+		block, ignore, err := renderAlipaySmallPurseEntry(statement, row, config, allocator)
 		if err != nil {
 			return err
 		}
@@ -154,7 +168,7 @@ func (s *Server) loadAlipaySmallPurseConfig() (alipaySmallPurseConfig, error) {
 	return config, nil
 }
 
-func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig) (string, bool, error) {
+func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig, allocator *alipaySmallPurseContributionAllocator) (string, bool, error) {
 	income := cents(row.Income)
 	expense := cents(row.Expense)
 	if income == 0 && expense == 0 {
@@ -173,9 +187,16 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 	txType := "支出"
 	target := config.DefaultPlusAccount
 	amount := expense
+	incomeKind := ""
 	if income > 0 {
 		txType = "收入"
-		target = alipaySmallPursePartnerLiabilityAccount(config)
+		incomeKind = alipaySmallPurseIncomeKind(row)
+		if incomeKind == "refund" {
+			txType = "退款"
+			target = config.DefaultPlusAccount
+		} else {
+			target = alipaySmallPursePartnerLiabilityAccount(config)
+		}
 		amount = income
 	}
 	ignore, target, tags := alipaySmallPurseApplyRules(row, payee, amount, txType, target, config)
@@ -217,6 +238,21 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		lines = append(lines, fmt.Sprintf(`  merchantId: "%s"`, escapeBean(merchant)))
 	}
 	if income > 0 {
+		if allocator != nil && incomeKind == "topup" {
+			contributor, err := alipaySmallPurseTopupContributor(row, config)
+			if err != nil {
+				return "", false, err
+			}
+			allocator.add(contributor, amount)
+			if contributor == alipaySmallPurseContributorOwner && alipaySmallPurseIgnoreOwnerTopups(config) {
+				return "", true, nil
+			}
+		}
+		if allocator != nil && incomeKind == "refund" && alipaySmallPurseSharedExpenseSplit(config) {
+			ownShare, partnerShare := allocator.refund(amount)
+			lines = appendAlipaySmallPurseSharedPostings(lines, target, alipaySmallPursePartnerLiabilityAccount(config), alipaySmallPurseCashAccountForConfig(config), -ownShare, -partnerShare, amount, currency)
+			return strings.Join(lines, "\n"), false, nil
+		}
 		lines = append(lines,
 			fmt.Sprintf("  %-38s %12s %s", alipaySmallPurseCashAccountForConfig(config), fromCents(amount), currency),
 			fmt.Sprintf("  %-38s %12s %s", target, fromCents(-amount), currency),
@@ -224,13 +260,11 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		return strings.Join(lines, "\n"), false, nil
 	}
 	if alipaySmallPurseSharedExpenseSplit(config) {
-		ownShare := amount / 2
-		partnerShare := amount - ownShare
-		lines = append(lines,
-			fmt.Sprintf("  %-38s %12s %s", target, fromCents(ownShare), currency),
-			fmt.Sprintf("  %-38s %12s %s", alipaySmallPursePartnerLiabilityAccount(config), fromCents(partnerShare), currency),
-			fmt.Sprintf("  %-38s %12s %s", alipaySmallPurseCashAccountForConfig(config), fromCents(-amount), currency),
-		)
+		ownShare, partnerShare := amount/2, amount-(amount/2)
+		if allocator != nil {
+			ownShare, partnerShare = allocator.spend(amount)
+		}
+		lines = appendAlipaySmallPurseSharedPostings(lines, target, alipaySmallPursePartnerLiabilityAccount(config), alipaySmallPurseCashAccountForConfig(config), ownShare, partnerShare, -amount, currency)
 		return strings.Join(lines, "\n"), false, nil
 	}
 	lines = append(lines,
@@ -238,6 +272,194 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		fmt.Sprintf("  %-38s %12s %s", alipaySmallPurseCashAccountForConfig(config), fromCents(-amount), currency),
 	)
 	return strings.Join(lines, "\n"), false, nil
+}
+
+type alipaySmallPurseContributor string
+
+const (
+	alipaySmallPurseContributorOwner   alipaySmallPurseContributor = "owner"
+	alipaySmallPurseContributorPartner alipaySmallPurseContributor = "partner"
+)
+
+type alipaySmallPurseContributionAllocator struct {
+	ownBalance     int
+	partnerBalance int
+}
+
+func newAlipaySmallPurseContributionAllocator(config alipaySmallPurseConfig, ownInitial, partnerInitial int) *alipaySmallPurseContributionAllocator {
+	if !alipaySmallPurseUsesRunningContributionBalance(config) || !alipaySmallPurseSharedExpenseSplit(config) {
+		return nil
+	}
+	if config.AlipaySmallPurse.OwnerInitialBalance != nil {
+		ownInitial = centsFromOptionalFloat(config.AlipaySmallPurse.OwnerInitialBalance)
+	}
+	if config.AlipaySmallPurse.PartnerInitialBalance != nil {
+		partnerInitial = centsFromOptionalFloat(config.AlipaySmallPurse.PartnerInitialBalance)
+	}
+	return &alipaySmallPurseContributionAllocator{
+		ownBalance:     ownInitial,
+		partnerBalance: partnerInitial,
+	}
+}
+
+func (a *alipaySmallPurseContributionAllocator) add(contributor alipaySmallPurseContributor, amount int) {
+	switch contributor {
+	case alipaySmallPurseContributorOwner:
+		a.ownBalance += amount
+	case alipaySmallPurseContributorPartner:
+		a.partnerBalance += amount
+	}
+}
+
+func (a *alipaySmallPurseContributionAllocator) spend(amount int) (int, int) {
+	ownShare, partnerShare := a.split(amount)
+	a.ownBalance -= ownShare
+	a.partnerBalance -= partnerShare
+	return ownShare, partnerShare
+}
+
+func (a *alipaySmallPurseContributionAllocator) refund(amount int) (int, int) {
+	ownShare, partnerShare := a.split(amount)
+	a.ownBalance += ownShare
+	a.partnerBalance += partnerShare
+	return ownShare, partnerShare
+}
+
+func (a *alipaySmallPurseContributionAllocator) split(amount int) (int, int) {
+	ownWeight := maxInt(a.ownBalance, 0)
+	partnerWeight := maxInt(a.partnerBalance, 0)
+	totalWeight := ownWeight + partnerWeight
+	if totalWeight <= 0 {
+		ownShare := amount / 2
+		return ownShare, amount - ownShare
+	}
+	ownShare := int((int64(amount)*int64(ownWeight) + int64(totalWeight)/2) / int64(totalWeight))
+	return ownShare, amount - ownShare
+}
+
+func appendAlipaySmallPurseSharedPostings(lines []string, target, partnerLiability, cashAccount string, ownShare, partnerShare, cashAmount int, currency string) []string {
+	if ownShare != 0 {
+		lines = append(lines, fmt.Sprintf("  %-38s %12s %s", target, fromCents(ownShare), currency))
+	}
+	if partnerShare != 0 {
+		lines = append(lines, fmt.Sprintf("  %-38s %12s %s", partnerLiability, fromCents(partnerShare), currency))
+	}
+	lines = append(lines, fmt.Sprintf("  %-38s %12s %s", cashAccount, fromCents(cashAmount), currency))
+	return lines
+}
+
+func alipaySmallPurseRowsForRendering(rows []alipaySmallPurseRow, config alipaySmallPurseConfig) []alipaySmallPurseRow {
+	out := append([]alipaySmallPurseRow(nil), rows...)
+	if !alipaySmallPurseUsesRunningContributionBalance(config) {
+		return out
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DateTime == out[j].DateTime {
+			return out[i].RowNumber < out[j].RowNumber
+		}
+		return out[i].DateTime < out[j].DateTime
+	})
+	return out
+}
+
+func alipaySmallPurseUsesRunningContributionBalance(config alipaySmallPurseConfig) bool {
+	return strings.EqualFold(strings.TrimSpace(config.AlipaySmallPurse.AllocationMode), "runningContributionBalance")
+}
+
+func alipaySmallPurseIncomeKind(row alipaySmallPurseRow) string {
+	description := strings.TrimSpace(row.Description)
+	if strings.HasPrefix(description, "转入") {
+		return "topup"
+	}
+	return "refund"
+}
+
+func alipaySmallPurseTopupContributor(row alipaySmallPurseRow, config alipaySmallPurseConfig) (alipaySmallPurseContributor, error) {
+	name := strings.TrimSpace(valueOr(row.OperatorName, row.OperatorNick))
+	if alipaySmallPurseNameMatches(name, config.AlipaySmallPurse.OwnerNames) {
+		return alipaySmallPurseContributorOwner, nil
+	}
+	if alipaySmallPurseNameMatches(name, config.AlipaySmallPurse.PartnerNames) {
+		return alipaySmallPurseContributorPartner, nil
+	}
+	if len(config.AlipaySmallPurse.OwnerNames) > 0 || len(config.AlipaySmallPurse.PartnerNames) > 0 {
+		return "", fmt.Errorf("支付宝小荷包第 %d 行无法识别转入人: %s", row.RowNumber, name)
+	}
+	return alipaySmallPurseContributorPartner, nil
+}
+
+func alipaySmallPurseNameMatches(name string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func alipaySmallPurseIgnoreOwnerTopups(config alipaySmallPurseConfig) bool {
+	handling := strings.TrimSpace(config.AlipaySmallPurse.OwnerTopupHandling)
+	if handling == "" {
+		return true
+	}
+	return strings.EqualFold(handling, "ignore")
+}
+
+func centsFromOptionalFloat(value *float64) int {
+	if value == nil {
+		return 0
+	}
+	return int(math.Round(*value * 100))
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func (s *Server) alipaySmallPurseInitialContributionBalances(statement alipaySmallPurseStatement, config alipaySmallPurseConfig) (int, int, error) {
+	if !alipaySmallPurseUsesRunningContributionBalance(config) || !alipaySmallPurseSharedExpenseSplit(config) {
+		return 0, 0, nil
+	}
+	start, _ := alipaySmallPurseDateRange(statement)
+	if start == "" {
+		return 0, 0, nil
+	}
+	snapshot, err := s.alipaySmallPurseSnapshot()
+	if err != nil {
+		return 0, 0, err
+	}
+	balances := balancesBefore(snapshot.Transactions, start)
+	cashBalance := balances[alipaySmallPurseCashAccountForConfig(config)]["CNY"]
+	partnerBalance := -balances[alipaySmallPursePartnerLiabilityAccount(config)]["CNY"]
+	return cashBalance - partnerBalance, partnerBalance, nil
+}
+
+func (s *Server) alipaySmallPurseSnapshot() (*LedgerSnapshot, error) {
+	cache := s.cache
+	if cache == nil {
+		cache = NewLedgerCache(s.cfg)
+	}
+	return cache.Snapshot()
+}
+
+func balancesBefore(transactions []Transaction, date string) map[string]map[string]int {
+	balances := map[string]map[string]int{}
+	for _, txn := range transactions {
+		if txn.Date >= date {
+			continue
+		}
+		for _, posting := range txn.Postings {
+			currency := valueOr(posting.Currency, "CNY")
+			if balances[posting.Account] == nil {
+				balances[posting.Account] = map[string]int{}
+			}
+			balances[posting.Account][currency] += posting.Amount
+		}
+	}
+	return balances
 }
 
 func alipaySmallPurseApplyRules(row alipaySmallPurseRow, payee string, amount int, txType, currentTarget string, config alipaySmallPurseConfig) (bool, string, []string) {

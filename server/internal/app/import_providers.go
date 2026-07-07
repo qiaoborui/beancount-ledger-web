@@ -178,7 +178,7 @@ var billImporters = []billImporter{
 			if generated.CandidateCount != prepared.FilteredRowCount {
 				return nil, fmt.Errorf("支付宝小荷包行数核对失败：XLSX 明细 %d 条，可导入 %d 条，但生成 %d 条。已停止导入，请检查小荷包解析器", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
 			}
-			return []string{fmt.Sprintf("支付宝小荷包行数核对通过：XLSX 明细 %d 条，生成 %d 条，去重后待写入 %d 条。共同消费默认按 50/50 拆分，对象份额计入 Liabilities:Payable:Friends。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+			return []string{fmt.Sprintf("支付宝小荷包行数核对通过：XLSX 明细 %d 条，生成 %d 条，去重后待写入 %d 条。共同消费按小荷包配置拆分，对象份额计入配置的对象权益账户。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
 		},
 		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
 			return prepared.RawRowCount, prepared.FilteredRowCount
