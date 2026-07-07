@@ -543,6 +543,16 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesTimedTopups(t *testing.T)
 	if !ok {
 		t.Fatal("missing alipay-small-purse provider")
 	}
+	prepared, err := importer.Prepare(server, importFileInput{InputFile: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.RawRowCount != 5 || prepared.FilteredRowCount != 4 || prepared.PrefilterSkipped != 1 {
+		t.Fatalf("unexpected prepared row counts: %#v", prepared)
+	}
+	if _, err := importer.PreviewWarnings(prepared, providerSourceAnalysis{}, beanSummary{CandidateCount: 4}, beanSummary{CandidateCount: 4}, ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}

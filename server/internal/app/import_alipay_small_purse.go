@@ -84,22 +84,37 @@ func (s *Server) prepareAlipaySmallPurseInput(inputFile, importID string) (prepa
 	if err != nil {
 		return preparedImportInput{}, err
 	}
+	config, err := s.loadAlipaySmallPurseConfig()
+	if err != nil {
+		return preparedImportInput{}, err
+	}
 	start, end := alipaySmallPurseDateRange(statement)
-	filtered := 0
+	generatedRows := 0
+	skippedRows := 0
 	for _, row := range statement.Rows {
-		if cents(row.Income) != 0 || cents(row.Expense) != 0 {
-			filtered++
+		generates, err := alipaySmallPurseRowGeneratesEntry(statement, row, config)
+		if err != nil {
+			return preparedImportInput{}, err
+		}
+		if generates {
+			generatedRows++
+		} else if cents(row.Income) != 0 || cents(row.Expense) != 0 {
+			skippedRows++
 		}
 	}
 	warnings := []string{fmt.Sprintf("已识别支付宝小荷包“%s”明细 %d 条。", valueOr(statement.WalletName, "未命名小荷包"), len(statement.Rows))}
 	if statement.PeriodStart != "" && statement.PeriodEnd != "" {
 		warnings = append(warnings, fmt.Sprintf("小荷包账单期间：%s 至 %s。", statement.PeriodStart, statement.PeriodEnd))
 	}
+	if skippedRows > 0 {
+		warnings = append(warnings, fmt.Sprintf("已跳过 %d 条只用于更新小荷包权益的明细。", skippedRows))
+	}
 	return preparedImportInput{
 		InputFile:        inputFile,
 		Warnings:         warnings,
 		RawRowCount:      len(statement.Rows),
-		FilteredRowCount: filtered,
+		FilteredRowCount: generatedRows,
+		PrefilterSkipped: skippedRows,
 		DateStart:        start,
 		DateEnd:          end,
 	}, nil
@@ -365,6 +380,47 @@ func alipaySmallPurseRowsForRendering(rows []alipaySmallPurseRow, config alipayS
 
 func alipaySmallPurseUsesRunningContributionBalance(config alipaySmallPurseConfig) bool {
 	return strings.EqualFold(strings.TrimSpace(config.AlipaySmallPurse.AllocationMode), "runningContributionBalance")
+}
+
+func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig) (bool, error) {
+	income := cents(row.Income)
+	expense := cents(row.Expense)
+	if income == 0 && expense == 0 {
+		return false, nil
+	}
+	if income != 0 && expense != 0 {
+		return true, nil
+	}
+	txType := "支出"
+	target := config.DefaultPlusAccount
+	amount := expense
+	incomeKind := ""
+	if income > 0 {
+		txType = "收入"
+		incomeKind = alipaySmallPurseIncomeKind(row)
+		if incomeKind == "refund" {
+			txType = "退款"
+			target = config.DefaultPlusAccount
+		} else {
+			target = alipaySmallPursePartnerLiabilityAccount(config)
+		}
+		amount = income
+	}
+	payee := alipaySmallPursePayee(row.Description, statement.WalletName)
+	ignore, _, _ := alipaySmallPurseApplyRules(row, payee, amount, txType, target, config)
+	if ignore {
+		return false, nil
+	}
+	if incomeKind == "topup" && alipaySmallPurseUsesRunningContributionBalance(config) && alipaySmallPurseSharedExpenseSplit(config) {
+		contributor, err := alipaySmallPurseTopupContributor(row, config)
+		if err != nil {
+			return false, err
+		}
+		if contributor == alipaySmallPurseContributorOwner && alipaySmallPurseIgnoreOwnerTopups(config) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func alipaySmallPurseIncomeKind(row alipaySmallPurseRow) string {

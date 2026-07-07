@@ -181,6 +181,9 @@ var billImporters = []billImporter{
 			}
 			return []string{fmt.Sprintf("支付宝小荷包行数核对通过：XLSX 明细 %d 条，生成 %d 条，去重后待写入 %d 条。共同消费按小荷包配置拆分，对象份额计入配置的对象权益账户。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
 		},
+		excludedRows: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) int {
+			return prepared.RawRowCount - prepared.FilteredRowCount
+		},
 		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
 			return prepared.RawRowCount, prepared.FilteredRowCount
 		},
