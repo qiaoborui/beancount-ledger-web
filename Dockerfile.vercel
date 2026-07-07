@@ -1,17 +1,14 @@
-FROM golang:1.25-bookworm AS go-builder
+FROM golang:1.25-alpine AS go-builder
 WORKDIR /app/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server ./
 RUN CGO_ENABLED=0 go build -o /app/ledger-web ./cmd/ledger-web
 
-FROM debian:bookworm-slim AS runner
+FROM alpine:3.21 AS runner
 WORKDIR /app
 ENV GIN_MODE=release
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip git poppler-utils \
-  && rm -rf /var/lib/apt/lists/* \
-  && pip3 install --break-system-packages beancount==3.2.3
+RUN apk add --no-cache ca-certificates git
 COPY --from=go-builder /app/ledger-web ./ledger-web
 COPY examples ./examples
 EXPOSE 3000

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/gzip"
@@ -14,6 +16,8 @@ type Server struct {
 	cfg              Config
 	runtimeStore     RuntimeStore
 	runtimeFileStore RuntimeFileStore
+	indexStore       *LedgerIndexStore
+	indexStoreErr    error
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
@@ -27,9 +31,17 @@ type Server struct {
 func NewRouter(cfg Config) *gin.Engine {
 	runtimeStore := MustRuntimeStore(cfg)
 	runtimeFileStore := MustRuntimeFileStore(cfg)
+	var indexStore *LedgerIndexStore
+	var indexStoreErr error
+	if ledgerReadModelEnabled(cfg) {
+		indexStore, indexStoreErr = NewLedgerIndexStore(cfg)
+	}
 	cache := NewLedgerCache(cfg)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
-	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, cache: cache, writer: writer, accountService: NewAccountService(cache, writer), readService: NewLedgerReadService(cache), reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
+	readService := NewLedgerReadServiceWithIndex(cache, indexStore, indexStoreErr, cfg.ReadModelStrict)
+	server := &Server{cfg: cfg, runtimeStore: runtimeStore, runtimeFileStore: runtimeFileStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, func() (*LedgerSnapshot, error) {
+		return readService.SnapshotLite(context.Background())
+	}), readService: readService, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
@@ -49,11 +61,15 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
+	api.POST("/quick-unlock/register", s.quickUnlockRegister)
+	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
+	api.POST("/quick-unlock/revoke", s.quickUnlockRevoke)
 
 	readOnly30s := api.Group("", cacheControl(30))
 	readOnly60s := api.Group("", cacheControl(60))
 
 	readOnly30s.GET("/auth/me", s.me)
+	readOnly30s.GET("/quick-unlock/status", s.quickUnlockStatus)
 	readOnly60s.GET("/passkey/status", s.passkeyStatus)
 
 	api.POST("/passkey/login/options", s.passkeyLoginOptions)
@@ -74,6 +90,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	ledgerRead60s := ledger.Group("", cacheControl(60))
 	ledgerRead60s.GET("/version", s.ledgerVersion)
+	ledgerRead60s.GET("/index-info", s.indexInfo)
 	ledgerRead60s.GET("/entries", s.ledgerEntries)
 	ledgerRead60s.GET("/balances", s.balances)
 	ledgerRead60s.GET("/investments", s.investments)
@@ -109,7 +126,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/ai/accounts-chat", s.aiAccountsChat)
 
 	readOnly30s.GET("/git/status", s.gitStatus)
-	readOnly30s.GET("/git/diff", s.gitDiff)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)
 
@@ -128,6 +144,41 @@ func cacheControl(maxAge int) gin.HandlerFunc {
 }
 
 func (s *Server) health(c *gin.Context) {
+	if s.indexStoreErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"ok":               false,
+			"uptimeSeconds":    int(time.Since(startedAt).Seconds()),
+			"ledgerReadModel":  s.cfg.LedgerReadModel,
+			"readModelStrict":  s.cfg.ReadModelStrict,
+			"ledgerIndexError": s.indexStoreErr.Error(),
+			"runtimeStore":     s.cfg.RuntimeStore,
+			"runtimeFileStore": s.cfg.RuntimeFileStore,
+		})
+		return
+	}
+	if s.indexStore != nil {
+		revision, indexed, err := s.indexStore.ActiveRevision(c.Request.Context())
+		body := gin.H{
+			"ok":                  err == nil && indexed,
+			"uptimeSeconds":       int(time.Since(startedAt).Seconds()),
+			"ledgerReadModel":     s.cfg.LedgerReadModel,
+			"readModelStrict":     s.cfg.ReadModelStrict,
+			"ledgerIndexActive":   indexed,
+			"ledgerIndexSource":   sanitizeLedgerIndexSource(s.cfg),
+			"runtimeStore":        s.cfg.RuntimeStore,
+			"runtimeFileStore":    s.cfg.RuntimeFileStore,
+			"runtimeDirRequired":  filesystemRuntimeBackend(s.cfg.RuntimeStore) || filesystemRuntimeBackend(s.cfg.RuntimeFileStore),
+			"ledgerVersion":       revision.LedgerVersion.Version,
+			"ledgerVersionFiles":  revision.LedgerVersion.FileCount,
+			"ledgerIndexedAtUnix": revision.IndexedAt.Unix(),
+			"ledgerIndexGitSHA":   revision.GitSHA,
+		}
+		if err != nil {
+			body["error"] = err.Error()
+		}
+		c.JSON(status(err == nil && indexed, http.StatusOK, http.StatusServiceUnavailable), body)
+		return
+	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "error": err.Error()})
 		return
@@ -151,6 +202,39 @@ func (s *Server) health(c *gin.Context) {
 		body["runtimeDirExists"] = runtimeDirExists
 	}
 	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
+}
+
+func (s *Server) indexInfo(c *gin.Context) {
+	if s.indexStore == nil {
+		c.JSON(http.StatusOK, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false})
+		return
+	}
+	revision, indexed, err := s.indexStore.ActiveRevision(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"readModel": s.cfg.LedgerReadModel,
+		"enabled":   true,
+		"active":    indexed,
+		"gitSHA":    revision.GitSHA,
+		"source":    sanitizeLedgerIndexSource(s.cfg),
+		"version":   revision.LedgerVersion.Version,
+		"fileCount": revision.LedgerVersion.FileCount,
+		"indexedAt": revision.IndexedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func sanitizeLedgerIndexSource(cfg Config) string {
+	source := ledgerIndexSourceKey(cfg)
+	// Strip credentials from URLs (e.g. https://token@host -> https://host)
+	if idx := strings.Index(source, "@"); idx != -1 {
+		if protoEnd := strings.Index(source, "://"); protoEnd != -1 && protoEnd < idx {
+			source = source[:protoEnd+3] + source[idx+1:]
+		}
+	}
+	return source
 }
 
 func filesystemRuntimeBackend(value string) bool {

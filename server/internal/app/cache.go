@@ -20,10 +20,12 @@ type LedgerVersion struct {
 
 type LedgerSnapshot struct {
 	LedgerVersion
-	BeanEntries       []BeanEntry               `json:"-"`
-	BeanErrors        []BeanParseError          `json:"-"`
-	OptionsMap        map[string]string         `json:"-"`
-	Transactions      []Transaction             `json:"transactions"`
+	BeanEntries       []BeanEntry       `json:"-"`
+	BeanErrors        []BeanParseError  `json:"-"`
+	OptionsMap        map[string]string `json:"-"`
+	Transactions      []Transaction     `json:"transactions"`
+	transactionsAsc   []Transaction
+	transactionsDesc  []Transaction
 	RawBalances       map[string]map[string]int `json:"-"`
 	PriceIndex        PriceIndex                `json:"-"`
 	AccountMap        map[string]Account        `json:"-"`
@@ -97,6 +99,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 		Prices:            prices,
 		ParsedAt:          time.Now().UnixMilli(),
 	}
+	prepareLedgerSnapshot(snapshot)
 	c.snapshot = snapshot
 	return snapshot, nil
 }
@@ -187,6 +190,30 @@ func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {
 	return asc, desc
 }
 
+func prepareLedgerSnapshot(snapshot *LedgerSnapshot) {
+	if snapshot == nil {
+		return
+	}
+	if snapshot.RawBalances == nil {
+		snapshot.RawBalances = CurrentBalances(snapshot.Transactions)
+	}
+	if snapshot.PriceIndex.byPair == nil {
+		snapshot.PriceIndex = NewPriceIndex(snapshot.Prices)
+	}
+	if snapshot.AccountMap == nil {
+		snapshot.AccountMap = accountByName(snapshot.Accounts)
+	}
+	if snapshot.Balances == nil {
+		snapshot.Balances = nativeAccountBalances(snapshot.RawBalances, snapshot.AccountMap)
+	}
+	if snapshot.AccountBalances == nil {
+		snapshot.AccountBalances = AccountBalanceRowsWithPriceIndex(snapshot.RawBalances, snapshot.PriceIndex, "")
+	}
+	if snapshot.transactionsAsc == nil || snapshot.transactionsDesc == nil {
+		snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	}
+}
+
 func snapshotRawBalances(snapshot *LedgerSnapshot) map[string]map[string]int {
 	if snapshot.RawBalances != nil {
 		return snapshot.RawBalances
@@ -209,11 +236,17 @@ func snapshotAccountMap(snapshot *LedgerSnapshot) map[string]Account {
 }
 
 func snapshotTransactionsAsc(snapshot *LedgerSnapshot) []Transaction {
+	if snapshot.transactionsAsc != nil {
+		return snapshot.transactionsAsc
+	}
 	asc, _ := sortedTransactionViews(snapshot.Transactions)
 	return asc
 }
 
 func snapshotTransactionsDesc(snapshot *LedgerSnapshot) []Transaction {
+	if snapshot.transactionsDesc != nil {
+		return snapshot.transactionsDesc
+	}
 	_, desc := sortedTransactionViews(snapshot.Transactions)
 	return desc
 }

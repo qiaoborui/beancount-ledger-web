@@ -1,12 +1,31 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
+import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const lazyVendorPatterns = [/chart-vendor/, /markdown-vendor/, /ai-vendor/];
+
+function stripHeavyModulePreloads(): Plugin {
+  return {
+    name: "strip-heavy-modulepreloads",
+    enforce: "post",
+    transformIndexHtml(html) {
+      return html.replace(
+        /<link rel="modulepreload"[^>]*>/g,
+        (match) => {
+          if (lazyVendorPatterns.some((p) => p.test(match))) return "";
+          return match;
+        },
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [tailwindcss()],
+  plugins: [tailwindcss(), stripHeavyModulePreloads()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readLedgerCacheAsync, writeLedgerCache } from "../storage";
+import { readLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
 import { timeRangeToParams } from "@/lib/timeRange";
-import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
+import { readEncryptedLedgerCache, writeEncryptedLedgerCache } from "../offlineUnlock";
+import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -21,8 +23,25 @@ function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationC
   runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked, valuationCurrency), cache };
 }
 
+function readDisplayLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
+  const runtimeCached = readRuntimeLedgerCache(range, unlocked, valuationCurrency);
+  if (runtimeCached) return runtimeCached;
+  const cached = readLedgerCache(range, valuationCurrency);
+  if (!cached) return null;
+  if (!unlocked) return maskSensitiveLedgerCache(cached);
+  return cached.sensitiveCached ? cached : maskSensitiveLedgerCache(cached);
+}
+
 function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
   return runtimeCacheKey(range, unlocked, valuationCurrency);
+}
+
+export async function fetchLedgerIndexInfo(): Promise<LedgerIndexInfo | null> {
+  try {
+    return await fetchJson<LedgerIndexInfo>("/api/ledger/index-info");
+  } catch {
+    return null;
+  }
 }
 
 async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
@@ -54,8 +73,39 @@ export type LedgerBootstrapResponse = {
   sensitiveUnlocked?: boolean;
 };
 
+type LedgerLoadOptions = {
+  sensitiveUnlocked?: boolean;
+};
+
 function transactionHasIncome(txn: Txn) {
   return txn.postings.some((posting) => posting.account.startsWith("Income:"));
+}
+
+function offlineOrNetworkError(error: unknown) {
+  return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
+}
+
+export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
+  return {
+    ...cache,
+    balances: {},
+    accountBalances: [],
+    netWorthRows: [],
+    monthEndNetWorthRows: [],
+    netWorthWindows: null,
+    creditCards: [],
+    investments: null,
+    txns: cache.txns.filter((txn) => !transactionHasIncome(txn)),
+    reconciliationRows: [],
+    accountStatuses: [],
+    incomeStatement: cache.incomeStatement ? {
+      ...cache.incomeStatement,
+      income: [],
+      totalIncome: 0,
+      netIncome: 0,
+    } : null,
+    sensitiveCached: false,
+  };
 }
 
 export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now()) {
@@ -83,35 +133,50 @@ export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, cli
     incomeStatement: { income: cacheUnlocked ? (inc.income ?? []) : [], expense: inc.expense ?? [], totalIncome: cacheUnlocked ? (inc.totalIncome ?? 0) : 0, totalExpense: inc.totalExpense ?? 0, netIncome: cacheUnlocked ? (inc.netIncome ?? 0) : 0, valuationCurrency: inc.valuationCurrency ?? responseValuationCurrency, expenseAnalytics: inc.expenseAnalytics ?? [], topPayees: inc.topPayees ?? [], topPaymentAccounts: inc.topPaymentAccounts ?? [] },
     ledgerVersion: version ?? undefined,
     savedAt,
+    sensitiveCached: cacheUnlocked,
   };
   return { cache, cacheUnlocked, serverSensitiveUnlocked, responseValuationCurrency };
 }
 
-export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, onGitStatusRefresh, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; onGitStatusRefresh: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
-  const initialRuntimeCache = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
-  const [summary, setSummary] = useState<Summary | null>(() => initialRuntimeCache?.summary ?? null);
-  const [balances, setBalances] = useState<Record<string, number>>(() => initialRuntimeCache?.balances ?? {});
-  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialRuntimeCache?.accountBalances ?? []);
-  const [txns, setTxns] = useState<Txn[]>(() => initialRuntimeCache?.txns ?? []);
-  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.netWorthRows ?? []);
-  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialRuntimeCache?.monthEndNetWorthRows ?? []);
-  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialRuntimeCache?.netWorthWindows ?? null);
-  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialRuntimeCache?.creditCards ?? []);
-  const [investments, setInvestments] = useState<InvestmentSummary | null>(() => initialRuntimeCache?.investments ?? null);
-  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialRuntimeCache?.reconciliationRows ?? []);
-  const [accounts, setAccounts] = useState<AccountView[]>(() => initialRuntimeCache?.accounts ?? []);
-  const [commodities, setCommodities] = useState<string[]>(() => initialRuntimeCache?.commodities ?? ["CNY"]);
-  const [prices, setPrices] = useState<Price[]>(() => initialRuntimeCache?.prices ?? []);
-  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialRuntimeCache?.incomeStatement ?? null);
-  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialRuntimeCache?.accountStatuses ?? []);
+export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKey: string) {
+  return previousKey !== nextKey;
+}
+
+export function shouldFetchFullBootstrap() {
+  return true;
+}
+
+export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+  const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
+  if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
+  const initialCache = initialCacheRef.current;
+  const [summary, setSummary] = useState<Summary | null>(() => initialCache?.summary ?? null);
+  const [balances, setBalances] = useState<Record<string, number>>(() => initialCache?.balances ?? {});
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialCache?.accountBalances ?? []);
+  const [txns, setTxns] = useState<Txn[]>(() => initialCache?.txns ?? []);
+  const [netWorthRows, setNetWorthRows] = useState<NetWorthPoint[]>(() => initialCache?.netWorthRows ?? []);
+  const [monthEndNetWorthRows, setMonthEndNetWorthRows] = useState<NetWorthPoint[]>(() => initialCache?.monthEndNetWorthRows ?? []);
+  const [netWorthWindows, setNetWorthWindows] = useState<NetWorthWindows | null>(() => initialCache?.netWorthWindows ?? null);
+  const [creditCards, setCreditCards] = useState<CreditCardAnalytics[]>(() => initialCache?.creditCards ?? []);
+  const [investments, setInvestments] = useState<InvestmentSummary | null>(() => initialCache?.investments ?? null);
+  const [reconciliationRows, setReconciliationRows] = useState<ReconcileRow[]>(() => initialCache?.reconciliationRows ?? []);
+  const [accounts, setAccounts] = useState<AccountView[]>(() => initialCache?.accounts ?? []);
+  const [commodities, setCommodities] = useState<string[]>(() => initialCache?.commodities ?? ["CNY"]);
+  const [prices, setPrices] = useState<Price[]>(() => initialCache?.prices ?? []);
+  const [incomeStatement, setIncomeStatement] = useState<IncomeStatementCache>(() => initialCache?.incomeStatement ?? null);
+  const [accountStatuses, setAccountStatuses] = useState<AccountStatus[]>(() => initialCache?.accountStatuses ?? []);
   const [loadingFresh, setLoadingFresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialRuntimeCache?.savedAt ?? null);
-  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialRuntimeCache?.ledgerVersion ?? null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialCache?.savedAt ?? null);
+  const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialCache?.ledgerVersion ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const loadSequenceRef = useRef(0);
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
+  const offlineNoticeKeyRef = useRef<string | null>(null);
+  const showToastRef = useRef(showToast);
 
   latestContextRef.current = { range: timeRange, unlocked, valuationCurrency };
+  showToastRef.current = showToast;
 
   const clearLedgerData = useCallback(() => {
     setSummary(null);
@@ -177,30 +242,63 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     } : null);
   }, []);
 
-  const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean } = {}) => {
+  const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean; clientUnlocked?: boolean } = {}) => {
+    const clientUnlocked = options.clientUnlocked ?? unlocked;
     const params = new URLSearchParams(timeRangeToParams(range));
     params.set("valuationCurrency", valuationCurrency);
     const query = params.toString();
-    const inFlightKey = `${query}:${unlocked ? "unlocked" : "locked"}`;
+    const inFlightKey = `${query}:${clientUnlocked ? "unlocked" : "locked"}`;
     const existing = freshInFlightRef.current.get(inFlightKey);
     if (existing) return existing;
 
     const run = async () => {
-      if (!options.background) setLoadingFresh(true);
+      const isBackground = Boolean(options.background);
+      if (!isBackground) setLoadingFresh(true);
       try {
-        const data = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${query}`);
-        const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
-        if (unlocked && !serverSensitiveUnlocked) onSensitiveLocked();
-        const version = data.ledgerVersion ?? await fetchLedgerVersion();
-        const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, unlocked, valuationCurrency, version);
-        applyCache(fresh, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
+        // Phase 1: fast lite bootstrap for immediate UI
+        const liteQuery = new URLSearchParams(timeRangeToParams(range));
+        liteQuery.set("valuationCurrency", valuationCurrency);
+        liteQuery.set("lite", "1");
+        const liteData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${liteQuery}`);
+        const serverSensitiveUnlocked = Boolean(liteData.sensitiveUnlocked);
+        if (clientUnlocked && !serverSensitiveUnlocked) {
+          latestContextRef.current = { range, unlocked: false, valuationCurrency };
+          onSensitiveLocked();
+        }
+        const version = liteData.ledgerVersion ?? await fetchLedgerVersion().catch(() => null);
+        const { cache: liteCache, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(liteData, clientUnlocked, valuationCurrency, version);
+        applyCache(liteCache, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
         if (cacheUnlocked) {
-          writeLedgerCache(range, fresh, responseValuationCurrency);
+          void writeEncryptedLedgerCache(range, liteCache, responseValuationCurrency);
+          writeLedgerCache(range, maskSensitiveLedgerCache(liteCache), responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);
         }
-        onGitStatusRefresh();
+
+        // Phase 2: full bootstrap in background for rich data (net worth, credit cards, etc.)
+        if (shouldFetchFullBootstrap()) {
+          const fullQuery = new URLSearchParams(timeRangeToParams(range));
+          fullQuery.set("valuationCurrency", valuationCurrency);
+          const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`);
+          const fullVersion = fullData.ledgerVersion ?? version;
+          const {
+            cache: fullCache,
+            cacheUnlocked: fullCacheUnlocked,
+            responseValuationCurrency: fullResponseValuationCurrency,
+            serverSensitiveUnlocked: fullServerSensitiveUnlocked,
+          } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
+          if (clientUnlocked && !fullServerSensitiveUnlocked) {
+            latestContextRef.current = { range, unlocked: false, valuationCurrency };
+            onSensitiveLocked();
+          }
+          applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency);
+          if (fullCacheUnlocked) {
+            void writeEncryptedLedgerCache(range, fullCache, fullResponseValuationCurrency);
+            writeLedgerCache(range, maskSensitiveLedgerCache(fullCache), fullResponseValuationCurrency);
+            freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${fullResponseValuationCurrency}`);
+          }
+        }
       } finally {
-        if (!options.background) setLoadingFresh(false);
+        if (!isBackground) setLoadingFresh(false);
         freshInFlightRef.current.delete(inFlightKey);
       }
     };
@@ -208,20 +306,54 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     const promise = run();
     freshInFlightRef.current.set(inFlightKey, promise);
     return promise;
-  }, [applyCache, onGitStatusRefresh, onSensitiveLocked, unlocked, valuationCurrency]);
+  }, [applyCache, onSensitiveLocked, unlocked, valuationCurrency]);
 
-  const load = useCallback(async (forceFresh = false) => {
-    const [me, passkey] = await Promise.all([
-      fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
-      fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
-    ]);
+  const load = useCallback(async (forceFresh = false, options: LedgerLoadOptions = {}) => {
+    const loadSequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = loadSequence;
+    const isCurrentLoad = () => loadSequenceRef.current === loadSequence;
+    let me: { authenticated?: boolean; sensitiveUnlocked?: boolean };
+    let passkey: { registered?: boolean };
+    try {
+      [me, passkey] = await Promise.all([
+        fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
+        fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
+      ]);
+      if (!isCurrentLoad()) return;
+      offlineNoticeKeyRef.current = null;
+    } catch (error) {
+      if (!isCurrentLoad()) return;
+      if (offlineOrNetworkError(error) && hasKnownLedgerAuthentication()) {
+        rememberLedgerAuthenticated();
+        onAuthChange(true);
+        const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
+        const noticeKey = `${timeRangeToParams(timeRange)}:${valuationCurrency}:${cached ? "cached" : "empty"}`;
+        if (cached) {
+          const cache = unlocked ? cached : maskSensitiveLedgerCache(cached);
+          applyCache(cache, unlocked, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
+          if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
+            offlineNoticeKeyRef.current = noticeKey;
+            showToastRef.current("info", "当前离线，已显示上次缓存的数据");
+          }
+        } else {
+          if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
+            offlineNoticeKeyRef.current = noticeKey;
+            showToastRef.current("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
+          }
+        }
+        return;
+      }
+      throw error;
+    }
     const hasPasskey = Boolean(passkey.registered);
     onPasskeyRegistered(hasPasskey);
     const authenticated = Boolean(me.authenticated);
     onAuthChange(authenticated);
+    const sensitiveUnlocked = authenticated && Boolean(options.sensitiveUnlocked ?? me.sensitiveUnlocked) && !sessionStorage.getItem("ledger_locked_at");
+    latestContextRef.current = { range: timeRange, unlocked: sensitiveUnlocked, valuationCurrency };
     if (authenticated) {
-      sessionStorage.setItem("ledger_authed", "1");
-      if (me.sensitiveUnlocked && !sessionStorage.getItem("ledger_locked_at")) {
+      rememberLedgerAuthenticated();
+      if (sensitiveUnlocked) {
         sessionStorage.setItem("ledger_unlocked", "1");
         onSensitiveUnlockChange(true);
       } else {
@@ -230,34 +362,49 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       }
     }
     else {
-      sessionStorage.removeItem("ledger_authed");
-      sessionStorage.removeItem("ledger_unlocked");
+      forgetLedgerAuthentication();
       onSensitiveUnlockChange(false);
+      latestContextRef.current = { range: timeRange, unlocked: false, valuationCurrency };
       clearLedgerData();
     }
     if (!authenticated) return;
 
     if (!forceFresh) {
-      const runtimeCached = readRuntimeLedgerCache(timeRange, unlocked, valuationCurrency);
+      const runtimeCached = readRuntimeLedgerCache(timeRange, sensitiveUnlocked, valuationCurrency);
       if (runtimeCached) {
-        applyCache(runtimeCached);
+        applyCache(runtimeCached, sensitiveUnlocked);
+        void fetchFreshLedger(timeRange, { background: true, clientUnlocked: sensitiveUnlocked }).catch(() => {});
         return;
       }
-    }
-
-    if (!forceFresh && unlocked) {
-      const currentVersion = await fetchLedgerVersion();
       const cached = await readLedgerCacheAsync(timeRange, valuationCurrency);
-      if (cached && currentVersion && cached.ledgerVersion?.version === currentVersion.version) {
+      if (!isCurrentLoad()) return;
+      if (cached) {
+        const displayCache = sensitiveUnlocked && cached.sensitiveCached ? cached : maskSensitiveLedgerCache(cached);
         const cacheKey = timeRangeToParams(timeRange) + `:${valuationCurrency}`;
-        applyCache(cached);
-        freshLedgerCacheKeys.add(cacheKey);
+        applyCache(displayCache, sensitiveUnlocked, timeRange, cached.valuationCurrency ?? valuationCurrency, valuationCurrency);
+        if (cached.sensitiveCached) freshLedgerCacheKeys.add(cacheKey);
+        void fetchFreshLedger(timeRange, { background: true, clientUnlocked: sensitiveUnlocked }).catch(() => {});
         return;
       }
     }
 
-    await fetchFreshLedger(timeRange);
+    await fetchFreshLedger(timeRange, { clientUnlocked: sensitiveUnlocked });
   }, [applyCache, clearLedgerData, fetchFreshLedger, timeRange, onAuthChange, onPasskeyRegistered, onSensitiveUnlockChange, unlocked, valuationCurrency]);
+
+  const unlockOfflineSensitiveCache = useCallback(async (secret: string) => {
+    const cache = await readEncryptedLedgerCache(timeRange, valuationCurrency, secret);
+    if (!cache) {
+      showToast("error", "这个时间范围还没有可解密的离线缓存");
+      return false;
+    }
+    sessionStorage.removeItem("ledger_locked_at");
+    sessionStorage.removeItem("ledger_hidden_at");
+    sessionStorage.setItem("ledger_unlocked", "1");
+    onSensitiveUnlockChange(true);
+    applyCache({ ...cache, sensitiveCached: true }, true, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
+    showToast("success", "已离线解锁缓存数据");
+    return true;
+  }, [applyCache, onSensitiveUnlockChange, showToast, timeRange, valuationCurrency]);
 
   async function refreshLedger() {
     if (refreshing || loadingFresh) return;
@@ -276,7 +423,11 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     if (!unlocked) clearSensitiveData();
   }, [clearSensitiveData, unlocked]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load().catch((error) => {
+      showToastRef.current("error", error instanceof Error ? error.message : "账本数据加载失败");
+    });
+  }, [load]);
 
   return {
     summary,
@@ -300,5 +451,6 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     load,
     accountStatuses,
     refreshLedger,
+    unlockOfflineSensitiveCache,
   };
 }

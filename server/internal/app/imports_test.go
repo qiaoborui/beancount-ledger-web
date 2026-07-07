@@ -206,6 +206,95 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestDedupImportBeanTextUsesOrderIDAndSignature(t *testing.T) {
+	existing := []Transaction{
+		{
+			Date:      "2026-05-24",
+			Payee:     "便利店",
+			Narration: "零食",
+			Metadata:  map[string]MetadataValue{"orderId": "module-order", "statementHash": "statement-1"},
+			Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 650, Currency: "CNY"},
+				{Account: "Assets:Cash", Amount: -650, Currency: "CNY"},
+			},
+		},
+		{
+			Date:      "2026-05-25",
+			Payee:     "咖啡",
+			Narration: "拿铁",
+			Metadata:  map[string]MetadataValue{"statementHash": "statement-1"},
+			Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 2800, Currency: "CNY"},
+				{Account: "Assets:Cash", Amount: -2800, Currency: "CNY"},
+			},
+		},
+	}
+	beanText := strings.Join([]string{
+		`2026-05-24 * "便利店" "零食"`,
+		`  orderId: "module-order"`,
+		"  Expenses:Food                         6.50 CNY",
+		"  Assets:Cash                          -6.50 CNY",
+		"",
+		`2026-05-25 * "咖啡" "拿铁"`,
+		"  Expenses:Food                        28.00 CNY",
+		"  Assets:Cash                         -28.00 CNY",
+		"",
+		`2026-05-26 * "书店" "书"`,
+		"  Expenses:Books                       45.00 CNY",
+		"  Assets:Cash                         -45.00 CNY",
+		"",
+	}, "\n")
+
+	deduped, skipped, err := dedupImportBeanText(existing, beanText, "statement-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 2 {
+		t.Fatalf("skipped=%d, want 2\ndeduped:\n%s", skipped, deduped)
+	}
+	if strings.Contains(deduped, "module-order") || strings.Contains(deduped, "咖啡") {
+		t.Fatalf("deduped text still contains duplicates:\n%s", deduped)
+	}
+	if !strings.Contains(deduped, "书店") {
+		t.Fatalf("deduped text dropped new transaction:\n%s", deduped)
+	}
+}
+
+func TestDedupImportBeanTextFallsBackToFundingPosting(t *testing.T) {
+	existing := []Transaction{
+		{
+			Date:      "2026-05-24",
+			Payee:     "Edited Payee",
+			Narration: "Edited category",
+			Postings: []Posting{
+				{Account: "Expenses:Groceries", Amount: 650, Currency: "CNY"},
+				{Account: "Assets:CN:Wechat:Balance", Amount: -650, Currency: "CNY"},
+			},
+		},
+	}
+	beanText := strings.Join([]string{
+		`2026-05-24 * "Original Payee" "Original narration"`,
+		"  Expenses:Food                         6.50 CNY",
+		"  Assets:CN:Wechat:Balance             -6.50 CNY",
+		"",
+		`2026-05-25 * "Original Payee" "Original narration"`,
+		"  Expenses:Food                         6.50 CNY",
+		"  Assets:CN:Wechat:Balance             -6.50 CNY",
+		"",
+	}, "\n")
+
+	deduped, skipped, err := dedupImportBeanText(existing, beanText, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 {
+		t.Fatalf("skipped=%d, want 1\ndeduped:\n%s", skipped, deduped)
+	}
+	if strings.Contains(deduped, "2026-05-24") || !strings.Contains(deduped, "2026-05-25") {
+		t.Fatalf("unexpected deduped text:\n%s", deduped)
+	}
+}
+
 func TestImportPreviewRemoteGitCheckoutBeforeRequirements(t *testing.T) {
 	seed := testLedger(t)
 	writeAlipayImportRequirements(t, seed)
@@ -545,7 +634,7 @@ func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
 		"  Assets:Cash                          -8.00 CNY",
 	}, "\n")
 
-	err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash")
+	_, err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash")
 	if err == nil {
 		t.Fatal("expected bean-check failure")
 	}

@@ -3,29 +3,40 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	AppRoot          string
-	LedgerRoot       string
-	RuntimeDir       string
-	StaticDir        string
-	ServeStatic      bool
-	Port             string
-	LedgerStorage    string
-	LedgerGitRemote  string
-	LedgerGitBranch  string
-	LedgerGitWorkDir string
-	RuntimeStore     string
-	RuntimeFileStore string
-	DatabaseURL      string
+	AppRoot                    string
+	LedgerRoot                 string
+	RuntimeDir                 string
+	StaticDir                  string
+	ServeStatic                bool
+	Port                       string
+	LedgerStorage              string
+	LedgerGitRemote            string
+	LedgerGitBranch            string
+	LedgerGitWorkDir           string
+	LedgerGitHubOwner          string
+	LedgerGitHubRepo           string
+	LedgerGitHubToken          string
+	LedgerGitHubAPIURL         string
+	LedgerGitEventsPollSeconds int
+	RuntimeStore               string
+	RuntimeFileStore           string
+	DatabaseURL                string
+	LedgerReadModel            string
+	ReadModelStrict            bool
 }
 
 func LoadConfig() Config {
 	storage := strings.ToLower(env("LEDGER_STORAGE", "remote_git"))
 	if storage == "git" {
 		storage = "remote_git"
+	}
+	if storage == "github" {
+		storage = "github_api"
 	}
 	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
 	gitWorkDir := env("LEDGER_GIT_WORKDIR", "")
@@ -44,20 +55,36 @@ func LoadConfig() Config {
 	if runtimeFileStore == "" {
 		runtimeFileStore = runtimeStore
 	}
+	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
+
+	gitEventsPollSeconds := 0
+	if raw := env("LEDGER_GIT_EVENTS_POLL_SECONDS", "30"); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			gitEventsPollSeconds = n
+		}
+	}
+
 	return Config{
-		AppRoot:          "",
-		LedgerRoot:       filepath.Clean(ledgerRoot),
-		RuntimeDir:       filepath.Clean(runtimeDir),
-		StaticDir:        filepath.Clean(env("STATIC_DIR", "")),
-		ServeStatic:      envBool("SERVE_STATIC", false),
-		Port:             env("PORT", "3000"),
-		LedgerStorage:    storage,
-		LedgerGitRemote:  strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
-		LedgerGitBranch:  env("LEDGER_GIT_BRANCH", "main"),
-		LedgerGitWorkDir: filepath.Clean(gitWorkDir),
-		RuntimeStore:     runtimeStore,
-		RuntimeFileStore: runtimeFileStore,
-		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AppRoot:                    "",
+		LedgerRoot:                 filepath.Clean(ledgerRoot),
+		RuntimeDir:                 filepath.Clean(runtimeDir),
+		StaticDir:                  filepath.Clean(env("STATIC_DIR", "")),
+		ServeStatic:                envBool("SERVE_STATIC", false),
+		Port:                       env("PORT", "3000"),
+		LedgerStorage:              storage,
+		LedgerGitRemote:            strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE")),
+		LedgerGitBranch:            env("LEDGER_GIT_BRANCH", "main"),
+		LedgerGitWorkDir:           filepath.Clean(gitWorkDir),
+		LedgerGitHubOwner:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
+		LedgerGitHubRepo:           strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
+		LedgerGitHubToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
+		LedgerGitHubAPIURL:         strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		LedgerGitEventsPollSeconds: gitEventsPollSeconds,
+		RuntimeStore:               runtimeStore,
+		RuntimeFileStore:           runtimeFileStore,
+		DatabaseURL:                strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		LedgerReadModel:            ledgerReadModel,
+		ReadModelStrict:            envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
 	}
 }
 

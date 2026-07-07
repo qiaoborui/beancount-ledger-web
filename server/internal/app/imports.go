@@ -140,6 +140,15 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
 			return nil, err
 		}
+	} else if githubAPIEnabled(s.cfg) {
+		dedupedBean, skipped, err := s.dedupGeneratedBeanWithReadModel(ctx, generatedBean, upload.StatementHash)
+		if err != nil {
+			return nil, err
+		}
+		dedupReport = fmt.Sprintf("GitHub API 读模型去重：生成 %d 条，跳过 %d 条已存在，待写入 %d 条。", generatedSummary.CandidateCount, skipped, generatedSummary.CandidateCount-skipped)
+		if err := os.WriteFile(dedupedFile, []byte(dedupedBean), 0o600); err != nil {
+			return nil, err
+		}
 	} else {
 		dedupReport, err = s.runDedup(importer, generatedFile, "", alipayFundRounding, true)
 		if err != nil {
@@ -174,6 +183,9 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 	}
 	excludedRowCount := importer.ExcludedRowCount(prepared, sourceAnalysis, generatedSummary)
 	warnings := append([]string{}, prepared.Warnings...)
+	if githubAPIEnabled(s.cfg) {
+		warnings = append(warnings, "GitHub API 写入模式使用 Postgres 读模型做预览去重；提交后等待本地 worker 索引更新。")
+	}
 	if summary.CandidateCount == 0 {
 		warnings = append(warnings, "去重后没有发现可写入的新交易。")
 	}
@@ -220,6 +232,149 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 	}, nil
 }
 
+func (s *Server) dedupGeneratedBeanWithReadModel(ctx context.Context, beanText, statementHash string) (string, int, error) {
+	snapshot, err := s.ledgerSnapshotLite(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	return dedupImportBeanText(snapshot.Transactions, beanText, statementHash)
+}
+
+func dedupImportBeanText(existing []Transaction, beanText, statementHash string) (string, int, error) {
+	result := ParseBeanLines(beanTextLines("<import-dedup>", beanText))
+	if len(result.Errors) > 0 {
+		return "", 0, result.Errors[0]
+	}
+	index := newImportDuplicateIndex(existing)
+	kept := []string{}
+	skipped := 0
+	for _, entry := range result.Entries {
+		if entry.Kind != "transaction" || len(entry.RawLines) == 0 {
+			continue
+		}
+		if index.seenBeanEntry(entry, statementHash) {
+			skipped++
+			continue
+		}
+		kept = append(kept, strings.TrimRight(strings.Join(entry.RawLines, "\n"), "\n"))
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n\n")), skipped, nil
+}
+
+type importDuplicateIndex struct {
+	orderIDs            map[string]bool
+	signatures          map[string]bool
+	postingSignatures   map[string]bool
+	statementSignatures map[string]bool
+}
+
+func newImportDuplicateIndex(existing []Transaction) importDuplicateIndex {
+	index := importDuplicateIndex{
+		orderIDs:            map[string]bool{},
+		signatures:          map[string]bool{},
+		postingSignatures:   map[string]bool{},
+		statementSignatures: map[string]bool{},
+	}
+	for _, txn := range existing {
+		if orderID := metadataString(txn.Metadata["orderId"]); orderID != "" {
+			index.orderIDs[orderID] = true
+		}
+		signature := transactionDuplicateSignature(txn.Date, txn.Payee, txn.Narration, txn.Postings)
+		if signature != "" {
+			index.signatures[signature] = true
+			if statementHash := metadataString(txn.Metadata["statementHash"]); statementHash != "" {
+				index.statementSignatures[statementHash+"|"+signature] = true
+			}
+		}
+		for _, signature := range importDuplicatePostingSignatures(txn.Date, txn.Postings) {
+			index.postingSignatures[signature] = true
+		}
+	}
+	return index
+}
+
+func (index importDuplicateIndex) seenBeanEntry(entry BeanEntry, fallbackStatementHash string) bool {
+	if orderID := metadataString(entry.Metadata["orderId"]); orderID != "" && index.orderIDs[orderID] {
+		return true
+	}
+	signature := beanEntryDuplicateSignature(entry)
+	if signature == "" {
+		return false
+	}
+	statementHash := metadataString(entry.Metadata["statementHash"])
+	if statementHash == "" {
+		statementHash = fallbackStatementHash
+	}
+	if statementHash != "" && index.statementSignatures[statementHash+"|"+signature] {
+		return true
+	}
+	for _, postingSignature := range beanEntryDuplicatePostingSignatures(entry) {
+		if index.postingSignatures[postingSignature] {
+			return true
+		}
+	}
+	return index.signatures[signature]
+}
+
+func beanEntryDuplicateSignature(entry BeanEntry) string {
+	postings := make([]Posting, 0, len(entry.Postings))
+	for _, posting := range entry.Postings {
+		if posting.Account == "" {
+			continue
+		}
+		postings = append(postings, Posting{Account: posting.Account, Amount: posting.Amount, Currency: posting.Currency})
+	}
+	return transactionDuplicateSignature(entry.Date, entry.Payee, entry.Narration, postings)
+}
+
+func transactionDuplicateSignature(date, payee, narration string, postings []Posting) string {
+	if date == "" || len(postings) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(postings))
+	for _, posting := range postings {
+		if posting.Account == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d:%s", posting.Account, posting.Amount, posting.Currency))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join([]string{date, strings.TrimSpace(payee), strings.TrimSpace(narration), strings.Join(parts, ",")}, "|")
+}
+
+func beanEntryDuplicatePostingSignatures(entry BeanEntry) []string {
+	postings := make([]Posting, 0, len(entry.Postings))
+	for _, posting := range entry.Postings {
+		if posting.Account == "" {
+			continue
+		}
+		postings = append(postings, Posting{Account: posting.Account, Amount: posting.Amount, Currency: posting.Currency})
+	}
+	return importDuplicatePostingSignatures(entry.Date, postings)
+}
+
+func importDuplicatePostingSignatures(date string, postings []Posting) []string {
+	if date == "" {
+		return nil
+	}
+	signatures := []string{}
+	for _, posting := range postings {
+		if !importDuplicateFundingAccount(posting.Account) || posting.Amount == 0 {
+			continue
+		}
+		signatures = append(signatures, fmt.Sprintf("%s|%s|%d|%s", date, posting.Account, posting.Amount, posting.Currency))
+	}
+	sort.Strings(signatures)
+	return signatures
+}
+
+func importDuplicateFundingAccount(account string) bool {
+	return strings.HasPrefix(account, "Assets:") || strings.HasPrefix(account, "Liabilities:")
+}
+
 func (s *Server) commitImport(ctx context.Context, importID, provider string, entries []ImportEntry) (ginH, error) {
 	if _, err := s.ensureImportRequirements(provider); err != nil {
 		return nil, err
@@ -257,7 +412,7 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if summary.DateStart == "" || summary.DateEnd == "" {
 		return nil, errors.New("账单没有可归档的日期范围，请重新上传账单")
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -272,21 +427,29 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 			fallbackDocumentAccount = entries[0].Postings[len(entries[0].Postings)-1].Account
 		}
 	}
-	outputFile := uniquePath(importOutputPath(s.cfg, summary.DateStart, summary.DateEnd, provider, importID[:min(len(importID), 6)]))
-	documentFile := uniquePath(importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)]))
+	outputFile := importOutputPath(s.cfg, summary.DateStart, summary.DateEnd, provider, importID[:min(len(importID), 6)])
+	documentFile := importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)])
 	monthFile := transactionFileForDate(s.cfg, summary.DateStart)
 	documentAccount := providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
 	sourceDocumentFile := meta.InputFile
 	if meta.DocumentFile != "" {
 		sourceDocumentFile = meta.DocumentFile
 	}
-	if err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount); err != nil {
+	written, err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount)
+	if err != nil {
 		return nil, err
 	}
-	return ginH{"ok": true, "outputFile": outputFile, "includeFile": monthFile, "documentFile": documentFile, "count": summary.CandidateCount, "beanText": beanText}, nil
+	return ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}, nil
 }
 
 func (s *Server) listImportDocuments() ([]ImportDocument, error) {
+	if githubAPIEnabled(s.cfg) {
+		client, err := newGitHubLedgerClient(s.cfg)
+		if err != nil {
+			return nil, err
+		}
+		return client.listImportDocuments(context.Background())
+	}
 	root := transactionsDir(s.cfg)
 	documents := []ImportDocument{}
 	entries, err := os.ReadDir(root)
@@ -362,25 +525,17 @@ func importDocumentInfo(path, year, name string, size int64, modTime time.Time) 
 }
 
 func cleanImportDocumentPath(cfg Config, rawPath string) (string, string, error) {
-	trimmed := strings.TrimSpace(rawPath)
-	if trimmed == "" {
-		return "", "", errors.New("path is required")
-	}
-	if strings.Contains(trimmed, "\x00") || filepath.IsAbs(trimmed) {
-		return "", "", errors.New("invalid import document path")
-	}
-	path := filepath.ToSlash(filepath.Clean(trimmed))
-	if path == "." || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
-		return "", "", errors.New("invalid import document path")
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) != 5 || parts[0] != "transactions" || !regexp.MustCompile(`^\d{4}$`).MatchString(parts[1]) || parts[2] != "documents" || parts[3] != "imports" || parts[4] == "" {
-		return "", "", errors.New("path is outside import documents")
+	path, err := cleanImportDocumentRel(rawPath)
+	if err != nil {
+		return "", "", err
 	}
 	full := filepath.Join(cfg.LedgerRoot, filepath.FromSlash(path))
 	rel, err := filepath.Rel(cfg.LedgerRoot, full)
 	if err != nil || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." || filepath.IsAbs(rel) {
 		return "", "", errors.New("invalid import document path")
+	}
+	if githubAPIEnabled(cfg) {
+		return path, full, nil
 	}
 	info, err := os.Stat(full)
 	if err != nil {
@@ -390,6 +545,25 @@ func cleanImportDocumentPath(cfg Config, rawPath string) (string, string, error)
 		return "", "", errors.New("import document path is a directory")
 	}
 	return path, full, nil
+}
+
+func cleanImportDocumentRel(rawPath string) (string, error) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", errors.New("path is required")
+	}
+	if strings.Contains(trimmed, "\x00") || filepath.IsAbs(trimmed) {
+		return "", errors.New("invalid import document path")
+	}
+	path := filepath.ToSlash(filepath.Clean(trimmed))
+	if path == "." || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
+		return "", errors.New("invalid import document path")
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) != 5 || parts[0] != "transactions" || !regexp.MustCompile(`^\d{4}$`).MatchString(parts[1]) || parts[2] != "documents" || parts[3] != "imports" || parts[4] == "" {
+		return "", errors.New("path is outside import documents")
+	}
+	return path, nil
 }
 
 func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
@@ -466,6 +640,9 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 		return nil, fmt.Errorf("provider must be %s", strings.Join(importProviderIDs(), ", "))
 	}
 	cfg := importer.ProviderConfig()
+	if githubAPIEnabled(s.cfg) {
+		return importer, s.ensureGitHubImportRequirementFiles(context.Background(), importer.ImportEngine().RequiredFiles(cfg))
+	}
 	required := importer.ImportEngine().RequiredFiles(cfg)
 	for _, relative := range required {
 		if _, err := os.Stat(filepath.Join(s.cfg.LedgerRoot, relative)); err != nil {
@@ -473,6 +650,35 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 		}
 	}
 	return importer, nil
+}
+
+func (s *Server) ensureGitHubImportRequirementFiles(ctx context.Context, required []string) error {
+	client, err := newGitHubLedgerClient(s.cfg)
+	if err != nil {
+		return err
+	}
+	remoteTx, err := client.beginTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	for _, relative := range required {
+		relative = filepath.ToSlash(filepath.Clean(relative))
+		if relative == "." || relative == "main.bean" || relative == "scripts/dedup_import.py" {
+			continue
+		}
+		content, err := remoteTx.readFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
+		if err != nil {
+			return fmt.Errorf("账本缺少必要文件: %s", relative)
+		}
+		full := filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(full, content, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) prepareCmbInput(inputFile, originalFilename, importID string) (preparedImportInput, error) {
@@ -598,7 +804,7 @@ func commandEnv() []string {
 }
 
 func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.ledgerSnapshot(context.Background())
 	if err != nil {
 		return "", err
 	}
@@ -678,16 +884,34 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 	return strings.TrimSpace(strings.Join(blocks, "\n\n")), nil
 }
 
-func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) error {
-	return s.writer.RunTransactionWithSource(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
+type writtenImportFiles struct {
+	OutputFile   string
+	MonthFile    string
+	DocumentFile string
+}
+
+func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) (writtenImportFiles, error) {
+	written := writtenImportFiles{MonthFile: monthFile}
+	err := s.writer.RunTransactionWithSource(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
+		var err error
+		outputFile, err = tx.UniquePath(outputFile)
+		if err != nil {
+			return err
+		}
+		written.OutputFile = outputFile
 		if err := s.writer.ensureMonthlyFileAndInclude(tx, monthFile, start); err != nil {
 			return err
 		}
 		documentLine := ""
 		if sourceFile != "" && documentFile != "" {
+			documentFile, err = tx.UniquePath(documentFile)
+			if err != nil {
+				return err
+			}
 			if err := tx.CopyFile(sourceFile, documentFile, 0o600); err != nil {
 				return err
 			}
+			written.DocumentFile = documentFile
 			documentLine = documentDirective(end, documentAccount, outputFile, documentFile) + "\n\n"
 		}
 		header := fmt.Sprintf("; %s import: %s .. %s\n", importProviderTitle(provider), start, end)
@@ -695,7 +919,7 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 			return err
 		}
 		includeLine := includeLineRelative(monthFile, outputFile)
-		monthBefore, err := os.ReadFile(monthFile)
+		monthBefore, err := tx.ReadFile(monthFile)
 		if err != nil {
 			return err
 		}
@@ -717,4 +941,5 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 		}
 		return nil
 	})
+	return written, err
 }

@@ -287,6 +287,45 @@ func TestInvestmentSummaryPreservesSecurityDecimalPrecision(t *testing.T) {
 	}
 }
 
+func TestInvestmentSummaryFallsBackToIndexedTransactions(t *testing.T) {
+	snapshot := &LedgerSnapshot{
+		Accounts: []Account{
+			{Account: "Assets:Broker:QQQ", Currency: "QQQ", Label: "券商 QQQ 持仓", Group: "wealth", Active: true},
+			{Account: "Equity:Opening-Balances", Currency: "CNY", Label: "Opening", Group: "equity", Active: true},
+		},
+		Commodities: []string{"CNY", "QQQ", "USD"},
+		Prices: []Price{
+			{Date: "2026-05-31", Currency: "USD", Amount: 700, AmountValue: BeanAmount{Number: "7.00", Currency: "CNY"}, QuoteCurrency: "CNY"},
+			{Date: "2026-06-01", Currency: "QQQ", Amount: 11000, AmountValue: BeanAmount{Number: "110.00", Currency: "USD"}, QuoteCurrency: "USD"},
+		},
+		Transactions: []Transaction{{
+			Date:      "2026-05-31",
+			Payee:     "Broker",
+			Narration: "QQQ opening",
+			Postings: []Posting{
+				{Account: "Assets:Broker:QQQ", Amount: 50, Currency: "QQQ"},
+				{Account: "Equity:Opening-Balances", Amount: -50, Currency: "QQQ"},
+			},
+		}},
+	}
+
+	summary := BuildInvestmentSummaryFromSnapshot(snapshot)
+
+	if len(summary.Positions) != 1 || len(summary.Holdings) != 1 {
+		t.Fatalf("expected indexed transaction fallback to produce one holding, got positions=%#v holdings=%#v", summary.Positions, summary.Holdings)
+	}
+	position := summary.Positions[0]
+	if position.Account != "Assets:Broker:QQQ" || position.Quantity != 0.5 || position.LatestPrice == nil || position.LatestPrice.Amount != 110 {
+		t.Fatalf("unexpected fallback position: %#v", position)
+	}
+	if position.MarketValueCNY == nil || *position.MarketValueCNY != 38500 || summary.TotalMarketValueCNY != 38500 {
+		t.Fatalf("fallback should value indexed holdings in CNY, summary=%#v position=%#v", summary, position)
+	}
+	if len(summary.Lots) != 1 || summary.Lots[0].Quantity != 0.5 {
+		t.Fatalf("fallback should expose positive indexed postings as lots, got %#v", summary.Lots)
+	}
+}
+
 func TestAccountsParseAdditionalIncludedFiles(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "accounts_stocks.bean"), strings.Join([]string{

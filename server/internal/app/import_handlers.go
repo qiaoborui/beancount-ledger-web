@@ -76,6 +76,20 @@ func (s *Server) importsDocumentFile(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Disposition", `inline; filename="`+filepath.Base(path)+`"`)
+	if githubAPIEnabled(s.cfg) {
+		client, clientErr := newGitHubLedgerClient(s.cfg)
+		if clientErr != nil {
+			errorJSON(c, http.StatusBadRequest, clientErr)
+			return
+		}
+		content, readErr := client.readLedgerFile(c.Request.Context(), path)
+		if readErr != nil {
+			errorJSON(c, http.StatusBadRequest, readErr)
+			return
+		}
+		c.Data(http.StatusOK, "application/octet-stream", content)
+		return
+	}
 	c.File(full)
 }
 

@@ -7,7 +7,6 @@ export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
 export const loadAiBookkeepingChat = () => import("./AiBookkeepingChat");
 export const loadCommandPalette = () => import("./CommandPalette");
 export const loadEntryModal = () => import("./EntryModal");
-export const loadGitSaveModal = () => import("./GitSaveModal");
 export const loadQuickActionsSheet = () => import("./QuickActionsSheet");
 export const loadImportPage = () => import("./ImportPage");
 export const loadLedgerEditorPage = () => import("./LedgerEditorPage");
@@ -72,4 +71,16 @@ export function preloadLedgerRoute(href: string) {
       console.warn("Ledger account detail preload failed", error);
     });
   }
+}
+
+export function preloadOfflineCoreRoutes() {
+  if (typeof window === "undefined") return;
+  const coreRoutes = ["/transactions", "/accounts", "/settings"];
+  for (const href of coreRoutes) preloadLedgerRoute(href);
+  void loadEntryModal().catch((error) => {
+    console.warn("Ledger entry preload failed", error);
+  });
+  void loadQuickActionsSheet().catch((error) => {
+    console.warn("Ledger quick actions preload failed", error);
+  });
 }

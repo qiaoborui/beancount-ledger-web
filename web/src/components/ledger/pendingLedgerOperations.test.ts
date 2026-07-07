@@ -3,6 +3,7 @@ import {
   applyPendingLedgerOperations,
   mergePendingOperation,
   migrateLegacyPendingWrites,
+  normalizePendingLedgerOperations,
   type PendingLedgerOperation,
 } from "./pendingLedgerOperations";
 import type { ParsedTransaction } from "@/lib/schemas";
@@ -48,6 +49,31 @@ function updateOperation(id: string, source: Txn["source"], patch: Partial<Parse
 }
 
 describe("pending ledger operations", () => {
+  it("projects pending appended transactions into cached rows", () => {
+    const rows = applyPendingLedgerOperations([txn(3)], [{ id: "append-1", createdAt: 1, kind: "append", entry: entry({ payee: "Local Cafe" }) }]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].payee).toBe("Local Cafe");
+    expect(rows[0].source).toEqual({ file: "local://pending/append-1", line: 0, hash: "append-1" });
+    expect(rows[0].pending).toEqual({ kind: "append", operationId: "append-1" });
+  });
+
+  it("keeps pending appends inside the selected time range", () => {
+    const rows = applyPendingLedgerOperations(
+      [txn(3)],
+      [{ id: "append-1", createdAt: 1, kind: "append", entry: entry({ date: "2026-06-01" }) }],
+      { start: "2026-05-01", end: "2026-06-01", preset: "month" },
+    );
+
+    expect(rows).toEqual([txn(3)]);
+  });
+
+  it("does not project pending balance assertions as transactions", () => {
+    const rows = applyPendingLedgerOperations([txn(3)], [{ id: "balance-1", createdAt: 1, kind: "append", entry: { kind: "balance", date: "2026-05-20", account: "Assets:Cash", amount: "10.00", currency: "CNY" } }]);
+
+    expect(rows).toEqual([txn(3)]);
+  });
+
   it("projects pending transaction updates into cached rows", () => {
     const rows = applyPendingLedgerOperations([txn(3)], [updateOperation("op-1", txn(3).source)]);
 
@@ -101,5 +127,11 @@ describe("pending ledger operations", () => {
     const migrated = migrateLegacyPendingWrites([{ id: "old-1", createdAt: 123, entry: entry() }]);
 
     expect(migrated).toEqual([{ id: "old-1", createdAt: 123, kind: "append", entry: entry() }]);
+  });
+
+  it("normalizes interrupted syncing operations back to pending", () => {
+    const normalized = normalizePendingLedgerOperations([{ id: "op-1", createdAt: 1, kind: "append", entry: entry(), status: "syncing" }]);
+
+    expect(normalized).toEqual([{ id: "op-1", createdAt: 1, kind: "append", entry: entry(), status: "pending" }]);
   });
 });

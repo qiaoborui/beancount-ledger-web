@@ -75,4 +75,24 @@ describe("syncOperation", () => {
     expect(firstBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
     expect(retryBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12 });
   });
+
+  it("stops transaction updates when the queued base ledger version is stale", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ version: "new-version", fileCount: 2, latestMtimeMs: 2 }, true));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const operation: PendingLedgerOperation = {
+      id: "op-1",
+      createdAt: 1,
+      kind: "update-transaction",
+      source: { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" },
+      entry,
+      baseLedgerVersion: { version: "old-version", fileCount: 2, latestMtimeMs: 1 },
+    };
+
+    await expect(syncOperation(operation)).rejects.toThrow("需要确认");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/ledger/version");
+  });
 });

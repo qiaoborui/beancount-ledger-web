@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -15,7 +16,7 @@ func (s *Server) ledgerVersion(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	version, err := s.cache.Version()
+	version, err := s.readService.Version(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -24,6 +25,14 @@ func (s *Server) ledgerVersion(c *gin.Context) {
 }
 
 func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool) {
+	return s.snapshotWithLoader(c, sensitive, s.ledgerSnapshot)
+}
+
+func (s *Server) snapshotLite(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool) {
+	return s.snapshotWithLoader(c, sensitive, s.ledgerSnapshotLite)
+}
+
+func (s *Server) snapshotWithLoader(c *gin.Context, sensitive bool, load func(context.Context) (*LedgerSnapshot, error)) (*LedgerSnapshot, bool) {
 	if sensitive {
 		if !requireSensitive(c) {
 			return nil, false
@@ -31,7 +40,7 @@ func (s *Server) snapshot(c *gin.Context, sensitive bool) (*LedgerSnapshot, bool
 	} else if !requireAuth(c) {
 		return nil, false
 	}
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := load(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return nil, false
@@ -44,7 +53,15 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
+	unlocked := isSensitiveUnlocked(c)
+	isLite := c.Query("lite") == "1"
+	var payload gin.H
+	var err error
+	if isLite {
+		payload, err = s.readService.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
+	} else {
+		payload, err = s.readService.Bootstrap(start, end, unlocked, c.Query("valuationCurrency"))
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -53,8 +70,12 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 }
 
 func (s *Server) ledgerEntries(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, false)
-	if !ok {
+	if !requireAuth(c) {
+		return
+	}
+	snapshot, err := s.ledgerSnapshot(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, BeanLoadResultFromEntries(snapshot.BeanEntries, snapshot.BeanErrors))
@@ -87,7 +108,7 @@ func (s *Server) transactions(c *gin.Context) {
 }
 
 func (s *Server) balances(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}
@@ -108,7 +129,7 @@ func (s *Server) incomeStatement(c *gin.Context) {
 }
 
 func (s *Server) dashboard(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}
@@ -121,7 +142,7 @@ func (s *Server) investments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices))
+	c.JSON(http.StatusOK, BuildInvestmentSummaryFromSnapshot(snapshot))
 }
 
 func parseDashboardFilters(c *gin.Context) DashboardFilters {
@@ -170,6 +191,9 @@ func (s *Server) appendAccount(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.accounts.append") {
+		return
+	}
 	var input AccountInput
 	if !bindJSON(c, &input) {
 		return
@@ -184,6 +208,9 @@ func (s *Server) appendAccount(c *gin.Context) {
 
 func (s *Server) applyAccountOperations(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.accounts.operations") {
 		return
 	}
 	var input AccountOperationsRequest
@@ -231,7 +258,7 @@ func (s *Server) accountStatus(c *gin.Context) {
 }
 
 func (s *Server) reconciliation(c *gin.Context) {
-	snapshot, ok := s.snapshot(c, true)
+	snapshot, ok := s.snapshotLite(c, true)
 	if !ok {
 		return
 	}
@@ -268,6 +295,9 @@ func (s *Server) appendEntry(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.append") {
+		return
+	}
 	var entry LedgerEntry
 	if !bindJSON(c, &entry) {
 		return
@@ -282,6 +312,9 @@ func (s *Server) appendEntry(c *gin.Context) {
 
 func (s *Server) appendBatch(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.append-batch") {
 		return
 	}
 	var input AppendBatchRequest
@@ -300,6 +333,9 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.reverse") {
+		return
+	}
 	var input ReverseTransactionRequest
 	if !bindJSON(c, &input) {
 		return
@@ -314,6 +350,9 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 
 func (s *Server) updateTransaction(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.update") {
 		return
 	}
 	var input UpdateTransactionRequest
@@ -331,6 +370,9 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	if s.rejectWorkerOnly(c, "ledger.transactions.delete") {
+		return
+	}
 	var input DeleteTransactionRequest
 	if !bindJSON(c, &input) {
 		return
@@ -344,6 +386,9 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 
 func (s *Server) reconcile(c *gin.Context) {
 	if !requireSensitive(c) {
+		return
+	}
+	if s.rejectWorkerOnly(c, "ledger.reconciliation.write") {
 		return
 	}
 	var input ReconcileRequest
@@ -419,11 +464,11 @@ func isSensitiveStaticProbe(path string) bool {
 func setStaticCacheHeaders(c *gin.Context, path string) {
 	switch {
 	case path == "index.html", strings.HasSuffix(path, "/index.html"), strings.HasSuffix(path, "sw.js"):
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
 	case strings.HasPrefix(path, "assets/"), strings.Contains(path, "/assets/"):
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	default:
-		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
 	}
 }
 

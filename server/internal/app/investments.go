@@ -100,6 +100,16 @@ func BuildInvestmentSummary(lines []BeanLine, accounts []Account, prices []Price
 	return BuildInvestmentSummaryFromBeanEntries(ParseBeanLines(lines).Entries, accounts, prices)
 }
 
+func BuildInvestmentSummaryFromSnapshot(snapshot *LedgerSnapshot) InvestmentSummary {
+	if snapshot == nil {
+		return InvestmentSummary{}
+	}
+	if len(snapshot.BeanEntries) > 0 {
+		return BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices)
+	}
+	return BuildInvestmentSummaryFromTransactions(snapshot.Transactions, snapshot.Accounts, snapshot.Prices, snapshot.Commodities)
+}
+
 func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Account, prices []Price) InvestmentSummary {
 	commodities := parseCommodityDetails(entries)
 	commodityMap := map[string]Commodity{}
@@ -176,6 +186,118 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 		quoteQuantity[commodity] += quantity
 		quotePositionCount[commodity]++
 		securities[commodity] = true
+	}
+	sort.Slice(positions, func(i, j int) bool {
+		left, right := cnyValue(positions[i].MarketValueCNY), cnyValue(positions[j].MarketValueCNY)
+		if left != right {
+			return left > right
+		}
+		if positions[i].Commodity != positions[j].Commodity {
+			return positions[i].Commodity < positions[j].Commodity
+		}
+		return positions[i].Account < positions[j].Account
+	})
+
+	quotes := make([]InvestmentQuote, 0, len(quoteQuantity))
+	updatedAt := ""
+	for commodity := range quoteQuantity {
+		quote := InvestmentQuote{
+			Commodity:        commodity,
+			CommodityName:    commodityName(commodityMap, commodity),
+			LatestPrice:      latestPrices[commodity],
+			PositionCount:    quotePositionCount[commodity],
+			PositionQuantity: quoteQuantity[commodity],
+		}
+		if quote.LatestPrice != nil {
+			quote.MarketCurrency = quote.LatestPrice.Currency
+			if quote.LatestPrice.Date > updatedAt {
+				updatedAt = quote.LatestPrice.Date
+			}
+			if !roundedZero(quote.PositionQuantity) {
+				value := quote.PositionQuantity * quote.LatestPrice.Amount
+				if cny := marketValueCNY(value, quote.LatestPrice.Currency, priceIndex); cny != nil {
+					quote.MarketValueCNY = cny
+				}
+			}
+		}
+		quotes = append(quotes, quote)
+	}
+	sort.Slice(quotes, func(i, j int) bool {
+		left, right := cnyValue(quotes[i].MarketValueCNY), cnyValue(quotes[j].MarketValueCNY)
+		if left != right {
+			return left > right
+		}
+		return quotes[i].Commodity < quotes[j].Commodity
+	})
+
+	lots := summaryLots(positionLots, positions)
+	holdings := investmentHoldings(commodityMap, latestPrices, priceHistory, positions, quoteQuantity, priceIndex)
+	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Lots: lots, Quotes: quotes, UpdatedAt: updatedAt}
+}
+
+func BuildInvestmentSummaryFromTransactions(txns []Transaction, accounts []Account, prices []Price, commodities []string) InvestmentSummary {
+	commodityMap := map[string]Commodity{}
+	securities := map[string]bool{}
+	for _, commodity := range commodities {
+		if !fiatCommodities[commodity] {
+			securities[commodity] = true
+			commodityMap[commodity] = Commodity{Symbol: commodity, Name: commodity}
+		}
+	}
+	for _, price := range prices {
+		if !fiatCommodities[price.Currency] {
+			securities[price.Currency] = true
+		}
+	}
+	accountMap := map[string]Account{}
+	for _, account := range accounts {
+		accountMap[account.Account] = account
+		if !fiatCommodities[account.Currency] {
+			securities[account.Currency] = true
+		}
+	}
+
+	priceIndex := newInvestmentPriceIndex(prices)
+	latestPrices := latestInvestmentPrices(prices)
+	priceHistory := investmentPriceHistory(prices)
+	positionQuantities := investmentQuantitiesFromTransactions(txns, securities)
+	positionLots := investmentLotsFromTransactions(txns, securities, accountMap, commodityMap)
+	positions := make([]InvestmentPosition, 0, len(positionQuantities))
+	quoteQuantity := map[string]float64{}
+	quotePositionCount := map[string]int{}
+	totalCNY := 0
+	for key, quantity := range positionQuantities {
+		if roundedZero(quantity) {
+			continue
+		}
+		parts := strings.SplitN(key, "\x00", 2)
+		accountName, commodity := parts[0], parts[1]
+		acct := accountMap[accountName]
+		label := accountName
+		if acct.Label != "" {
+			label = acct.Label
+		}
+		position := InvestmentPosition{
+			Account:       accountName,
+			AccountLabel:  label,
+			Commodity:     commodity,
+			CommodityName: commodityName(commodityMap, commodity),
+			Quantity:      quantity,
+			LatestPrice:   latestPrices[commodity],
+			Lots:          positionLots[key],
+		}
+		if position.LatestPrice != nil {
+			value := quantity * position.LatestPrice.Amount
+			position.MarketValue = &value
+			position.MarketCurrency = position.LatestPrice.Currency
+			if cny := marketValueCNY(value, position.LatestPrice.Currency, priceIndex); cny != nil {
+				position.MarketValueCNY = cny
+				totalCNY += *cny
+			}
+		}
+		positions = append(positions, position)
+		quoteQuantity[commodity] += quantity
+		quotePositionCount[commodity]++
 	}
 	sort.Slice(positions, func(i, j int) bool {
 		left, right := cnyValue(positions[i].MarketValueCNY), cnyValue(positions[j].MarketValueCNY)
@@ -398,6 +520,19 @@ func investmentQuantities(entries []BeanEntry, securities map[string]bool) map[s
 	return positions
 }
 
+func investmentQuantitiesFromTransactions(txns []Transaction, securities map[string]bool) map[string]float64 {
+	positions := map[string]float64{}
+	for _, txn := range txns {
+		for _, posting := range txn.Postings {
+			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+				continue
+			}
+			positions[posting.Account+"\x00"+posting.Currency] += investmentTransactionPostingQuantity(posting)
+		}
+	}
+	return positions
+}
+
 type investmentCost struct {
 	value    float64
 	currency string
@@ -490,6 +625,39 @@ func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap 
 	return lots
 }
 
+func investmentLotsFromTransactions(txns []Transaction, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
+	lots := map[string][]InvestmentLot{}
+	for _, txn := range txns {
+		for _, posting := range txn.Postings {
+			if !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+				continue
+			}
+			quantity := investmentTransactionPostingQuantity(posting)
+			if quantity <= 0 || roundedZero(quantity) {
+				continue
+			}
+			accountName, commodity := posting.Account, posting.Currency
+			label := accountName
+			if acct := accountMap[accountName]; acct.Label != "" {
+				label = acct.Label
+			}
+			key := accountName + "\x00" + commodity
+			lots[key] = append(lots[key], InvestmentLot{
+				Date:          txn.Date,
+				Account:       accountName,
+				AccountLabel:  label,
+				Commodity:     commodity,
+				CommodityName: commodityName(commodityMap, commodity),
+				Quantity:      quantity,
+			})
+		}
+	}
+	for key := range lots {
+		sortInvestmentLots(lots[key])
+	}
+	return lots
+}
+
 func sortInvestmentLots(lots []InvestmentLot) {
 	sort.Slice(lots, func(i, j int) bool {
 		if lots[i].Date != lots[j].Date {
@@ -531,6 +699,10 @@ func roundedZero(value float64) bool {
 
 func investmentPostingQuantity(posting parsedPosting) float64 {
 	return investmentBeanAmountValue(posting.Quantity, posting.Amount)
+}
+
+func investmentTransactionPostingQuantity(posting Posting) float64 {
+	return float64(posting.Amount) / 100
 }
 
 func investmentPriceAmount(price Price) float64 {

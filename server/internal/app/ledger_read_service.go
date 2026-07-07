@@ -1,29 +1,173 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 type LedgerReadService struct {
-	cache *LedgerCache
+	cache      *LedgerCache
+	indexStore *LedgerIndexStore
+	indexErr   error
+	strict     bool
+
+	mu             sync.Mutex
+	cachedVersion  string
+	cachedSnapshot *LedgerSnapshot
+	cachedFull     bool
+	cachedRevision LedgerIndexRevision
+	cachedRevAt    time.Time
 }
 
 func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
 	return &LedgerReadService{cache: cache}
 }
 
+func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore *LedgerIndexStore, indexErr error, strict bool) *LedgerReadService {
+	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict}
+}
+
+// revisionCacheTTL controls how often we re-query ActiveRevision.
+// The indexer runs every 5 min; a 10s TTL avoids redundant Neon queries.
+const revisionCacheTTL = 10 * time.Second
+
+func (s *LedgerReadService) cachedActiveRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
+	s.mu.Lock()
+	if time.Since(s.cachedRevAt) < revisionCacheTTL {
+		rev := s.cachedRevision
+		s.mu.Unlock()
+		return rev, rev.ID != 0, nil
+	}
+	s.mu.Unlock()
+
+	rev, ok, err := s.indexStore.ActiveRevision(ctx)
+	if err != nil || !ok {
+		return rev, ok, err
+	}
+
+	s.mu.Lock()
+	s.cachedRevision = rev
+	s.cachedRevAt = time.Now()
+	s.mu.Unlock()
+	return rev, true, nil
+}
+
+func (s *LedgerReadService) Snapshot(ctx context.Context) (*LedgerSnapshot, error) {
+	return s.snapshot(ctx, true)
+}
+
+func (s *LedgerReadService) SnapshotLite(ctx context.Context) (*LedgerSnapshot, error) {
+	return s.snapshot(ctx, false)
+}
+
+func (s *LedgerReadService) snapshot(ctx context.Context, includeBeanPayloads bool) (*LedgerSnapshot, error) {
+	if s.indexErr != nil {
+		return nil, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			if s.strict {
+				return nil, ErrLedgerReadModelUnavailable
+			}
+			return s.cache.Snapshot()
+		}
+		// Return cached snapshot when version hasn't changed.
+		s.mu.Lock()
+		if s.cachedSnapshot != nil && s.cachedVersion == revision.LedgerVersion.Version && (!includeBeanPayloads || s.cachedFull) {
+			cached := s.cachedSnapshot
+			s.mu.Unlock()
+			return cached, nil
+		}
+		s.mu.Unlock()
+		// Version changed — reload full snapshot.
+		snapCtx, snapCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer snapCancel()
+		var snapshot *LedgerSnapshot
+		var loaded bool
+		if includeBeanPayloads {
+			snapshot, loaded, err = s.indexStore.ActiveSnapshot(snapCtx)
+		} else {
+			snapshot, loaded, err = s.indexStore.ActiveSnapshotLite(snapCtx)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if loaded {
+			s.mu.Lock()
+			s.cachedSnapshot = snapshot
+			s.cachedVersion = snapshot.Version
+			s.cachedFull = includeBeanPayloads
+			s.mu.Unlock()
+			return snapshot, nil
+		}
+		if s.strict {
+			return nil, ErrLedgerReadModelUnavailable
+		}
+	}
+	if s.strict {
+		return nil, ErrLedgerReadModelUnavailable
+	}
+	return s.cache.Snapshot()
+}
+
+func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) {
+	if s.indexErr != nil {
+		return LedgerVersion{}, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
+		if err != nil {
+			return LedgerVersion{}, err
+		}
+		if ok {
+			return revision.LedgerVersion, nil
+		}
+		if s.strict {
+			return LedgerVersion{}, ErrLedgerReadModelUnavailable
+		}
+	}
+	if s.strict {
+		return LedgerVersion{}, ErrLedgerReadModelUnavailable
+	}
+	return s.cache.Version()
+}
+
+var ErrLedgerReadModelUnavailable = errors.New("ledger read model has no active revision; run ledger-indexer first")
+
 func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.SnapshotLite(context.Background())
+	if unlocked {
+		snapshot, err = s.Snapshot(context.Background())
+	}
 	if err != nil {
 		return nil, err
 	}
 	return BuildLedgerBootstrap(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
+func (s *LedgerReadService) BootstrapLite(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
+	snapshot, err := s.SnapshotLite(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return BuildLedgerBootstrapLite(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
+}
+
 func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.SnapshotLite(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +175,28 @@ func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuati
 }
 
 func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	if s.indexErr != nil {
+		return nil, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			txns, err := s.indexStore.TransactionsForRevision(indexCtx, revision.ID, start, end)
+			if err != nil {
+				return nil, err
+			}
+			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked), nil
+		}
+		if s.strict {
+			return nil, ErrLedgerReadModelUnavailable
+		}
+	}
+	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +211,7 @@ func firstValuationCurrency(values []string) string {
 }
 
 func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.SnapshotLite(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -57,14 +222,14 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
+	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
 	reconciliationRows := []gin.H{}
 	accountStatuses := []AccountStatus{}
 	investments := InvestmentSummary{}
 	if unlocked {
 		reconciliationRows = buildReconciliationRows(snapshot, start, end)
 		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-		investments = BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices)
+		investments = BuildInvestmentSummaryFromSnapshot(snapshot)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	return gin.H{
@@ -91,16 +256,62 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	}
 }
 
+func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
+	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
+	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
+	expense, _, _ := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
+	incomeStatement := gin.H{
+		"expense":            []IncomeStatementNode{},
+		"totalExpense":       summary.Expense,
+		"expenseAnalytics":   expense,
+		"topPayees":          []interface{}{},
+		"topPaymentAccounts": []interface{}{},
+		"income":             []IncomeStatementNode{},
+		"totalIncome":        statusInt(unlocked, summary.Income),
+		"netIncome":          statusInt(unlocked, summary.Net),
+		"valuationCurrency":  valuationCurrency,
+	}
+	return gin.H{
+		"start":              start,
+		"end":                end,
+		"summary":            summary,
+		"balances":           statusMap(unlocked, snapshot.Balances),
+		"accountBalances":    statusAccountBalances(unlocked, snapshotAccountBalances(snapshot, valuationCurrency)),
+		"netWorthHistory":    []NetWorthPoint{},
+		"monthEndNetWorth":   []NetWorthPoint{},
+		"netWorthWindows":    nil,
+		"creditCards":        []CreditCardAnalytics{},
+		"investments":        InvestmentSummary{},
+		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		"reconciliationRows": []gin.H{},
+		"accounts":           snapshot.Accounts,
+		"commodities":        snapshot.Commodities,
+		"prices":             snapshot.Prices,
+		"valuationCurrency":  valuationCurrency,
+		"incomeStatement":    incomeStatement,
+		"accountStatuses":    []AccountStatus{},
+		"ledgerVersion":      snapshot.LedgerVersion,
+		"sensitiveUnlocked":  unlocked,
+	}
+}
+
 func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
+	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
 	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
 }
 
 func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
 	return gin.H{"start": start, "end": end, "transactions": filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked), "sensitiveUnlocked": unlocked}
+}
+
+func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end string, unlocked bool) gin.H {
+	if unlocked {
+		return gin.H{"start": start, "end": end, "transactions": txns, "sensitiveUnlocked": true}
+	}
+	return gin.H{"start": start, "end": end, "transactions": filterSensitiveTransactions(txns), "sensitiveUnlocked": false}
 }
 
 func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) gin.H {
@@ -145,6 +356,16 @@ func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocke
 	return filtered
 }
 
+func filterSensitiveTransactions(txns []Transaction) []Transaction {
+	filtered := make([]Transaction, 0, min(len(txns), 256))
+	for _, txn := range txns {
+		if !transactionHasIncome(txn) {
+			filtered = append(filtered, txn)
+		}
+	}
+	return filtered
+}
+
 func transactionHasIncome(txn Transaction) bool {
 	for _, posting := range txn.Postings {
 		if strings.HasPrefix(posting.Account, "Income:") {
@@ -152,6 +373,13 @@ func transactionHasIncome(txn Transaction) bool {
 		}
 	}
 	return false
+}
+
+func snapshotAccountBalances(snapshot *LedgerSnapshot, valuationCurrency string) []AccountBalance {
+	if normalizeValuationCurrency(valuationCurrency) == "CNY" && snapshot.AccountBalances != nil {
+		return snapshot.AccountBalances
+	}
+	return AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
 }
 
 func scopedLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) Summary {

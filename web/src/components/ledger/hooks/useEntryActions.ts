@@ -19,7 +19,7 @@ function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useEntryActions({ load, refreshGitStatus, showToast, enqueuePendingWrites }: { load: (forceFresh?: boolean) => void | Promise<void>; refreshGitStatus: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void }) {
+export function useEntryActions({ load, showToast, enqueuePendingWrites }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void }) {
   const [nl, setNl] = useState("");
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsing" | "success" | "error">("idle");
@@ -142,7 +142,6 @@ export function useEntryActions({ load, refreshGitStatus, showToast, enqueuePend
       haptic([6, 24, 10]);
       showToast("success", `已写入 ${count} 条账本记录`);
       load(true);
-      refreshGitStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (offlineOrNetworkError(error)) {
