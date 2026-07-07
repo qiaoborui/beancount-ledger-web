@@ -198,6 +198,45 @@ func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
 	}
 }
 
+func TestConfiguredCORSOriginCanUseCookieAuth(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("LEDGER_CORS_ORIGINS", "https://frontend.example.com")
+	router := NewRouter(cfg)
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/api/auth/login", nil)
+	preflight.Header.Set("Origin", "https://frontend.example.com")
+	preflight.Header.Set("Access-Control-Request-Method", "POST")
+	preflightRes := httptest.NewRecorder()
+	router.ServeHTTP(preflightRes, preflight)
+	if preflightRes.Code != http.StatusNoContent {
+		t.Fatalf("preflight status=%d body=%s", preflightRes.Code, preflightRes.Body.String())
+	}
+	if got := preflightRes.Header().Get("Access-Control-Allow-Origin"); got != "https://frontend.example.com" {
+		t.Fatalf("cors origin=%q", got)
+	}
+	if got := preflightRes.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("cors credentials=%q", got)
+	}
+
+	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"password":"secret"}`))
+	login.Header.Set("Origin", "https://frontend.example.com")
+	login.Header.Set("Sec-Fetch-Site", "cross-site")
+	login.Header.Set("Content-Type", "application/json")
+	loginRes := httptest.NewRecorder()
+	router.ServeHTTP(loginRes, login)
+	if loginRes.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRes.Code, loginRes.Body.String())
+	}
+	cookies := loginRes.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected auth cookies")
+	}
+	if cookies[0].SameSite != http.SameSiteNoneMode || !cookies[0].Secure {
+		t.Fatalf("expected cross-site secure cookie, got sameSite=%v secure=%v", cookies[0].SameSite, cookies[0].Secure)
+	}
+}
+
 func TestStaticFallbackCacheHeaders(t *testing.T) {
 	cfg := testLedger(t)
 	cfg.ServeStatic = true

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { ArrowDown, ArrowUp, Check, Minus, Plus, RotateCcw, Zap } from "lucide-react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { displayApiEndpointUrl, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
@@ -77,6 +80,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <ApiEndpointSettingsPanel />
     <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} />
     <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} />
 
@@ -158,6 +162,155 @@ export function SettingsPage({
       </div>
     </section>
   </div>;
+}
+
+function ApiEndpointSettingsPanel() {
+  const [settings, setSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
+  const [draftUrl, setDraftUrl] = useState("");
+  const [message, setMessage] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [probeResults, setProbeResults] = useState<Record<string, ApiEndpointProbeResult>>({});
+
+  function save(next: ApiEndpointSettings, notice = "") {
+    setSettings(next);
+    writeApiEndpointSettings(next);
+    if (notice) setMessage(notice);
+  }
+
+  function addEndpoint() {
+    try {
+      const url = normalizeApiEndpointUrl(draftUrl);
+      if (settings.endpoints.some((endpoint) => endpoint.url === url)) {
+        setMessage("这个后端已经在列表里。");
+        return;
+      }
+      const next: ApiEndpointSettings = {
+        ...settings,
+        endpoints: [...settings.endpoints, { id: `endpoint-${Date.now()}`, url, enabled: true }],
+      };
+      setDraftUrl("");
+      save(next, "已添加后端。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "添加失败");
+    }
+  }
+
+  function updateEndpoint(id: string, update: Partial<ApiEndpoint>) {
+    const nextEndpoints = settings.endpoints.map((endpoint) => endpoint.id === id ? { ...endpoint, ...update } : endpoint);
+    const activeStillEnabled = nextEndpoints.some((endpoint) => endpoint.id === settings.activeId && endpoint.enabled);
+    save({ ...settings, activeId: activeStillEnabled ? settings.activeId : nextEndpoints.find((endpoint) => endpoint.enabled)?.id ?? settings.endpoints[0].id, endpoints: nextEndpoints });
+  }
+
+  function moveEndpoint(id: string, direction: -1 | 1) {
+    const index = settings.endpoints.findIndex((endpoint) => endpoint.id === id);
+    const nextIndex = index + direction;
+    if (index <= 0 || nextIndex <= 0 || nextIndex >= settings.endpoints.length) return;
+    const nextEndpoints = [...settings.endpoints];
+    const [endpoint] = nextEndpoints.splice(index, 1);
+    nextEndpoints.splice(nextIndex, 0, endpoint);
+    save({ ...settings, endpoints: nextEndpoints });
+  }
+
+  function removeEndpoint(id: string) {
+    const nextEndpoints = settings.endpoints.filter((endpoint) => endpoint.id !== id || isSameOriginApiEndpoint(endpoint));
+    const nextActiveId = nextEndpoints.some((endpoint) => endpoint.id === settings.activeId) ? settings.activeId : nextEndpoints[0].id;
+    save({ ...settings, activeId: nextActiveId, endpoints: nextEndpoints }, "已移除后端。");
+  }
+
+  async function testEndpoints() {
+    if (testing) return;
+    setTesting(true);
+    setMessage("");
+    try {
+      const enabled = settings.endpoints.filter((endpoint) => endpoint.enabled);
+      const results = await Promise.all(enabled.map((endpoint) => probeApiEndpoint(endpoint)));
+      const byId = Object.fromEntries(results.map((result) => [result.id, result]));
+      setProbeResults((current) => ({ ...current, ...byId }));
+      const fastest = results.filter((result) => result.ok && result.latencyMs !== undefined).sort((a, b) => (a.latencyMs ?? Infinity) - (b.latencyMs ?? Infinity))[0];
+      if (settings.autoSelect && fastest && fastest.id !== settings.activeId) {
+        save({ ...settings, activeId: fastest.id }, "已自动选择测速最快的后端。");
+      } else if (fastest) {
+        setMessage(`最快可用后端：${endpointLabel(settings.endpoints.find((endpoint) => endpoint.id === fastest.id))}，${fastest.latencyMs}ms。`);
+      } else {
+        setMessage("没有测到可用后端，请检查地址和 CORS 配置。");
+      }
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return <section className="card p-5 md:p-6">
+    <div className="flex flex-col gap-4 border-l-4 border-brand pl-4 md:flex-row md:items-start md:justify-between">
+      <div>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">request endpoints</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">请求地址管理</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">前端默认请求一个后端，读取接口会按列表顺序自动 fallback。写入账本时只使用默认后端，避免重复提交。</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <div className="inline-flex h-11 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm text-olive">
+          <Switch checked={settings.autoSelect} onCheckedChange={(checked) => save({ ...settings, autoSelect: checked })} />
+          自动选择
+        </div>
+        <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-medium text-paper disabled:opacity-50" disabled={testing} onClick={() => void testEndpoints()}>
+          {testing ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          测速
+        </button>
+      </div>
+    </div>
+    <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+      <input className="h-12 min-w-0 rounded-xl border border-line bg-panel px-3 text-ink" value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addEndpoint()} placeholder="https://api.example.com" />
+      <button type="button" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-medium text-brand hover:bg-tag" onClick={addEndpoint}>
+        <Plus className="h-4 w-4" />
+        添加
+      </button>
+    </div>
+    <div className="mt-6 space-y-2">
+      {settings.endpoints.map((endpoint, index) => {
+        const active = endpoint.id === settings.activeId;
+        const sameOrigin = isSameOriginApiEndpoint(endpoint);
+        const result = probeResults[endpoint.id];
+        return <div key={endpoint.id} className={`rounded-2xl border p-3 ${active ? "border-brand bg-[var(--selected-bg)]" : "border-line bg-panel"}`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => endpoint.enabled && save({ ...settings, activeId: endpoint.id })} disabled={!endpoint.enabled}>
+              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${active ? "bg-brand text-paper" : "bg-tag text-brand"}`}>{active ? <Check className="h-4 w-4" /> : <span className="h-2 w-2 rounded-full bg-current" />}</span>
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-ink">{sameOrigin ? "当前站点" : `备用后端 ${index}`}</span>
+                  {active && <span className="rounded-full bg-brand px-2 py-0.5 text-xs text-paper">默认</span>}
+                  {!endpoint.enabled && <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">已停用</span>}
+                </span>
+                <span className="mt-1 block break-all text-sm leading-6 text-olive">{displayApiEndpointUrl(endpoint)}</span>
+              </span>
+            </button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <EndpointProbeBadge result={result} />
+              <IconButton label="上移" disabled={sameOrigin || index <= 1} onClick={() => moveEndpoint(endpoint.id, -1)}><ArrowUp className="h-4 w-4" /></IconButton>
+              <IconButton label="下移" disabled={sameOrigin || index === settings.endpoints.length - 1} onClick={() => moveEndpoint(endpoint.id, 1)}><ArrowDown className="h-4 w-4" /></IconButton>
+              <button type="button" className="h-9 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={sameOrigin || active} onClick={() => updateEndpoint(endpoint.id, { enabled: !endpoint.enabled })}>{endpoint.enabled ? "停用" : "启用"}</button>
+              <IconButton label="移除" disabled={sameOrigin} onClick={() => removeEndpoint(endpoint.id)}><Minus className="h-4 w-4" /></IconButton>
+            </div>
+          </div>
+        </div>;
+      })}
+    </div>
+    <p className="mt-3 text-xs leading-5 text-stone">自定义后端必须是 HTTPS，并需要在后端允许当前前端 Origin 的 CORS。设置只保存在当前浏览器。</p>
+    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
+  </section>;
+}
+
+function endpointLabel(endpoint?: ApiEndpoint) {
+  if (!endpoint) return "未知后端";
+  return isSameOriginApiEndpoint(endpoint) ? "当前站点" : endpoint.url;
+}
+
+function EndpointProbeBadge({ result }: { result?: ApiEndpointProbeResult }) {
+  if (!result) return <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">未测速</span>;
+  if (result.ok) return <span className="rounded-full bg-brand/10 px-2 py-1 text-xs text-brand">{result.latencyMs}ms</span>;
+  return <span className="max-w-[12rem] truncate rounded-full bg-[var(--danger)]/10 px-2 py-1 text-xs text-[var(--danger)]" title={result.error}>{result.error ?? "不可用"}</span>;
+}
+
+function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return <button type="button" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-paper text-olive hover:bg-tag disabled:opacity-40" aria-label={label} title={label} disabled={disabled} onClick={onClick}>{children}</button>;
 }
 
 function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, onEnable, onDisable }: { enabled: boolean; mode: QuickUnlockMode; sensitiveUnlocked: boolean; onEnable: (secret: string, mode: QuickUnlockMode) => void | Promise<void>; onDisable: () => void | Promise<void> }) {
