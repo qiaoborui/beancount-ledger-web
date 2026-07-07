@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -112,7 +113,7 @@ func (s *Server) loadCmbCheckingConfig() (cmbCheckingConfig, error) {
 		DefaultCurrency:      "CNY",
 		Title:                "招商银行储蓄卡流水",
 	}
-	raw, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, "imports/cmb-checking-config.yaml"))
+	raw, err := s.readLedgerFileContent(context.Background(), "imports/cmb-checking-config.yaml")
 	if err != nil {
 		return config, err
 	}

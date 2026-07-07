@@ -716,29 +716,29 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesLedgerHistory(t *testing.
 }
 
 func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHubAPIMode(t *testing.T) {
-	cfg := testLedger(t)
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"imports/alipay-config.yaml": strings.Join([]string{
+			"defaultPlusAccount: Expenses:Food",
+			"defaultCurrency: CNY",
+			"alipaySmallPurse:",
+			"  cashAccount: Assets:SmallPurse",
+			"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+			"  allocationMode: runningContributionBalance",
+			"  ownerNames:",
+			"    - 乔博睿",
+			"  partnerNames:",
+			"    - 何缘立",
+			"  rules:",
+			"    - item: 盒马",
+			"      targetAccount: Expenses:Food",
+			"",
+		}, "\n"),
+	})
+	defer fake.server.Close()
+	cfg := githubAPITestConfig(t, fake)
 	cfg.LedgerStorage = "github_api"
 	cfg.LedgerReadModel = "postgres"
 	cfg.ReadModelStrict = true
-	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
-		"defaultPlusAccount: Expenses:Food",
-		"defaultCurrency: CNY",
-		"alipaySmallPurse:",
-		"  cashAccount: Assets:SmallPurse",
-		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
-		"  allocationMode: runningContributionBalance",
-		"  ownerNames:",
-		"    - 乔博睿",
-		"  partnerNames:",
-		"    - 何缘立",
-		"  rules:",
-		"    - item: 盒马",
-		"      targetAccount: Expenses:Food",
-		"",
-	}, "\n"))
-	if err := os.Remove(filepath.Join(cfg.LedgerRoot, "main.bean")); err != nil {
-		t.Fatal(err)
-	}
 	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
 	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
 		{OrderID: "read-model-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},

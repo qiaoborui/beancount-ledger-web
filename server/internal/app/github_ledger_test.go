@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestGitHubAPIWriterCommitsWithoutLocalCheckout(t *testing.T) {
@@ -99,6 +101,150 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 		!strings.Contains(fake.blobs["blob-2"], `include "imports/alipay.bean"`) &&
 		!strings.Contains(fake.blobs["blob-3"], `include "imports/alipay.bean"`) {
 		t.Fatalf("monthly include not written in blobs: %#v", fake.blobs)
+	}
+}
+
+func TestGitHubAPIAppendEntryReadsValidationFilesFromGitHub(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\n",
+		"commodities.bean":          "2026-01-01 commodity CNY\n",
+		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Expenses:Food CNY\n",
+		"transactions/2026/05.bean": "; 2026-05 交易记录\n",
+	})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	writer := NewLedgerWriter(cfg, nil)
+	_, err := writer.AppendEntriesWithSource(ledgerWriteSourceAppendEntry, []LedgerEntry{{
+		Kind:      "transaction",
+		Date:      "2026-05-03",
+		Payee:     "Cafe",
+		Narration: "Lunch",
+		Currency:  "CNY",
+		Postings: []EntryPosting{
+			{Account: "Expenses:Food", Amount: "12.00", Currency: "CNY"},
+			{Account: "Assets:Cash", Amount: "-12.00", Currency: "CNY"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.treePaths) != 1 || fake.treePaths[0] != "transactions/2026/05.bean" {
+		t.Fatalf("tree paths=%#v", fake.treePaths)
+	}
+	if got := fake.blobs["blob-1"]; !strings.Contains(got, `2026-05-03 * "Cafe" "Lunch"`) {
+		t.Fatalf("transaction was not appended through github blob: %q", got)
+	}
+}
+
+func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T) {
+	original := strings.Join([]string{
+		`2026-05-01 * "Cafe" "Lunch"`,
+		"  Expenses:Food 12.00 CNY",
+		"  Assets:Cash -12.00 CNY",
+		"",
+	}, "\n")
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\n",
+		"commodities.bean":          "2026-01-01 commodity CNY\n",
+		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Expenses:Food CNY\n",
+		"transactions/2026/05.bean": original,
+	})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	writer := NewLedgerWriter(cfg, nil)
+	err := writer.ReplaceTransactionBlock(TransactionSource{
+		File: filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"),
+		Line: 1,
+		Hash: transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
+	}, LedgerEntry{
+		Kind:      "transaction",
+		Date:      "2026-05-01",
+		Payee:     "Cafe",
+		Narration: "Dinner",
+		Currency:  "CNY",
+		Postings: []EntryPosting{
+			{Account: "Expenses:Food", Amount: "18.00", Currency: "CNY"},
+			{Account: "Assets:Cash", Amount: "-18.00", Currency: "CNY"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.treePaths) != 1 || fake.treePaths[0] != "transactions/2026/05.bean" {
+		t.Fatalf("tree paths=%#v", fake.treePaths)
+	}
+	if got := fake.blobs["blob-1"]; !strings.Contains(got, `"Dinner"`) || strings.Contains(got, `"Lunch"`) {
+		t.Fatalf("transaction was not replaced through github blob: %q", got)
+	}
+}
+
+func TestGitHubAPIAppendAccountReadsValidationFilesFromGitHub(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":        "include \"commodities.bean\"\ninclude \"accounts.bean\"\n",
+		"commodities.bean": "2026-01-01 commodity CNY\n",
+		"accounts.bean":    "2026-01-01 open Assets:Cash CNY\n",
+	})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	writer := NewLedgerWriter(cfg, nil)
+	if err := writer.AppendAccount(AccountInput{Date: "2026-01-02", Account: "Expenses:Travel", Alias: "差旅", Currency: "CNY"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.treePaths) != 1 || fake.treePaths[0] != "accounts.bean" {
+		t.Fatalf("tree paths=%#v", fake.treePaths)
+	}
+	if got := fake.blobs["blob-1"]; !strings.Contains(got, "2026-01-02 open Expenses:Travel CNY") {
+		t.Fatalf("account was not appended through github blob: %q", got)
+	}
+}
+
+func TestGitHubAPIImportConfigReadsFromGitHub(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"imports/cmb-checking-config.yaml": "cashAccount: Assets:Bank:CMB\n",
+	})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	server := &Server{cfg: cfg}
+	config, err := server.loadCmbCheckingConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.CashAccount != "Assets:Bank:CMB" {
+		t.Fatalf("config should be read from github, got %#v", config)
+	}
+}
+
+func TestReadModelStrictAllowsGitHubAPIWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server := &Server{cfg: Config{
+		LedgerStorage:    "github_api",
+		LedgerReadModel:  "postgres",
+		ReadModelStrict:  true,
+		LedgerGitBranch:  "main",
+		LedgerGitHubRepo: "ledger",
+	}}
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	if server.rejectWorkerOnly(ctx, "ledger.transactions.update") {
+		t.Fatal("github_api writes should not be rejected as worker-only")
+	}
+}
+
+func githubAPITestConfig(t *testing.T, fake *fakeGitHubLedgerAPI) Config {
+	t.Helper()
+	return Config{
+		LedgerRoot:         filepath.Join(t.TempDir(), "repo"),
+		RuntimeDir:         t.TempDir(),
+		LedgerStorage:      "github_api",
+		LedgerGitBranch:    "main",
+		LedgerGitHubOwner:  "owner",
+		LedgerGitHubRepo:   "ledger",
+		LedgerGitHubToken:  "token",
+		LedgerGitHubAPIURL: fake.server.URL + "/",
 	}
 }
 

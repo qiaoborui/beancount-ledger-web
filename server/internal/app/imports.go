@@ -652,6 +652,21 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 	return importer, nil
 }
 
+func (s *Server) readLedgerFileContent(ctx context.Context, relative string) ([]byte, error) {
+	relative = filepath.ToSlash(filepath.Clean(relative))
+	if relative == "." || strings.HasPrefix(relative, "../") || strings.Contains(relative, "/../") {
+		return nil, errors.New("invalid ledger file path")
+	}
+	if githubAPIEnabled(s.cfg) {
+		client, err := newGitHubLedgerClient(s.cfg)
+		if err != nil {
+			return nil, err
+		}
+		return client.readLedgerFile(ctx, relative)
+	}
+	return os.ReadFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
+}
+
 func (s *Server) ensureGitHubImportRequirementFiles(ctx context.Context, required []string) error {
 	client, err := newGitHubLedgerClient(s.cfg)
 	if err != nil {
@@ -666,16 +681,8 @@ func (s *Server) ensureGitHubImportRequirementFiles(ctx context.Context, require
 		if relative == "." || relative == "main.bean" || relative == "scripts/dedup_import.py" {
 			continue
 		}
-		content, err := remoteTx.readFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
-		if err != nil {
+		if _, err := remoteTx.readFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative))); err != nil {
 			return fmt.Errorf("账本缺少必要文件: %s", relative)
-		}
-		full := filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(full, content, 0o600); err != nil {
-			return err
 		}
 	}
 	return nil

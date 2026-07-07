@@ -235,8 +235,7 @@ func parseCSVLine(line string) []string {
 }
 
 func (s *Server) cmbPaymentSourcePrefixes() []string {
-	configFile := filepath.Join(s.cfg.LedgerRoot, "imports/cmb-credit-card-config.yaml")
-	raw, err := os.ReadFile(configFile)
+	raw, err := s.readLedgerFileContent(context.Background(), "imports/cmb-credit-card-config.yaml")
 	if err != nil {
 		return []string{"支付宝-", "财付通-", "微信支付-"}
 	}
