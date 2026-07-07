@@ -1,3 +1,5 @@
+name: beancount-ledger-web
+
 services:
   ledger-web:
     build:
@@ -48,7 +50,7 @@ services:
 
     volumes:
       # Mount your private ledger repo. Defaults to the preview example.
-      - ./examples/preview-ledger:/data/ledger:ro
+      - ../examples/preview-ledger:/data/ledger:ro
       # For a real private ledger, replace the above with:
       # - /home/borui/beancount-ledger:/data/ledger:rw
 
