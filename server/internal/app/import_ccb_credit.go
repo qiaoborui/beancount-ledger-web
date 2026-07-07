@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/csv"
@@ -162,7 +163,7 @@ func (s *Server) prefilterCcbCreditCSV(inputFile, outputFile string) (ccbCreditC
 	return ccbCreditCSVPrefilter{RawRowCount: len(rows), FilteredRowCount: len(kept), Skipped: skipped, Warnings: warnings}, nil
 }
 
-func (s *Server) generateCcbCreditBean(inputFile, outputFile string) error {
+func (s *Server) generateCcbCreditBean(ctx context.Context, inputFile, outputFile string) error {
 	config, err := s.loadCcbCreditConfig()
 	if err != nil {
 		return err

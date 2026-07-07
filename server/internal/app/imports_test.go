@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	pdf "github.com/ledongthuc/pdf"
 )
 
@@ -479,7 +480,7 @@ func TestAlipaySmallPurseImportGeneratesSharedPoolEntries(t *testing.T) {
 	if !ok {
 		t.Fatal("missing alipay-small-purse provider")
 	}
-	if err := importer.Generate(server, prepared, output); err != nil {
+	if err := importer.Generate(context.Background(), server, prepared, output); err != nil {
 		t.Fatal(err)
 	}
 	generated := string(mustRead(t, output))
@@ -542,7 +543,7 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesTimedTopups(t *testing.T)
 	if !ok {
 		t.Fatal("missing alipay-small-purse provider")
 	}
-	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}
 
@@ -632,13 +633,84 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesLedgerHistory(t *testing.
 	if !ok {
 		t.Fatal("missing alipay-small-purse provider")
 	}
-	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}
 
 	generated := string(mustRead(t, output))
 	for _, want := range []string{
 		`orderId: "current-spend"`,
+		`Expenses:Food                                 81.25 CNY`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated bean missing %q:\n%s", want, generated)
+		}
+	}
+	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "48.75")
+}
+
+func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHubAPIMode(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.LedgerStorage = "github_api"
+	cfg.LedgerReadModel = "postgres"
+	cfg.ReadModelStrict = true
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  ownerNames:",
+		"    - 乔博睿",
+		"  partnerNames:",
+		"    - 何缘立",
+		"  rules:",
+		"    - item: 盒马",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	if err := os.Remove(filepath.Join(cfg.LedgerRoot, "main.bean")); err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "read-model-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},
+	})
+
+	server := &Server{
+		cfg: cfg,
+		readService: fakeLedgerReadService{snapshot: &LedgerSnapshot{
+			LedgerVersion: LedgerVersion{Version: "read-model"},
+			Transactions: []Transaction{
+				{Date: "2026-06-28", Postings: []Posting{
+					{Account: "Assets:SmallPurse", Amount: 80000, Currency: "CNY"},
+					{Account: "Assets:CN:MYBank:Yulibao", Amount: -80000, Currency: "CNY"},
+				}},
+				{Date: "2026-06-29", Postings: []Posting{
+					{Account: "Expenses:Food", Amount: 5000, Currency: "CNY"},
+					{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 5000, Currency: "CNY"},
+					{Account: "Assets:SmallPurse", Amount: -10000, Currency: "CNY"},
+				}},
+				{Date: "2026-06-30", Postings: []Posting{
+					{Account: "Assets:SmallPurse", Amount: 50000, Currency: "CNY"},
+					{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -50000, Currency: "CNY"},
+				}},
+			},
+		}},
+	}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	for _, want := range []string{
+		`orderId: "read-model-spend"`,
 		`Expenses:Food                                 81.25 CNY`,
 	} {
 		if !strings.Contains(generated, want) {
@@ -672,7 +744,7 @@ func TestAlipaySmallPurseFallbackRulesSkipGenericAlipayMethodIgnore(t *testing.T
 	if !ok {
 		t.Fatal("missing alipay-small-purse provider")
 	}
-	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}
 
@@ -905,7 +977,7 @@ func TestDEGModuleImportEngineGeneratesBeancount(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "alipay.bean")
-	err = degModuleImportEngine{}.Generate(server, importEngineInput{
+	err = degModuleImportEngine{}.Generate(context.Background(), server, importEngineInput{
 		ProviderID: "alipay",
 		Config:     importProviderConfigs["alipay"],
 		InputFile:  prepared.InputFile,
@@ -1027,7 +1099,7 @@ func TestCmbCheckingImportHelpers(t *testing.T) {
 	if importer.ImportEngine().ID() != "deg-module" {
 		t.Fatalf("engine = %s", importer.ImportEngine().ID())
 	}
-	if err := importer.Generate(server, preparedImportInput{InputFile: input}, output); err != nil {
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
 		t.Fatal(err)
 	}
 	generated := string(mustRead(t, output))
@@ -1258,7 +1330,7 @@ func TestCcbCreditEmailImportHelpers(t *testing.T) {
 	if prefilter.RawRowCount != 3 || prefilter.Skipped != 2 || prefilter.FilteredRowCount != 1 {
 		t.Fatalf("unexpected prefilter counts: %#v", prefilter)
 	}
-	if err := server.generateCcbCreditBean(normalized+".filtered", output); err != nil {
+	if err := server.generateCcbCreditBean(context.Background(), normalized+".filtered", output); err != nil {
 		t.Fatal(err)
 	}
 	generated := string(mustRead(t, output))
@@ -1670,4 +1742,40 @@ func requirePostingLine(t *testing.T, beanText, account, amount string) {
 	if !pattern.MatchString(beanText) {
 		t.Fatalf("generated bean missing posting %s %s CNY:\n%s", account, amount, beanText)
 	}
+}
+
+type fakeLedgerReadService struct {
+	snapshot *LedgerSnapshot
+}
+
+func (s fakeLedgerReadService) Version(context.Context) (LedgerVersion, error) {
+	return s.snapshot.LedgerVersion, nil
+}
+
+func (s fakeLedgerReadService) Snapshot(context.Context) (*LedgerSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s fakeLedgerReadService) SnapshotLite(context.Context) (*LedgerSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s fakeLedgerReadService) Bootstrap(string, string, bool, ...string) (gin.H, error) {
+	return nil, errors.New("unused fake ledger read service method")
+}
+
+func (s fakeLedgerReadService) BootstrapLite(string, string, bool, ...string) (gin.H, error) {
+	return nil, errors.New("unused fake ledger read service method")
+}
+
+func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (gin.H, error) {
+	return nil, errors.New("unused fake ledger read service method")
+}
+
+func (s fakeLedgerReadService) Transactions(string, string, bool) (gin.H, error) {
+	return nil, errors.New("unused fake ledger read service method")
+}
+
+func (s fakeLedgerReadService) IncomeStatement(string, string, bool, ...string) (gin.H, error) {
+	return nil, errors.New("unused fake ledger read service method")
 }

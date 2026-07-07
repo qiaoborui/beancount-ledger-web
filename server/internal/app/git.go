@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,8 @@ type GitChange struct {
 	Status         string `json:"status"`
 	Label          string `json:"label"`
 }
+
+const gitDiffMaxBytes = 200_000
 
 func gitLedger(cfg Config, args ...string) (string, error) {
 	return gitLedgerOutput(cfg, args...)
@@ -115,6 +118,111 @@ git remote set-url origin git@github.com:OWNER/REPO.git`
 
 func gitRemoteDisabled() bool {
 	return truthyEnv("LEDGER_GIT_REMOTE_DISABLED")
+}
+
+func ledgerGitDiffForPath(cfg Config, rawPath string) (string, bool, error) {
+	path, err := cleanLedgerGitPath(cfg, rawPath)
+	if err != nil {
+		return "", false, err
+	}
+	status, err := gitLedgerOutput(cfg, "status", "--short", "--", path)
+	if err != nil {
+		return "", false, err
+	}
+	change := ""
+	changes := parseGitChanges(status)
+	for _, item := range changes {
+		if item.Path == path || item.OriginalPath == path {
+			change = item.Status
+			break
+		}
+	}
+	if change == "??" {
+		diff, truncated, err := untrackedFileDiff(cfg, path)
+		return diff, truncated, err
+	}
+	cached, err := gitLedgerOutput(cfg, "diff", "--cached", "--no-ext-diff", "--", path)
+	if err != nil {
+		return "", false, err
+	}
+	worktree, err := gitLedgerOutput(cfg, "diff", "--no-ext-diff", "--", path)
+	if err != nil {
+		return "", false, err
+	}
+	parts := []string{}
+	if strings.TrimSpace(cached) != "" {
+		parts = append(parts, cached)
+	}
+	if strings.TrimSpace(worktree) != "" {
+		parts = append(parts, worktree)
+	}
+	if len(parts) == 0 {
+		return "该文件没有可显示的文本差异。", false, nil
+	}
+	combined := strings.Join(parts, "\n")
+	return truncateGitDiff(combined), len(combined) > gitDiffMaxBytes, nil
+}
+
+func cleanLedgerGitPath(cfg Config, rawPath string) (string, error) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", errors.New("path is required")
+	}
+	if strings.Contains(trimmed, "\x00") || filepath.IsAbs(trimmed) {
+		return "", errors.New("invalid git path")
+	}
+	path := filepath.ToSlash(filepath.Clean(trimmed))
+	if path == "." || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
+		return "", errors.New("invalid git path")
+	}
+	for _, allowed := range ledgerGitCandidatePaths {
+		if path == allowed || strings.HasPrefix(path, allowed+"/") {
+			return path, nil
+		}
+	}
+	if isLedgerEditorPathAllowed(path) {
+		return path, nil
+	}
+	return "", fmt.Errorf("path is outside ledger tracked areas: %s", path)
+}
+
+func untrackedFileDiff(cfg Config, path string) (string, bool, error) {
+	full := filepath.Join(cfg.LedgerRoot, filepath.FromSlash(path))
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		return "", false, err
+	}
+	text, truncated := truncateRawText(string(raw))
+	var builder strings.Builder
+	builder.WriteString("diff --git a/")
+	builder.WriteString(path)
+	builder.WriteString(" b/")
+	builder.WriteString(path)
+	builder.WriteString("\nnew file\n--- /dev/null\n+++ b/")
+	builder.WriteString(path)
+	builder.WriteString("\n@@\n")
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" {
+			builder.WriteString("+\n")
+			continue
+		}
+		builder.WriteString("+")
+		builder.WriteString(line)
+		builder.WriteString("\n")
+	}
+	return builder.String(), truncated, nil
+}
+
+func truncateRawText(text string) (string, bool) {
+	if len(text) <= gitDiffMaxBytes {
+		return text, false
+	}
+	return text[:gitDiffMaxBytes] + "\n... diff truncated ...", true
+}
+
+func truncateGitDiff(diff string) string {
+	text, _ := truncateRawText(diff)
+	return text
 }
 
 func ledgerGitTrackedPathspecs(cfg Config) []string {

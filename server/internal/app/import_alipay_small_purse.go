@@ -2,6 +2,7 @@ package app
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -104,7 +105,7 @@ func (s *Server) prepareAlipaySmallPurseInput(inputFile, importID string) (prepa
 	}, nil
 }
 
-func (s *Server) generateAlipaySmallPurseBean(inputFile, outputFile string) error {
+func (s *Server) generateAlipaySmallPurseBean(ctx context.Context, inputFile, outputFile string) error {
 	config, err := s.loadAlipaySmallPurseConfig()
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func (s *Server) generateAlipaySmallPurseBean(inputFile, outputFile string) erro
 	}
 	blocks := make([]string, 0, len(statement.Rows))
 	rows := alipaySmallPurseRowsForRendering(statement.Rows, config)
-	ownInitial, partnerInitial, err := s.alipaySmallPurseInitialContributionBalances(statement, config)
+	ownInitial, partnerInitial, err := s.alipaySmallPurseInitialContributionBalances(ctx, statement, config)
 	if err != nil {
 		return err
 	}
@@ -419,7 +420,7 @@ func maxInt(left, right int) int {
 	return right
 }
 
-func (s *Server) alipaySmallPurseInitialContributionBalances(statement alipaySmallPurseStatement, config alipaySmallPurseConfig) (int, int, error) {
+func (s *Server) alipaySmallPurseInitialContributionBalances(ctx context.Context, statement alipaySmallPurseStatement, config alipaySmallPurseConfig) (int, int, error) {
 	if !alipaySmallPurseUsesRunningContributionBalance(config) || !alipaySmallPurseSharedExpenseSplit(config) {
 		return 0, 0, nil
 	}
@@ -427,7 +428,7 @@ func (s *Server) alipaySmallPurseInitialContributionBalances(statement alipaySma
 	if start == "" {
 		return 0, 0, nil
 	}
-	snapshot, err := s.alipaySmallPurseSnapshot()
+	snapshot, err := s.alipaySmallPurseSnapshot(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -437,7 +438,13 @@ func (s *Server) alipaySmallPurseInitialContributionBalances(statement alipaySma
 	return cashBalance - partnerBalance, partnerBalance, nil
 }
 
-func (s *Server) alipaySmallPurseSnapshot() (*LedgerSnapshot, error) {
+func (s *Server) alipaySmallPurseSnapshot(ctx context.Context) (*LedgerSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.readService != nil {
+		return s.readService.SnapshotLite(ctx)
+	}
 	cache := s.cache
 	if cache == nil {
 		cache = NewLedgerCache(s.cfg)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 type importEngine interface {
 	ID() string
 	RequiredFiles(importProviderConfig) []string
-	Generate(*Server, importEngineInput) error
+	Generate(context.Context, *Server, importEngineInput) error
 }
 
 type importEngineInput struct {
@@ -37,7 +38,7 @@ func (degModuleImportEngine) RequiredFiles(config importProviderConfig) []string
 	return []string{"main.bean", config.Config, "scripts/dedup_import.py"}
 }
 
-func (degModuleImportEngine) Generate(s *Server, input importEngineInput) error {
+func (degModuleImportEngine) Generate(ctx context.Context, s *Server, input importEngineInput) error {
 	config, err := loadDEGModuleConfig(s.cfg, input.Config)
 	if err != nil {
 		return err
@@ -90,7 +91,7 @@ func degImportEngine() importEngine {
 
 type nativeBeanImportEngine struct {
 	id       string
-	generate func(*Server, string, string) error
+	generate func(*Server, context.Context, string, string) error
 }
 
 func (engine nativeBeanImportEngine) ID() string {
@@ -104,10 +105,10 @@ func (nativeBeanImportEngine) RequiredFiles(config importProviderConfig) []strin
 	return []string{"main.bean", config.Config, "scripts/dedup_import.py"}
 }
 
-func (engine nativeBeanImportEngine) Generate(s *Server, input importEngineInput) error {
-	return engine.generate(s, input.InputFile, input.OutputFile)
+func (engine nativeBeanImportEngine) Generate(ctx context.Context, s *Server, input importEngineInput) error {
+	return engine.generate(s, ctx, input.InputFile, input.OutputFile)
 }
 
-func nativeImportEngine(id string, generate func(*Server, string, string) error) importEngine {
+func nativeImportEngine(id string, generate func(*Server, context.Context, string, string) error) importEngine {
 	return nativeBeanImportEngine{id: id, generate: generate}
 }

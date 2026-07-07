@@ -118,7 +118,7 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 	if err != nil {
 		return nil, err
 	}
-	if err := importer.Generate(s, prepared, generatedFile); err != nil {
+	if err := importer.Generate(ctx, s, prepared, generatedFile); err != nil {
 		return nil, err
 	}
 	rawGeneratedBean, err := os.ReadFile(generatedFile)

@@ -21,11 +21,22 @@ type Server struct {
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
-	readService      *LedgerReadService
+	readService      ledgerReadService
 	reconcileService *ReconciliationService
 	txService        *TransactionService
 	limiter          *RateLimiter
 	events           *EventHub
+}
+
+type ledgerReadService interface {
+	Version(context.Context) (LedgerVersion, error)
+	Snapshot(context.Context) (*LedgerSnapshot, error)
+	SnapshotLite(context.Context) (*LedgerSnapshot, error)
+	Bootstrap(string, string, bool, ...string) (gin.H, error)
+	BootstrapLite(string, string, bool, ...string) (gin.H, error)
+	Summary(string, string, bool, ...string) (gin.H, error)
+	Transactions(string, string, bool) (gin.H, error)
+	IncomeStatement(string, string, bool, ...string) (gin.H, error)
 }
 
 func NewRouter(cfg Config) *gin.Engine {
@@ -61,9 +72,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
-	api.POST("/quick-unlock/register", s.quickUnlockRegister)
-	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
-	api.POST("/quick-unlock/revoke", s.quickUnlockRevoke)
 
 	readOnly30s := api.Group("", cacheControl(30))
 	readOnly60s := api.Group("", cacheControl(60))
@@ -71,6 +79,10 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	readOnly30s.GET("/auth/me", s.me)
 	readOnly30s.GET("/quick-unlock/status", s.quickUnlockStatus)
 	readOnly60s.GET("/passkey/status", s.passkeyStatus)
+
+	api.POST("/quick-unlock/register", s.quickUnlockRegister)
+	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
+	api.POST("/quick-unlock/revoke", s.quickUnlockRevoke)
 
 	api.POST("/passkey/login/options", s.passkeyLoginOptions)
 	api.POST("/passkey/login/verify", s.passkeyLoginVerify)
@@ -126,6 +138,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/ai/accounts-chat", s.aiAccountsChat)
 
 	readOnly30s.GET("/git/status", s.gitStatus)
+	readOnly30s.GET("/git/diff", s.gitDiff)
 	api.POST("/git/pull", s.gitPull)
 	api.POST("/git/commit", s.gitCommit)
 

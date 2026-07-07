@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -27,7 +28,7 @@ type billImporter interface {
 	ImportEngine() importEngine
 	Detect(filename, sample, ext string) (providerDetection, bool)
 	Prepare(*Server, importFileInput) (preparedImportInput, error)
-	Generate(*Server, preparedImportInput, string) error
+	Generate(context.Context, *Server, preparedImportInput, string) error
 	AnalyzeSource(*Server, preparedImportInput, string) (providerSourceAnalysis, []string)
 	DedupArgs(importDedupOptions) []string
 	DecorateEntries(importMeta, []ImportEntry)
@@ -96,9 +97,9 @@ func (i staticBillImporter) Prepare(s *Server, input importFileInput) (preparedI
 	return preparedImportInput{InputFile: input.InputFile}, nil
 }
 
-func (i staticBillImporter) Generate(s *Server, prepared preparedImportInput, outputFile string) error {
+func (i staticBillImporter) Generate(ctx context.Context, s *Server, prepared preparedImportInput, outputFile string) error {
 	engine := i.ImportEngine()
-	return engine.Generate(s, importEngineInput{ProviderID: i.ProviderID(), Config: i.ProviderConfig(), InputFile: prepared.InputFile, OutputFile: outputFile})
+	return engine.Generate(ctx, s, importEngineInput{ProviderID: i.ProviderID(), Config: i.ProviderConfig(), InputFile: prepared.InputFile, OutputFile: outputFile})
 }
 
 func (i staticBillImporter) AnalyzeSource(s *Server, prepared preparedImportInput, generatedBean string) (providerSourceAnalysis, []string) {
