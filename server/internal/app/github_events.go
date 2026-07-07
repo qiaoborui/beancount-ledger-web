@@ -15,6 +15,10 @@ import (
 // and triggers an immediate ledger sync, giving much lower latency than
 // the periodic scheduler while requiring no public-facing webhook URL.
 func StartGitHubEventsPoller(cfg Config) {
+	StartGitHubEventsPollerWithAfterSync(cfg, nil)
+}
+
+func StartGitHubEventsPollerWithAfterSync(cfg Config, afterSync func()) {
 	owner, repo, token := resolveGitHubPollAuth(cfg)
 	if owner == "" || repo == "" || token == "" {
 		return
@@ -23,7 +27,7 @@ func StartGitHubEventsPoller(cfg Config) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
-	go runGitHubEventsPoll(cfg, owner, repo, token, interval)
+	go runGitHubEventsPoll(cfg, owner, repo, token, interval, afterSync)
 	log.Printf("[github-events] started owner=%s repo=%s branch=%s interval=%s",
 		owner, repo, cfg.LedgerGitBranch, interval)
 }
@@ -86,7 +90,7 @@ func parseGitHubRemote(remote string) (owner, repo, token string) {
 	return owner, repo, token
 }
 
-func runGitHubEventsPoll(cfg Config, owner, repo, token string, interval time.Duration) {
+func runGitHubEventsPoll(cfg Config, owner, repo, token string, interval time.Duration, afterSync func()) {
 	client := github.NewClient(nil).WithAuthToken(token)
 	if cfg.LedgerGitHubAPIURL != "" {
 		if u, err := url.Parse(strings.TrimRight(cfg.LedgerGitHubAPIURL, "/") + "/"); err == nil {
@@ -119,6 +123,9 @@ func runGitHubEventsPoll(cfg Config, owner, repo, token string, interval time.Du
 				publishJobStatus("git.pull", "ok", "Synced via GitHub events poll.")
 				publishLedgerUpdated(cfg, "github-events")
 				publishGitStatus(cfg, "github-events")
+				if afterSync != nil {
+					afterSync()
+				}
 			}
 		}
 		if newest > lastEventID {
