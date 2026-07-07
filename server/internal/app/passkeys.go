@@ -469,6 +469,7 @@ func configuredPublicOrigin() string {
 func configuredWebAuthnOrigins(c *gin.Context) []string {
 	origins := []string{}
 	origins = appendWebAuthnOrigin(origins, configuredPublicOrigin())
+	origins = appendConfiguredWebAuthnOrigins(origins, os.Getenv("WEBAUTHN_PUBLIC_ORIGIN"))
 	origins = appendConfiguredWebAuthnOrigins(origins, os.Getenv("WEBAUTHN_RP_ORIGINS"))
 	origins = appendConfiguredWebAuthnOrigins(origins, os.Getenv("PUBLIC_ORIGINS"))
 	if len(origins) == 0 {
