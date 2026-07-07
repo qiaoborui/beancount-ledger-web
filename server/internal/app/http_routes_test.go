@@ -211,7 +211,7 @@ func TestStaticFallbackCacheHeaders(t *testing.T) {
 	if index.Code != http.StatusOK {
 		t.Fatalf("index status=%d body=%s", index.Code, index.Body.String())
 	}
-	if got := index.Header().Get("Cache-Control"); got != "no-cache" {
+	if got := index.Header().Get("Cache-Control"); got != "public, max-age=0, must-revalidate" {
 		t.Fatalf("index Cache-Control=%q", got)
 	}
 
@@ -229,7 +229,7 @@ func TestStaticFallbackCacheHeaders(t *testing.T) {
 	if serviceWorker.Code != http.StatusOK {
 		t.Fatalf("sw status=%d body=%s", serviceWorker.Code, serviceWorker.Body.String())
 	}
-	if got := serviceWorker.Header().Get("Cache-Control"); got != "no-cache" {
+	if got := serviceWorker.Header().Get("Cache-Control"); got != "public, max-age=0, must-revalidate" {
 		t.Fatalf("sw Cache-Control=%q", got)
 	}
 
