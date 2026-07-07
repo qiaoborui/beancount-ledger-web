@@ -695,7 +695,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           size="xl"
           align="center"
           bodyClassName="!p-0 xl:!overflow-hidden"
-          panelClassName="xl:!h-[90dvh]"
+          panelClassName="xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[96vw] 2xl:!max-w-[1440px]"
           closeLabel={committing ? "写入中" : "关闭"}
           footer={
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -727,8 +727,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
           }
         >
-          <div className="flex min-h-full min-w-0 flex-col bg-paper xl:h-full xl:min-h-0">
-            <div className="border-b border-line bg-panel px-4 py-4 sm:px-5">
+          <div className="flex h-full min-h-0 min-w-0 flex-col bg-paper">
+            <div className="shrink-0 border-b border-line bg-panel px-4 py-4 sm:px-5 xl:py-3">
               <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -743,7 +743,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                   <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
-              <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+              <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4 xl:mt-3">
                 <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
                 <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
                 <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
@@ -751,7 +751,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               </div>
             </div>
 
-            <div className="flex min-w-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden">
+            <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden xl:py-3">
               {commitResult?.ok ? (
                 <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -769,7 +769,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               ) : null}
 
               {preview.warnings.length > 0 ? (
-                <Alert className="grid-cols-1 space-y-2">
+                <Alert className="grid-cols-1 space-y-2 xl:max-h-24 xl:overflow-y-auto xl:pr-3">
                   {preview.warnings.map((warning) => (
                     <div key={warning} className="flex min-w-0 items-start gap-2">
                       <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[var(--warning)]" />
