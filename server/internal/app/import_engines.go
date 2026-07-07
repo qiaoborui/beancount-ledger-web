@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -39,7 +40,7 @@ func (degModuleImportEngine) RequiredFiles(config importProviderConfig) []string
 }
 
 func (degModuleImportEngine) Generate(ctx context.Context, s *Server, input importEngineInput) error {
-	config, err := loadDEGModuleConfig(s.cfg, input.Config)
+	config, err := loadDEGModuleConfig(ctx, s, input.Config)
 	if err != nil {
 		return err
 	}
@@ -63,11 +64,18 @@ func (degModuleImportEngine) Generate(ctx context.Context, s *Server, input impo
 	return compiler.Compile()
 }
 
-func loadDEGModuleConfig(appConfig Config, providerConfig importProviderConfig) (*degconfig.Config, error) {
-	configFile := filepath.Join(appConfig.LedgerRoot, providerConfig.Config)
+func loadDEGModuleConfig(ctx context.Context, s *Server, providerConfig importProviderConfig) (*degconfig.Config, error) {
+	raw, err := s.readLedgerFileContent(ctx, providerConfig.Config)
+	if err != nil {
+		return nil, fmt.Errorf("读取 DEG 配置失败 %s: %w", providerConfig.Config, err)
+	}
 	reader := viper.New()
-	reader.SetConfigFile(configFile)
-	if err := reader.ReadInConfig(); err != nil {
+	configType := strings.TrimPrefix(filepath.Ext(providerConfig.Config), ".")
+	if configType == "yml" {
+		configType = "yaml"
+	}
+	reader.SetConfigType(configType)
+	if err := reader.ReadConfig(bytes.NewReader(raw)); err != nil {
 		return nil, fmt.Errorf("读取 DEG 配置失败 %s: %w", providerConfig.Config, err)
 	}
 	config := &degconfig.Config{}

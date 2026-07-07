@@ -167,7 +167,7 @@ func (s *Server) loadAlipaySmallPurseConfig() (alipaySmallPurseConfig, error) {
 		DefaultCashAccount:  alipaySmallPurseCashAccount,
 		DefaultCurrency:     "CNY",
 	}
-	raw, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, "imports/alipay-config.yaml"))
+	raw, err := s.readLedgerFileContent(context.Background(), "imports/alipay-config.yaml")
 	if err != nil {
 		return config, err
 	}

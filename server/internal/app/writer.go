@@ -269,6 +269,37 @@ func (tx *LedgerWriteTransaction) ReadFile(file string) ([]byte, error) {
 	return os.ReadFile(file)
 }
 
+func (tx *LedgerWriteTransaction) ReadLedgerLines(entry string, seen map[string]bool) ([]BeanLine, error) {
+	full, err := filepath.Abs(entry)
+	if err != nil {
+		return nil, err
+	}
+	if seen[full] {
+		return nil, nil
+	}
+	seen[full] = true
+	text, err := tx.ReadFile(full)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(full)
+	var out []BeanLine
+	for i, line := range strings.Split(string(text), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if m := includeRe.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			out = append(out, BeanLine{File: full, Line: i + 1, Text: line})
+			lines, err := tx.ReadLedgerLines(filepath.Join(dir, m[1]), seen)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, lines...)
+			continue
+		}
+		out = append(out, BeanLine{File: full, Line: i + 1, Text: line})
+	}
+	return out, nil
+}
+
 func (tx *LedgerWriteTransaction) Exists(file string) (bool, error) {
 	if tx.github != nil {
 		return tx.github.exists(file)
@@ -332,7 +363,7 @@ func (w *LedgerWriter) AppendBeanText(date, beanText string) error {
 }
 
 func (w *LedgerWriter) AppendBeanTextWithSource(date, beanText, source string) error {
-	return w.appendItemsChecked(source, []appendItem{{date: date, beanText: beanText}})
+	return w.appendItemsChecked(source, []appendItem{{date: date, beanText: beanText}}, nil)
 }
 
 func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
@@ -340,9 +371,6 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 }
 
 func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEntry) ([]string, error) {
-	if err := w.validateEntryCommodities(entries); err != nil {
-		return nil, err
-	}
 	items := make([]appendItem, 0, len(entries))
 	texts := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -357,7 +385,9 @@ func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEn
 		items = append(items, appendItem{date: entry.Date, beanText: text})
 		texts = append(texts, text)
 	}
-	if err := w.appendItemsChecked(source, items); err != nil {
+	if err := w.appendItemsChecked(source, items, func(tx *LedgerWriteTransaction) error {
+		return w.validateEntryCommodities(tx, entries)
+	}); err != nil {
 		return nil, err
 	}
 	return texts, nil
@@ -365,10 +395,10 @@ func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEn
 
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 	input.Currency = defaultAccountCurrency(input.Account, input.Currency)
-	if err := w.validateCurrencies([]string{input.Currency}); err != nil {
-		return err
-	}
 	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
+		if err := w.validateCurrencies(tx, []string{input.Currency}); err != nil {
+			return err
+		}
 		file := accountsBeanPath(w.cfg)
 		before, err := tx.ReadFile(file)
 		if err != nil {
@@ -395,17 +425,17 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 			currencies = append(currencies, operation.Currency)
 		}
 	}
-	if err := w.validateCurrencies(currencies); err != nil {
-		return nil, err
-	}
 	texts := []string{}
 	if err := w.RunTransactionWithSource(ledgerWriteSourceAccountOperations, func(tx *LedgerWriteTransaction) error {
+		if err := w.validateCurrencies(tx, currencies); err != nil {
+			return err
+		}
 		file := accountsBeanPath(w.cfg)
 		before, err := tx.ReadFile(file)
 		if err != nil {
 			return err
 		}
-		accounts, err := w.knownAccounts()
+		accounts, err := w.knownAccounts(tx)
 		if err != nil {
 			return err
 		}
@@ -442,10 +472,10 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 }
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
-	if err := w.validateEntryCommodities([]LedgerEntry{entry}); err != nil {
-		return err
-	}
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionUpdate, func(tx *LedgerWriteTransaction) error {
+		if err := w.validateEntryCommodities(tx, []LedgerEntry{entry}); err != nil {
+			return err
+		}
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -467,7 +497,7 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 	})
 }
 
-func (w *LedgerWriter) validateEntryCommodities(entries []LedgerEntry) error {
+func (w *LedgerWriter) validateEntryCommodities(tx *LedgerWriteTransaction, entries []LedgerEntry) error {
 	currencies := []string{}
 	for _, entry := range entries {
 		if entry.Kind == "balance" {
@@ -477,14 +507,14 @@ func (w *LedgerWriter) validateEntryCommodities(entries []LedgerEntry) error {
 			currencies = append(currencies, posting.Currency)
 		}
 	}
-	return w.validateCurrencies(currencies)
+	return w.validateCurrencies(tx, currencies)
 }
 
-func (w *LedgerWriter) validateCurrencies(currencies []string) error {
+func (w *LedgerWriter) validateCurrencies(tx *LedgerWriteTransaction, currencies []string) error {
 	if len(currencies) == 0 {
 		return nil
 	}
-	commodities, err := w.knownCommodities()
+	commodities, err := w.knownCommodities(tx)
 	if err != nil {
 		return err
 	}
@@ -499,16 +529,16 @@ func (w *LedgerWriter) validateCurrencies(currencies []string) error {
 	return nil
 }
 
-func (w *LedgerWriter) knownCommodities() ([]string, error) {
-	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+func (w *LedgerWriter) knownCommodities(tx *LedgerWriteTransaction) ([]string, error) {
+	lines, err := tx.ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
 	return CommoditiesFromBeanEntries(ParseBeanLines(lines).Entries), nil
 }
 
-func (w *LedgerWriter) knownAccounts() ([]Account, error) {
-	lines, err := ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
+func (w *LedgerWriter) knownAccounts(tx *LedgerWriteTransaction) ([]Account, error) {
+	lines, err := tx.ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +580,7 @@ type appendItem struct {
 	beanText string
 }
 
-func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem) error {
+func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem, validate func(*LedgerWriteTransaction) error) error {
 	byFile := map[string][]appendItem{}
 	for _, item := range items {
 		file := transactionFileForDate(w.cfg, item.date)
@@ -562,6 +592,11 @@ func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem) err
 	}
 	sort.Strings(files)
 	return w.RunTransactionWithSource(source, func(tx *LedgerWriteTransaction) error {
+		if validate != nil {
+			if err := validate(tx); err != nil {
+				return err
+			}
+		}
 		for _, file := range files {
 			fileItems := byFile[file]
 			if err := w.ensureMonthlyFileAndInclude(tx, file, fileItems[0].date); err != nil {
@@ -591,8 +626,10 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, f
 	if err := tx.Snapshot(file); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return err
+	if tx.github == nil {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
 	}
 	exists, err := tx.Exists(file)
 	if err != nil {

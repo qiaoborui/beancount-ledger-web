@@ -282,7 +282,7 @@ func (s *Server) loadCcbCreditConfig() (ccbCreditConfig, error) {
 		DefaultCurrency:     "CNY",
 		Title:               "建设银行信用卡账单",
 	}
-	raw, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, "imports/ccb-credit-card-config.yaml"))
+	raw, err := s.readLedgerFileContent(context.Background(), "imports/ccb-credit-card-config.yaml")
 	if err != nil {
 		return config, err
 	}

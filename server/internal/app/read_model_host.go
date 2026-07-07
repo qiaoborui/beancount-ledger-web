@@ -29,7 +29,7 @@ func (s *Server) ledgerSnapshotLite(ctx context.Context) (*LedgerSnapshot, error
 }
 
 func (s *Server) rejectWorkerOnly(c *gin.Context, operation string) bool {
-	if !s.readModelHostMode() {
+	if !s.readModelHostMode() || githubAPIEnabled(s.cfg) {
 		return false
 	}
 	c.JSON(http.StatusNotImplemented, gin.H{
