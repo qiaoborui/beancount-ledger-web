@@ -142,7 +142,7 @@ func (s *Server) investments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices))
+	c.JSON(http.StatusOK, BuildInvestmentSummaryFromSnapshot(snapshot))
 }
 
 func parseDashboardFilters(c *gin.Context) DashboardFilters {

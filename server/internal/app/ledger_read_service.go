@@ -229,7 +229,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	if unlocked {
 		reconciliationRows = buildReconciliationRows(snapshot, start, end)
 		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-		investments = BuildInvestmentSummaryFromBeanEntries(snapshot.BeanEntries, snapshot.Accounts, snapshot.Prices)
+		investments = BuildInvestmentSummaryFromSnapshot(snapshot)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	return gin.H{
@@ -261,15 +261,15 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	expense, _, _ := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
 	incomeStatement := gin.H{
-		"expense":           []IncomeStatementNode{},
-		"totalExpense":      summary.Expense,
-		"expenseAnalytics":  expense,
-		"topPayees":         []interface{}{},
+		"expense":            []IncomeStatementNode{},
+		"totalExpense":       summary.Expense,
+		"expenseAnalytics":   expense,
+		"topPayees":          []interface{}{},
 		"topPaymentAccounts": []interface{}{},
-		"income":            []IncomeStatementNode{},
-		"totalIncome":       statusInt(unlocked, summary.Income),
-		"netIncome":         statusInt(unlocked, summary.Net),
-		"valuationCurrency": valuationCurrency,
+		"income":             []IncomeStatementNode{},
+		"totalIncome":        statusInt(unlocked, summary.Income),
+		"netIncome":          statusInt(unlocked, summary.Net),
+		"valuationCurrency":  valuationCurrency,
 	}
 	return gin.H{
 		"start":              start,
