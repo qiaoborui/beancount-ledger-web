@@ -246,24 +246,47 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     if (existing) return existing;
 
     const run = async () => {
-      if (!options.background) setLoadingFresh(true);
+      const isBackground = Boolean(options.background);
+      if (!isBackground) setLoadingFresh(true);
       try {
-        const data = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${query}`);
-        const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
+        // Phase 1: fast lite bootstrap for immediate UI
+        const liteQuery = new URLSearchParams(timeRangeToParams(range));
+        liteQuery.set("valuationCurrency", valuationCurrency);
+        liteQuery.set("lite", "1");
+        const liteData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${liteQuery}`);
+        const serverSensitiveUnlocked = Boolean(liteData.sensitiveUnlocked);
         if (clientUnlocked && !serverSensitiveUnlocked) {
           latestContextRef.current = { range, unlocked: false, valuationCurrency };
           onSensitiveLocked();
         }
-        const version = data.ledgerVersion ?? await fetchLedgerVersion();
-        const { cache: fresh, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(data, clientUnlocked, valuationCurrency, version);
-        applyCache(fresh, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
+        const version = liteData.ledgerVersion ?? await fetchLedgerVersion().catch(() => null);
+        const { cache: liteCache, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(liteData, clientUnlocked, valuationCurrency, version);
+        applyCache(liteCache, cacheUnlocked, range, responseValuationCurrency, valuationCurrency);
         if (cacheUnlocked) {
-          void writeEncryptedLedgerCache(range, fresh, responseValuationCurrency);
-          writeLedgerCache(range, maskSensitiveLedgerCache(fresh), responseValuationCurrency);
+          void writeEncryptedLedgerCache(range, liteCache, responseValuationCurrency);
+          writeLedgerCache(range, maskSensitiveLedgerCache(liteCache), responseValuationCurrency);
           freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${responseValuationCurrency}`);
         }
+
+        // Phase 2: full bootstrap in background for rich data (net worth, credit cards, etc.)
+        if (!isBackground) {
+          const fullQuery = new URLSearchParams(timeRangeToParams(range));
+          fullQuery.set("valuationCurrency", valuationCurrency);
+          fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`)
+            .then((fullData) => {
+              const fullVersion = fullData.ledgerVersion ?? version;
+              const { cache: fullCache } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
+              applyCache(fullCache, cacheUnlocked, range, valuationCurrency, valuationCurrency);
+              if (cacheUnlocked) {
+                void writeEncryptedLedgerCache(range, fullCache, valuationCurrency);
+                writeLedgerCache(range, maskSensitiveLedgerCache(fullCache), valuationCurrency);
+                freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${valuationCurrency}`);
+              }
+            })
+            .catch(() => {}); // full bootstrap is best-effort
+        }
       } finally {
-        if (!options.background) setLoadingFresh(false);
+        if (!isBackground) setLoadingFresh(false);
         freshInFlightRef.current.delete(inFlightKey);
       }
     };

@@ -53,7 +53,15 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Bootstrap(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
+	unlocked := isSensitiveUnlocked(c)
+	isLite := c.Query("lite") == "1"
+	var payload gin.H
+	var err error
+	if isLite {
+		payload, err = s.readService.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
+	} else {
+		payload, err = s.readService.Bootstrap(start, end, unlocked, c.Query("valuationCurrency"))
+	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -456,11 +464,11 @@ func isSensitiveStaticProbe(path string) bool {
 func setStaticCacheHeaders(c *gin.Context, path string) {
 	switch {
 	case path == "index.html", strings.HasSuffix(path, "/index.html"), strings.HasSuffix(path, "sw.js"):
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", "public, max-age=0, must-revalidate")
 	case strings.HasPrefix(path, "assets/"), strings.Contains(path, "/assets/"):
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	default:
-		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400")
 	}
 }
 
