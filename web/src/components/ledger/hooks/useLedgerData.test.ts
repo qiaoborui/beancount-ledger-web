@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
 import type { LedgerVersion, Txn } from "../types";
 
 const version: LedgerVersion = { version: "v1", fileCount: 1, latestMtimeMs: 123 };
@@ -97,5 +97,14 @@ describe("shouldShowOfflineLedgerNotice", () => {
     expect(shouldShowOfflineLedgerNotice(null, "month=CURRENT:CNY:cached")).toBe(true);
     expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:cached")).toBe(false);
     expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:empty")).toBe(true);
+  });
+});
+
+describe("shouldFetchFullBootstrap", () => {
+  it("keeps unlocked background refreshes from stopping at lite bootstrap", () => {
+    expect(shouldFetchFullBootstrap(false, false)).toBe(true);
+    expect(shouldFetchFullBootstrap(false, true)).toBe(true);
+    expect(shouldFetchFullBootstrap(true, false)).toBe(false);
+    expect(shouldFetchFullBootstrap(true, true)).toBe(true);
   });
 });

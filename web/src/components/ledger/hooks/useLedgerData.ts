@@ -142,6 +142,10 @@ export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKe
   return previousKey !== nextKey;
 }
 
+export function shouldFetchFullBootstrap(isBackground: boolean, cacheUnlocked: boolean) {
+  return !isBackground || cacheUnlocked;
+}
+
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
   if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
@@ -269,7 +273,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         }
 
         // Phase 2: full bootstrap in background for rich data (net worth, credit cards, etc.)
-        if (!isBackground) {
+        if (shouldFetchFullBootstrap(isBackground, cacheUnlocked)) {
           const fullQuery = new URLSearchParams(timeRangeToParams(range));
           fullQuery.set("valuationCurrency", valuationCurrency);
           fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`)
