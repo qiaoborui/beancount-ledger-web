@@ -135,10 +135,10 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
   const showingRouteProgress = routePending || Boolean(navPendingHref);
 
   return (
-    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
+    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(var(--app-header-height)+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
       {showingRouteProgress && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
       <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
-        <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
+        <div className="app-shell-header-inner flex h-16 items-center justify-between">
           <div className="flex min-w-0 items-center gap-3 md:w-64">
             <button className="rounded-xl border border-line bg-paper p-2 text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label="打开侧边栏">
               <Menu className="h-5 w-5" />
