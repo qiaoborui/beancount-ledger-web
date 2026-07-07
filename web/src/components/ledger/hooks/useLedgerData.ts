@@ -142,8 +142,8 @@ export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKe
   return previousKey !== nextKey;
 }
 
-export function shouldFetchFullBootstrap(isBackground: boolean, cacheUnlocked: boolean) {
-  return !isBackground || cacheUnlocked;
+export function shouldFetchFullBootstrap() {
+  return true;
 }
 
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
@@ -173,8 +173,10 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const loadSequenceRef = useRef(0);
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency });
   const offlineNoticeKeyRef = useRef<string | null>(null);
+  const showToastRef = useRef(showToast);
 
   latestContextRef.current = { range: timeRange, unlocked, valuationCurrency };
+  showToastRef.current = showToast;
 
   const clearLedgerData = useCallback(() => {
     setSummary(null);
@@ -273,21 +275,27 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         }
 
         // Phase 2: full bootstrap in background for rich data (net worth, credit cards, etc.)
-        if (shouldFetchFullBootstrap(isBackground, cacheUnlocked)) {
+        if (shouldFetchFullBootstrap()) {
           const fullQuery = new URLSearchParams(timeRangeToParams(range));
           fullQuery.set("valuationCurrency", valuationCurrency);
-          fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`)
-            .then((fullData) => {
-              const fullVersion = fullData.ledgerVersion ?? version;
-              const { cache: fullCache } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
-              applyCache(fullCache, cacheUnlocked, range, valuationCurrency, valuationCurrency);
-              if (cacheUnlocked) {
-                void writeEncryptedLedgerCache(range, fullCache, valuationCurrency);
-                writeLedgerCache(range, maskSensitiveLedgerCache(fullCache), valuationCurrency);
-                freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${valuationCurrency}`);
-              }
-            })
-            .catch(() => {}); // full bootstrap is best-effort
+          const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`);
+          const fullVersion = fullData.ledgerVersion ?? version;
+          const {
+            cache: fullCache,
+            cacheUnlocked: fullCacheUnlocked,
+            responseValuationCurrency: fullResponseValuationCurrency,
+            serverSensitiveUnlocked: fullServerSensitiveUnlocked,
+          } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
+          if (clientUnlocked && !fullServerSensitiveUnlocked) {
+            latestContextRef.current = { range, unlocked: false, valuationCurrency };
+            onSensitiveLocked();
+          }
+          applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency);
+          if (fullCacheUnlocked) {
+            void writeEncryptedLedgerCache(range, fullCache, fullResponseValuationCurrency);
+            writeLedgerCache(range, maskSensitiveLedgerCache(fullCache), fullResponseValuationCurrency);
+            freshLedgerCacheKeys.add(timeRangeToParams(range) + `:${fullResponseValuationCurrency}`);
+          }
         }
       } finally {
         if (!isBackground) setLoadingFresh(false);
@@ -325,12 +333,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
           applyCache(cache, unlocked, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency);
           if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
             offlineNoticeKeyRef.current = noticeKey;
-            showToast("info", "当前离线，已显示上次缓存的数据");
+            showToastRef.current("info", "当前离线，已显示上次缓存的数据");
           }
         } else {
           if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
             offlineNoticeKeyRef.current = noticeKey;
-            showToast("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
+            showToastRef.current("info", "当前离线，已保留登录状态；暂无缓存账本可显示");
           }
         }
         return;
@@ -415,7 +423,11 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     if (!unlocked) clearSensitiveData();
   }, [clearSensitiveData, unlocked]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load().catch((error) => {
+      showToastRef.current("error", error instanceof Error ? error.message : "账本数据加载失败");
+    });
+  }, [load]);
 
   return {
     summary,

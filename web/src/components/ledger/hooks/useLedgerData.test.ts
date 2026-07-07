@@ -101,10 +101,7 @@ describe("shouldShowOfflineLedgerNotice", () => {
 });
 
 describe("shouldFetchFullBootstrap", () => {
-  it("keeps unlocked background refreshes from stopping at lite bootstrap", () => {
-    expect(shouldFetchFullBootstrap(false, false)).toBe(true);
-    expect(shouldFetchFullBootstrap(false, true)).toBe(true);
-    expect(shouldFetchFullBootstrap(true, false)).toBe(false);
-    expect(shouldFetchFullBootstrap(true, true)).toBe(true);
+  it("always hydrates full data after the lite bootstrap", () => {
+    expect(shouldFetchFullBootstrap()).toBe(true);
   });
 });
