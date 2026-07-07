@@ -33,16 +33,30 @@ function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuth
   setAuthed(true);
 }
 
+function refreshAfterAuth(load: LedgerAuthLoad, showToast: LedgerAuthArgs["showToast"]) {
+  try {
+    Promise.resolve(load(true, { sensitiveUnlocked: true })).catch((error) => {
+      showToast("error", error instanceof Error ? `账本数据刷新失败：${error.message}` : "账本数据刷新失败");
+    });
+  } catch (error) {
+    showToast("error", error instanceof Error ? `账本数据刷新失败：${error.message}` : "账本数据刷新失败");
+  }
+}
+
 export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = { login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null }) {
   async function login() {
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
-      const res = await fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
-      if (res.ok) {
-        markSensitiveUnlocked(setUnlocked, setAuthed);
-        await load(true, { sensitiveUnlocked: true });
-      } else {
-        showToast("error", "密码不对");
+      try {
+        const res = await fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
+        if (res.ok) {
+          markSensitiveUnlocked(setUnlocked, setAuthed);
+          refreshAfterAuth(load, showToast);
+        } else {
+          showToast("error", "密码不对");
+        }
+      } catch (error) {
+        showToast("error", error instanceof Error ? error.message : "登录失败");
       }
     })();
     try {
@@ -64,7 +78,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
         const data = await readJson<{ error?: string }>(verify);
         if (!verify.ok) throw new Error(data.error || "Face ID 登录失败");
         markSensitiveUnlocked(setUnlocked, setAuthed);
-        await load(true, { sensitiveUnlocked: true });
+        refreshAfterAuth(load, showToast);
         clearToast();
       } catch (error) {
         showToast("error", error instanceof Error ? error.message : String(error));
@@ -83,10 +97,11 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
       try {
         await unlockWithQuickLedgerSecret(secret);
         markSensitiveUnlocked(setUnlocked, setAuthed);
-        await load(true, { sensitiveUnlocked: true });
+        refreshAfterAuth(load, showToast);
         clearToast();
       } catch (error) {
         showToast("error", error instanceof Error ? error.message : String(error));
+        throw error;
       }
     })();
     try {

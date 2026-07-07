@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLedgerAuthActions } from "./useLedgerAuth";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
+import { unlockWithQuickLedgerSecret } from "../quickUnlock";
 
 vi.mock("@simplewebauthn/browser", () => ({
   startAuthentication: vi.fn(),
   startRegistration: vi.fn(),
+}));
+
+vi.mock("../quickUnlock", () => ({
+  unlockWithQuickLedgerSecret: vi.fn(),
 }));
 
 function memoryStorage() {
@@ -40,6 +45,7 @@ describe("createLedgerAuthActions", () => {
     Object.defineProperty(globalThis, "localStorage", { value: memoryStorage(), configurable: true });
     vi.mocked(startAuthentication).mockResolvedValue({ id: "credential" } as never);
     vi.mocked(startRegistration).mockResolvedValue({ id: "credential" } as never);
+    vi.mocked(unlockWithQuickLedgerSecret).mockResolvedValue(undefined);
     globalThis.fetch = vi.fn(async (input) => {
       const url = String(input);
       if (url.endsWith("/api/passkey/login/options")) return jsonResponse({ challenge: "login-challenge" });
@@ -77,5 +83,51 @@ describe("createLedgerAuthActions", () => {
     expect(urls.filter((url) => url.endsWith("/api/passkey/login/options"))).toHaveLength(1);
     expect(vi.mocked(startAuthentication)).toHaveBeenCalledTimes(1);
     expect(args.load).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat a post-login ledger refresh failure as a passkey failure", async () => {
+    const args = authArgs();
+    args.load = vi.fn().mockRejectedValue(new Error("bootstrap timed out"));
+    const actions = createLedgerAuthActions(args);
+
+    await actions.loginWithPasskey();
+    await Promise.resolve();
+
+    expect(args.setUnlocked).toHaveBeenCalledWith(true);
+    expect(args.setAuthed).toHaveBeenCalledWith(true);
+    expect(args.clearToast).toHaveBeenCalled();
+    expect(args.showToast).toHaveBeenCalledWith("error", "账本数据刷新失败：bootstrap timed out");
+  });
+
+  it("returns from quick unlock before the full ledger refresh completes", async () => {
+    const args = authArgs();
+    let finishRefresh: () => void = () => {};
+    let refreshSettled = false;
+    args.load = vi.fn(() => new Promise<void>((resolve) => {
+      finishRefresh = () => {
+        refreshSettled = true;
+        resolve();
+      };
+    }));
+    const actions = createLedgerAuthActions(args);
+
+    await actions.loginWithQuickUnlock("local-secret");
+
+    expect(refreshSettled).toBe(false);
+    expect(args.setUnlocked).toHaveBeenCalledWith(true);
+    expect(args.clearToast).toHaveBeenCalled();
+    finishRefresh();
+  });
+
+  it("propagates quick unlock secret failures so the modal can stay open", async () => {
+    const args = authArgs();
+    vi.mocked(unlockWithQuickLedgerSecret).mockRejectedValueOnce(new Error("bad local secret"));
+    const actions = createLedgerAuthActions(args);
+
+    await expect(actions.loginWithQuickUnlock("bad")).rejects.toThrow("bad local secret");
+
+    expect(args.setUnlocked).not.toHaveBeenCalled();
+    expect(args.load).not.toHaveBeenCalled();
+    expect(args.showToast).toHaveBeenCalledWith("error", "bad local secret");
   });
 });

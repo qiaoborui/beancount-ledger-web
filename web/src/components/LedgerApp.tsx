@@ -650,6 +650,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
               onUnlock={loginWithPasskey}
               unlocking={unlocking}
+              autoFocusInput
             />
           </div>
         </div>,
