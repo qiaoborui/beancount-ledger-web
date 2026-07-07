@@ -9,6 +9,7 @@
 **/dist
 **/.runtime
 ledger-web
+ledger-indexer
 main.bean
 accounts.bean
 budgets.bean

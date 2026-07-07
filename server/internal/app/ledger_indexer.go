@@ -67,6 +67,10 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 }
 
 func RunLedgerIndexLoop(ctx context.Context, cfg Config, interval time.Duration) error {
+	return RunLedgerIndexLoopWithTrigger(ctx, cfg, interval, nil)
+}
+
+func RunLedgerIndexLoopWithTrigger(ctx context.Context, cfg Config, interval time.Duration, trigger <-chan struct{}) error {
 	store, err := NewLedgerIndexStore(cfg)
 	if err != nil {
 		return err
@@ -77,7 +81,7 @@ func RunLedgerIndexLoop(ctx context.Context, cfg Config, interval time.Duration)
 		_, err := RunLedgerIndexOnceWithStore(ctx, cfg, store)
 		return err
 	}
-	for {
+	runOnce := func() {
 		started := time.Now()
 		result, err := RunLedgerIndexOnceWithStore(ctx, cfg, store)
 		if err != nil {
@@ -87,11 +91,18 @@ func RunLedgerIndexLoop(ctx context.Context, cfg Config, interval time.Duration)
 		} else {
 			log.Printf("[ledger-indexer] indexed revision=%d version=%s files=%d git=%s in %s", result.RevisionID, result.LedgerVersion.Version, result.LedgerVersion.FileCount, result.GitSHA, time.Since(started).Round(time.Millisecond))
 		}
+	}
+
+	for {
+		runOnce()
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
+		case <-trigger:
+			timer.Stop()
+			log.Printf("[ledger-indexer] triggered by github events")
 		case <-timer.C:
 		}
 	}

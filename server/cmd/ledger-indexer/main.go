@@ -17,11 +17,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	app.StartLedgerScheduler(cfg)
+	indexNow := make(chan struct{}, 1)
+	app.StartGitHubEventsPollerWithAfterSync(cfg, func() {
+		select {
+		case indexNow <- struct{}{}:
+		default:
+		}
+	})
+
 	interval := indexInterval()
 	if interval > 0 {
 		log.Printf("ledger indexer running every %s", interval)
 	}
-	if err := app.RunLedgerIndexLoop(ctx, cfg, interval); err != nil && err != context.Canceled {
+	if err := app.RunLedgerIndexLoopWithTrigger(ctx, cfg, interval, indexNow); err != nil && err != context.Canceled {
 		log.Fatal(err)
 	}
 }

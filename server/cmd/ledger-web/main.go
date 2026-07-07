@@ -20,6 +20,7 @@ func main() {
 
 	cfg := app.LoadConfig()
 	app.StartLedgerScheduler(cfg)
+	app.StartGitHubEventsPoller(cfg)
 	router := app.NewRouter(cfg)
 	addr := ":" + cfg.Port
 	log.Printf("ledger web listening on %s", addr)
