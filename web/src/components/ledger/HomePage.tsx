@@ -40,30 +40,27 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
   const weeklyExpenseDelta = previousSevenExpense > 0 ? (lastSevenExpense - previousSevenExpense) / previousSevenExpense : null;
   const topThreeShare = topCategories.slice(0, 3).reduce((sum, row) => sum + (row.share ?? 0), 0);
   const netTone = net < 0 ? "amount-expense" : "amount-gold";
+  const dashboardGridClass = "grid min-w-0 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
 
   return <>
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:items-stretch">
-      <section className="card flex min-w-0 flex-col overflow-hidden p-0">
-        <div className="flex items-start justify-between gap-4 p-5 md:p-6">
-          <div className="min-w-0">
-            <div className="ledger-kicker">month control</div>
-            <h1 className="mt-2 text-wrap-balance font-serif text-3xl font-medium leading-tight tracking-[-0.012em] text-warm md:text-4xl">这个月的钱流</h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-olive">先看结余和支出速度，再决定要不要打开明细。</p>
-          </div>
+    <div className={`${dashboardGridClass} xl:items-stretch`}>
+      <section className="card flex min-w-0 flex-col overflow-hidden p-4 md:p-5">
+        <div className="flex min-h-24 items-start justify-between gap-4">
+          <SectionTitle eyebrow="当前周期" title="本期总览" detail="收入、支出、结余和支出速度集中查看。" />
           <button className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-panel text-brand hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
             {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
-        <div className="mx-3 rounded-2xl bg-paper p-4 shadow-[inset_0_0_0_1px_var(--line)] md:mx-4 md:p-5">
+        <div className="rounded-xl bg-paper p-4 shadow-[inset_0_0_0_1px_var(--line)]">
           <div className="ledger-label">本期结余</div>
-          <div className={`mt-2 break-words font-serif text-4xl font-medium leading-none tracking-[-0.022em] md:text-5xl ${netTone}`}>{mask(formatValuation(net / 100, displayCurrency))}</div>
+          <div className={`mt-2 break-words font-serif text-3xl font-medium leading-none tracking-[-0.012em] md:text-4xl ${netTone}`}>{mask(formatValuation(net / 100, displayCurrency))}</div>
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <FlowMetric label="收入" value={mask(formatValuation(income / 100, displayCurrency))} tone="amount-income" />
             <FlowMetric label="支出" value={mask(formatValuation(expense / 100, displayCurrency), false)} tone="amount-expense" />
             <FlowMetric label="日均支出" value={mask(formatValuation(averageExpense / 100, displayCurrency), false)} tone="amount-gold" />
           </div>
         </div>
-        <div className="grid gap-3 p-3 pt-4 md:grid-cols-3 md:p-4">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           <SignalCard icon={<WalletCards className="h-4 w-4" />} label="支出占收入" value={expenseRatio == null ? "暂无收入" : formatPercent(expenseRatio)} detail={savingsRate == null ? "还没有可比口径" : `储蓄率 ${formatPercent(savingsRate)}`} tone={expenseRatio != null && expenseRatio > 1 ? "amount-expense" : "amount-income"} />
           <SignalCard icon={<PieChart className="h-4 w-4" />} label="消费集中度" value={topCategories.length ? formatPercent(topThreeShare) : "暂无分类"} detail={topCategories.length ? "前三类支出占比" : "本期暂无支出分类"} tone="amount-gold" />
           <SignalCard icon={<CalendarDays className="h-4 w-4" />} label="记录节奏" value={dayRows.length ? `${expenseDays}/${dayRows.length} 天` : "暂无记录"} detail={latestDate ? `最近更新 ${latestDate.slice(5)}` : "等待本期数据"} tone="text-warm" />
@@ -72,7 +69,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       <DailyTrendCard rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
     </div>
 
-    <div className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+    <div className={`${dashboardGridClass} mt-4 items-start`}>
       <CategoryFocus rows={topCategories} totalExpense={expense} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
       <RhythmBrief lastSevenExpense={lastSevenExpense} weeklyExpenseDelta={weeklyExpenseDelta} topCategory={topCategory} dayRows={dayRows} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
     </div>
@@ -83,24 +80,36 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
 function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
   const label = rows.length ? `${rows[0][0].slice(5)} ~ ${rows.at(-1)?.[0].slice(5)}` : "本期";
   const { ref, ready } = useDeferredChartReady(rows.length > 0 && showAmounts);
-  return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-4 xl:min-h-0 max-xl:min-h-[360px]">
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="ledger-kicker">daily rhythm</div>
-        <h2 className="mt-1 font-serif text-xl text-warm">每天怎么流动</h2>
-        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-stone">
+  return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-4 md:p-5 xl:min-h-0 max-xl:min-h-[360px]">
+    <div className="flex min-h-24 items-start justify-between gap-3">
+      <SectionTitle eyebrow="日趋势" title="日收支趋势" detail={
+        <span className="flex flex-wrap items-center gap-3">
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--color-expense))]" />支出柱</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[rgb(var(--color-income))]" />收入线</span>
-        </div>
-      </div>
-      <span className="ledger-chip rounded-full px-2 py-1 text-xs">{label}</span>
+        </span>
+      } />
+      <span className="ledger-chip rounded-full px-2.5 py-1 text-xs">
+        {label}
+      </span>
     </div>
-    {rows.length ? showAmounts ? <div ref={ref} className="ledger-chart mt-4 min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
-      {ready ? <Suspense fallback={<div className="grid h-full min-h-[260px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">正在准备趋势图…</div>}>
+    {rows.length ? showAmounts ? <div ref={ref} className="ledger-chart min-h-[260px] min-w-0 max-w-full flex-1 xl:min-h-0">
+      {ready ? <Suspense fallback={<EmptyPanel text="正在准备趋势图…" className="min-h-[260px]" />}>
         <LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} />
-      </Suspense> : <div className="grid h-full min-h-[260px] place-items-center rounded-xl border border-line bg-panel text-sm text-stone">趋势图稍后加载</div>}
-    </div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">金额已隐藏，显示金额后可查看趋势与明细。</div> : <div className="mt-4 grid min-h-[260px] flex-1 place-items-center rounded-xl border border-line bg-panel text-sm text-stone xl:min-h-0">暂无日趋势数据</div>}
+      </Suspense> : <EmptyPanel text="趋势图稍后加载" className="min-h-[260px]" />}
+    </div> : <EmptyPanel text="金额已隐藏，显示金额后可查看趋势与明细。" className="mt-0 min-h-[260px] flex-1 xl:min-h-0" /> : <EmptyPanel text="暂无日趋势数据" className="mt-0 min-h-[260px] flex-1 xl:min-h-0" />}
   </section>;
+}
+
+function SectionTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail?: React.ReactNode }) {
+  return <div className="min-w-0">
+    <div className="ledger-label text-[11px] font-semibold text-stone">{eyebrow}</div>
+    <h2 className="mt-1.5 text-wrap-balance text-2xl font-semibold leading-tight tracking-normal text-warm md:text-[1.625rem]">{title}</h2>
+    {detail && <div className="mt-2 text-sm leading-6 text-olive">{detail}</div>}
+  </div>;
+}
+
+function EmptyPanel({ text, className = "" }: { text: string; className?: string }) {
+  return <div className={`grid place-items-center rounded-xl bg-paper px-4 py-6 text-center text-sm text-stone shadow-[inset_0_0_0_1px_var(--line)] ${className}`}>{text}</div>;
 }
 
 function useDeferredChartReady(enabled: boolean) {
@@ -165,11 +174,8 @@ function SignalCard({ icon, label, value, detail, tone }: { icon: React.ReactNod
 
 function CategoryFocus({ rows, totalExpense, showAmounts, valuationCurrency, onSelectCategory }: { rows: ExpenseCategoryAnalytics[]; totalExpense: number; showAmounts: boolean; valuationCurrency: string; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   return <section className="card min-w-0 overflow-hidden p-4 md:p-5">
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="ledger-kicker">spending map</div>
-        <h2 className="mt-1 font-serif text-2xl text-warm">钱花到哪里</h2>
-      </div>
+    <div className="flex min-h-20 items-start justify-between gap-3">
+      <SectionTitle eyebrow="支出结构" title="分类分布" />
       <span className="ledger-chip shrink-0 rounded-full px-2.5 py-1 text-xs">{rows.length ? `${rows.length} 类` : "暂无"}</span>
     </div>
     <div className="mt-4 space-y-3">
@@ -197,8 +203,9 @@ function RhythmBrief({ lastSevenExpense, weeklyExpenseDelta, topCategory, dayRow
   const recentRows = dayRows.slice(-5).reverse();
   const weeklyTone = weeklyExpenseDelta != null && weeklyExpenseDelta > 0 ? "amount-expense" : "amount-income";
   return <section className="card min-w-0 overflow-hidden p-4 md:p-5">
-    <div className="ledger-kicker">next glance</div>
-    <h2 className="mt-1 font-serif text-2xl text-warm">现在最该看什么</h2>
+    <div className="min-h-20">
+      <SectionTitle eyebrow="近期变化" title="动向摘要" />
+    </div>
     <div className="mt-4 grid gap-3">
       <BriefRow
         title="最近 7 天支出"
