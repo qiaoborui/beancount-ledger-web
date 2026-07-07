@@ -584,6 +584,62 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesTimedTopups(t *testing.T)
 	}
 }
 
+func TestAlipaySmallPurseFiltersFullyRefundedGroups(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Food",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  rules:",
+		"    - item: 正常消费",
+		"      targetAccount: Expenses:Food",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "normal-spend", DateTime: "2026-06-30 18:00:00", Description: "正常消费", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "10.00"},
+		{OrderID: "2026063004200214001066007061_20260630300002007006141238430705", DateTime: "2026-06-30 17:15:49", Description: "退款-盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "0.92"},
+		{OrderID: "2026063004200214001066007061_20260630300002007006141237920970", DateTime: "2026-06-30 17:15:43", Description: "退款-盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "24.90"},
+		{OrderID: "2026063004200214001066007061_20260630300002007006141237852037", DateTime: "2026-06-30 17:15:06", Description: "退款-盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "19.90"},
+		{OrderID: "2026063004200214001066007061_20260630300002007006141237673911", DateTime: "2026-06-30 17:15:03", Description: "退款-盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "4.28"},
+		{OrderID: "2026063004200214001066007061_20260630300002007006141239623775", DateTime: "2026-06-30 17:15:00", Description: "退款-盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Income: "6.90"},
+		{OrderID: "2026063004200214001066007061", DateTime: "2026-06-30 16:49:52", Description: "已退款 - 盒马工坊 手作老面香菇青菜包 200g等多件", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "56.90"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	importer, ok := importProvider("alipay-small-purse")
+	if !ok {
+		t.Fatal("missing alipay-small-purse provider")
+	}
+	prepared, err := importer.Prepare(server, importFileInput{InputFile: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.RawRowCount != 7 || prepared.FilteredRowCount != 1 || prepared.PrefilterSkipped != 6 {
+		t.Fatalf("unexpected prepared row counts: %#v", prepared)
+	}
+	if _, err := importer.PreviewWarnings(prepared, providerSourceAnalysis{}, beanSummary{CandidateCount: 1}, beanSummary{CandidateCount: 1}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := importer.Generate(context.Background(), server, preparedImportInput{InputFile: input}, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	if strings.Count(generated, `source: "支付宝小荷包"`) != 1 {
+		t.Fatalf("unexpected generated entries:\n%s", generated)
+	}
+	if strings.Contains(generated, "2026063004200214001066007061") {
+		t.Fatalf("fully refunded group should be filtered:\n%s", generated)
+	}
+	if !strings.Contains(generated, `orderId: "normal-spend"`) {
+		t.Fatalf("normal spend should be kept:\n%s", generated)
+	}
+}
+
 func TestAlipaySmallPurseRunningContributionBalanceUsesLedgerHistory(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{

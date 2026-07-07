@@ -89,10 +89,11 @@ func (s *Server) prepareAlipaySmallPurseInput(inputFile, importID string) (prepa
 		return preparedImportInput{}, err
 	}
 	start, end := alipaySmallPurseDateRange(statement)
+	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows)
 	generatedRows := 0
 	skippedRows := 0
 	for _, row := range statement.Rows {
-		generates, err := alipaySmallPurseRowGeneratesEntry(statement, row, config)
+		generates, err := alipaySmallPurseRowGeneratesEntry(statement, row, config, refundSkips)
 		if err != nil {
 			return preparedImportInput{}, err
 		}
@@ -107,7 +108,7 @@ func (s *Server) prepareAlipaySmallPurseInput(inputFile, importID string) (prepa
 		warnings = append(warnings, fmt.Sprintf("小荷包账单期间：%s 至 %s。", statement.PeriodStart, statement.PeriodEnd))
 	}
 	if skippedRows > 0 {
-		warnings = append(warnings, fmt.Sprintf("已跳过 %d 条只用于更新小荷包权益的明细。", skippedRows))
+		warnings = append(warnings, fmt.Sprintf("已跳过 %d 条无需生成交易的明细。", skippedRows))
 	}
 	return preparedImportInput{
 		InputFile:        inputFile,
@@ -131,12 +132,16 @@ func (s *Server) generateAlipaySmallPurseBean(ctx context.Context, inputFile, ou
 	}
 	blocks := make([]string, 0, len(statement.Rows))
 	rows := alipaySmallPurseRowsForRendering(statement.Rows, config)
+	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows)
 	ownInitial, partnerInitial, err := s.alipaySmallPurseInitialContributionBalances(ctx, statement, config)
 	if err != nil {
 		return err
 	}
 	allocator := newAlipaySmallPurseContributionAllocator(config, ownInitial, partnerInitial)
 	for _, row := range rows {
+		if refundSkips[row.OrderID] {
+			continue
+		}
 		block, ignore, err := renderAlipaySmallPurseEntry(statement, row, config, allocator)
 		if err != nil {
 			return err
@@ -382,7 +387,10 @@ func alipaySmallPurseUsesRunningContributionBalance(config alipaySmallPurseConfi
 	return strings.EqualFold(strings.TrimSpace(config.AlipaySmallPurse.AllocationMode), "runningContributionBalance")
 }
 
-func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig) (bool, error) {
+func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig, refundSkips map[string]bool) (bool, error) {
+	if refundSkips[row.OrderID] {
+		return false, nil
+	}
 	income := cents(row.Income)
 	expense := cents(row.Expense)
 	if income == 0 && expense == 0 {
@@ -421,6 +429,67 @@ func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row 
 		}
 	}
 	return true, nil
+}
+
+type alipaySmallPurseRefundGroup struct {
+	expenseOrderID string
+	expenseAmount  int
+	refundOrderIDs []string
+	refundAmount   int
+}
+
+func alipaySmallPurseRefundSkipRows(rows []alipaySmallPurseRow) map[string]bool {
+	groups := map[string]*alipaySmallPurseRefundGroup{}
+	for _, row := range rows {
+		baseID := alipaySmallPurseBaseOrderID(row.OrderID)
+		if baseID == "" {
+			continue
+		}
+		description := strings.TrimSpace(row.Description)
+		income := cents(row.Income)
+		expense := cents(row.Expense)
+		switch {
+		case expense > 0 && strings.HasPrefix(description, "已退款"):
+			group := alipaySmallPurseRefundGroupForID(groups, baseID)
+			group.expenseOrderID = row.OrderID
+			group.expenseAmount = expense
+		case income > 0 && strings.HasPrefix(description, "退款"):
+			group := alipaySmallPurseRefundGroupForID(groups, baseID)
+			group.refundOrderIDs = append(group.refundOrderIDs, row.OrderID)
+			group.refundAmount += income
+		}
+	}
+	skips := map[string]bool{}
+	for _, group := range groups {
+		if group.expenseOrderID == "" || len(group.refundOrderIDs) == 0 || group.expenseAmount != group.refundAmount {
+			continue
+		}
+		skips[group.expenseOrderID] = true
+		for _, orderID := range group.refundOrderIDs {
+			skips[orderID] = true
+		}
+	}
+	return skips
+}
+
+func alipaySmallPurseRefundGroupForID(groups map[string]*alipaySmallPurseRefundGroup, orderID string) *alipaySmallPurseRefundGroup {
+	group := groups[orderID]
+	if group == nil {
+		group = &alipaySmallPurseRefundGroup{}
+		groups[orderID] = group
+	}
+	return group
+}
+
+func alipaySmallPurseBaseOrderID(orderID string) string {
+	orderID = strings.TrimSpace(orderID)
+	if orderID == "" {
+		return ""
+	}
+	if index := strings.Index(orderID, "_"); index > 0 {
+		return orderID[:index]
+	}
+	return orderID
 }
 
 func alipaySmallPurseIncomeKind(row alipaySmallPurseRow) string {
