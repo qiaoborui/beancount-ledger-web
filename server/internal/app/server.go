@@ -54,7 +54,7 @@ func NewRouter(cfg Config) *gin.Engine {
 		return readService.SnapshotLite(context.Background())
 	}), readService: readService, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: NewRateLimiter(), events: ledgerEventHub}
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
+	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {

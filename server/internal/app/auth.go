@@ -161,26 +161,38 @@ func clearSensitiveCookie(c *gin.Context) {
 }
 
 func setAuthCookie(c *gin.Context, name, value string, maxAge int) {
+	sameSite := http.SameSiteLaxMode
+	secure := gin.Mode() == gin.ReleaseMode
+	if requestUsesConfiguredCrossOrigin(c) {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
-		Secure:   gin.Mode() == gin.ReleaseMode,
+		Secure:   secure,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 	})
 }
 
 func clearAuthCookie(c *gin.Context, name string) {
+	sameSite := http.SameSiteLaxMode
+	secure := gin.Mode() == gin.ReleaseMode
+	if requestUsesConfiguredCrossOrigin(c) {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     name,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
-		Secure:   gin.Mode() == gin.ReleaseMode,
+		Secure:   secure,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 	})
 }
 
@@ -190,16 +202,16 @@ func sameOriginMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if site := strings.ToLower(strings.TrimSpace(c.GetHeader("Sec-Fetch-Site"))); site == "cross-site" {
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if site := strings.ToLower(strings.TrimSpace(c.GetHeader("Sec-Fetch-Site"))); site == "cross-site" && !crossOriginAllowed(c, origin) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Cross-site requests are not allowed"})
 			return
 		}
-		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		if origin == "" {
 			c.Next()
 			return
 		}
-		if !sameOriginAllowed(c, origin) {
+		if !sameOriginAllowed(c, origin) && !crossOriginAllowed(c, origin) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Cross-site requests are not allowed"})
 			return
 		}
