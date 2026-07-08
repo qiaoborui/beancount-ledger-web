@@ -124,17 +124,11 @@ func TestRouterAuthAndSummary(t *testing.T) {
 		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
 	}
 
-	sessionOnly := []*http.Cookie{}
-	for _, cookie := range mergeCookies(login.Result().Cookies(), lock.Result().Cookies()) {
-		if cookie.Name == sessionCookieName {
-			sessionOnly = append(sessionOnly, cookie)
-		}
-	}
-	verifyQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, sessionOnly)
+	verifyQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, nil)
 	if verifyQuick.Code != http.StatusOK {
 		t.Fatalf("quick unlock verify status=%d body=%s", verifyQuick.Code, verifyQuick.Body.String())
 	}
-	quickSummary := requestWithCookies(router, http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", "", mergeCookies(sessionOnly, verifyQuick.Result().Cookies()))
+	quickSummary := requestWithCookies(router, http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", "", verifyQuick.Result().Cookies())
 	if quickSummary.Code != http.StatusOK {
 		t.Fatalf("quick unlock summary status=%d body=%s", quickSummary.Code, quickSummary.Body.String())
 	}
@@ -145,11 +139,17 @@ func TestRouterAuthAndSummary(t *testing.T) {
 		t.Fatalf("quick unlock should restore sensitive access: %#v", body)
 	}
 
+	sessionOnly := []*http.Cookie{}
+	for _, cookie := range verifyQuick.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			sessionOnly = append(sessionOnly, cookie)
+		}
+	}
 	revokeQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/revoke", `{"deviceId":"test-device-1"}`, sessionOnly)
 	if revokeQuick.Code != http.StatusOK {
 		t.Fatalf("quick unlock revoke status=%d body=%s", revokeQuick.Code, revokeQuick.Body.String())
 	}
-	verifyRevoked := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, sessionOnly)
+	verifyRevoked := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, nil)
 	if verifyRevoked.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked quick unlock status=%d body=%s", verifyRevoked.Code, verifyRevoked.Body.String())
 	}
