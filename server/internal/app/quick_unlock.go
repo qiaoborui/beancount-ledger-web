@@ -99,9 +99,6 @@ func (s *Server) quickUnlockVerify(c *gin.Context) {
 	if !s.limiter.Check(c, "quick-unlock.verify", 20, time.Minute) {
 		return
 	}
-	if !requireAuth(c) {
-		return
-	}
 	var input QuickUnlockVerifyRequest
 	if !bindJSON(c, &input) {
 		return
@@ -110,6 +107,12 @@ func (s *Server) quickUnlockVerify(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Quick unlock failed"})
 		return
 	}
+	sessionToken, err := createSessionToken()
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	setSessionCookie(c, sessionToken)
 	setSensitiveCookie(c)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
