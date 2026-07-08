@@ -134,9 +134,7 @@ func newPostgresRuntimeFileStore(databaseURL string) (*postgresRuntimeFileStore,
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	configurePostgresPool(db)
 	store := &postgresRuntimeFileStore{db: db}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

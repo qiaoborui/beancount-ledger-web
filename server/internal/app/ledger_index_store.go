@@ -38,9 +38,7 @@ func NewLedgerIndexStore(cfg Config) (*LedgerIndexStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	configurePostgresPool(db)
 	store := &LedgerIndexStore{db: db, sourceKey: ledgerIndexSourceKey(cfg)}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
