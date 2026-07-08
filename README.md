@@ -98,6 +98,28 @@ previews, disable it or remove its pull-request comments after switching to the
 root services project. The standalone frontend config no longer proxies `/api/*`
 to production.
 
+### Docker with Supabase Postgres
+
+The local Docker compose file is configured to use the same Supabase Postgres
+runtime store and ledger read model as the hosted API. Copy `.env.example` to
+your local `.env`, set `DATABASE_URL` to the Supabase direct or session-pooler
+connection string, and keep the file uncommitted.
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
+To index a mounted local ledger into the same Supabase database, start the
+optional indexer profile:
+
+```bash
+LEDGER_HOST_PATH=/path/to/private-ledger docker compose -f docker/docker-compose.yml --profile indexer up --build
+```
+
+For a worker that clones the private ledger instead of mounting it, set
+`INDEXER_LEDGER_STORAGE=remote_git`, `LEDGER_GIT_REMOTE`, `LEDGER_GIT_BRANCH`,
+and `LEDGER_INDEX_SOURCE_KEY` in the local `.env`.
+
 ## Environment variables
 
 See [web/.env.example](web/.env.example) for the complete list.
