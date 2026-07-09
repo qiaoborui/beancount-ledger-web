@@ -4,46 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { haptic } from "./ledger/haptics";
 import { shouldShowServiceWorkerUpdate } from "./pwaUpdate";
 
-type WindowControlsOverlay = {
-  visible: boolean;
-  addEventListener: (type: "geometrychange", listener: () => void) => void;
-  removeEventListener: (type: "geometrychange", listener: () => void) => void;
-};
-
-type NavigatorWithPwaChrome = Navigator & {
-  standalone?: boolean;
-  userAgentData?: { platform?: string };
-  windowControlsOverlay?: WindowControlsOverlay;
-};
-
-function isMacDesktopPwaPlatform(navigatorLike: NavigatorWithPwaChrome) {
-  const platform = navigatorLike.userAgentData?.platform || navigatorLike.platform || "";
-  const userAgent = navigatorLike.userAgent || "";
-  const touchPoints = navigatorLike.maxTouchPoints || 0;
-  return /mac/i.test(platform) && !/iphone|ipad|ipod/i.test(userAgent) && touchPoints < 2;
-}
-
 export function PwaRegister() {
   const [updateReady, setUpdateReady] = useState(false);
   const dismissedWaitingRef = useRef<ServiceWorker | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
-    const navigatorWithChrome = navigator as NavigatorWithPwaChrome;
-    const overlay = navigatorWithChrome.windowControlsOverlay;
     const updateDisplayMode = () => {
-      const standalone = media.matches || Boolean(navigatorWithChrome.standalone);
+      const standalone = media.matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
       document.documentElement.dataset.displayMode = standalone ? "standalone" : "browser";
-      document.documentElement.dataset.desktopPlatform = isMacDesktopPwaPlatform(navigatorWithChrome) ? "macos" : "other";
-      document.documentElement.dataset.windowControlsOverlay = overlay ? (overlay.visible ? "visible" : "hidden") : "unsupported";
     };
     updateDisplayMode();
     media.addEventListener("change", updateDisplayMode);
-    overlay?.addEventListener("geometrychange", updateDisplayMode);
-    return () => {
-      media.removeEventListener("change", updateDisplayMode);
-      overlay?.removeEventListener("geometrychange", updateDisplayMode);
-    };
+    return () => media.removeEventListener("change", updateDisplayMode);
   }, []);
 
   useEffect(() => {

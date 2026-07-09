@@ -86,8 +86,6 @@
   --ledger-token-account: #2d5a8a;
   --ledger-token-number: #8a6f2f;
   --ledger-token-currency: #504e49;
-  --app-header-height: 4rem;
-  --app-titlebar-left-offset: 0px;
 }
 
 html[data-theme="dark"] {
@@ -443,19 +441,6 @@ button.card:active, a.card:active { transform: scale(0.992); }
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.app-shell-header-inner {
-  padding-left: calc(max(1rem, env(safe-area-inset-left)) + var(--app-titlebar-left-offset));
-  padding-right: max(1rem, env(safe-area-inset-right));
-}
-
-html[data-display-mode="standalone"][data-desktop-platform="macos"] {
-  --app-titlebar-left-offset: 5.75rem;
-}
-
-html[data-display-mode="standalone"][data-window-controls-overlay="visible"] {
-  --app-titlebar-left-offset: env(titlebar-area-x, 0px);
-}
-
 @media (min-width: 768px) {
   .app-shell {
     height: 100dvh;
@@ -463,13 +448,8 @@ html[data-display-mode="standalone"][data-window-controls-overlay="visible"] {
     overflow: hidden;
   }
 
-  .app-shell-header-inner {
-    padding-left: calc(1.5rem + var(--app-titlebar-left-offset));
-    padding-right: 1.5rem;
-  }
-
   .app-shell-frame {
-    height: calc(100dvh - var(--app-header-height) - env(safe-area-inset-top));
+    height: calc(100dvh - 4rem - env(safe-area-inset-top));
     min-height: 0;
   }
 
