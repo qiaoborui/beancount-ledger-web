@@ -108,9 +108,6 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 	if githubAPIEnabled(w.cfg) {
 		return w.runGitHubAPITransaction(source, apply)
 	}
-	if remoteGitEnabled(w.cfg) {
-		return w.runRemoteGitTransaction(source, apply)
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
@@ -164,7 +161,7 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			cancel()
 			return err
 		}
-		if _, err := remoteTx.commit(remoteGitCommitMessage(source)); err != nil {
+		if _, err := remoteTx.commit(ledgerCommitMessage(source)); err != nil {
 			cancel()
 			lastErr = err
 			continue
@@ -179,62 +176,6 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 	}
 	if lastErr == nil {
 		lastErr = errors.New("github api ledger write failed")
-	}
-	return lastErr
-}
-
-func (w *LedgerWriter) runRemoteGitTransaction(source string, apply func(*LedgerWriteTransaction) error) error {
-	if w.runtimeStore != nil {
-		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func() error {
-			return w.runRemoteGitTransactionLocked(source, apply)
-		})
-	}
-	return w.runRemoteGitTransactionLocked(source, apply)
-}
-
-func (w *LedgerWriter) runRemoteGitTransactionLocked(source string, apply func(*LedgerWriteTransaction) error) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	state := remoteGitStateFor(w.cfg)
-	state.mu.Lock()
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := ensureRemoteGitCheckoutLocked(w.cfg, state, true); err != nil {
-			state.mu.Unlock()
-			return err
-		}
-		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
-		if err := apply(tx); err != nil {
-			tx.Restore()
-			state.mu.Unlock()
-			return err
-		}
-		if err := runBeanCheck(w.cfg); err != nil {
-			tx.Restore()
-			state.mu.Unlock()
-			return err
-		}
-		if _, err := remoteGitCommitAndPush(w.cfg, remoteGitCommitMessage(source)); err != nil {
-			lastErr = err
-			_, _ = gitLedgerOutput(w.cfg, "reset", "--hard", remoteGitRemoteRef(w.cfg))
-			_, _ = gitLedgerOutput(w.cfg, "clean", "-fd")
-			continue
-		}
-		state.checkedAt = time.Now()
-		if w.cache != nil {
-			w.cache.MarkDirty()
-		}
-		if strings.TrimSpace(source) == "" {
-			source = ledgerWriteSourceDefault
-		}
-		state.mu.Unlock()
-		publishLedgerUpdated(w.cfg, source)
-		publishGitStatus(w.cfg, source)
-		return nil
-	}
-	state.mu.Unlock()
-	if lastErr == nil {
-		lastErr = errors.New("remote git write failed")
 	}
 	return lastErr
 }
@@ -657,33 +598,7 @@ func (w *LedgerWriter) ensureMonthlyFileAndInclude(tx *LedgerWriteTransaction, f
 	return tx.WriteFile(main, []byte(string(mainBefore)+sep+includeLine+"\n"), 0o644)
 }
 
-func remoteGitCommitAndPush(cfg Config, message string) (string, error) {
-	trackedPaths := ledgerGitTrackedPathspecs(cfg)
-	status, err := gitLedger(cfg, append([]string{"status", "--short", "--"}, trackedPaths...)...)
-	if err != nil {
-		return "", err
-	}
-	if len(parseGitChanges(status)) == 0 {
-		return "No ledger changes to commit.", nil
-	}
-	if _, err := gitLedgerOutput(cfg, append([]string{"add", "--"}, trackedPaths...)...); err != nil {
-		return "", err
-	}
-	commitOut, err := gitLedgerOutput(cfg, append([]string{"commit", "-m", message, "--"}, trackedPaths...)...)
-	if err != nil {
-		return commitOut, err
-	}
-	if gitRemoteDisabled() {
-		return commitOut + "\nGit remote sync disabled\n", nil
-	}
-	pushOut, err := gitLedgerOutput(cfg, "push", "origin", "HEAD:"+cfg.LedgerGitBranch)
-	if err != nil {
-		return commitOut + pushOut, err
-	}
-	return commitOut + pushOut, nil
-}
-
-func remoteGitCommitMessage(source string) string {
+func ledgerCommitMessage(source string) string {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return "chore: update ledger"

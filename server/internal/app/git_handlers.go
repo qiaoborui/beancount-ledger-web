@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,8 +11,8 @@ func (s *Server) gitStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	if s.readModelHostMode() {
-		c.JSON(http.StatusOK, gin.H{"status": "", "dirty": false, "changedFileCount": 0, "changes": []GitChange{}, "gitAvailable": false, "message": "Ledger Git is managed by the local ledger worker."})
+	if s.readModelHostMode() || githubAPIEnabled(s.cfg) {
+		c.JSON(http.StatusOK, ledgerGitManagedExternallyPayload())
 		return
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
@@ -41,6 +40,9 @@ func (s *Server) gitStatus(c *gin.Context) {
 
 func (s *Server) gitDiff(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	if s.rejectLocalGitOperation(c, "git.diff") {
 		return
 	}
 	if s.rejectWorkerOnly(c, "git.diff") {
@@ -72,41 +74,32 @@ func (s *Server) gitPull(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	if s.rejectWorkerOnly(c, "git.pull") {
-		return
-	}
-	if gitRemoteDisabled() {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "output": "Git remote sync disabled\n"})
-		return
-	}
-	publishJobStatus("git.pull", "running", "")
-	if err := syncLedgerNow(s.cfg); err != nil {
-		publishJobStatus("git.pull", "error", err.Error())
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	out := "Remote Git checkout synced.\n"
-	publishJobStatus("git.pull", "ok", out)
-	publishLedgerUpdated(s.cfg, "git-pull")
-	publishGitStatus(s.cfg, "git-pull")
-	c.JSON(http.StatusOK, gin.H{"ok": true, "output": out})
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":     ErrWorkerOnlyOperation.Error(),
+		"operation": "git.pull",
+		"message":   "Remote Git sync has been removed from the application. Sync the local ledger checkout outside ledger-web.",
+	})
 }
 
 func (s *Server) gitCommit(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	if s.rejectWorkerOnly(c, "git.commit") {
-		return
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":     ErrWorkerOnlyOperation.Error(),
+		"operation": "git.commit",
+		"message":   "Git commits are managed outside ledger-web. Use GitHub API writes on the stateless host or commit directly in the local ledger repository.",
+	})
+}
+
+func (s *Server) rejectLocalGitOperation(c *gin.Context, operation string) bool {
+	if !s.readModelHostMode() && !githubAPIEnabled(s.cfg) {
+		return false
 	}
-	var input GitCommitRequest
-	_ = c.ShouldBindJSON(&input)
-	if strings.TrimSpace(input.Message) == "" {
-		input.Message = "chore: update ledger"
-	}
-	if err := ensureLedgerReady(s.cfg); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "changedFileCount": 0, "remainingChangedFileCount": 0, "output": "Remote Git mode commits and pushes each ledger write automatically."})
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":     ErrWorkerOnlyOperation.Error(),
+		"operation": operation,
+		"message":   "Ledger Git is managed outside the stateless API host. Run this operation on the local ledger worker or directly in the ledger repository.",
+	})
+	return true
 }

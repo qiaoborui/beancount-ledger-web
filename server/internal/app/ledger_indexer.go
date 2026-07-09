@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -34,23 +33,17 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
-	if remoteSHA := ledgerRemoteHeadSHA(cfg); remoteSHA != "" && hasActive && active.GitSHA == remoteSHA {
-		return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "git sha unchanged"}, nil
-	}
 	if err := ensureLedgerReady(cfg); err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := ledgerIndexGitSHA(cfg)
-	if gitSHA != "" && hasActive && active.GitSHA == gitSHA {
-		return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "git sha unchanged"}, nil
-	}
-	if gitSHA == "" && hasActive {
+	gitSHA := ""
+	if hasActive {
 		version, err := ledgerVersion(cfg)
 		if err != nil {
 			return LedgerIndexResult{}, err
 		}
 		if active.LedgerVersion.Version == version.Version {
-			return LedgerIndexResult{RevisionID: active.ID, GitSHA: active.GitSHA, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "ledger version unchanged"}, nil
+			return LedgerIndexResult{RevisionID: active.ID, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "ledger version unchanged"}, nil
 		}
 	}
 
@@ -106,34 +99,4 @@ func RunLedgerIndexLoopWithTrigger(ctx context.Context, cfg Config, interval tim
 		case <-timer.C:
 		}
 	}
-}
-
-func ledgerRemoteHeadSHA(cfg Config) string {
-	if !remoteGitEnabled(cfg) {
-		return ""
-	}
-	branch := strings.TrimSpace(cfg.LedgerGitBranch)
-	if branch == "" {
-		branch = "main"
-	}
-	out, err := gitOutput("", "ls-remote", cfg.LedgerGitRemote, "refs/heads/"+branch)
-	if err != nil {
-		return ""
-	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-func ledgerIndexGitSHA(cfg Config) string {
-	if !remoteGitEnabled(cfg) {
-		return ""
-	}
-	out, err := gitLedgerOutput(cfg, "rev-parse", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
 }

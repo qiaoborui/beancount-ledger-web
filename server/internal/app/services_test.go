@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,25 +37,6 @@ func TestRateLimitUsesRemoteAddrByDefault(t *testing.T) {
 	router.ServeHTTP(second, req)
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status = %d, want 429", second.Code)
-	}
-}
-
-func TestGitSchedulerConfig(t *testing.T) {
-	t.Setenv("LEDGER_GIT_SCHEDULER", "true")
-	if !gitSchedulerEnabled() {
-		t.Fatal("scheduler should be enabled for true")
-	}
-	t.Setenv("LEDGER_GIT_SCHEDULER", "false")
-	if gitSchedulerEnabled() {
-		t.Fatal("scheduler should be disabled for false")
-	}
-	t.Setenv("LEDGER_GIT_PULL_INTERVAL_MINUTES", "0.001")
-	if got := schedulerInterval("LEDGER_GIT_PULL_INTERVAL_MINUTES", 15); got != 60*time.Millisecond {
-		t.Fatalf("unexpected scheduler interval: %s", got)
-	}
-	t.Setenv("LEDGER_GIT_PULL_INTERVAL_MINUTES", "-1")
-	if got := schedulerInterval("LEDGER_GIT_PULL_INTERVAL_MINUTES", 15); got != 0 {
-		t.Fatalf("non-positive interval should disable job, got %s", got)
 	}
 }
 

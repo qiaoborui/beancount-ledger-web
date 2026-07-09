@@ -73,7 +73,6 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	compiled := CompileBeanLines(lines)
 	entries := compiled.Entries
-	normalizeEntryFilenames(c.cfg, entries)
 	txns := TransactionsFromBeanEntries(entries)
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
@@ -149,27 +148,6 @@ func (c *LedgerCache) currentVersion(forceRefresh bool) (LedgerVersion, error) {
 	c.versionReadAt = time.Now()
 	c.mu.Unlock()
 	return version, nil
-}
-
-func normalizeEntryFilenames(cfg Config, entries []BeanEntry) {
-	if !remoteGitEnabled(cfg) {
-		return
-	}
-	root, err := filepath.Abs(cfg.LedgerRoot)
-	if err != nil {
-		return
-	}
-	for i := range entries {
-		full, err := filepath.Abs(entries[i].File)
-		if err != nil {
-			continue
-		}
-		rel, err := filepath.Rel(root, full)
-		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-			continue
-		}
-		entries[i].File = filepath.ToSlash(rel)
-	}
 }
 
 func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {

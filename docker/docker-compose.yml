@@ -16,20 +16,12 @@ services:
       - LEDGER_ROOT=${LEDGER_ROOT:-/data/ledger}
       - LEDGER_STORAGE=${LEDGER_STORAGE:-filesystem}
 
-      # ── Git remote sync (optional) ──
-      # Uncomment and configure for remote_git mode:
-      - LEDGER_GIT_REMOTE=${LEDGER_GIT_REMOTE:-}
+      # ── GitHub API writes / metadata ──
       - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
-      - LEDGER_GIT_WORKDIR=${LEDGER_GIT_WORKDIR:-/data/git}
-      - LEDGER_GIT_SCHEDULER=${LEDGER_GIT_SCHEDULER:-false}
-      - LEDGER_GIT_PULL_INTERVAL_MINUTES=${LEDGER_GIT_PULL_INTERVAL_MINUTES:-15}
-
-      # ── GitHub Events polling (optional, for near-real-time sync) ──
       - LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER:-}
       - LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO:-}
       - LEDGER_GITHUB_TOKEN=${LEDGER_GITHUB_TOKEN:-}
       - LEDGER_GITHUB_API_URL=${LEDGER_GITHUB_API_URL:-}
-      - LEDGER_GIT_EVENTS_POLL_SECONDS=${LEDGER_GIT_EVENTS_POLL_SECONDS:-30}
 
       # ── Git author ──
       - LEDGER_GIT_AUTHOR_NAME=${LEDGER_GIT_AUTHOR_NAME:-Ledger}
@@ -65,9 +57,8 @@ services:
 
       # Persist runtime state (passkeys, notifications, locks).
       - ledger-runtime:/data/runtime
-      - ledger-git:/data/git
 
-  # ── Optional: index the mounted or remote ledger into Supabase Postgres ──
+  # ── Optional: index the mounted ledger into Supabase Postgres ──
   ledger-indexer:
     profiles:
       - indexer
@@ -78,15 +69,8 @@ services:
     restart: unless-stopped
     environment:
       - LEDGER_ROOT=${LEDGER_ROOT:-/data/ledger}
-      - LEDGER_STORAGE=${INDEXER_LEDGER_STORAGE:-filesystem}
-      - LEDGER_GIT_REMOTE=${LEDGER_GIT_REMOTE:-}
+      - LEDGER_STORAGE=filesystem
       - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
-      - LEDGER_GIT_WORKDIR=${LEDGER_GIT_WORKDIR:-/data/git}
-      - LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER:-}
-      - LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO:-}
-      - LEDGER_GITHUB_TOKEN=${LEDGER_GITHUB_TOKEN:-}
-      - LEDGER_GITHUB_API_URL=${LEDGER_GITHUB_API_URL:-}
-      - LEDGER_GIT_EVENTS_POLL_SECONDS=${LEDGER_GIT_EVENTS_POLL_SECONDS:-30}
       - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL to your Supabase Postgres connection string}
       - POSTGRES_MAX_OPEN_CONNS=${POSTGRES_MAX_OPEN_CONNS:-2}
       - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
@@ -99,8 +83,6 @@ services:
     volumes:
       - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}
       - ledger-runtime:/data/runtime
-      - ledger-git:/data/git
 
 volumes:
   ledger-runtime:
-  ledger-git:
