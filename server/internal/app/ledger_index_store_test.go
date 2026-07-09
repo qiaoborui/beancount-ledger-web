@@ -34,9 +34,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
-	t.Setenv("LEDGER_INDEX_SOURCE_KEY", "test-ledger-index-store-"+time.Now().Format("20060102150405.000000000"))
+	branch := "test-ledger-index-store-" + time.Now().Format("20060102150405.000000000")
 
-	store, err := NewLedgerIndexStore(Config{DatabaseURL: databaseURL, LedgerReadModel: "postgres", LedgerGitBranch: "main"})
+	store, err := NewLedgerIndexStore(Config{DatabaseURL: databaseURL, LedgerReadModel: "postgres", LedgerGitBranch: branch})
 	if err != nil {
 		t.Fatal(err)
 	}

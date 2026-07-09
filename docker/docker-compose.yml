@@ -28,9 +28,6 @@ services:
       - LEDGER_GIT_AUTHOR_EMAIL=${LEDGER_GIT_AUTHOR_EMAIL:-ledger@localhost}
 
       # ── Runtime state in Supabase Postgres ──
-      - RUNTIME_DIR=${RUNTIME_DIR:-/data/runtime}
-      - RUNTIME_STORE=${RUNTIME_STORE:-postgres}
-      - RUNTIME_FILE_STORE=${RUNTIME_FILE_STORE:-postgres}
       - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL to your Supabase Postgres connection string}
       - POSTGRES_MAX_OPEN_CONNS=${POSTGRES_MAX_OPEN_CONNS:-2}
       - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
@@ -39,7 +36,6 @@ services:
       # ── Hosted read model in Supabase Postgres ──
       - LEDGER_READ_MODEL=${LEDGER_READ_MODEL:-postgres}
       - LEDGER_READ_MODEL_STRICT=${LEDGER_READ_MODEL_STRICT:-true}
-      - LEDGER_INDEX_SOURCE_KEY=${LEDGER_INDEX_SOURCE_KEY:-personal-ledger#main}
 
       # ── Optional ──
       - AUTH_SECRET=${AUTH_SECRET:-}
@@ -54,9 +50,6 @@ services:
       - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}
       # For a real private ledger, replace the above with:
       # - /home/borui/beancount-ledger:/data/ledger:rw
-
-      # Persist runtime state (passkeys, notifications, locks).
-      - ledger-runtime:/data/runtime
 
   # ── Optional: index the mounted ledger into Supabase Postgres ──
   ledger-indexer:
@@ -76,13 +69,7 @@ services:
       - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
       - POSTGRES_CONN_MAX_IDLE_SECONDS=${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}
       - LEDGER_READ_MODEL=postgres
-      - LEDGER_INDEX_SOURCE_KEY=${LEDGER_INDEX_SOURCE_KEY:-personal-ledger#main}
-      - RUNTIME_DIR=${RUNTIME_DIR:-/data/runtime}
       - BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-bean-check}
       - LEDGER_INDEX_INTERVAL_SECONDS=${LEDGER_INDEX_INTERVAL_SECONDS:-300}
     volumes:
       - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}
-      - ledger-runtime:/data/runtime
-
-volumes:
-  ledger-runtime:

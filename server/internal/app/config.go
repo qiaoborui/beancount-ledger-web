@@ -20,8 +20,6 @@ type Config struct {
 	LedgerGitHubRepo   string
 	LedgerGitHubToken  string
 	LedgerGitHubAPIURL string
-	RuntimeStore       string
-	RuntimeFileStore   string
 	DatabaseURL        string
 	LedgerReadModel    string
 	ReadModelStrict    bool
@@ -36,11 +34,6 @@ func LoadConfig() Config {
 	runtimeDir := os.Getenv("RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = filepath.Join(os.TempDir(), "beancount-ledger-web", "runtime")
-	}
-	runtimeStore := strings.ToLower(env("RUNTIME_STORE", "filesystem"))
-	runtimeFileStore := strings.ToLower(env("RUNTIME_FILE_STORE", ""))
-	if runtimeFileStore == "" {
-		runtimeFileStore = runtimeStore
 	}
 	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
 
@@ -57,8 +50,6 @@ func LoadConfig() Config {
 		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
 		LedgerGitHubToken:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
 		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
-		RuntimeStore:       runtimeStore,
-		RuntimeFileStore:   runtimeFileStore,
 		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LedgerReadModel:    ledgerReadModel,
 		ReadModelStrict:    envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),

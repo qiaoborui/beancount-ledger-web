@@ -55,18 +55,11 @@ func ledgerReadModelEnabled(cfg Config) bool {
 }
 
 func ledgerIndexSourceKey(cfg Config) string {
-	if sourceKey := strings.TrimSpace(env("LEDGER_INDEX_SOURCE_KEY", "")); sourceKey != "" {
-		return sourceKey
-	}
-	source := strings.TrimSpace(cfg.LedgerRoot)
-	if githubAPIEnabled(cfg) && strings.TrimSpace(cfg.LedgerGitHubOwner) != "" && strings.TrimSpace(cfg.LedgerGitHubRepo) != "" {
-		source = strings.TrimSpace(cfg.LedgerGitHubOwner) + "/" + strings.TrimSpace(cfg.LedgerGitHubRepo)
-	}
 	branch := strings.TrimSpace(cfg.LedgerGitBranch)
 	if branch == "" {
 		branch = "main"
 	}
-	return source + "#" + branch
+	return "ledger#" + branch
 }
 
 func (s *LedgerIndexStore) Close() error {

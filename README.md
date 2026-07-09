@@ -82,11 +82,9 @@ environment variables in the Vercel dashboard:
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name.
 - `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
 - `LEDGER_GIT_BRANCH=main` — branch to read and update through the GitHub API.
-- `RUNTIME_STORE=postgres` / `RUNTIME_FILE_STORE=postgres` — persist passkeys, web push subscriptions, notifications, write locks, and import preview files in Postgres.
-- `DATABASE_URL` — Postgres connection string.
+- `DATABASE_URL` — Postgres connection string for the read model, runtime state, locks, and import preview files.
 - `LEDGER_READ_MODEL=postgres` — hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
 - `LEDGER_READ_MODEL_STRICT=true` — default when `LEDGER_READ_MODEL=postgres`; prevents the API host from falling back to local Git checkout and parsing.
-- `LEDGER_INDEX_SOURCE_KEY` — stable namespace shared by the API host and the index worker, for example `personal-ledger#main`.
 
 Do not set `LEDGER_ROOT` or `BEAN_CHECK_BIN` on the Vercel API service. The API
 host is stateless: it reads Postgres, writes GitHub through the API, and stores
@@ -103,8 +101,8 @@ to production.
 ### Docker with Supabase Postgres
 
 The local Docker compose file is configured to use the same Supabase Postgres
-runtime store and ledger read model as the hosted API. Copy `.env.example` to
-your local `.env`, set `DATABASE_URL` to the Supabase direct or session-pooler
+runtime store and ledger read model as the hosted API. Copy `.env.example` to your
+local `.env`, set `DATABASE_URL` to the Supabase direct or session-pooler
 connection string, and keep the file uncommitted.
 
 ```bash
@@ -130,11 +128,9 @@ Important variables:
 
 - `LEDGER_STORAGE=github_api|filesystem` — use `github_api` for hosted API writes and `filesystem` for local ledgers already present on disk, including the index worker.
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `LEDGER_STORAGE=github_api`.
-- `RUNTIME_STORE=postgres` / `DATABASE_URL` — persist passkeys, web push subscriptions, notifications, and write locks in Postgres.
-- `RUNTIME_FILE_STORE=filesystem|postgres` — optional override for runtime files. Defaults to `RUNTIME_STORE`.
+- `DATABASE_URL` — enables Postgres for the ledger read model, runtime state, locks, web push subscriptions, notifications, and import preview files. Without it, local development falls back to `RUNTIME_DIR`.
 - `LEDGER_READ_MODEL=files|postgres` — use `postgres` to serve ledger reads from the normalized Postgres read model.
 - `LEDGER_READ_MODEL_STRICT=true|false` — when true, the API host returns an error if no active indexed revision exists instead of cloning/parsing local files.
-- `LEDGER_INDEX_SOURCE_KEY` — optional stable index namespace. Set the same value on `ledger-web` and `ledger-indexer` so both services read and write the same active ledger projection.
 - `LEDGER_INDEX_INTERVAL_SECONDS` — optional worker loop interval for `ledger-indexer`; unset or non-positive runs one indexing pass and exits.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
@@ -158,22 +154,22 @@ revision-scoped normalized projection to Postgres, then atomically marks the
 revision active. `ledger-web` can then serve `/api/ledger/*` reads from Postgres
 with `LEDGER_READ_MODEL=postgres`.
 
-The Vercel API host needs `DATABASE_URL`, `RUNTIME_STORE=postgres`,
-`RUNTIME_FILE_STORE=postgres`, `LEDGER_READ_MODEL=postgres`,
-`LEDGER_READ_MODEL_STRICT=true`, and the same `LEDGER_INDEX_SOURCE_KEY` as the
-worker. Ledger read endpoints use Postgres only. For hosted writes, set
-`LEDGER_STORAGE=github_api` plus the explicit GitHub repository/token variables.
-Import commit and editor save create GitHub commits directly, mark the read model
-as pending, and the local worker updates Postgres on its next indexing pass. Import
+The Vercel API host needs `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`, and
+`LEDGER_READ_MODEL_STRICT=true`. Ledger read endpoints use Postgres only. For
+hosted writes, set `LEDGER_STORAGE=github_api` plus the explicit GitHub
+repository/token variables. Import commit and editor save create GitHub commits
+directly, mark the read model as pending, and the local worker updates Postgres
+on its next indexing pass. Import
 preview in GitHub API mode does not parse the full ledger or run the ledger-file
 dedup script; instead it dedups against the Postgres read model by statement
 metadata, order IDs, exact transaction signatures, and funding-account postings.
 Review any remaining preview rows before committing.
 
 The index worker needs `LEDGER_STORAGE=filesystem`, `LEDGER_ROOT`,
-`DATABASE_URL`, `LEDGER_READ_MODEL=postgres`, and the same
-`LEDGER_INDEX_SOURCE_KEY`. Keep the mounted ledger checkout and Beancount tooling
-on the worker side; keep them off the hosted API service.
+`DATABASE_URL`, and `LEDGER_READ_MODEL=postgres`. The API and worker both use the
+default `ledger#<branch>` index namespace, so no separate source-key variable is
+needed for the normal single-ledger deployment. Keep the mounted ledger checkout
+and Beancount tooling on the worker side; keep them off the hosted API service.
 
 ## Ledger layout
 
