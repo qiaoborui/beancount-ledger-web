@@ -297,47 +297,6 @@ func TestDedupImportBeanTextFallsBackToFundingPosting(t *testing.T) {
 	}
 }
 
-func TestImportPreviewRemoteGitCheckoutBeforeRequirements(t *testing.T) {
-	seed := testLedger(t)
-	writeAlipayImportRequirements(t, seed)
-	remote := initBareLedgerRemote(t, seed)
-	cfg := remoteGitTestConfig(t, seed, remote)
-	t.Setenv("PYTHON_BIN", fakeDedupPython(t))
-	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
-	cookies := loginCookies(t, router)
-
-	var form bytes.Buffer
-	writer := multipart.NewWriter(&form)
-	part, err := writer.CreateFormFile("file", "alipay.csv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = part.Write(alipayCSVFixture())
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/ledger/imports/preview", &form)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	for _, cookie := range cookies {
-		req.AddCookie(cookie)
-	}
-	router.ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	var preview struct {
-		Entries []ImportEntry `json:"entries"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if len(preview.Entries) != 1 || preview.Entries[0].OrderID != "module-order" {
-		t.Fatalf("unexpected preview from remote_git checkout: %#v", preview)
-	}
-}
-
 func TestImportProvidersEndpoint(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")

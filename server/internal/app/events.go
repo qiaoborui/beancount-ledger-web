@@ -81,6 +81,12 @@ func publishGitStatus(cfg Config, source string) {
 	if !ledgerEventHub.HasSubscribers() {
 		return
 	}
+	if githubAPIEnabled(cfg) || ledgerReadModelEnabled(cfg) {
+		data := ledgerGitManagedExternallyPayload()
+		data["source"] = source
+		ledgerEventHub.Publish("git.status", data)
+		return
+	}
 	if err := ensureLedgerReady(cfg); err != nil {
 		ledgerEventHub.Publish("git.status", gin.H{"source": source, "error": err.Error()})
 		return

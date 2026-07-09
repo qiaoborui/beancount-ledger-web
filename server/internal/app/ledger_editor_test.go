@@ -66,30 +66,6 @@ func TestLedgerEditorFilesReadAndSave(t *testing.T) {
 	}
 }
 
-func TestLedgerEditorRemoteGitCheckoutBeforeListing(t *testing.T) {
-	seed := testLedger(t)
-	remote := initBareLedgerRemote(t, seed)
-	cfg := remoteGitTestConfig(t, seed, remote)
-	t.Setenv("APP_PASSWORD", "secret")
-
-	router := NewRouter(cfg)
-	cookies := loginCookies(t, router)
-
-	files := requestWithCookies(router, http.MethodGet, "/api/ledger/editor/files", "", cookies)
-	if files.Code != http.StatusOK {
-		t.Fatalf("files status=%d body=%s", files.Code, files.Body.String())
-	}
-	var filesBody struct {
-		Files []LedgerEditorFile `json:"files"`
-	}
-	if err := json.Unmarshal(files.Body.Bytes(), &filesBody); err != nil {
-		t.Fatal(err)
-	}
-	if !containsEditorPath(filesBody.Files, "main.bean") {
-		t.Fatalf("expected remote_git checkout before editor listing: %#v", filesBody.Files)
-	}
-}
-
 func TestLedgerEditorRejectsUnsafeAndStaleWrites(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

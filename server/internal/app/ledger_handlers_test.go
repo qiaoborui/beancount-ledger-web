@@ -556,7 +556,6 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	}
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("APP_PASSWORD", "secret")
-	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
 	runGit(t, cfg, "init")
 	runGit(t, cfg, "config", "user.email", "ledger@example.test")
 	runGit(t, cfg, "config", "user.name", "Ledger Test")
@@ -589,18 +588,16 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	}
 
 	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
-	if res.Code != http.StatusOK {
+	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
 	}
 	var commitBody struct {
-		ChangedFileCount          int    `json:"changedFileCount"`
-		RemainingChangedFileCount int    `json:"remainingChangedFileCount"`
-		Output                    string `json:"output"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
 		t.Fatal(err)
 	}
-	if commitBody.ChangedFileCount != 0 || commitBody.RemainingChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Remote Git mode") {
+	if !strings.Contains(commitBody.Message, "outside ledger-web") {
 		t.Fatalf("unexpected git commit response: %#v", commitBody)
 	}
 	runGit(t, cfg, "add", ".")
@@ -632,17 +629,16 @@ func TestGitEndpointsHandleNonGitLedger(t *testing.T) {
 	}
 
 	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
-	if res.Code != http.StatusOK {
+	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
 	}
 	var commitBody struct {
-		ChangedFileCount int    `json:"changedFileCount"`
-		Output           string `json:"output"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
 		t.Fatal(err)
 	}
-	if commitBody.ChangedFileCount != 0 || !strings.Contains(commitBody.Output, "Remote Git mode") {
+	if !strings.Contains(commitBody.Message, "outside ledger-web") {
 		t.Fatalf("unexpected non-git commit response: %#v", commitBody)
 	}
 }
@@ -681,39 +677,5 @@ func TestAppendEntryPublishesAppendEntrySource(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ledger.updated event")
-	}
-}
-
-func TestLedgerGitCommitUsesEnvAuthor(t *testing.T) {
-	cfg := testLedger(t)
-	isolateGitIdentity(t)
-	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
-	t.Setenv("LEDGER_GIT_AUTHOR_NAME", "Ledger Bot")
-	t.Setenv("LEDGER_GIT_AUTHOR_EMAIL", "ledger-bot@example.test")
-	runGit(t, cfg, "init")
-
-	output, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
-	if err != nil {
-		t.Fatalf("ledger git commit failed: %v\n%s", err, output)
-	}
-	identity := strings.TrimSpace(runGit(t, cfg, "log", "-1", "--format=%an <%ae>"))
-	if identity != "Ledger Bot <ledger-bot@example.test>" {
-		t.Fatalf("commit should use env author, got %q", identity)
-	}
-}
-
-func TestLedgerGitCommitExplainsMissingAuthor(t *testing.T) {
-	cfg := testLedger(t)
-	isolateGitIdentity(t)
-	t.Setenv("LEDGER_GIT_REMOTE_DISABLED", "true")
-	runGit(t, cfg, "init")
-
-	_, err := ledgerGitCommitPullPush(cfg, "test: save ledger")
-	if err == nil {
-		t.Fatal("ledger git commit should fail without an author identity")
-	}
-	message := err.Error()
-	if !strings.Contains(message, "Git 提交缺少作者身份") || !strings.Contains(message, "LEDGER_GIT_AUTHOR_NAME") || !strings.Contains(message, cfg.LedgerRoot) {
-		t.Fatalf("missing-author error should be actionable, got:\n%s", message)
 	}
 }

@@ -164,8 +164,7 @@ func (s *Server) health(c *gin.Context) {
 			"ledgerReadModel":  s.cfg.LedgerReadModel,
 			"readModelStrict":  s.cfg.ReadModelStrict,
 			"ledgerIndexError": s.indexStoreErr.Error(),
-			"runtimeStore":     s.cfg.RuntimeStore,
-			"runtimeFileStore": s.cfg.RuntimeFileStore,
+			"runtimeBackend":   runtimeBackend(s.cfg),
 		})
 		return
 	}
@@ -178,9 +177,8 @@ func (s *Server) health(c *gin.Context) {
 			"readModelStrict":     s.cfg.ReadModelStrict,
 			"ledgerIndexActive":   indexed,
 			"ledgerIndexSource":   sanitizeLedgerIndexSource(s.cfg),
-			"runtimeStore":        s.cfg.RuntimeStore,
-			"runtimeFileStore":    s.cfg.RuntimeFileStore,
-			"runtimeDirRequired":  filesystemRuntimeBackend(s.cfg.RuntimeStore) || filesystemRuntimeBackend(s.cfg.RuntimeFileStore),
+			"runtimeBackend":      runtimeBackend(s.cfg),
+			"runtimeDirRequired":  runtimeBackend(s.cfg) == "filesystem",
 			"ledgerVersion":       revision.LedgerVersion.Version,
 			"ledgerVersionFiles":  revision.LedgerVersion.FileCount,
 			"ledgerIndexedAtUnix": revision.IndexedAt.Unix(),
@@ -198,7 +196,7 @@ func (s *Server) health(c *gin.Context) {
 	}
 	_, ledgerErr := os.Stat(s.cfg.LedgerRoot)
 	_, mainErr := os.Stat(mainBeanPath(s.cfg))
-	runtimeDirRequired := filesystemRuntimeBackend(s.cfg.RuntimeStore) || filesystemRuntimeBackend(s.cfg.RuntimeFileStore)
+	runtimeDirRequired := runtimeBackend(s.cfg) == "filesystem"
 	runtimeDirExists := true
 	if runtimeDirRequired {
 		_, runtimeErr := os.Stat(s.cfg.RuntimeDir)
@@ -208,7 +206,7 @@ func (s *Server) health(c *gin.Context) {
 	body := gin.H{
 		"ok": ok, "uptimeSeconds": int(time.Since(startedAt).Seconds()),
 		"ledgerRootExists": ledgerErr == nil, "mainBeanExists": mainErr == nil,
-		"runtimeStore": s.cfg.RuntimeStore, "runtimeFileStore": s.cfg.RuntimeFileStore,
+		"runtimeBackend":     runtimeBackend(s.cfg),
 		"runtimeDirRequired": runtimeDirRequired,
 	}
 	if runtimeDirRequired {
@@ -248,10 +246,6 @@ func sanitizeLedgerIndexSource(cfg Config) string {
 		}
 	}
 	return source
-}
-
-func filesystemRuntimeBackend(value string) bool {
-	return value == "" || value == "file" || value == "filesystem"
 }
 
 var startedAt = time.Now()

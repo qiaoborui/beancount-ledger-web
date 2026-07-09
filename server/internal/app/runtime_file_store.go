@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,17 +23,10 @@ type RuntimeFileStore interface {
 }
 
 func NewRuntimeFileStore(cfg Config) (RuntimeFileStore, error) {
-	switch cfg.RuntimeFileStore {
-	case "", "filesystem", "file":
-		return newFilesystemRuntimeFileStore(cfg.RuntimeDir), nil
-	case "postgres", "pg":
-		if cfg.DatabaseURL == "" {
-			return nil, errors.New("DATABASE_URL is required when RUNTIME_FILE_STORE=postgres")
-		}
+	if runtimeBackend(cfg) == "postgres" {
 		return newPostgresRuntimeFileStore(cfg.DatabaseURL)
-	default:
-		return nil, fmt.Errorf("unsupported RUNTIME_FILE_STORE: %s", cfg.RuntimeFileStore)
 	}
+	return newFilesystemRuntimeFileStore(cfg.RuntimeDir), nil
 }
 
 func MustRuntimeFileStore(cfg Config) RuntimeFileStore {

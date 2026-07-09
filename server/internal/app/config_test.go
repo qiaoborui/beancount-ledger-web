@@ -7,10 +7,8 @@ import (
 
 func TestLoadConfigFilesystemRespectsLedgerRoot(t *testing.T) {
 	ledgerRoot := t.TempDir()
-	gitWorkDir := t.TempDir()
 	t.Setenv("LEDGER_STORAGE", "filesystem")
 	t.Setenv("LEDGER_ROOT", ledgerRoot)
-	t.Setenv("LEDGER_GIT_WORKDIR", gitWorkDir)
 
 	cfg := LoadConfig()
 
@@ -19,18 +17,20 @@ func TestLoadConfigFilesystemRespectsLedgerRoot(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRemoteGitUsesWorkdirCheckout(t *testing.T) {
-	ledgerRoot := t.TempDir()
-	gitWorkDir := t.TempDir()
-	t.Setenv("LEDGER_STORAGE", "remote_git")
-	t.Setenv("LEDGER_ROOT", ledgerRoot)
-	t.Setenv("LEDGER_GIT_WORKDIR", gitWorkDir)
-
+func TestLoadConfigDefaultsToFilesystem(t *testing.T) {
 	cfg := LoadConfig()
 
-	want := filepath.Join(gitWorkDir, "repo")
-	if cfg.LedgerRoot != filepath.Clean(want) {
-		t.Fatalf("LedgerRoot=%q, want %q", cfg.LedgerRoot, filepath.Clean(want))
+	if cfg.LedgerStorage != "filesystem" {
+		t.Fatalf("LedgerStorage=%q, want filesystem", cfg.LedgerStorage)
+	}
+}
+
+func TestValidateConfigRejectsRemoteGit(t *testing.T) {
+	cfg := Config{LedgerStorage: "remote_git"}
+
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected remote_git to be rejected")
 	}
 }
 
@@ -52,12 +52,14 @@ func TestLoadConfigGitHubAlias(t *testing.T) {
 	if client.owner != "example" || client.repo != "ledger" {
 		t.Fatalf("github repo=(%q,%q), want example/ledger", client.owner, client.repo)
 	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGitHubAPIRequiresExplicitRepoConfig(t *testing.T) {
 	cfg := Config{
 		LedgerStorage:     "github_api",
-		LedgerGitRemote:   "https://github.com/example/ledger.git",
 		LedgerGitHubToken: "secret",
 	}
 

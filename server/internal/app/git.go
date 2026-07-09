@@ -46,9 +46,6 @@ func gitLedgerOutput(cfg Config, args ...string) (string, error) {
 }
 
 func ledgerGitAvailable(cfg Config) (bool, error) {
-	if remoteGitEnabled(cfg) {
-		return true, nil
-	}
 	output, err := gitLedgerOutput(cfg, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		if isGitRepositoryError(err.Error()) {
@@ -63,6 +60,13 @@ func ledgerGitUnavailablePayload() map[string]any {
 	return map[string]any{
 		"status": "", "dirty": false, "changedFileCount": 0, "changes": []GitChange{},
 		"gitAvailable": false, "message": "Ledger Git is not available for this ledger.",
+	}
+}
+
+func ledgerGitManagedExternallyPayload() map[string]any {
+	return map[string]any{
+		"status": "", "dirty": false, "changedFileCount": 0, "changes": []GitChange{},
+		"gitAvailable": false, "message": "Ledger Git is managed outside the stateless API host.",
 	}
 }
 
@@ -114,10 +118,6 @@ func gitCredentialHelp(cfg Config) string {
 cd ` + cfg.LedgerRoot + `
 git remote -v
 git remote set-url origin git@github.com:OWNER/REPO.git`
-}
-
-func gitRemoteDisabled() bool {
-	return truthyEnv("LEDGER_GIT_REMOTE_DISABLED")
 }
 
 func ledgerGitDiffForPath(cfg Config, rawPath string) (string, bool, error) {
