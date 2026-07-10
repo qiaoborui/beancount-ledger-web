@@ -167,6 +167,33 @@ Actions, or your container platform. The API and worker both use the default
 for the normal single-ledger deployment. Keep the mounted ledger checkout and
 Beancount tooling on the worker side; keep them off the hosted API service.
 
+#### GitHub Actions indexer
+
+The repository includes `.github/workflows/ledger-indexer.yml`, which runs the
+one-shot indexer every 10 minutes and can also be started manually from the
+Actions tab.
+
+Configure these GitHub Actions repository variables:
+
+- `LEDGER_GITHUB_OWNER` — private ledger repository owner.
+- `LEDGER_GITHUB_REPO` — private ledger repository name.
+- `LEDGER_GIT_BRANCH` — optional ledger branch; defaults to `main`.
+
+Configure these GitHub Actions repository secrets:
+
+- `LEDGER_GITHUB_TOKEN` — fine-grained token with Contents read access to the
+  private ledger repository.
+- `DATABASE_URL` — Postgres connection string shared with `ledger-web`.
+
+The workflow checks out this application repository, checks out the private
+ledger repository into `private-ledger/`, sets `LEDGER_ROOT` to that checkout,
+and runs:
+
+```bash
+cd server
+go run ./cmd/ledger-indexer
+```
+
 To migrate an older filesystem runtime directory into Postgres:
 
 ```bash
