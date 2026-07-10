@@ -69,7 +69,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       <DailyTrendCard rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
     </div>
 
-    <div className={`${dashboardGridClass} mt-4 items-start`}>
+    <div className={`${dashboardGridClass} mt-4 xl:items-stretch`}>
       <CategoryFocus rows={topCategories} totalExpense={expense} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
       <RhythmBrief lastSevenExpense={lastSevenExpense} weeklyExpenseDelta={weeklyExpenseDelta} topCategory={topCategory} dayRows={dayRows} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
     </div>

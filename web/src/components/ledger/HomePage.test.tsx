@@ -42,3 +42,22 @@ describe("HomePage privacy", () => {
     expect(html).not.toContain("¥1,234.56");
   });
 });
+
+describe("HomePage layout", () => {
+  it("stretches the paired insight cards to equal height on desktop", () => {
+    const html = renderToString(
+      <HomePage
+        summary={summary}
+        valuationCurrency="CNY"
+        privacySettings={privacySettings}
+        sensitiveUnlocked={false}
+        creditCards={[]}
+        expenseAnalytics={[]}
+        accountStatuses={[]}
+        onPrivacyChange={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("mt-4 xl:items-stretch");
+  });
+});
