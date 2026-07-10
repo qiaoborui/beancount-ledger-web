@@ -5,9 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestReverseTransactionEntryMirrorsOriginalPostings(t *testing.T) {
@@ -33,7 +30,7 @@ func TestReverseTransactionEntryMirrorsOriginalPostings(t *testing.T) {
 	}
 }
 
-func TestTransactionServiceReverseWritesEntryAndPublishesSource(t *testing.T) {
+func TestTransactionServiceReverseWritesEntry(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
@@ -45,8 +42,6 @@ func TestTransactionServiceReverseWritesEntryAndPublishesSource(t *testing.T) {
 	cache := NewLedgerCache(cfg)
 	writer := NewLedgerWriter(cfg, cache)
 	service := NewTransactionService(cache, writer)
-	sub := ledgerEventHub.Subscribe()
-	defer sub.Close()
 	entry, err := service.Reverse(ReverseTransactionRequest{Source: TransactionSource{File: filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"), Line: 1}, Date: "2026-05-02"})
 	if err != nil {
 		t.Fatal(err)
@@ -57,21 +52,5 @@ func TestTransactionServiceReverseWritesEntryAndPublishesSource(t *testing.T) {
 	text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")))
 	if !strings.Contains(text, "冲销：Lunch") || !strings.Contains(text, "Assets:Cash") || !strings.Contains(text, "12.00 CNY") {
 		t.Fatalf("reversal was not written:\n%s", text)
-	}
-
-	select {
-	case event := <-sub.ch:
-		if event.Type != "ledger.updated" {
-			t.Fatalf("event type = %s, want ledger.updated", event.Type)
-		}
-		data, ok := event.Data.(gin.H)
-		if !ok {
-			t.Fatalf("event data has unexpected type: %#v", event.Data)
-		}
-		if data["source"] != ledgerWriteSourceTransactionReversal {
-			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceTransactionReversal)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ledger.updated event")
 	}
 }

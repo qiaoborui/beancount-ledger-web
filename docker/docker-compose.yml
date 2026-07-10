@@ -10,17 +10,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # ── Ledger source ──
-      # For a local git-cloned private ledger, mount it and set LEDGER_ROOT.
-      # The compose file defaults to the example preview ledger.
-      - LEDGER_ROOT=${LEDGER_ROOT:-/data/ledger}
-      - LEDGER_STORAGE=${LEDGER_STORAGE:-filesystem}
-
-      # ── GitHub API writes / metadata ──
+      # ── GitHub API writes ──
       - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
-      - LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER:-}
-      - LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO:-}
-      - LEDGER_GITHUB_TOKEN=${LEDGER_GITHUB_TOKEN:-}
+      - LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER:?Set LEDGER_GITHUB_OWNER}
+      - LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO:?Set LEDGER_GITHUB_REPO}
+      - LEDGER_GITHUB_TOKEN=${LEDGER_GITHUB_TOKEN:?Set LEDGER_GITHUB_TOKEN}
       - LEDGER_GITHUB_API_URL=${LEDGER_GITHUB_API_URL:-}
 
       # ── Git author ──
@@ -33,10 +27,6 @@ services:
       - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
       - POSTGRES_CONN_MAX_IDLE_SECONDS=${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}
 
-      # ── Hosted read model in Supabase Postgres ──
-      - LEDGER_READ_MODEL=${LEDGER_READ_MODEL:-postgres}
-      - LEDGER_READ_MODEL_STRICT=${LEDGER_READ_MODEL_STRICT:-true}
-
       # ── Optional ──
       - AUTH_SECRET=${AUTH_SECRET:-}
       - APP_PASSWORD=${APP_PASSWORD:-}
@@ -44,14 +34,7 @@ services:
       - WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN:-http://localhost:3000}
       - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-localhost}
       - PPROF_ADDR=${PPROF_ADDR:-}
-
-    volumes:
-      # Mount your private ledger repo. Defaults to the preview example.
-      - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}
-      # For a real private ledger, replace the above with:
-      # - /home/borui/beancount-ledger:/data/ledger:rw
-
-  # ── Optional: index the mounted ledger into Supabase Postgres ──
+  # ── Optional one-shot job: index the mounted ledger into Supabase Postgres ──
   ledger-indexer:
     profiles:
       - indexer
@@ -59,17 +42,14 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.indexer
     container_name: ledger-indexer
-    restart: unless-stopped
+    restart: "no"
     environment:
       - LEDGER_ROOT=${LEDGER_ROOT:-/data/ledger}
-      - LEDGER_STORAGE=filesystem
       - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
       - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL to your Supabase Postgres connection string}
       - POSTGRES_MAX_OPEN_CONNS=${POSTGRES_MAX_OPEN_CONNS:-2}
       - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
       - POSTGRES_CONN_MAX_IDLE_SECONDS=${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}
-      - LEDGER_READ_MODEL=postgres
       - BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-bean-check}
-      - LEDGER_INDEX_INTERVAL_SECONDS=${LEDGER_INDEX_INTERVAL_SECONDS:-300}
     volumes:
       - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}

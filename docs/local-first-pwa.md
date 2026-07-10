@@ -8,16 +8,18 @@ a PWA for fast launch, cached reads, and offline draft writes.
 
 ```text
 phone / laptop PWA
-  -> local HTTPS origin
+  -> HTTPS origin
   -> ledger-web Go server
-  -> LEDGER_ROOT private Beancount repo
-  -> RUNTIME_DIR passkeys, notifications, locks
+  -> Postgres read model + runtime state
+  -> GitHub API private Beancount repo writes
+  -> scheduled ledger-indexer job
 ```
 
-Use Vercel for pull-request previews or hosted experiments when useful, but keep
-the personal production ledger behind a self-hosted `ledger-web` server. This
-avoids tying day-to-day ledger access to serverless quotas while preserving the
-existing Beancount validation and rollback behavior.
+`ledger-web` itself is stateless: it does not keep a local ledger checkout or a
+runtime directory. The private Beancount repository remains the source of truth,
+Postgres stores app runtime state and the active read model, and a separately
+scheduled `ledger-indexer` job refreshes Postgres from an existing local checkout
+or mounted ledger copy.
 
 ## What works offline
 
@@ -31,7 +33,8 @@ existing Beancount validation and rollback behavior.
   Go server.
 
 The browser is not the source of truth. Every queued write still goes through the
-Go API, `LedgerWriter`, `bean-check`, rollback handling, and optional Git sync.
+Go API and GitHub API ledger writer. The scheduled indexer validates and parses
+the ledger checkout before publishing a new Postgres read-model revision.
 
 ## Conflict behavior
 
@@ -84,8 +87,7 @@ IP or from one domain to another creates a separate browser app state.
 
 ## Validation checklist
 
-1. Start `ledger-web` with `LEDGER_ROOT` pointing outside this repository and
-   `RUNTIME_DIR` pointing to private runtime storage.
+1. Start `ledger-web` with `DATABASE_URL` and GitHub repository credentials.
 2. Open the app once while online and sign in.
 3. Unlock sensitive data if you want cached balance and net-worth views.
 4. Install the PWA from the browser.

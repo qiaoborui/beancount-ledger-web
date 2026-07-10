@@ -5,9 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestBuildReconciliationRejectsUnsupportedAccount(t *testing.T) {
@@ -22,7 +19,7 @@ func TestBuildReconciliationRejectsUnsupportedAccount(t *testing.T) {
 	}
 }
 
-func TestReconciliationServiceWritesAdjustmentAndPublishesSource(t *testing.T) {
+func TestReconciliationServiceWritesAdjustment(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
@@ -34,8 +31,6 @@ func TestReconciliationServiceWritesAdjustmentAndPublishesSource(t *testing.T) {
 	cache := NewLedgerCache(cfg)
 	writer := NewLedgerWriter(cfg, cache)
 	service := NewReconciliationService(cache, writer)
-	sub := ledgerEventHub.Subscribe()
-	defer sub.Close()
 	result, err := service.Reconcile(ReconcileRequest{Account: "Assets:Cash", ActualAmount: "980.00", BalanceDate: "2026-05-31", AdjustmentDate: "2026-05-30"})
 	if err != nil {
 		t.Fatal(err)
@@ -49,21 +44,5 @@ func TestReconciliationServiceWritesAdjustmentAndPublishesSource(t *testing.T) {
 	text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")))
 	if !strings.Contains(text, "余额差额调整") || !strings.Contains(text, "balance Assets:Cash 980.00 CNY") {
 		t.Fatalf("reconciliation was not written:\n%s", text)
-	}
-
-	select {
-	case event := <-sub.ch:
-		if event.Type != "ledger.updated" {
-			t.Fatalf("event type = %s, want ledger.updated", event.Type)
-		}
-		data, ok := event.Data.(gin.H)
-		if !ok {
-			t.Fatalf("event data has unexpected type: %#v", event.Data)
-		}
-		if data["source"] != ledgerWriteSourceReconciliation {
-			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceReconciliation)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ledger.updated event")
 	}
 }

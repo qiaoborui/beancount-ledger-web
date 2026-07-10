@@ -339,10 +339,6 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ai/parse":                     true,
 		"POST /api/ai/chat":                      true,
 		"POST /api/ai/accounts-chat":             true,
-		"GET /api/git/status":                    true,
-		"GET /api/git/diff":                      true,
-		"POST /api/git/pull":                     true,
-		"POST /api/git/commit":                   true,
 		"GET /api/push/subscription":             true,
 		"POST /api/push/subscription":            true,
 		"DELETE /api/push/subscription":          true,
@@ -418,19 +414,12 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		{http.MethodGet, "/api/ledger/reconciliation?start=2026-05-01&end=2026-06-01", ""},
 		{http.MethodGet, "/api/ledger/editor/files", ""},
 		{http.MethodGet, "/api/ledger/editor/file?path=main.bean", ""},
-		{http.MethodGet, "/api/git/status", ""},
-		{http.MethodGet, "/api/git/diff?path=main.bean", ""},
 	} {
 		res := requestWithCookies(router, route.method, route.path, route.body, cookies)
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s %s=%d body=%s", route.method, route.path, res.Code, res.Body.String())
 		}
 	}
-	gitPull := requestWithCookies(router, http.MethodPost, "/api/git/pull", "", cookies)
-	if gitPull.Code != http.StatusNotImplemented {
-		t.Fatalf("POST /api/git/pull=%d body=%s", gitPull.Code, gitPull.Body.String())
-	}
-
 	account := requestWithCookies(router, http.MethodPost, "/api/ledger/accounts", `{"date":"2026-01-01","account":"Expenses:Travel","alias":"差旅","currency":"CNY"}`, cookies)
 	if account.Code != http.StatusOK {
 		t.Fatalf("append account=%d body=%s", account.Code, account.Body.String())

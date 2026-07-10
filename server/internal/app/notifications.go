@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,8 +46,6 @@ type notificationStore struct {
 	Version       int                  `json:"version"`
 	Notifications []StoredNotification `json:"notifications"`
 }
-
-var notificationMu sync.Mutex
 
 func (s *Server) insights(c *gin.Context) {
 	if !requireAuth(c) {
@@ -105,7 +102,6 @@ func (s *Server) updateNotifications(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	s.publishNotificationUpdate("status", s.unreadNotificationCount(), 0)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "notifications": notifications})
 }
 
@@ -192,55 +188,61 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 }
 
 func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight) ([]StoredNotification, error) {
-	notificationMu.Lock()
-	defer notificationMu.Unlock()
-	store := s.readNotificationStore()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	currentIDs := map[string]bool{}
 	created := []StoredNotification{}
-	for _, insight := range insights {
-		id := notificationID(month, insight)
-		currentIDs[id] = true
-		detailHash := notificationDetailHash(insight)
-		found := -1
+	var notifications []StoredNotification
+	err := s.runtime().WithLock(context.Background(), "notifications", func() error {
+		store := s.readNotificationStore()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		currentIDs := map[string]bool{}
+		for _, insight := range insights {
+			id := notificationID(month, insight)
+			currentIDs[id] = true
+			detailHash := notificationDetailHash(insight)
+			found := -1
+			for i := range store.Notifications {
+				if store.Notifications[i].ID == id {
+					found = i
+					break
+				}
+			}
+			if found == -1 {
+				notification := StoredNotification{ID: id, InsightID: insight.ID, Month: month, Severity: insight.Severity, Title: insight.Title, Detail: insight.Detail, DetailHash: detailHash, Amount: insight.Amount, Account: insight.Account, Date: insight.Date, Status: "unread", CreatedAt: now, UpdatedAt: now}
+				store.Notifications = append(store.Notifications, notification)
+				created = append(created, notification)
+				continue
+			}
+			existing := &store.Notifications[found]
+			if existing.DetailHash != detailHash || existing.Severity != insight.Severity || existing.Title != insight.Title {
+				existing.Severity = insight.Severity
+				existing.Title = insight.Title
+				existing.Detail = insight.Detail
+				existing.DetailHash = detailHash
+				existing.Amount = insight.Amount
+				existing.Account = insight.Account
+				existing.Date = insight.Date
+				existing.UpdatedAt = now
+				if existing.Status == "resolved" {
+					existing.Status = "unread"
+					existing.ResolvedAt = nil
+					existing.ReadAt = nil
+				}
+			}
+		}
 		for i := range store.Notifications {
-			if store.Notifications[i].ID == id {
-				found = i
-				break
+			notification := &store.Notifications[i]
+			if notification.Month == month && !currentIDs[notification.ID] && notification.Status != "resolved" {
+				notification.Status = "resolved"
+				notification.ResolvedAt = &now
+				notification.UpdatedAt = now
 			}
 		}
-		if found == -1 {
-			notification := StoredNotification{ID: id, InsightID: insight.ID, Month: month, Severity: insight.Severity, Title: insight.Title, Detail: insight.Detail, DetailHash: detailHash, Amount: insight.Amount, Account: insight.Account, Date: insight.Date, Status: "unread", CreatedAt: now, UpdatedAt: now}
-			store.Notifications = append(store.Notifications, notification)
-			created = append(created, notification)
-			continue
+		if err := s.writeNotificationStore(store); err != nil {
+			return err
 		}
-		existing := &store.Notifications[found]
-		if existing.DetailHash != detailHash || existing.Severity != insight.Severity || existing.Title != insight.Title {
-			existing.Severity = insight.Severity
-			existing.Title = insight.Title
-			existing.Detail = insight.Detail
-			existing.DetailHash = detailHash
-			existing.Amount = insight.Amount
-			existing.Account = insight.Account
-			existing.Date = insight.Date
-			existing.UpdatedAt = now
-			if existing.Status == "resolved" {
-				existing.Status = "unread"
-				existing.ResolvedAt = nil
-				existing.ReadAt = nil
-			}
-		}
-	}
-	for i := range store.Notifications {
-		notification := &store.Notifications[i]
-		if notification.Month == month && !currentIDs[notification.ID] && notification.Status != "resolved" {
-			notification.Status = "resolved"
-			notification.ResolvedAt = &now
-			notification.UpdatedAt = now
-		}
-	}
-	if err := s.writeNotificationStore(store); err != nil {
+		notifications = s.notificationsForMonth(store.Notifications, month)
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	if len(created) > 0 {
@@ -251,62 +253,42 @@ func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight
 		}
 		_, _ = s.sendWebPushToAll(map[string]string{"title": title, "body": created[0].Detail, "url": "/", "tag": "ledger-notifications-" + month})
 	}
-	s.publishNotificationUpdate("insights", countUnreadNotifications(store.Notifications), len(created))
-	return s.notificationsForMonth(store.Notifications, month), nil
+	return notifications, nil
 }
 
 func (s *Server) updateNotificationStatus(ids []string, status string) ([]StoredNotification, error) {
-	notificationMu.Lock()
-	defer notificationMu.Unlock()
-	store := s.readNotificationStore()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	idSet := map[string]bool{}
-	for _, id := range ids {
-		idSet[id] = true
-	}
 	updated := []StoredNotification{}
-	for i := range store.Notifications {
-		notification := &store.Notifications[i]
-		if !idSet[notification.ID] {
-			continue
+	err := s.runtime().WithLock(context.Background(), "notifications", func() error {
+		store := s.readNotificationStore()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		idSet := map[string]bool{}
+		for _, id := range ids {
+			idSet[id] = true
 		}
-		notification.Status = status
-		notification.UpdatedAt = now
-		switch status {
-		case "read":
-			notification.ReadAt = &now
-		case "unread":
-			notification.ReadAt = nil
-			notification.DismissedAt = nil
-			notification.ResolvedAt = nil
-		case "dismissed":
-			notification.DismissedAt = &now
-		case "resolved":
-			notification.ResolvedAt = &now
+		for i := range store.Notifications {
+			notification := &store.Notifications[i]
+			if !idSet[notification.ID] {
+				continue
+			}
+			notification.Status = status
+			notification.UpdatedAt = now
+			switch status {
+			case "read":
+				notification.ReadAt = &now
+			case "unread":
+				notification.ReadAt = nil
+				notification.DismissedAt = nil
+				notification.ResolvedAt = nil
+			case "dismissed":
+				notification.DismissedAt = &now
+			case "resolved":
+				notification.ResolvedAt = &now
+			}
+			updated = append(updated, *notification)
 		}
-		updated = append(updated, *notification)
-	}
-	return updated, s.writeNotificationStore(store)
-}
-
-func (s *Server) publishNotificationUpdate(source string, unreadCount int, createdCount int) {
-	s.events.Publish("notifications.updated", gin.H{"source": source, "unreadCount": unreadCount, "createdCount": createdCount})
-}
-
-func countUnreadNotifications(notifications []StoredNotification) int {
-	count := 0
-	for _, notification := range notifications {
-		if notification.Status == "unread" {
-			count++
-		}
-	}
-	return count
-}
-
-func (s *Server) unreadNotificationCount() int {
-	notificationMu.Lock()
-	defer notificationMu.Unlock()
-	return countUnreadNotifications(s.readNotificationStore().Notifications)
+		return s.writeNotificationStore(store)
+	})
+	return updated, err
 }
 
 func (s *Server) readNotificationStore() notificationStore {

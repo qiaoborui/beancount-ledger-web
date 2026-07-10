@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestGitHubAPIWriterCommitsWithoutLocalCheckout(t *testing.T) {
@@ -215,22 +213,6 @@ func TestGitHubAPIImportConfigReadsFromGitHub(t *testing.T) {
 	}
 	if config.CashAccount != "Assets:Bank:CMB" {
 		t.Fatalf("config should be read from github, got %#v", config)
-	}
-}
-
-func TestReadModelStrictAllowsGitHubAPIWrites(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	server := &Server{cfg: Config{
-		LedgerStorage:    "github_api",
-		LedgerReadModel:  "postgres",
-		ReadModelStrict:  true,
-		LedgerGitBranch:  "main",
-		LedgerGitHubRepo: "ledger",
-	}}
-	w := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(w)
-	if server.rejectWorkerOnly(ctx, "ledger.transactions.update") {
-		t.Fatal("github_api writes should not be rejected as worker-only")
 	}
 }
 

@@ -6,9 +6,9 @@ This app is designed so application code and financial data live separately.
 
 - Public application repository: this project.
 - Private ledger repository: your real Beancount files.
-- Runtime directory: passkeys, notifications, web push subscriptions, locks.
+- Postgres database: app runtime state, passkeys, notifications, web push subscriptions, locks, import preview blobs, and the ledger read model.
 
-Do not commit your real ledger or runtime files to the application repository.
+Do not commit your real ledger, `.env` files, database dumps, or migration exports to the application repository.
 
 ## Data sent to AI providers
 
@@ -18,11 +18,12 @@ Disable AI by not configuring provider API keys.
 
 ## Runtime state
 
-The following files should be treated as private runtime state:
+The stateless `ledger-web` service stores runtime state in Postgres:
 
-- `passkeys.json`
-- `notifications.json`
-- `webpush-subscriptions.json`
-- `ledger-write.lock`
+- passkeys
+- notifications
+- web push subscriptions
+- distributed locks and rate-limit buckets
+- import preview metadata and uploaded files
 
-Set `RUNTIME_DIR` to a directory outside the application repository in production.
+Older filesystem runtime directories can be migrated with `ledger-state-migrate`.

@@ -6,9 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestAccountServiceDetail(t *testing.T) {
@@ -33,7 +30,7 @@ func TestAccountServiceDetail(t *testing.T) {
 	}
 }
 
-func TestAccountServiceAppendDefaultsCurrencyAndPublishesSource(t *testing.T) {
+func TestAccountServiceAppendDefaultsCurrency(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
@@ -44,9 +41,6 @@ func TestAccountServiceAppendDefaultsCurrencyAndPublishesSource(t *testing.T) {
 
 	cache := NewLedgerCache(cfg)
 	service := NewAccountService(cache, NewLedgerWriter(cfg, cache))
-	sub := ledgerEventHub.Subscribe()
-	defer sub.Close()
-
 	input, err := service.Append(AccountInput{Date: "2026-01-01", Account: "Assets:Wallet", Alias: "钱包"})
 	if err != nil {
 		t.Fatal(err)
@@ -57,22 +51,6 @@ func TestAccountServiceAppendDefaultsCurrencyAndPublishesSource(t *testing.T) {
 	text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "accounts.bean")))
 	if !strings.Contains(text, "open Assets:Wallet CNY") || !strings.Contains(text, `alias: "钱包"`) {
 		t.Fatalf("account was not appended:\n%s", text)
-	}
-
-	select {
-	case event := <-sub.ch:
-		if event.Type != "ledger.updated" {
-			t.Fatalf("event type = %s, want ledger.updated", event.Type)
-		}
-		data, ok := event.Data.(gin.H)
-		if !ok {
-			t.Fatalf("event data has unexpected type: %#v", event.Data)
-		}
-		if data["source"] != ledgerWriteSourceAccountAppend {
-			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceAccountAppend)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ledger.updated event")
 	}
 }
 

@@ -56,6 +56,73 @@ func LoadConfig() Config {
 	}
 }
 
+func LoadWebConfig() Config {
+	cfg := loadBaseConfig()
+	cfg.LedgerStorage = "github_api"
+	cfg.LedgerReadModel = "postgres"
+	cfg.ReadModelStrict = true
+	cfg.RuntimeDir = ""
+	cfg.LedgerRoot = ""
+	return cfg
+}
+
+func LoadIndexerConfig() Config {
+	cfg := loadBaseConfig()
+	cfg.LedgerStorage = "filesystem"
+	cfg.LedgerReadModel = "postgres"
+	cfg.ReadModelStrict = true
+	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
+	cfg.LedgerRoot = filepath.Clean(ledgerRoot)
+	return cfg
+}
+
+func loadBaseConfig() Config {
+	return Config{
+		AppRoot:            "",
+		StaticDir:          filepath.Clean(env("STATIC_DIR", "")),
+		ServeStatic:        envBool("SERVE_STATIC", false),
+		Port:               env("PORT", "3000"),
+		LedgerGitBranch:    env("LEDGER_GIT_BRANCH", "main"),
+		LedgerGitHubOwner:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
+		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
+		LedgerGitHubToken:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
+		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+	}
+}
+
+func ValidateWebConfig(cfg Config) error {
+	if cfg.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	if cfg.LedgerStorage != "github_api" {
+		return errors.New("ledger-web is stateless and requires GitHub API ledger storage")
+	}
+	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
+		return errors.New("ledger-web requires the Postgres read model in strict mode")
+	}
+	if strings.TrimSpace(cfg.LedgerGitHubOwner) == "" || strings.TrimSpace(cfg.LedgerGitHubRepo) == "" {
+		return errors.New("LEDGER_GITHUB_OWNER and LEDGER_GITHUB_REPO are required")
+	}
+	if strings.TrimSpace(cfg.LedgerGitHubToken) == "" {
+		return errors.New("LEDGER_GITHUB_TOKEN is required")
+	}
+	return nil
+}
+
+func ValidateIndexerConfig(cfg Config) error {
+	if cfg.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
+		return errors.New("LEDGER_ROOT is required for ledger-indexer")
+	}
+	if !ledgerReadModelEnabled(cfg) {
+		return errors.New("ledger-indexer requires the Postgres read model")
+	}
+	return nil
+}
+
 func ValidateConfig(cfg Config) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.LedgerStorage)) {
 	case "", "filesystem", "file", "github_api":

@@ -125,7 +125,6 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 	if strings.TrimSpace(source) == "" {
 		source = ledgerWriteSourceDefault
 	}
-	publishLedgerUpdated(w.cfg, source)
 	return nil
 }
 
@@ -170,8 +169,6 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		if w.cache != nil {
 			w.cache.MarkDirty()
 		}
-		publishLedgerUpdated(w.cfg, source)
-		publishGitStatus(w.cfg, source)
 		return nil
 	}
 	if lastErr == nil {

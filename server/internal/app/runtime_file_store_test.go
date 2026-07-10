@@ -9,7 +9,7 @@ import (
 
 func TestFilesystemRuntimeFileStoreMaterializeFile(t *testing.T) {
 	root := t.TempDir()
-	store := newFilesystemRuntimeFileStore(root)
+	store := newFilesystemRuntimeStore(root)
 	ctx := context.Background()
 
 	if err := store.PutFile(ctx, "imports", "preview123/original", []byte("statement")); err != nil {
