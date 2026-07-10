@@ -153,7 +153,7 @@ func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T)
 	cfg := githubAPITestConfig(t, fake)
 	writer := NewLedgerWriter(cfg, nil)
 	err := writer.ReplaceTransactionBlock(TransactionSource{
-		File: filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean"),
+		File: "/home/runner/work/ledger/private-ledger/transactions/2026/05.bean",
 		Line: 1,
 		Hash: transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
 	}, LedgerEntry{

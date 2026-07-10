@@ -708,6 +708,11 @@ func editableLedgerFile(cfg Config, file string) (string, error) {
 	}
 	main, _ := filepath.Abs(mainBeanPath(cfg))
 	if full != main && !strings.HasPrefix(full, root+string(filepath.Separator)) {
+		if githubAPIEnabled(cfg) {
+			if migrated, ok := legacyGitHubTransactionSourcePath(cfg, full); ok {
+				return migrated, nil
+			}
+		}
 		return "", errors.New("只能修改当前账本目录内的文件")
 	}
 	if githubAPIEnabled(cfg) {
@@ -717,6 +722,20 @@ func editableLedgerFile(cfg Config, file string) (string, error) {
 		return "", errors.New("找不到交易来源文件")
 	}
 	return full, nil
+}
+
+func legacyGitHubTransactionSourcePath(cfg Config, file string) (string, bool) {
+	path := filepath.ToSlash(filepath.Clean(file))
+	marker := "/transactions/"
+	index := strings.LastIndex(path, marker)
+	if index < 0 {
+		return "", false
+	}
+	relative := strings.TrimPrefix(path[index+1:], "/")
+	if relative == "transactions" || !strings.HasSuffix(relative, ".bean") {
+		return "", false
+	}
+	return filepath.Join(cfg.LedgerRoot, filepath.FromSlash(relative)), true
 }
 
 func transactionBlock(text string, source TransactionSource) ([]string, int, int, error) {
