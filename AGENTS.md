@@ -119,6 +119,15 @@ CI uses Node.js 24 for the frontend job and the Go version declared in
 checks for `server/`, `examples/`, `docker/`, and CI changes, and frontend
 checks for `web/`, `docker/`, and CI changes.
 
+When an integration-level behavior depends on hosted infrastructure, GitHub API
+ledger storage, the Postgres read model, or Vercel runtime configuration, prefer
+using the dedicated test/preview environment instead of production. The public
+demo ledger repository and preview Supabase database may be used for agent-run
+integration tests, write-path smoke tests, and deployment verification. Keep
+test writes confined to that environment, document any mutations in the handoff,
+and never point automated agent tests at the private production ledger unless
+the user explicitly asks for it.
+
 ## Agent4MD Memory and Skills
 
 The project-level Agent4MD entrypoint is this file. Supporting memory lives
