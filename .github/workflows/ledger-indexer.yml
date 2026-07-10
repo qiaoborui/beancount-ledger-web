@@ -7,6 +7,11 @@ on:
         description: "Ledger branch, tag, or SHA to index; defaults to LEDGER_GIT_BRANCH or main"
         required: false
         type: string
+      force_rebuild:
+        description: "Rebuild the active index even when the ledger version is unchanged"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "*/10 * * * *"
 
@@ -60,12 +65,18 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Read private ledger commit
+        id: ledger_commit
+        run: echo "sha=$(git -C private-ledger rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Index ledger into Postgres
         working-directory: server
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           LEDGER_ROOT: ${{ github.workspace }}/private-ledger
-          LEDGER_GIT_BRANCH: ${{ inputs.ledger_ref || vars.LEDGER_GIT_BRANCH || 'main' }}
+          LEDGER_GIT_BRANCH: ${{ vars.LEDGER_GIT_BRANCH || 'main' }}
+          LEDGER_GIT_SHA: ${{ steps.ledger_commit.outputs.sha }}
+          LEDGER_INDEX_FORCE_REBUILD: ${{ inputs.force_rebuild || 'false' }}
           POSTGRES_MAX_OPEN_CONNS: ${{ vars.POSTGRES_MAX_OPEN_CONNS || '2' }}
           POSTGRES_MAX_IDLE_CONNS: ${{ vars.POSTGRES_MAX_IDLE_CONNS || '1' }}
           POSTGRES_CONN_MAX_IDLE_SECONDS: ${{ vars.POSTGRES_CONN_MAX_IDLE_SECONDS || '60' }}
@@ -79,5 +90,6 @@ jobs:
             echo
             echo "- Ledger repository: \`${{ vars.LEDGER_GITHUB_OWNER }}/${{ vars.LEDGER_GITHUB_REPO }}\`"
             echo "- Ledger ref: \`${{ inputs.ledger_ref || vars.LEDGER_GIT_BRANCH || 'main' }}\`"
-            echo "- Ledger commit: \`$(git -C private-ledger rev-parse HEAD 2>/dev/null || echo unavailable)\`"
+            echo "- Ledger commit: \`${{ steps.ledger_commit.outputs.sha }}\`"
+            echo "- Force rebuild: \`${{ inputs.force_rebuild || false }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -69,6 +69,13 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if !ok || revision.ID != secondID || revision.GitSHA != "sha-2" {
 		t.Fatalf("unexpected active revision: ok=%v revision=%#v", ok, revision)
 	}
+	activeSnapshot, ok, err := store.ActiveSnapshot(ctx)
+	if err != nil || !ok {
+		t.Fatalf("active snapshot: ok=%v err=%v", ok, err)
+	}
+	if len(activeSnapshot.Transactions) != 2 || activeSnapshot.Transactions[0].Source.GitSHA != "sha-2" {
+		t.Fatalf("active snapshot transaction source SHA=%#v", activeSnapshot.Transactions)
+	}
 	txns, err := store.TransactionsForRevision(ctx, secondID, "2026-05-01", "2026-06-01")
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +104,25 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 	if postingCount != 4 {
 		t.Fatalf("reused-only posting count=%d, want 4", postingCount)
+	}
+
+	forced := testIndexSnapshot("v3", []Transaction{
+		testIndexedTransaction("2026-05-01", "Cafe", "transactions/2026/05.bean", 10, "same", 1800),
+		testIndexedTransaction("2026-05-03", "Tea", "transactions/2026/05.bean", 30, "new", 800),
+	})
+	forcedID, err := store.ForceReplaceActiveSnapshot(ctx, forced, "sha-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forcedID != thirdID {
+		t.Fatalf("forced rebuild revision id=%d, want %d", forcedID, thirdID)
+	}
+	forcedTransactions, err := store.TransactionsForRevision(ctx, forcedID, "2026-05-01", "2026-06-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forcedTransactions) != 2 || forcedTransactions[1].Postings[0].Amount != 1800 {
+		t.Fatalf("forced rebuild did not replace transaction payload: %#v", forcedTransactions)
 	}
 }
 

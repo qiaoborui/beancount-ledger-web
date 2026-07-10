@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -153,9 +154,10 @@ func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T)
 	cfg := githubAPITestConfig(t, fake)
 	writer := NewLedgerWriter(cfg, nil)
 	err := writer.ReplaceTransactionBlock(TransactionSource{
-		File: "/home/runner/work/ledger/private-ledger/transactions/2026/05.bean",
-		Line: 1,
-		Hash: transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
+		File:   "/home/runner/work/ledger/private-ledger/transactions/2026/05.bean",
+		Line:   1,
+		Hash:   transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
+		GitSHA: "base-commit",
 	}, LedgerEntry{
 		Kind:      "transaction",
 		Date:      "2026-05-01",
@@ -175,6 +177,19 @@ func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T)
 	}
 	if got := fake.blobs["blob-1"]; !strings.Contains(got, `"Dinner"`) || strings.Contains(got, `"Lunch"`) {
 		t.Fatalf("transaction was not replaced through github blob: %q", got)
+	}
+}
+
+func TestLedgerWriteTransactionRejectsStaleIndexGitSHA(t *testing.T) {
+	tx := &LedgerWriteTransaction{github: &githubLedgerTransaction{baseCommitSHA: "current-commit"}}
+
+	err := tx.validateTransactionSource(TransactionSource{GitSHA: "indexed-commit"})
+
+	if !errors.Is(err, errLedgerIndexOutdated) {
+		t.Fatalf("error=%v, want stale index error", err)
+	}
+	if got := ledgerWriteErrorStatus(err); got != http.StatusConflict {
+		t.Fatalf("status=%d, want %d", got, http.StatusConflict)
 	}
 }
 

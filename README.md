@@ -89,6 +89,10 @@ Do not set `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`,
 `ledger-web` fixes these internally: reads are strict Postgres reads, writes go
 through the GitHub API, and runtime data lives in Postgres.
 
+The scheduled `Ledger Indexer` workflow keeps the read model incremental. Run
+the workflow with `force_rebuild=true` after an index format migration to
+rebuild the active Postgres revision from the checked-out private ledger.
+
 See [web/.env.example](web/.env.example) for the complete list.
 
 If you previously used a separate `web/` Vercel project for frontend-only

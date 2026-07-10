@@ -27,3 +27,18 @@ func TestNormalizeLedgerSnapshotSourcePathsUsesLedgerRelativePaths(t *testing.T)
 		t.Fatalf("bean error file=%q", got)
 	}
 }
+
+func TestShouldSkipLedgerIndex(t *testing.T) {
+	active := LedgerIndexRevision{LedgerVersion: LedgerVersion{Version: "v1"}, GitSHA: "commit-1"}
+	version := LedgerVersion{Version: "v1"}
+
+	if !shouldSkipLedgerIndex(active, version, "commit-1", false) {
+		t.Fatal("matching version and commit should skip")
+	}
+	if shouldSkipLedgerIndex(active, version, "commit-2", false) {
+		t.Fatal("new commit should rebuild")
+	}
+	if shouldSkipLedgerIndex(active, version, "commit-1", true) {
+		t.Fatal("forced rebuild should bypass the version shortcut")
+	}
+}

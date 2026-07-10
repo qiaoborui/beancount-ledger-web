@@ -190,6 +190,9 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.
 			if err != nil {
 				return nil, err
 			}
+			for index := range txns {
+				txns[index].Source.GitSHA = revision.GitSHA
+			}
 			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked), nil
 		}
 		if s.strict {

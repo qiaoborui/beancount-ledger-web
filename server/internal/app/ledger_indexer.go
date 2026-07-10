@@ -36,13 +36,13 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if err := ensureLedgerReady(cfg); err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := ""
+	gitSHA := strings.TrimSpace(cfg.LedgerGitSHA)
 	if hasActive {
 		version, err := ledgerVersion(cfg)
 		if err != nil {
 			return LedgerIndexResult{}, err
 		}
-		if active.LedgerVersion.Version == version.Version {
+		if shouldSkipLedgerIndex(active, version, gitSHA, cfg.LedgerIndexForceRebuild) {
 			return LedgerIndexResult{RevisionID: active.ID, LedgerVersion: active.LedgerVersion, Skipped: true, SkipReason: "ledger version unchanged"}, nil
 		}
 	}
@@ -53,11 +53,23 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 		return LedgerIndexResult{}, err
 	}
 	normalizeLedgerSnapshotSourcePaths(cfg, snapshot)
-	revisionID, err := store.ReplaceActiveSnapshot(ctx, snapshot, gitSHA)
+	var revisionID int64
+	if cfg.LedgerIndexForceRebuild {
+		revisionID, err = store.ForceReplaceActiveSnapshot(ctx, snapshot, gitSHA)
+	} else {
+		revisionID, err = store.ReplaceActiveSnapshot(ctx, snapshot, gitSHA)
+	}
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
 	return LedgerIndexResult{RevisionID: revisionID, GitSHA: gitSHA, LedgerVersion: snapshot.LedgerVersion}, nil
+}
+
+func shouldSkipLedgerIndex(active LedgerIndexRevision, version LedgerVersion, gitSHA string, force bool) bool {
+	if force || active.LedgerVersion.Version != version.Version {
+		return false
+	}
+	return gitSHA == "" || active.GitSHA == gitSHA
 }
 
 func normalizeLedgerSnapshotSourcePaths(cfg Config, snapshot *LedgerSnapshot) {

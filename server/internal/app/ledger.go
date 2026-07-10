@@ -54,9 +54,10 @@ type Transaction struct {
 }
 
 type TransactionSource struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
-	Hash string `json:"hash,omitempty"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Hash   string `json:"hash,omitempty"`
+	GitSHA string `json:"gitSha,omitempty"`
 }
 
 type BalanceAssertion struct {

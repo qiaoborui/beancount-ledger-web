@@ -23,7 +23,10 @@ type LedgerWriter struct {
 	mu                  sync.Mutex
 }
 
-var errLedgerWriteTimeout = errors.New("ledger write timed out")
+var (
+	errLedgerWriteTimeout  = errors.New("ledger write timed out")
+	errLedgerIndexOutdated = errors.New("账本索引已落后于当前账本，请刷新后重试")
+)
 
 const defaultGitHubLedgerWriteTimeout = 50 * time.Second
 
@@ -452,6 +455,9 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 
 func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry LedgerEntry) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionUpdate, func(tx *LedgerWriteTransaction) error {
+		if err := tx.validateTransactionSource(source); err != nil {
+			return err
+		}
 		if err := w.validateEntryCommodities(tx, []LedgerEntry{entry}); err != nil {
 			return err
 		}
@@ -535,6 +541,9 @@ func (w *LedgerWriter) knownAccounts(tx *LedgerWriteTransaction) ([]Account, err
 
 func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason string) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionDelete, func(tx *LedgerWriteTransaction) error {
+		if err := tx.validateTransactionSource(source); err != nil {
+			return err
+		}
 		file, err := editableLedgerFile(w.cfg, source.File)
 		if err != nil {
 			return err
@@ -561,6 +570,13 @@ func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason 
 		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
 		return tx.WriteFile(file, []byte(next), 0o644)
 	})
+}
+
+func (tx *LedgerWriteTransaction) validateTransactionSource(source TransactionSource) error {
+	if tx.github != nil && source.GitSHA != "" && source.GitSHA != tx.github.baseCommitSHA {
+		return errLedgerIndexOutdated
+	}
+	return nil
 }
 
 type appendItem struct {

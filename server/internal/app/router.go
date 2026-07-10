@@ -286,6 +286,9 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 }
 
 func ledgerWriteErrorStatus(err error) int {
+	if errors.Is(err, errLedgerIndexOutdated) {
+		return http.StatusConflict
+	}
 	if errors.Is(err, errLedgerWriteTimeout) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return http.StatusGatewayTimeout
 	}

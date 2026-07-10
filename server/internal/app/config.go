@@ -8,21 +8,23 @@ import (
 )
 
 type Config struct {
-	AppRoot            string
-	LedgerRoot         string
-	RuntimeDir         string
-	StaticDir          string
-	ServeStatic        bool
-	Port               string
-	LedgerStorage      string
-	LedgerGitBranch    string
-	LedgerGitHubOwner  string
-	LedgerGitHubRepo   string
-	LedgerGitHubToken  string
-	LedgerGitHubAPIURL string
-	DatabaseURL        string
-	LedgerReadModel    string
-	ReadModelStrict    bool
+	AppRoot                 string
+	LedgerRoot              string
+	RuntimeDir              string
+	StaticDir               string
+	ServeStatic             bool
+	Port                    string
+	LedgerStorage           string
+	LedgerGitBranch         string
+	LedgerGitSHA            string
+	LedgerIndexForceRebuild bool
+	LedgerGitHubOwner       string
+	LedgerGitHubRepo        string
+	LedgerGitHubToken       string
+	LedgerGitHubAPIURL      string
+	DatabaseURL             string
+	LedgerReadModel         string
+	ReadModelStrict         bool
 }
 
 func LoadConfig() Config {
@@ -38,21 +40,23 @@ func LoadConfig() Config {
 	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
 
 	return Config{
-		AppRoot:            "",
-		LedgerRoot:         filepath.Clean(ledgerRoot),
-		RuntimeDir:         filepath.Clean(runtimeDir),
-		StaticDir:          filepath.Clean(env("STATIC_DIR", "")),
-		ServeStatic:        envBool("SERVE_STATIC", false),
-		Port:               env("PORT", "3000"),
-		LedgerStorage:      storage,
-		LedgerGitBranch:    env("LEDGER_GIT_BRANCH", "main"),
-		LedgerGitHubOwner:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
-		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
-		LedgerGitHubToken:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
-		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
-		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		LedgerReadModel:    ledgerReadModel,
-		ReadModelStrict:    envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
+		AppRoot:                 "",
+		LedgerRoot:              filepath.Clean(ledgerRoot),
+		RuntimeDir:              filepath.Clean(runtimeDir),
+		StaticDir:               filepath.Clean(env("STATIC_DIR", "")),
+		ServeStatic:             envBool("SERVE_STATIC", false),
+		Port:                    env("PORT", "3000"),
+		LedgerStorage:           storage,
+		LedgerGitBranch:         env("LEDGER_GIT_BRANCH", "main"),
+		LedgerGitSHA:            strings.TrimSpace(os.Getenv("LEDGER_GIT_SHA")),
+		LedgerIndexForceRebuild: envBool("LEDGER_INDEX_FORCE_REBUILD", false),
+		LedgerGitHubOwner:       strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
+		LedgerGitHubRepo:        strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
+		LedgerGitHubToken:       strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
+		LedgerGitHubAPIURL:      strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		LedgerReadModel:         ledgerReadModel,
+		ReadModelStrict:         envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
 	}
 }
 
@@ -78,16 +82,18 @@ func LoadIndexerConfig() Config {
 
 func loadBaseConfig() Config {
 	return Config{
-		AppRoot:            "",
-		StaticDir:          filepath.Clean(env("STATIC_DIR", "")),
-		ServeStatic:        envBool("SERVE_STATIC", false),
-		Port:               env("PORT", "3000"),
-		LedgerGitBranch:    env("LEDGER_GIT_BRANCH", "main"),
-		LedgerGitHubOwner:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
-		LedgerGitHubRepo:   strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
-		LedgerGitHubToken:  strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
-		LedgerGitHubAPIURL: strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
-		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AppRoot:                 "",
+		StaticDir:               filepath.Clean(env("STATIC_DIR", "")),
+		ServeStatic:             envBool("SERVE_STATIC", false),
+		Port:                    env("PORT", "3000"),
+		LedgerGitBranch:         env("LEDGER_GIT_BRANCH", "main"),
+		LedgerGitSHA:            strings.TrimSpace(os.Getenv("LEDGER_GIT_SHA")),
+		LedgerIndexForceRebuild: envBool("LEDGER_INDEX_FORCE_REBUILD", false),
+		LedgerGitHubOwner:       strings.TrimSpace(os.Getenv("LEDGER_GITHUB_OWNER")),
+		LedgerGitHubRepo:        strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
+		LedgerGitHubToken:       strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
+		LedgerGitHubAPIURL:      strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
 	}
 }
 

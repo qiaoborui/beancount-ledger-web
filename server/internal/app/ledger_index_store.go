@@ -269,6 +269,9 @@ func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloa
 	if err := g.Wait(); err != nil {
 		return nil, false, err
 	}
+	for index := range snapshot.Transactions {
+		snapshot.Transactions[index].Source.GitSHA = revision.GitSHA
+	}
 	prepareLedgerSnapshot(snapshot)
 	return snapshot, true, nil
 }
@@ -337,13 +340,21 @@ func loadIndexCommodities(ctx context.Context, db *sql.DB, revisionID int64) ([]
 }
 
 func (s *LedgerIndexStore) ReplaceActiveSnapshot(ctx context.Context, snapshot *LedgerSnapshot, gitSHA string) (int64, error) {
+	return s.replaceActiveSnapshot(ctx, snapshot, gitSHA, false)
+}
+
+func (s *LedgerIndexStore) ForceReplaceActiveSnapshot(ctx context.Context, snapshot *LedgerSnapshot, gitSHA string) (int64, error) {
+	return s.replaceActiveSnapshot(ctx, snapshot, gitSHA, true)
+}
+
+func (s *LedgerIndexStore) replaceActiveSnapshot(ctx context.Context, snapshot *LedgerSnapshot, gitSHA string, force bool) (int64, error) {
 	if snapshot == nil {
 		return 0, errors.New("ledger snapshot is required")
 	}
 	previousRevisionID := int64(0)
 	if revision, ok, err := s.ActiveRevision(ctx); err != nil {
 		return 0, err
-	} else if ok && revision.LedgerVersion.Version == snapshot.Version && (gitSHA == "" || revision.GitSHA == gitSHA) {
+	} else if ok && !force && revision.LedgerVersion.Version == snapshot.Version && (gitSHA == "" || revision.GitSHA == gitSHA) {
 		return revision.ID, nil
 	} else if ok {
 		previousRevisionID = revision.ID
