@@ -136,6 +136,11 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	nextHash := sha256Hex([]byte(input.Content))[:16]
+	if input.Content == before {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel, "hash": currentHash, "modTime": info.ModTime().UTC().Format(time.RFC3339Nano), "size": info.Size(), "readModelPending": false})
+		return
+	}
 	if input.PreviousHash != "" && input.PreviousHash != currentHash {
 		c.JSON(http.StatusConflict, gin.H{"error": "file changed on disk, reload before saving", "path": rel, "hash": currentHash, "content": before, "modTime": info.ModTime().UTC().Format(time.RFC3339Nano)})
 		return
@@ -144,23 +149,7 @@ func (s *Server) saveEditorFile(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	var nextInfo os.FileInfo
-	var nextHash string
-	if githubAPIEnabled(s.cfg) {
-		client, clientErr := newGitHubLedgerClient(s.cfg)
-		if clientErr != nil {
-			errorJSON(c, http.StatusBadRequest, clientErr)
-			return
-		}
-		_, nextInfo, nextHash, err = client.readEditorFile(c.Request.Context(), rel)
-	} else {
-		_, nextInfo, nextHash, err = readLedgerEditorFile(full)
-	}
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel, "hash": nextHash, "modTime": nextInfo.ModTime().UTC().Format(time.RFC3339Nano), "size": nextInfo.Size(), "readModelPending": ledgerReadModelEnabled(s.cfg)})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel, "hash": nextHash, "modTime": time.Now().UTC().Format(time.RFC3339Nano), "size": len(input.Content), "readModelPending": ledgerReadModelEnabled(s.cfg)})
 }
 
 func listLedgerEditorFiles(cfg Config) ([]LedgerEditorFile, error) {

@@ -2,10 +2,27 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
 )
+
+func TestJSONPayloadsUsePostgresText(t *testing.T) {
+	payload, metadata, err := jsonPayloads(map[string]any{"ok": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := any(payload).(string); !ok {
+		t.Fatalf("payload type=%T, want string for Postgres JSONB", payload)
+	}
+	if _, ok := any(metadata).(string); !ok {
+		t.Fatalf("metadata type=%T, want string for Postgres JSONB", metadata)
+	}
+	if !json.Valid([]byte(payload)) || !json.Valid([]byte(metadata)) {
+		t.Fatalf("invalid JSON payload=%q metadata=%q", payload, metadata)
+	}
+}
 
 func TestClassifyReusableTransactionsRequiresStableSourceHashAndLine(t *testing.T) {
 	txns := []Transaction{
@@ -41,6 +58,7 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	defer store.db.ExecContext(context.Background(), `DELETE FROM ledger_index_revisions WHERE source_key = $1`, store.sourceKey)
 
 	ctx := context.Background()
 	first := testIndexSnapshot("v1", []Transaction{

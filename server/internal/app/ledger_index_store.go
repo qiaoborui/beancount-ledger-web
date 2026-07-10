@@ -471,11 +471,11 @@ func (s *LedgerIndexStore) replaceActiveSnapshot(ctx context.Context, snapshot *
 }
 
 func replaceActiveSnapshotPGX(ctx context.Context, tx pgx.Tx, sourceKey string, previousRevisionID int64, snapshot *LedgerSnapshot, gitSHA string) (int64, error) {
-	beanEntries, err := json.Marshal(snapshot.BeanEntries)
+	beanEntries, err := marshalPostgresJSON(snapshot.BeanEntries)
 	if err != nil {
 		return 0, err
 	}
-	beanErrors, err := json.Marshal(snapshot.BeanErrors)
+	beanErrors, err := marshalPostgresJSON(snapshot.BeanErrors)
 	if err != nil {
 		return 0, err
 	}
@@ -700,7 +700,7 @@ func copyFreshPostings(ctx context.Context, tx pgx.Tx, revisionID int64, txns []
 		posting := indexed.txn.Postings[postingIndex]
 		currentPostingIndex := postingIndex
 		postingIndex++
-		payload, err := json.Marshal(posting)
+		payload, err := marshalPostgresJSON(posting)
 		if err != nil {
 			return nil, err
 		}
@@ -715,7 +715,7 @@ func copyBalanceAssertions(ctx context.Context, tx pgx.Tx, revisionID int64, ass
 	}
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_balance_assertions"}, []string{"revision_id", "ordinal", "assertion_date", "account", "amount", "currency", "payload"}, pgx.CopyFromSlice(len(assertions), func(i int) ([]any, error) {
 		assertion := assertions[i]
-		payload, err := json.Marshal(assertion)
+		payload, err := marshalPostgresJSON(assertion)
 		if err != nil {
 			return nil, err
 		}
@@ -730,7 +730,7 @@ func copyPrices(ctx context.Context, tx pgx.Tx, revisionID int64, prices []Price
 	}
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_prices"}, []string{"revision_id", "ordinal", "price_date", "currency", "amount", "quote_currency", "payload"}, pgx.CopyFromSlice(len(prices), func(i int) ([]any, error) {
 		price := prices[i]
-		payload, err := json.Marshal(price)
+		payload, err := marshalPostgresJSON(price)
 		if err != nil {
 			return nil, err
 		}
@@ -749,17 +749,17 @@ func copyCommodities(ctx context.Context, tx pgx.Tx, revisionID int64, commoditi
 	return err
 }
 
-func jsonPayloads(payloadValue any, metadataValue any) ([]byte, []byte, error) {
-	payload, err := json.Marshal(payloadValue)
+func jsonPayloads(payloadValue any, metadataValue any) (string, string, error) {
+	payload, err := marshalPostgresJSON(payloadValue)
 	if err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
-	metadata, err := json.Marshal(metadataValue)
+	metadata, err := marshalPostgresJSON(metadataValue)
 	if err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
-	if string(metadata) == "null" {
-		metadata = []byte("{}")
+	if metadata == "null" {
+		metadata = "{}"
 	}
 	return payload, metadata, nil
 }
