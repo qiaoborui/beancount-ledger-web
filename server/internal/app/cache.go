@@ -236,37 +236,7 @@ type fileStat struct {
 }
 
 func ledgerVersion(cfg Config) (LedgerVersion, error) {
-	stats := []fileStat{}
-	err := filepath.WalkDir(cfg.LedgerRoot, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", ".runtime", "node_modules":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".bean") {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(cfg.LedgerRoot, path)
-		stats = append(stats, fileStat{
-			relative:    filepath.ToSlash(rel),
-			contentHash: sha256.Sum256(content),
-			mtimeMs:     info.ModTime().UnixMilli(),
-		})
-		return nil
-	})
+	stats, err := ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
 	if err != nil {
 		return LedgerVersion{}, err
 	}
@@ -283,4 +253,55 @@ func ledgerVersion(cfg Config) (LedgerVersion, error) {
 		}
 	}
 	return LedgerVersion{Version: hex.EncodeToString(hash.Sum(nil)), LatestMtime: float64(latest), FileCount: len(stats)}, nil
+}
+
+// ledgerVersionFiles collects only the files that affect the loaded ledger:
+// the entrypoint and its recursively included files. This deliberately mirrors
+// ReadLedgerLines so unrelated historical or import files do not invalidate the
+// read model.
+func ledgerVersionFiles(entry, ledgerRoot string, seen map[string]bool) ([]fileStat, error) {
+	full, err := filepath.Abs(entry)
+	if err != nil {
+		return nil, err
+	}
+	if seen[full] {
+		return nil, nil
+	}
+	seen[full] = true
+
+	content, err := os.ReadFile(full)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, err
+	}
+	root, err := filepath.Abs(ledgerRoot)
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(root, full)
+	if err != nil {
+		return nil, err
+	}
+	stats := []fileStat{{
+		relative:    filepath.ToSlash(relative),
+		contentHash: sha256.Sum256(content),
+		mtimeMs:     info.ModTime().UnixMilli(),
+	}}
+
+	dir := filepath.Dir(full)
+	for _, line := range strings.Split(string(content), "\n") {
+		match := includeRe.FindStringSubmatch(strings.TrimSpace(strings.TrimSuffix(line, "\r")))
+		if match == nil {
+			continue
+		}
+		included, err := ledgerVersionFiles(filepath.Join(dir, match[1]), root, seen)
+		if err != nil {
+			return nil, err
+		}
+		stats = append(stats, included...)
+	}
+	return stats, nil
 }

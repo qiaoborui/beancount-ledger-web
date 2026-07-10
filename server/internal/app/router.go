@@ -108,11 +108,24 @@ func (s *Server) transactions(c *gin.Context) {
 }
 
 func (s *Server) balances(c *gin.Context) {
-	snapshot, ok := s.snapshotLite(c, true)
-	if !ok {
+	if !requireSensitive(c) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"balances": snapshot.Balances, "assertions": snapshot.BalanceAssertions})
+	if s.readService == nil {
+		snapshot, err := s.ledgerSnapshotLite(c.Request.Context())
+		if err != nil {
+			errorJSON(c, http.StatusBadRequest, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"balances": snapshot.Balances, "assertions": snapshot.BalanceAssertions})
+		return
+	}
+	balances, assertions, err := s.readService.Balances(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"balances": balances, "assertions": assertions})
 }
 
 func (s *Server) incomeStatement(c *gin.Context) {

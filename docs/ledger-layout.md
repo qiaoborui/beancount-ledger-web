@@ -27,4 +27,4 @@ include "transactions/2026.bean"
 
 Accounts are loaded from `accounts.bean`. AI-generated entries are validated against active accounts from this file.
 
-Transactions can be organized however you prefer as long as they are included from `main.bean`. New Web writes currently append to `transactions/YYYY.bean`.
+Transactions can be organized however you prefer as long as they are included from `main.bean`. New Web writes append to `transactions/YYYY/MM.bean`; importing a statement also links its generated `.bean` file from that month.

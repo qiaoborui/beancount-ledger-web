@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -39,10 +40,19 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
+	gitSHA := strings.TrimSpace(cfg.LedgerGitSHA)
+	if hasActive && canSkipLedgerIndexByGitSHA(cfg, active, gitSHA, cfg.LedgerIndexForceRebuild) {
+		return LedgerIndexResult{
+			RevisionID:    active.ID,
+			GitSHA:        active.GitSHA,
+			LedgerVersion: active.LedgerVersion,
+			Skipped:       true,
+			SkipReason:    "ledger git SHA unchanged",
+		}, nil
+	}
 	if err := ensureLedgerReady(cfg); err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := strings.TrimSpace(cfg.LedgerGitSHA)
 	if hasActive {
 		version, err := ledgerVersion(cfg)
 		if err != nil {
@@ -69,6 +79,35 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 		return LedgerIndexResult{}, err
 	}
 	return LedgerIndexResult{RevisionID: revisionID, GitSHA: gitSHA, LedgerVersion: snapshot.LedgerVersion}, nil
+}
+
+func shouldSkipLedgerIndexByGitSHA(active LedgerIndexRevision, gitSHA string, force bool) bool {
+	return !force && gitSHA != "" && active.GitSHA == gitSHA
+}
+
+func canSkipLedgerIndexByGitSHA(cfg Config, active LedgerIndexRevision, gitSHA string, force bool) bool {
+	return shouldSkipLedgerIndexByGitSHA(active, gitSHA, force) && ledgerCheckoutMatchesGitSHA(cfg, gitSHA)
+}
+
+// ledgerCheckoutMatchesGitSHA verifies that the files under LedgerRoot still
+// represent the immutable revision configured for indexing. A verification
+// failure intentionally falls back to include-manifest hashing.
+func ledgerCheckoutMatchesGitSHA(cfg Config, gitSHA string) bool {
+	root, err := filepath.Abs(cfg.LedgerRoot)
+	if err != nil {
+		return false
+	}
+	git := func(args ...string) (string, error) {
+		command := append([]string{"-c", "safe.directory=" + root, "-C", root}, args...)
+		out, err := exec.Command("git", command...).Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	head, err := git("rev-parse", "--verify", "HEAD")
+	if err != nil || head != gitSHA {
+		return false
+	}
+	status, err := git("status", "--porcelain=v1", "--untracked-files=all")
+	return err == nil && status == ""
 }
 
 func shouldSkipLedgerIndex(active LedgerIndexRevision, version LedgerVersion, gitSHA string, force bool) bool {
