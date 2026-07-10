@@ -1,0 +1,83 @@
+name: Ledger Indexer
+
+on:
+  workflow_dispatch:
+    inputs:
+      ledger_ref:
+        description: "Ledger branch, tag, or SHA to index; defaults to LEDGER_GIT_BRANCH or main"
+        required: false
+        type: string
+  schedule:
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: ledger-indexer
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  index:
+    name: Index private ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check required configuration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LEDGER_GITHUB_TOKEN: ${{ secrets.LEDGER_GITHUB_TOKEN }}
+          LEDGER_GITHUB_OWNER: ${{ vars.LEDGER_GITHUB_OWNER }}
+          LEDGER_GITHUB_REPO: ${{ vars.LEDGER_GITHUB_REPO }}
+        run: |
+          missing=()
+          [[ -n "$DATABASE_URL" ]] || missing+=(DATABASE_URL)
+          [[ -n "$LEDGER_GITHUB_TOKEN" ]] || missing+=(LEDGER_GITHUB_TOKEN)
+          [[ -n "$LEDGER_GITHUB_OWNER" ]] || missing+=(LEDGER_GITHUB_OWNER)
+          [[ -n "$LEDGER_GITHUB_REPO" ]] || missing+=(LEDGER_GITHUB_REPO)
+          if (( ${#missing[@]} )); then
+            printf 'Missing required GitHub Actions secrets/variables: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Checkout private ledger
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ format('{0}/{1}', vars.LEDGER_GITHUB_OWNER, vars.LEDGER_GITHUB_REPO) }}
+          ref: ${{ inputs.ledger_ref || vars.LEDGER_GIT_BRANCH || 'main' }}
+          token: ${{ secrets.LEDGER_GITHUB_TOKEN }}
+          path: private-ledger
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Index ledger into Postgres
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LEDGER_ROOT: ${{ github.workspace }}/private-ledger
+          LEDGER_GIT_BRANCH: ${{ inputs.ledger_ref || vars.LEDGER_GIT_BRANCH || 'main' }}
+          POSTGRES_MAX_OPEN_CONNS: ${{ vars.POSTGRES_MAX_OPEN_CONNS || '2' }}
+          POSTGRES_MAX_IDLE_CONNS: ${{ vars.POSTGRES_MAX_IDLE_CONNS || '1' }}
+          POSTGRES_CONN_MAX_IDLE_SECONDS: ${{ vars.POSTGRES_CONN_MAX_IDLE_SECONDS || '60' }}
+        run: go run ./cmd/ledger-indexer
+
+      - name: Summarize indexed ledger
+        if: always()
+        run: |
+          {
+            echo "## Ledger indexer"
+            echo
+            echo "- Ledger repository: \`${{ vars.LEDGER_GITHUB_OWNER }}/${{ vars.LEDGER_GITHUB_REPO }}\`"
+            echo "- Ledger ref: \`${{ inputs.ledger_ref || vars.LEDGER_GIT_BRANCH || 'main' }}\`"
+            echo "- Ledger commit: \`$(git -C private-ledger rev-parse HEAD 2>/dev/null || echo unavailable)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
