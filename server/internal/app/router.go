@@ -285,6 +285,13 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 	return rows
 }
 
+func ledgerWriteErrorStatus(err error) int {
+	if errors.Is(err, errLedgerWriteTimeout) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadRequest
+}
+
 func (s *Server) appendEntry(c *gin.Context) {
 	if !requireAuth(c) {
 		return
@@ -295,7 +302,7 @@ func (s *Server) appendEntry(c *gin.Context) {
 	}
 	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendEntry, []LedgerEntry{entry})
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "beanText": texts[0]})
@@ -311,7 +318,7 @@ func (s *Server) appendBatch(c *gin.Context) {
 	}
 	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendBatch, input.Entries)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(input.Entries), "beanTexts": texts})
@@ -327,7 +334,7 @@ func (s *Server) reverseTransaction(c *gin.Context) {
 	}
 	entry, err := s.txService.Reverse(input)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "entry": entry})
@@ -342,7 +349,7 @@ func (s *Server) updateTransaction(c *gin.Context) {
 		return
 	}
 	if err := s.txService.Update(input.Source, input.Entry); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -357,7 +364,7 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 		return
 	}
 	if err := s.txService.Delete(input.Source, input.Reason); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -373,7 +380,7 @@ func (s *Server) reconcile(c *gin.Context) {
 	}
 	result, err := s.reconcileService.Reconcile(input)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, result)

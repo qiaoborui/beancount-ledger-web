@@ -84,8 +84,14 @@ func NewRouterWithError(cfg Config) (*gin.Engine, error) {
 		limiter = NewRateLimiter()
 	}
 	cache := NewLedgerCache(cfg)
-	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
 	readService := NewLedgerReadServiceWithIndex(cache, indexStore, indexStoreErr, cfg.ReadModelStrict)
+	writer := NewLedgerWriterWithRuntimeStoreAndCommodities(cfg, cache, runtimeStore, func() ([]string, error) {
+		snapshot, err := readService.SnapshotLite(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return snapshot.Commodities, nil
+	})
 	server := &Server{cfg: cfg, runtimeStore: runtimeStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, func() (*LedgerSnapshot, error) {
 		return readService.SnapshotLite(context.Background())
 	}), db: db, readService: readService, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: limiter}

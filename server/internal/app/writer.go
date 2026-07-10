@@ -16,11 +16,16 @@ import (
 )
 
 type LedgerWriter struct {
-	cfg          Config
-	cache        *LedgerCache
-	runtimeStore RuntimeStore
-	mu           sync.Mutex
+	cfg                 Config
+	cache               *LedgerCache
+	runtimeStore        RuntimeStore
+	commoditiesProvider func() ([]string, error)
+	mu                  sync.Mutex
 }
+
+var errLedgerWriteTimeout = errors.New("ledger write timed out")
+
+const defaultGitHubLedgerWriteTimeout = 50 * time.Second
 
 type AccountInput struct {
 	Date     string `json:"date"`
@@ -94,10 +99,14 @@ func NewLedgerWriter(cfg Config, cache *LedgerCache) *LedgerWriter {
 }
 
 func NewLedgerWriterWithRuntimeStore(cfg Config, cache *LedgerCache, runtimeStore RuntimeStore) *LedgerWriter {
+	return NewLedgerWriterWithRuntimeStoreAndCommodities(cfg, cache, runtimeStore, nil)
+}
+
+func NewLedgerWriterWithRuntimeStoreAndCommodities(cfg Config, cache *LedgerCache, runtimeStore RuntimeStore, commoditiesProvider func() ([]string, error)) *LedgerWriter {
 	if runtimeStore == nil {
 		runtimeStore = MustRuntimeStore(cfg)
 	}
-	return &LedgerWriter{cfg: cfg, cache: cache, runtimeStore: runtimeStore}
+	return &LedgerWriter{cfg: cfg, cache: cache, runtimeStore: runtimeStore, commoditiesProvider: commoditiesProvider}
 }
 
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
@@ -149,19 +158,29 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 	}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		timeout := githubLedgerWriteTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		remoteTx, err := client.beginTransaction(ctx)
 		if err != nil {
 			cancel()
+			if isContextTimeout(err) {
+				return ledgerWriteTimeoutError(timeout, err)
+			}
 			return err
 		}
 		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}, github: remoteTx}
 		if err := apply(tx); err != nil {
 			cancel()
+			if isContextTimeout(err) {
+				return ledgerWriteTimeoutError(timeout, err)
+			}
 			return err
 		}
 		if _, err := remoteTx.commit(ledgerCommitMessage(source)); err != nil {
 			cancel()
+			if isContextTimeout(err) {
+				return ledgerWriteTimeoutError(timeout, err)
+			}
 			lastErr = err
 			continue
 		}
@@ -175,6 +194,28 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		lastErr = errors.New("github api ledger write failed")
 	}
 	return lastErr
+}
+
+func githubLedgerWriteTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("LEDGER_GITHUB_WRITE_TIMEOUT"))
+	if raw == "" {
+		return defaultGitHubLedgerWriteTimeout
+	}
+	if timeout, err := time.ParseDuration(raw); err == nil && timeout > 0 {
+		return timeout
+	}
+	if timeout, err := time.ParseDuration(raw + "s"); err == nil && timeout > 0 {
+		return timeout
+	}
+	return defaultGitHubLedgerWriteTimeout
+}
+
+func isContextTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+func ledgerWriteTimeoutError(timeout time.Duration, err error) error {
+	return fmt.Errorf("%w: GitHub 写入超过 %s，请稍后重试；如果经常发生，可调大 LEDGER_GITHUB_WRITE_TIMEOUT 或改用异步写入: %v", errLedgerWriteTimeout, timeout.Round(time.Second), err)
 }
 
 func (tx *LedgerWriteTransaction) Snapshot(file string) error {
@@ -468,6 +509,15 @@ func (w *LedgerWriter) validateCurrencies(tx *LedgerWriteTransaction, currencies
 }
 
 func (w *LedgerWriter) knownCommodities(tx *LedgerWriteTransaction) ([]string, error) {
+	if w.commoditiesProvider != nil {
+		commodities, err := w.commoditiesProvider()
+		if err != nil {
+			return nil, err
+		}
+		if len(commodities) > 0 {
+			return commodities, nil
+		}
+	}
 	lines, err := tx.ReadLedgerLines(mainBeanPath(w.cfg), map[string]bool{})
 	if err != nil {
 		return nil, err
