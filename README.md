@@ -89,9 +89,10 @@ Do not set `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`,
 `ledger-web` fixes these internally: reads are strict Postgres reads, writes go
 through the GitHub API, and runtime data lives in Postgres.
 
-The scheduled `Ledger Indexer` workflow keeps the read model incremental. Run
-the workflow with `force_rebuild=true` after an index format migration to
-rebuild the active Postgres revision from the checked-out private ledger.
+The private ledger repository owns the `Index Ledger Web` workflow. It indexes
+every main-branch push and runs a 30-minute recovery schedule. Run it with
+`force_rebuild=true` after an index format migration to rebuild the active
+Postgres revision from the checked-out private ledger.
 
 See [web/.env.example](web/.env.example) for the complete list.
 
@@ -158,7 +159,7 @@ without requiring a local checkout in the API service.
 The API host needs `DATABASE_URL` and the explicit GitHub repository/token
 variables. Ledger read endpoints use Postgres only. Import commit and editor
 save create GitHub commits directly, mark the read model as pending, and the
-scheduled indexer updates Postgres on its next run. Import
+private-ledger indexer updates Postgres from that commit. Import
 preview in GitHub API mode does not parse the full ledger or run the ledger-file
 dedup script; instead it dedups against the Postgres read model by statement
 metadata, order IDs, exact transaction signatures, and funding-account postings.
@@ -170,33 +171,23 @@ Actions, or your container platform. The API and worker both use the default
 `ledger#<branch>` index namespace, so no separate source-key variable is needed
 for the normal single-ledger deployment. Keep the mounted ledger checkout and
 Beancount tooling on the worker side; keep them off the hosted API service.
+The indexer holds a Postgres advisory lock while publishing, so set
+`POSTGRES_MAX_OPEN_CONNS` to at least `2` when configuring a finite pool.
 
 #### GitHub Actions indexer
 
-The repository includes `.github/workflows/ledger-indexer.yml`, which runs the
-one-shot indexer every 10 minutes and can also be started manually from the
-Actions tab.
-
-Configure these GitHub Actions repository variables:
-
-- `LEDGER_GITHUB_OWNER` — private ledger repository owner.
-- `LEDGER_GITHUB_REPO` — private ledger repository name.
-- `LEDGER_GIT_BRANCH` — optional ledger branch; defaults to `main`.
-
-Configure these GitHub Actions repository secrets:
-
-- `LEDGER_GITHUB_TOKEN` — fine-grained token with Contents read access to the
-  private ledger repository.
-- `DATABASE_URL` — Postgres connection string shared with `ledger-web`.
-
-The workflow checks out this application repository, checks out the private
-ledger repository into `private-ledger/`, sets `LEDGER_ROOT` to that checkout,
-and runs:
+Install `Index Ledger Web` in the private ledger repository. It checks out the
+private ledger at the triggering commit, checks out this application repository,
+sets `LEDGER_ROOT`, and runs:
 
 ```bash
 cd server
 go run ./cmd/ledger-indexer
 ```
+
+Configure `DATABASE_URL` as a private-ledger Actions secret. `LEDGER_WEB_APP_REF`
+selects the application revision. The workflow indexes `main` into the
+`ledger#main` Postgres source key.
 
 To migrate an older filesystem runtime directory into Postgres:
 

@@ -126,6 +126,9 @@ func ValidateIndexerConfig(cfg Config) error {
 	if !ledgerReadModelEnabled(cfg) {
 		return errors.New("ledger-indexer requires the Postgres read model")
 	}
+	if maxOpenConns := postgresPoolSettingsFromEnv().maxOpenConns; maxOpenConns > 0 && maxOpenConns < 2 {
+		return errors.New("ledger-indexer requires POSTGRES_MAX_OPEN_CONNS to be at least 2 when it is set")
+	}
 	return nil
 }
 

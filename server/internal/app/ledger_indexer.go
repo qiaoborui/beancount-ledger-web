@@ -29,6 +29,12 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if store == nil {
 		return LedgerIndexResult{}, errors.New("ledger index store is required")
 	}
+	return store.withIndexLock(ctx, func() (LedgerIndexResult, error) {
+		return runLedgerIndexOnceWithStore(ctx, cfg, store)
+	})
+}
+
+func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerIndexStore) (LedgerIndexResult, error) {
 	active, hasActive, err := store.ActiveRevision(ctx)
 	if err != nil {
 		return LedgerIndexResult{}, err

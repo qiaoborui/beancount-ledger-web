@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { discardPendingLedgerOperation, hasPendingOperationsToSync, syncOperation } from "./usePendingLedgerWrites";
+import { discardPendingLedgerOperation, hasPendingOperationsToSync, isPendingLedgerConflict, syncOperation } from "./usePendingLedgerWrites";
 import type { PendingLedgerOperation } from "../pendingLedgerOperations";
 
 function response(body: unknown, ok: boolean) {
@@ -30,55 +30,8 @@ describe("syncOperation", () => {
     vi.restoreAllMocks();
   });
 
-  it("retries stale transaction updates by file and line when the source hash changed", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ error: "找不到原交易，账本可能已被修改，请刷新后重试" }, false))
-      .mockResolvedValueOnce(response({ ok: true }, true));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const operation: PendingLedgerOperation = {
-      id: "op-1",
-      createdAt: 1,
-      kind: "update-transaction",
-      source: { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" },
-      entry,
-    };
-
-    await syncOperation(operation);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(firstBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
-    expect(retryBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12 });
-  });
-
-  it("retries stale transaction deletes by file and line when the source hash changed", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ error: "找不到原交易，账本可能已被修改，请刷新后重试" }, false))
-      .mockResolvedValueOnce(response({ ok: true }, true));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const operation: PendingLedgerOperation = {
-      id: "op-1",
-      createdAt: 1,
-      kind: "delete-transaction",
-      source: { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" },
-      reason: "duplicate",
-    };
-
-    await syncOperation(operation);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(firstBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
-    expect(retryBody.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12 });
-  });
-
-  it("stops transaction updates when the queued base ledger version is stale", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ version: "new-version", fileCount: 2, latestMtimeMs: 2 }, true));
+  it("sends a transaction update when an unrelated ledger revision completed", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ ok: true }, true));
     vi.stubGlobal("fetch", fetchMock);
 
     const operation: PendingLedgerOperation = {
@@ -90,10 +43,37 @@ describe("syncOperation", () => {
       baseLedgerVersion: { version: "old-version", fileCount: 2, latestMtimeMs: 1 },
     };
 
-    await expect(syncOperation(operation)).rejects.toThrow("需要确认");
+    await syncOperation(operation);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/ledger/version");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/ledger/transactions");
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
+  });
+
+  it("keeps the transaction hash when a delete needs confirmation", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ error: "找不到原交易，账本可能已被修改，请刷新后重试" }, false));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const operation: PendingLedgerOperation = {
+      id: "op-1",
+      createdAt: 1,
+      kind: "delete-transaction",
+      source: { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" },
+      reason: "duplicate",
+    };
+
+    await expect(syncOperation(operation)).rejects.toThrow("找不到原交易");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
+  });
+
+  it("classifies a changed transaction source as a conflict", () => {
+    expect(isPendingLedgerConflict("找不到原交易，账本可能已被修改，请刷新后重试")).toBe(true);
+    expect(isPendingLedgerConflict("交易来源不唯一，账本可能已被修改，请刷新后重试")).toBe(true);
+    expect(isPendingLedgerConflict("连接超时")).toBe(false);
   });
 });
 

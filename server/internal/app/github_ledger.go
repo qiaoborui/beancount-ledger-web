@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -259,6 +260,10 @@ func (tx *githubLedgerTransaction) writeFile(file string, content []byte) error 
 	rel, err := tx.relPath(file)
 	if err != nil {
 		return err
+	}
+	if snap, ok := tx.cache[rel]; ok && snap.existed && bytes.Equal(snap.content, content) {
+		delete(tx.writes, rel)
+		return nil
 	}
 	tx.writes[rel] = append([]byte(nil), content...)
 	return nil

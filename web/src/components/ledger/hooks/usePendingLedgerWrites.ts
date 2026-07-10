@@ -103,24 +103,8 @@ function deleteOperation(source: Txn["source"], reason: string, baseLedgerVersio
   return { id: makeId(), createdAt: now, updatedAt: now, kind: "delete-transaction", source, reason, baseLedgerVersion, status: "pending" };
 }
 
-function ledgerVersionChanged(base?: LedgerVersion | null, current?: LedgerVersion | null) {
-  if (!base?.version || !current?.version) return false;
-  return base.version !== current.version;
-}
-
-async function fetchCurrentLedgerVersion(): Promise<LedgerVersion | null> {
-  const res = await fetch("/api/ledger/version");
-  const data = await readJson<LedgerVersion & { error?: string }>(res);
-  if (!res.ok) throw new Error(data.error || "读取账本版本失败");
-  return data;
-}
-
-async function assertTransactionBaseVersion(operation: PendingLedgerOperation) {
-  if (operation.kind === "append" || !operation.baseLedgerVersion?.version) return;
-  const current = await fetchCurrentLedgerVersion();
-  if (ledgerVersionChanged(operation.baseLedgerVersion, current)) {
-    throw new Error("账本已更新，这条本地修改需要确认后再同步");
-  }
+export function isPendingLedgerConflict(message: string) {
+  return message.includes("找不到原交易") || message.includes("交易来源");
 }
 
 export function discardPendingLedgerOperation(operations: PendingLedgerOperation[], id: string) {
@@ -132,7 +116,6 @@ export function hasPendingOperationsToSync(operations: PendingLedgerOperation[])
 }
 
 export async function syncOperation(operation: PendingLedgerOperation) {
-  await assertTransactionBaseVersion(operation);
   if (operation.kind === "append") {
     const res = await fetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) });
     const data = await readJson<{ error?: string }>(res);
@@ -141,24 +124,14 @@ export async function syncOperation(operation: PendingLedgerOperation) {
   }
 
   if (operation.kind === "update-transaction") {
-    let res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
-    let data = await readJson<{ error?: string }>(res);
-    if (!res.ok && operation.source.hash && data.error?.includes("找不到原交易")) {
-      const source = { file: operation.source.file, line: operation.source.line };
-      res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, entry: operation.entry }) });
-      data = await readJson<{ error?: string }>(res);
-    }
+    const res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
+    const data = await readJson<{ error?: string }>(res);
     if (!res.ok) throw new Error(data.error || "修改同步失败");
     return;
   }
 
-  let res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) });
-  let data = await readJson<{ error?: string }>(res);
-  if (!res.ok && operation.source.hash && data.error?.includes("找不到原交易")) {
-    const source = { file: operation.source.file, line: operation.source.line };
-    res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, reason: operation.reason }) });
-    data = await readJson<{ error?: string }>(res);
-  }
+  const res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) });
+  const data = await readJson<{ error?: string }>(res);
   if (!res.ok) throw new Error(data.error || "删除同步失败");
 }
 
@@ -241,7 +214,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
           const message = error instanceof Error ? error.message : "同步中断";
           const remaining = await readPendingOperations();
           const failedIndex = remaining.findIndex((operation) => operation.id === item.id);
-          const status = message.includes("需要确认") ? "conflict" : "error";
+          const status = isPendingLedgerConflict(message) ? "conflict" : "error";
           if (failedIndex >= 0) {
             const failed = remaining[failedIndex];
             persist(remaining.map((operation, index) => index === failedIndex ? {

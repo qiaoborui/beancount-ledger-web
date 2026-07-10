@@ -89,6 +89,19 @@ func TestValidateWebConfigRequiresPostgresAndGitHub(t *testing.T) {
 	}
 }
 
+func TestValidateIndexerConfigRequiresTwoPostgresConnections(t *testing.T) {
+	t.Setenv("POSTGRES_MAX_OPEN_CONNS", "1")
+	cfg := Config{
+		DatabaseURL:     "postgres://example",
+		LedgerRoot:      t.TempDir(),
+		LedgerReadModel: "postgres",
+	}
+
+	if err := ValidateIndexerConfig(cfg); err == nil {
+		t.Fatal("expected indexer pool capacity to be rejected")
+	}
+}
+
 func TestGitHubAPIRequiresExplicitRepoConfig(t *testing.T) {
 	cfg := Config{
 		LedgerStorage:     "github_api",

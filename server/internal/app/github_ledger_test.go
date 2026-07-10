@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -157,7 +156,7 @@ func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T)
 		File:   "/home/runner/work/ledger/private-ledger/transactions/2026/05.bean",
 		Line:   1,
 		Hash:   transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
-		GitSHA: "base-commit",
+		GitSHA: "indexed-commit",
 	}, LedgerEntry{
 		Kind:      "transaction",
 		Date:      "2026-05-01",
@@ -180,16 +179,70 @@ func TestGitHubAPIReplaceTransactionReadsValidationFilesFromGitHub(t *testing.T)
 	}
 }
 
-func TestLedgerWriteTransactionRejectsStaleIndexGitSHA(t *testing.T) {
+func TestGitHubAPIReplaceTransactionSkipsIdenticalWrite(t *testing.T) {
+	entry := LedgerEntry{
+		Kind:      "transaction",
+		Date:      "2026-05-01",
+		Payee:     "Cafe",
+		Narration: "Lunch",
+		Currency:  "CNY",
+		Postings: []EntryPosting{
+			{Account: "Expenses:Food", Amount: "12.00", Currency: "CNY"},
+			{Account: "Assets:Cash", Amount: "-12.00", Currency: "CNY"},
+		},
+	}
+	original := TransactionToBean(entry)
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\n",
+		"commodities.bean":          "2026-01-01 commodity CNY\n",
+		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Expenses:Food CNY\n",
+		"transactions/2026/05.bean": original,
+	})
+	defer fake.server.Close()
+
+	writer := NewLedgerWriter(githubAPITestConfig(t, fake), nil)
+	err := writer.ReplaceTransactionBlock(TransactionSource{
+		File:   "/home/runner/work/ledger/private-ledger/transactions/2026/05.bean",
+		Line:   1,
+		Hash:   transactionHash(strings.Split(strings.TrimRight(original, "\n"), "\n")[:3]),
+		GitSHA: "base-commit",
+	}, entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.treePaths) != 0 {
+		t.Fatalf("tree paths=%#v, want no commit", fake.treePaths)
+	}
+	if fake.updatedRef != "" {
+		t.Fatalf("updated ref=%q, want no ref update", fake.updatedRef)
+	}
+}
+
+func TestLedgerWriteTransactionRequiresSourceLocator(t *testing.T) {
 	tx := &LedgerWriteTransaction{github: &githubLedgerTransaction{baseCommitSHA: "current-commit"}}
 
-	err := tx.validateTransactionSource(TransactionSource{GitSHA: "indexed-commit"})
+	err := tx.validateTransactionSource(TransactionSource{GitSHA: "current-commit"})
 
-	if !errors.Is(err, errLedgerIndexOutdated) {
-		t.Fatalf("error=%v, want stale index error", err)
+	if err == nil {
+		t.Fatal("expected a missing source locator error")
 	}
-	if got := ledgerWriteErrorStatus(err); got != http.StatusConflict {
-		t.Fatalf("status=%d, want %d", got, http.StatusConflict)
+}
+
+func TestTransactionBlockRejectsAmbiguousHashFallback(t *testing.T) {
+	transaction := strings.Join([]string{
+		`2026-05-01 * "Cafe" "Lunch"`,
+		"  Expenses:Food 12.00 CNY",
+		"  Assets:Cash -12.00 CNY",
+	}, "\n")
+	text := strings.Join([]string{transaction, "", transaction, ""}, "\n")
+
+	_, _, _, err := transactionBlock(text, TransactionSource{
+		Line: 2,
+		Hash: transactionHash(strings.Split(transaction, "\n")),
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "交易来源不唯一") {
+		t.Fatalf("expected an ambiguous source error, got %v", err)
 	}
 }
 

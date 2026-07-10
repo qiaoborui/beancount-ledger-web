@@ -230,9 +230,9 @@ func snapshotTransactionsDesc(snapshot *LedgerSnapshot) []Transaction {
 }
 
 type fileStat struct {
-	relative string
-	size     int64
-	mtimeMs  int64
+	relative    string
+	contentHash [sha256.Size]byte
+	mtimeMs     int64
 }
 
 func ledgerVersion(cfg Config) (LedgerVersion, error) {
@@ -255,11 +255,15 @@ func ledgerVersion(cfg Config) (LedgerVersion, error) {
 		if err != nil {
 			return err
 		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
 		rel, _ := filepath.Rel(cfg.LedgerRoot, path)
 		stats = append(stats, fileStat{
-			relative: filepath.ToSlash(rel),
-			size:     info.Size(),
-			mtimeMs:  info.ModTime().UnixMilli(),
+			relative:    filepath.ToSlash(rel),
+			contentHash: sha256.Sum256(content),
+			mtimeMs:     info.ModTime().UnixMilli(),
 		})
 		return nil
 	})
@@ -272,9 +276,7 @@ func ledgerVersion(cfg Config) (LedgerVersion, error) {
 	for _, stat := range stats {
 		hash.Write([]byte(stat.relative))
 		hash.Write([]byte{0})
-		hash.Write([]byte(strconv.FormatInt(stat.size, 10)))
-		hash.Write([]byte{0})
-		hash.Write([]byte(strconv.FormatInt(stat.mtimeMs, 10)))
+		hash.Write(stat.contentHash[:])
 		hash.Write([]byte{0})
 		if stat.mtimeMs > latest {
 			latest = stat.mtimeMs

@@ -78,6 +78,22 @@ func (s *LedgerIndexStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *LedgerIndexStore) withIndexLock(ctx context.Context, fn func() (LedgerIndexResult, error)) (LedgerIndexResult, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return LedgerIndexResult{}, err
+	}
+	defer conn.Close()
+
+	lockName := "ledger-index:" + s.sourceKey
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, lockName); err != nil {
+		return LedgerIndexResult{}, err
+	}
+	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, lockName)
+
+	return fn()
+}
+
 func (s *LedgerIndexStore) EnsureSchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS ledger_index_revisions (

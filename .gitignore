@@ -53,3 +53,4 @@ __pycache__/
 /imports/
 /ledgers/
 .vercel
+.env*

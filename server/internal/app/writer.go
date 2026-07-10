@@ -24,8 +24,7 @@ type LedgerWriter struct {
 }
 
 var (
-	errLedgerWriteTimeout  = errors.New("ledger write timed out")
-	errLedgerIndexOutdated = errors.New("账本索引已落后于当前账本，请刷新后重试")
+	errLedgerWriteTimeout = errors.New("ledger write timed out")
 )
 
 const defaultGitHubLedgerWriteTimeout = 50 * time.Second
@@ -573,8 +572,8 @@ func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason 
 }
 
 func (tx *LedgerWriteTransaction) validateTransactionSource(source TransactionSource) error {
-	if tx.github != nil && source.GitSHA != "" && source.GitSHA != tx.github.baseCommitSHA {
-		return errLedgerIndexOutdated
+	if source.Line <= 0 && strings.TrimSpace(source.Hash) == "" {
+		return errors.New("交易来源缺少定位信息，请刷新后重试")
 	}
 	return nil
 }
@@ -785,6 +784,7 @@ func transactionBlockAtLine(text string, line int) ([]string, int, int, error) {
 
 func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	matchStart, matchEnd := -1, -1
 	for start := 0; start < len(lines); start++ {
 		if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+[*!]\s+`).MatchString(lines[start]) {
 			continue
@@ -794,8 +794,14 @@ func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 			end++
 		}
 		if transactionHash(lines[start:end]) == hash {
-			return lines, start, end, nil
+			if matchStart >= 0 {
+				return nil, 0, 0, errors.New("交易来源不唯一，账本可能已被修改，请刷新后重试")
+			}
+			matchStart, matchEnd = start, end
 		}
+	}
+	if matchStart >= 0 {
+		return lines, matchStart, matchEnd, nil
 	}
 	return nil, 0, 0, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
 }
