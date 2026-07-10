@@ -301,7 +301,7 @@ func importFileKey(importID, name string) string {
 
 func (s *Server) putImportFile(ctx context.Context, importID, name string, content []byte) (string, error) {
 	key := importFileKey(importID, name)
-	if err := s.runtimeFiles().PutFile(ctx, "imports", key, content); err != nil {
+	if err := s.runtime().PutFile(ctx, "imports", key, content); err != nil {
 		return "", err
 	}
 	return key, nil
@@ -311,7 +311,7 @@ func (s *Server) materializeImportFile(ctx context.Context, key, localPath strin
 	if key == "" || localPath == "" {
 		return false, nil
 	}
-	return s.runtimeFiles().MaterializeFile(ctx, "imports", key, localPath)
+	return s.runtime().MaterializeFile(ctx, "imports", key, localPath)
 }
 
 func (s *Server) materializeImportMetaFiles(ctx context.Context, importID string, meta *importMeta) error {
@@ -344,9 +344,9 @@ func (s *Server) materializeImportMetaFiles(ctx context.Context, importID string
 
 func importRuntimeDir(cfg Config, importID string) string {
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
-		return filepath.Join(cfg.RuntimeDir, "imports", "invalid")
+		return filepath.Join(os.TempDir(), "beancount-ledger-web", "imports", "invalid")
 	}
-	return filepath.Join(cfg.RuntimeDir, "imports", importID)
+	return filepath.Join(os.TempDir(), "beancount-ledger-web", "imports", importID)
 }
 
 func previewPath(cfg Config, importID, name string) string {

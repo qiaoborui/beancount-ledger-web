@@ -128,12 +128,3 @@ func unsetEnvForTest(t *testing.T, keys ...string) {
 		})
 	}
 }
-
-func hasGitChange(changes []GitChange, path string) bool {
-	for _, change := range changes {
-		if change.Path == path || change.OriginalPath == path {
-			return true
-		}
-	}
-	return false
-}

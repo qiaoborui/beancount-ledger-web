@@ -99,6 +99,7 @@ type ImportDocument struct {
 
 func (s *Server) createImportPreview(ctx context.Context, providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
 	importID := randomID()
+	defer os.RemoveAll(importRuntimeDir(s.cfg, importID))
 	upload, err := s.saveImportUpload(ctx, header, originalHeader, providerOverride, importID)
 	if err != nil {
 		return nil, err
@@ -389,6 +390,7 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if err := s.materializeImportMetaFiles(ctx, importID, &meta); err != nil {
 		return nil, err
 	}
+	defer os.RemoveAll(importRuntimeDir(s.cfg, importID))
 	hash, err := fileSHA256(meta.InputFile)
 	if err != nil {
 		return nil, err

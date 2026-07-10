@@ -18,6 +18,7 @@ import (
 type LedgerIndexStore struct {
 	db        *sql.DB
 	sourceKey string
+	closeDB   bool
 }
 
 type LedgerIndexRevision struct {
@@ -34,16 +35,24 @@ func NewLedgerIndexStore(cfg Config) (*LedgerIndexStore, error) {
 	if cfg.DatabaseURL == "" {
 		return nil, errors.New("DATABASE_URL is required when LEDGER_READ_MODEL=postgres")
 	}
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	db, err := openPostgres(cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
-	configurePostgresPool(db)
+	store, err := NewLedgerIndexStoreWithDB(db, cfg)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	store.closeDB = true
+	return store, nil
+}
+
+func NewLedgerIndexStoreWithDB(db *sql.DB, cfg Config) (*LedgerIndexStore, error) {
 	store := &LedgerIndexStore{db: db, sourceKey: ledgerIndexSourceKey(cfg)}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := store.EnsureSchema(ctx); err != nil {
-		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
@@ -63,7 +72,7 @@ func ledgerIndexSourceKey(cfg Config) string {
 }
 
 func (s *LedgerIndexStore) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || !s.closeDB {
 		return nil
 	}
 	return s.db.Close()

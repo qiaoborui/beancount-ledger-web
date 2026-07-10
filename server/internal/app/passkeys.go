@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,8 +43,6 @@ type passkeyUser struct {
 }
 
 const passkeySessionTTL = 10 * time.Minute
-
-var passkeyMu sync.Mutex
 
 func (u passkeyUser) WebAuthnID() []byte {
 	if len(u.id) > 0 {
@@ -267,43 +264,49 @@ func (s *Server) writePasskeyStore(store passkeyStore) error {
 }
 
 func (s *Server) savePasskeySession(session *webauthn.SessionData) error {
-	passkeyMu.Lock()
-	defer passkeyMu.Unlock()
 	if session == nil || strings.TrimSpace(session.Challenge) == "" {
 		return errors.New("No active passkey challenge")
 	}
-	store := s.readPasskeyStore()
-	store.normalizePasskeySessions(time.Now())
-	store.Sessions[session.Challenge] = storedPasskeySession{Session: session, CreatedAt: time.Now()}
-	return s.writePasskeyStore(store)
+	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
+		store := s.readPasskeyStore()
+		now := time.Now()
+		store.normalizePasskeySessions(now)
+		store.Sessions[session.Challenge] = storedPasskeySession{Session: session, CreatedAt: now}
+		return s.writePasskeyStore(store)
+	})
 }
 
 func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData, error) {
-	passkeyMu.Lock()
-	defer passkeyMu.Unlock()
 	if strings.TrimSpace(challenge) == "" {
 		return nil, errors.New("No active passkey challenge")
 	}
-	store := s.readPasskeyStore()
-	store.normalizePasskeySessions(time.Now())
-	stored, ok := store.Sessions[challenge]
-	if !ok || stored.Session == nil {
-		return nil, errors.New("No active passkey challenge")
-	}
-	session := stored.Session
-	delete(store.Sessions, challenge)
-	if err := s.writePasskeyStore(store); err != nil {
+	var session *webauthn.SessionData
+	err := s.runtime().WithLock(context.Background(), "passkeys", func() error {
+		store := s.readPasskeyStore()
+		store.normalizePasskeySessions(time.Now())
+		stored, ok := store.Sessions[challenge]
+		if !ok || stored.Session == nil {
+			return errors.New("No active passkey challenge")
+		}
+		session = stored.Session
+		delete(store.Sessions, challenge)
+		return s.writePasskeyStore(store)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return session, nil
 }
 
 func (s *Server) hasPasskeySession() bool {
-	passkeyMu.Lock()
-	defer passkeyMu.Unlock()
-	store := s.readPasskeyStore()
-	store.normalizePasskeySessions(time.Now())
-	return len(store.Sessions) > 0
+	hasSession := false
+	_ = s.runtime().WithLock(context.Background(), "passkeys", func() error {
+		store := s.readPasskeyStore()
+		store.normalizePasskeySessions(time.Now())
+		hasSession = len(store.Sessions) > 0
+		return s.writePasskeyStore(store)
+	})
+	return hasSession
 }
 
 func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
@@ -342,34 +345,34 @@ func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
 }
 
 func (s *Server) savePasskey(credential *webauthn.Credential) error {
-	passkeyMu.Lock()
-	defer passkeyMu.Unlock()
-	store := s.readPasskeyStore()
-	id := base64.RawURLEncoding.EncodeToString(credential.ID)
-	transports := make([]string, 0, len(credential.Transport))
-	for _, transport := range credential.Transport {
-		transports = append(transports, string(transport))
-	}
-	stored := StoredPasskey{
-		ID:             id,
-		PublicKey:      base64.RawURLEncoding.EncodeToString(credential.PublicKey),
-		Counter:        credential.Authenticator.SignCount,
-		Transports:     transports,
-		BackupEligible: boolPtr(credential.Flags.BackupEligible),
-		BackupState:    boolPtr(credential.Flags.BackupState),
-	}
-	replaced := false
-	for i := range store.Credentials {
-		if store.Credentials[i].ID == id {
-			store.Credentials[i] = stored
-			replaced = true
-			break
+	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
+		store := s.readPasskeyStore()
+		id := base64.RawURLEncoding.EncodeToString(credential.ID)
+		transports := make([]string, 0, len(credential.Transport))
+		for _, transport := range credential.Transport {
+			transports = append(transports, string(transport))
 		}
-	}
-	if !replaced {
-		store.Credentials = append(store.Credentials, stored)
-	}
-	return s.writePasskeyStore(store)
+		stored := StoredPasskey{
+			ID:             id,
+			PublicKey:      base64.RawURLEncoding.EncodeToString(credential.PublicKey),
+			Counter:        credential.Authenticator.SignCount,
+			Transports:     transports,
+			BackupEligible: boolPtr(credential.Flags.BackupEligible),
+			BackupState:    boolPtr(credential.Flags.BackupState),
+		}
+		replaced := false
+		for i := range store.Credentials {
+			if store.Credentials[i].ID == id {
+				store.Credentials[i] = stored
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			store.Credentials = append(store.Credentials, stored)
+		}
+		return s.writePasskeyStore(store)
+	})
 }
 
 func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
@@ -377,19 +380,19 @@ func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
 }
 
 func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligible bool, backupState bool) error {
-	passkeyMu.Lock()
-	defer passkeyMu.Unlock()
-	store := s.readPasskeyStore()
-	encoded := base64.RawURLEncoding.EncodeToString(id)
-	for i := range store.Credentials {
-		if store.Credentials[i].ID == encoded {
-			store.Credentials[i].Counter = counter
-			store.Credentials[i].BackupEligible = boolPtr(backupEligible)
-			store.Credentials[i].BackupState = boolPtr(backupState)
-			return s.writePasskeyStore(store)
+	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
+		store := s.readPasskeyStore()
+		encoded := base64.RawURLEncoding.EncodeToString(id)
+		for i := range store.Credentials {
+			if store.Credentials[i].ID == encoded {
+				store.Credentials[i].Counter = counter
+				store.Credentials[i].BackupEligible = boolPtr(backupEligible)
+				store.Credentials[i].BackupState = boolPtr(backupState)
+				return s.writePasskeyStore(store)
+			}
 		}
-	}
-	return errors.New("Unknown passkey")
+		return errors.New("Unknown passkey")
+	})
 }
 
 func (s *Server) passkeyUser() passkeyUser {

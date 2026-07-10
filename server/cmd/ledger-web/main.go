@@ -18,11 +18,14 @@ func main() {
 		}()
 	}
 
-	cfg := app.LoadConfig()
-	if err := app.ValidateConfig(cfg); err != nil {
+	cfg := app.LoadWebConfig()
+	if err := app.ValidateWebConfig(cfg); err != nil {
 		log.Fatal(err)
 	}
-	router := app.NewRouter(cfg)
+	router, err := app.NewRouterWithError(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 	addr := ":" + cfg.Port
 	log.Printf("ledger web listening on %s", addr)
 	if err := http.ListenAndServe(addr, router); err != nil {

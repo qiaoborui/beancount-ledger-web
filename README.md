@@ -67,9 +67,10 @@ See [web/.env.example](web/.env.example) for the full environment configuration.
 
 ## Deployment
 
-The recommended personal deployment is a self-hosted `ledger-web` server with
-`LEDGER_ROOT` pointing at a private ledger repository and `RUNTIME_DIR` pointing
-at private runtime storage.
+The recommended deployment runs a stateless `ledger-web` service plus a
+separately scheduled `ledger-indexer` job. The private ledger GitHub repository
+remains the source of truth; Postgres stores the ledger read model and all
+application runtime state.
 
 Vercel remains useful for pull-request previews or hosted deployments. Connect
 the GitHub repository with the root `vercel.json`; the project defines two
@@ -78,18 +79,15 @@ backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
 backend service; every other path routes to the frontend service. Configure
 environment variables in the Vercel dashboard:
 
-- `LEDGER_STORAGE=github_api` — required for Vercel + Postgres read model. The API host writes supported ledger changes directly to GitHub without cloning the ledger.
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name.
 - `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
 - `LEDGER_GIT_BRANCH=main` — branch to read and update through the GitHub API.
 - `DATABASE_URL` — Postgres connection string for the read model, runtime state, locks, and import preview files.
-- `LEDGER_READ_MODEL=postgres` — hosted read path. The API reads the active ledger index from Postgres instead of cloning/parsing the Beancount repository on each cold request.
-- `LEDGER_READ_MODEL_STRICT=true` — default when `LEDGER_READ_MODEL=postgres`; prevents the API host from falling back to local Git checkout and parsing.
 
-Do not set `LEDGER_ROOT` or `BEAN_CHECK_BIN` on the Vercel API service. The API
-host is stateless: it reads Postgres, writes GitHub through the API, and stores
-runtime data in Postgres. The old remote Git checkout variables have been
-removed from the application.
+Do not set `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`,
+`LEDGER_ROOT`, `RUNTIME_DIR`, or `BEAN_CHECK_BIN` on the API service.
+`ledger-web` fixes these internally: reads are strict Postgres reads, writes go
+through the GitHub API, and runtime data lives in Postgres.
 
 See [web/.env.example](web/.env.example) for the complete list.
 
@@ -110,15 +108,17 @@ docker compose -f docker/docker-compose.yml up --build
 ```
 
 To index a mounted local ledger into the same Supabase database, start the
-optional indexer profile:
+optional indexer profile whenever you want to refresh the read model:
 
 ```bash
 LEDGER_HOST_PATH=/path/to/private-ledger docker compose -f docker/docker-compose.yml --profile indexer up --build
 ```
 
-The indexer expects `LEDGER_HOST_PATH` to point at an existing local checkout or
-mounted copy of the private ledger. Clone or sync that checkout outside
-`ledger-indexer`; the application no longer manages remote Git checkouts.
+The indexer is a one-shot job. It expects `LEDGER_HOST_PATH` to point at an
+existing local checkout or mounted copy of the private ledger, indexes it into
+Postgres, and exits. Clone, sync, and schedule that checkout outside
+`ledger-indexer`; the application no longer manages remote Git checkouts or
+worker loops.
 
 ## Environment variables
 
@@ -126,18 +126,15 @@ See [web/.env.example](web/.env.example) for the complete list.
 
 Important variables:
 
-- `LEDGER_STORAGE=github_api|filesystem` — use `github_api` for hosted API writes and `filesystem` for local ledgers already present on disk, including the index worker.
-- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `LEDGER_STORAGE=github_api`.
-- `DATABASE_URL` — enables Postgres for the ledger read model, runtime state, locks, web push subscriptions, notifications, and import preview files. Without it, local development falls back to `RUNTIME_DIR`.
-- `LEDGER_READ_MODEL=files|postgres` — use `postgres` to serve ledger reads from the normalized Postgres read model.
-- `LEDGER_READ_MODEL_STRICT=true|false` — when true, the API host returns an error if no active indexed revision exists instead of cloning/parsing local files.
-- `LEDGER_INDEX_INTERVAL_SECONDS` — optional worker loop interval for `ledger-indexer`; unset or non-positive runs one indexing pass and exits.
+- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `ledger-web`.
+- `DATABASE_URL` — required for the ledger read model, runtime state, locks, rate limits, web push subscriptions, notifications, and import preview files.
+- `LEDGER_ROOT` — indexer-only path to a local private ledger checkout or mounted copy.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin, allowed passkey origins, and passkey RP ID. Keep `WEBAUTHN_RP_ID` on the original registration domain to preserve existing passkeys after a domain move.
-- `BEAN_CHECK_BIN` — optional path to `bean-check` for local/self-hosted or index worker validation. It is not needed on Vercel API hosts using `github_api`.
+- `BEAN_CHECK_BIN` — optional path to `bean-check` for index worker validation. It is not needed on API hosts.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
-- `LEDGER_GIT_SCHEDULER` — removed. Clone or sync worker checkouts outside the application.
+- `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`, `RUNTIME_DIR`, `LEDGER_INDEX_INTERVAL_SECONDS`, and `LEDGER_GIT_SCHEDULER` — removed from production runtime configuration.
 
 ### Postgres ledger read model
 
@@ -152,24 +149,33 @@ The Beancount files remain the only source of truth. `ledger-indexer` validates
 an existing local checkout or mounted ledger directory, parses it, writes a
 revision-scoped normalized projection to Postgres, then atomically marks the
 revision active. `ledger-web` can then serve `/api/ledger/*` reads from Postgres
-with `LEDGER_READ_MODEL=postgres`.
+without requiring a local checkout in the API service.
 
-The Vercel API host needs `DATABASE_URL`, `LEDGER_READ_MODEL=postgres`, and
-`LEDGER_READ_MODEL_STRICT=true`. Ledger read endpoints use Postgres only. For
-hosted writes, set `LEDGER_STORAGE=github_api` plus the explicit GitHub
-repository/token variables. Import commit and editor save create GitHub commits
-directly, mark the read model as pending, and the local worker updates Postgres
-on its next indexing pass. Import
+The API host needs `DATABASE_URL` and the explicit GitHub repository/token
+variables. Ledger read endpoints use Postgres only. Import commit and editor
+save create GitHub commits directly, mark the read model as pending, and the
+scheduled indexer updates Postgres on its next run. Import
 preview in GitHub API mode does not parse the full ledger or run the ledger-file
 dedup script; instead it dedups against the Postgres read model by statement
 metadata, order IDs, exact transaction signatures, and funding-account postings.
 Review any remaining preview rows before committing.
 
-The index worker needs `LEDGER_STORAGE=filesystem`, `LEDGER_ROOT`,
-`DATABASE_URL`, and `LEDGER_READ_MODEL=postgres`. The API and worker both use the
-default `ledger#<branch>` index namespace, so no separate source-key variable is
-needed for the normal single-ledger deployment. Keep the mounted ledger checkout
-and Beancount tooling on the worker side; keep them off the hosted API service.
+The index worker needs `LEDGER_ROOT` and `DATABASE_URL`. It runs one indexing
+pass and exits, so schedule it externally with cron, systemd timers, GitHub
+Actions, or your container platform. The API and worker both use the default
+`ledger#<branch>` index namespace, so no separate source-key variable is needed
+for the normal single-ledger deployment. Keep the mounted ledger checkout and
+Beancount tooling on the worker side; keep them off the hosted API service.
+
+To migrate an older filesystem runtime directory into Postgres:
+
+```bash
+go run ./cmd/ledger-state-migrate -runtime-dir /path/to/runtime
+go run ./cmd/ledger-state-migrate -runtime-dir /path/to/runtime -write
+```
+
+The first command is a dry run. The second writes idempotent runtime JSON and
+import preview blobs to Postgres.
 
 ## Ledger layout
 

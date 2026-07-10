@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -45,8 +44,6 @@ type pushSendResult struct {
 	Failed    int `json:"failed"`
 	Removed   int `json:"removed"`
 }
-
-var pushMu sync.Mutex
 
 func (s *Server) pushStatus(c *gin.Context) {
 	if !requireAuth(c) {
@@ -178,50 +175,54 @@ func (s *Server) writePushStore(store pushStore) error {
 }
 
 func (s *Server) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
-	pushMu.Lock()
-	defer pushMu.Unlock()
-	store := s.readPushStore()
 	id := base64.RawURLEncoding.EncodeToString([]byte(subscription.Endpoint))
 	if len(id) > 48 {
 		id = id[:48]
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	found := false
-	for i := range store.Subscriptions {
-		if store.Subscriptions[i].ID == id {
-			store.Subscriptions[i].Subscription = subscription
-			store.Subscriptions[i].UserAgent = userAgent
-			store.Subscriptions[i].UpdatedAt = now
-			found = true
-			break
+	count := 0
+	err := s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
+		store := s.readPushStore()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		found := false
+		for i := range store.Subscriptions {
+			if store.Subscriptions[i].ID == id {
+				store.Subscriptions[i].Subscription = subscription
+				store.Subscriptions[i].UserAgent = userAgent
+				store.Subscriptions[i].UpdatedAt = now
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		store.Subscriptions = append(store.Subscriptions, StoredPushSubscription{ID: id, Subscription: subscription, UserAgent: userAgent, CreatedAt: now, UpdatedAt: now})
-	}
-	return id, len(store.Subscriptions), s.writePushStore(store)
+		if !found {
+			store.Subscriptions = append(store.Subscriptions, StoredPushSubscription{ID: id, Subscription: subscription, UserAgent: userAgent, CreatedAt: now, UpdatedAt: now})
+		}
+		count = len(store.Subscriptions)
+		return s.writePushStore(store)
+	})
+	return id, count, err
 }
 
 func (s *Server) removePushSubscription(endpoint string) (int, int, error) {
-	pushMu.Lock()
-	defer pushMu.Unlock()
-	store := s.readPushStore()
-	kept := store.Subscriptions[:0]
 	removed := 0
-	for _, item := range store.Subscriptions {
-		if item.Subscription.Endpoint == endpoint {
-			removed++
-			continue
+	count := 0
+	err := s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
+		store := s.readPushStore()
+		kept := store.Subscriptions[:0]
+		for _, item := range store.Subscriptions {
+			if item.Subscription.Endpoint == endpoint {
+				removed++
+				continue
+			}
+			kept = append(kept, item)
 		}
-		kept = append(kept, item)
-	}
-	store.Subscriptions = kept
-	if removed > 0 {
-		if err := s.writePushStore(store); err != nil {
-			return 0, 0, err
+		store.Subscriptions = kept
+		count = len(store.Subscriptions)
+		if removed > 0 {
+			return s.writePushStore(store)
 		}
-	}
-	return removed, len(store.Subscriptions), nil
+		return nil
+	})
+	return removed, count, err
 }
 
 func (s *Server) sendWebPushToAll(payload map[string]string) (pushSendResult, error) {
@@ -263,19 +264,19 @@ func (s *Server) sendWebPushToAll(payload map[string]string) (pushSendResult, er
 		}
 	}
 	if len(dead) > 0 {
-		pushMu.Lock()
-		latest := s.readPushStore()
-		kept := latest.Subscriptions[:0]
-		for _, item := range latest.Subscriptions {
-			if dead[item.Subscription.Endpoint] {
-				result.Removed++
-				continue
+		err = s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
+			latest := s.readPushStore()
+			kept := latest.Subscriptions[:0]
+			for _, item := range latest.Subscriptions {
+				if dead[item.Subscription.Endpoint] {
+					result.Removed++
+					continue
+				}
+				kept = append(kept, item)
 			}
-			kept = append(kept, item)
-		}
-		latest.Subscriptions = kept
-		err = s.writePushStore(latest)
-		pushMu.Unlock()
+			latest.Subscriptions = kept
+			return s.writePushStore(latest)
+		})
 		if err != nil {
 			return result, err
 		}

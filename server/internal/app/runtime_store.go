@@ -8,23 +8,50 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+type RuntimeFile struct {
+	Content   []byte
+	Size      int64
+	UpdatedAt time.Time
+}
 
 type RuntimeStore interface {
 	GetJSON(ctx context.Context, scope, key string, dest any) (bool, error)
 	PutJSON(ctx context.Context, scope, key string, value any) error
+	GetFile(ctx context.Context, scope, key string) (RuntimeFile, bool, error)
+	PutFile(ctx context.Context, scope, key string, content []byte) error
+	MaterializeFile(ctx context.Context, scope, key, localPath string) (bool, error)
 	WithLock(ctx context.Context, name string, fn func() error) error
 }
 
 func NewRuntimeStore(cfg Config) (RuntimeStore, error) {
 	if runtimeBackend(cfg) == "postgres" {
-		return newPostgresRuntimeStore(cfg.DatabaseURL)
+		db, err := openPostgres(cfg.DatabaseURL)
+		if err != nil {
+			return nil, err
+		}
+		store, err := NewRuntimeStoreWithDB(db)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		return store, nil
 	}
 	return newFilesystemRuntimeStore(cfg.RuntimeDir), nil
+}
+
+func NewRuntimeStoreWithDB(db *sql.DB) (RuntimeStore, error) {
+	store := &postgresRuntimeStore{db: db}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := store.ensureSchema(ctx); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 func runtimeBackend(cfg Config) string {
@@ -59,6 +86,18 @@ func (s *errorRuntimeStore) GetJSON(context.Context, string, string, any) (bool,
 
 func (s *errorRuntimeStore) PutJSON(context.Context, string, string, any) error {
 	return s.err
+}
+
+func (s *errorRuntimeStore) GetFile(context.Context, string, string) (RuntimeFile, bool, error) {
+	return RuntimeFile{}, false, s.err
+}
+
+func (s *errorRuntimeStore) PutFile(context.Context, string, string, []byte) error {
+	return s.err
+}
+
+func (s *errorRuntimeStore) MaterializeFile(context.Context, string, string, string) (bool, error) {
+	return false, s.err
 }
 
 func (s *errorRuntimeStore) WithLock(_ context.Context, _ string, _ func() error) error {
@@ -101,6 +140,41 @@ func (s *filesystemRuntimeStore) PutJSON(_ context.Context, scope, key string, v
 	return os.WriteFile(path, content, 0o600)
 }
 
+func (s *filesystemRuntimeStore) GetFile(_ context.Context, scope, key string) (RuntimeFile, bool, error) {
+	path := s.filePath(scope, key)
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return RuntimeFile{}, false, nil
+	}
+	if err != nil {
+		return RuntimeFile{}, false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return RuntimeFile{}, false, err
+	}
+	return RuntimeFile{Content: content, Size: info.Size(), UpdatedAt: info.ModTime()}, true, nil
+}
+
+func (s *filesystemRuntimeStore) PutFile(_ context.Context, scope, key string, content []byte) error {
+	path := s.filePath(scope, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o600)
+}
+
+func (s *filesystemRuntimeStore) MaterializeFile(ctx context.Context, scope, key, localPath string) (bool, error) {
+	file, ok, err := s.GetFile(ctx, scope, key)
+	if err != nil || !ok {
+		return ok, err
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o700); err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(localPath, file.Content, 0o600)
+}
+
 func (s *filesystemRuntimeStore) WithLock(_ context.Context, _ string, fn func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,6 +197,10 @@ func (s *filesystemRuntimeStore) path(scope, key string) string {
 	}
 }
 
+func (s *filesystemRuntimeStore) filePath(scope, key string) string {
+	return filepath.Join(s.root, filepath.FromSlash(cleanRuntimeFileStorePath(scope, key)))
+}
+
 var runtimeStorePathPartRe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 func cleanRuntimeStorePathPart(part string) string {
@@ -137,28 +215,21 @@ type postgresRuntimeStore struct {
 	db *sql.DB
 }
 
-func newPostgresRuntimeStore(databaseURL string) (*postgresRuntimeStore, error) {
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		return nil, err
-	}
-	configurePostgresPool(db)
-	store := &postgresRuntimeStore{db: db}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := store.ensureSchema(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return store, nil
-}
-
 func (s *postgresRuntimeStore) ensureSchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS runtime_json (
   scope TEXT NOT NULL,
   key TEXT NOT NULL,
   value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_files (
+  scope TEXT NOT NULL,
+  key TEXT NOT NULL,
+  content BYTEA NOT NULL,
+  size BIGINT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (scope, key)
 )`)
@@ -193,6 +264,38 @@ DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, scope, key, raw)
 	return err
 }
 
+func (s *postgresRuntimeStore) GetFile(ctx context.Context, scope, key string) (RuntimeFile, bool, error) {
+	var file RuntimeFile
+	err := s.db.QueryRowContext(ctx, `SELECT content, size, updated_at FROM runtime_files WHERE scope = $1 AND key = $2`, scope, key).Scan(&file.Content, &file.Size, &file.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RuntimeFile{}, false, nil
+	}
+	if err != nil {
+		return RuntimeFile{}, false, err
+	}
+	return file, true, nil
+}
+
+func (s *postgresRuntimeStore) PutFile(ctx context.Context, scope, key string, content []byte) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO runtime_files (scope, key, content, size, updated_at)
+VALUES ($1, $2, $3, $4, now())
+ON CONFLICT (scope, key)
+DO UPDATE SET content = EXCLUDED.content, size = EXCLUDED.size, updated_at = now()`, scope, key, content, len(content))
+	return err
+}
+
+func (s *postgresRuntimeStore) MaterializeFile(ctx context.Context, scope, key, localPath string) (bool, error) {
+	file, ok, err := s.GetFile(ctx, scope, key)
+	if err != nil || !ok {
+		return ok, err
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o700); err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(localPath, file.Content, 0o600)
+}
+
 func (s *postgresRuntimeStore) WithLock(ctx context.Context, name string, fn func() error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -204,4 +307,16 @@ func (s *postgresRuntimeStore) WithLock(ctx context.Context, name string, fn fun
 	}
 	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, name)
 	return fn()
+}
+
+func cleanRuntimeFileStorePath(scope, key string) string {
+	joined := filepath.ToSlash(filepath.Clean(strings.TrimSpace(scope) + "/" + strings.TrimSpace(key)))
+	if joined == "." || joined == "/" || strings.HasPrefix(joined, "../") || strings.Contains(joined, "/../") || strings.HasPrefix(joined, "/") {
+		return "invalid"
+	}
+	parts := strings.Split(joined, "/")
+	for index, part := range parts {
+		parts[index] = cleanRuntimeStorePathPart(part)
+	}
+	return strings.Join(parts, "/")
 }

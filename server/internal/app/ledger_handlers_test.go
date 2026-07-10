@@ -9,9 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestAccountDetailReturnsFrontendContract(t *testing.T) {
@@ -547,7 +544,7 @@ func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	}
 }
 
-func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
+func TestAppendEntryTracksLedgerWritesInFiles(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
@@ -570,80 +567,19 @@ func TestGitStatusAndCommitTrackLedgerWrites(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("append status=%d body=%s", res.Code, res.Body.String())
 	}
-
-	res = requestWithCookies(router, http.MethodGet, "/api/git/status", "", cookies)
-	if res.Code != http.StatusOK {
-		t.Fatalf("git status=%d body=%s", res.Code, res.Body.String())
+	main := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "main.bean")))
+	if !strings.Contains(main, `include "transactions/2026/06.bean"`) {
+		t.Fatalf("main include was not appended:\n%s", main)
 	}
-	var statusBody struct {
-		Dirty            bool        `json:"dirty"`
-		ChangedFileCount int         `json:"changedFileCount"`
-		Changes          []GitChange `json:"changes"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &statusBody); err != nil {
-		t.Fatal(err)
-	}
-	if !statusBody.Dirty || statusBody.ChangedFileCount != 2 || !hasGitChange(statusBody.Changes, "main.bean") || !hasGitChange(statusBody.Changes, "transactions/2026/06.bean") {
-		t.Fatalf("git status should include main include and new monthly file: %#v", statusBody)
-	}
-
-	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
-	if res.Code != http.StatusNotImplemented {
-		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
-	}
-	var commitBody struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(commitBody.Message, "outside ledger-web") {
-		t.Fatalf("unexpected git commit response: %#v", commitBody)
+	monthly := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "06.bean")))
+	if !strings.Contains(monthly, "Bakery") || !strings.Contains(monthly, "Breakfast") {
+		t.Fatalf("monthly transaction was not appended:\n%s", monthly)
 	}
 	runGit(t, cfg, "add", ".")
 	runGit(t, cfg, "commit", "-m", "manual commit after append")
 }
 
-func TestGitEndpointsHandleNonGitLedger(t *testing.T) {
-	cfg := testLedger(t)
-	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
-	cookies := loginCookies(t, router)
-
-	res := requestWithCookies(router, http.MethodGet, "/api/git/status", "", cookies)
-	if res.Code != http.StatusOK {
-		t.Fatalf("git status=%d body=%s", res.Code, res.Body.String())
-	}
-	var statusBody struct {
-		GitAvailable     bool        `json:"gitAvailable"`
-		Dirty            bool        `json:"dirty"`
-		ChangedFileCount int         `json:"changedFileCount"`
-		Changes          []GitChange `json:"changes"`
-		Message          string      `json:"message"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &statusBody); err != nil {
-		t.Fatal(err)
-	}
-	if statusBody.GitAvailable || statusBody.Dirty || statusBody.ChangedFileCount != 0 || len(statusBody.Changes) != 0 || !strings.Contains(statusBody.Message, "not available") {
-		t.Fatalf("non-git ledger should report unavailable clean status: %#v", statusBody)
-	}
-
-	res = requestWithCookies(router, http.MethodPost, "/api/git/commit", `{"message":"test: save ledger"}`, cookies)
-	if res.Code != http.StatusNotImplemented {
-		t.Fatalf("git commit=%d body=%s", res.Code, res.Body.String())
-	}
-	var commitBody struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &commitBody); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(commitBody.Message, "outside ledger-web") {
-		t.Fatalf("unexpected non-git commit response: %#v", commitBody)
-	}
-}
-
-func TestAppendEntryPublishesAppendEntrySource(t *testing.T) {
+func TestAppendEntryWritesTransaction(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")
 	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
@@ -655,27 +591,13 @@ func TestAppendEntryPublishesAppendEntrySource(t *testing.T) {
 
 	router := NewRouter(cfg)
 	cookies := loginCookies(t, router)
-	sub := ledgerEventHub.Subscribe()
-	defer sub.Close()
 	appendBody := `{"kind":"transaction","date":"2026-06-02","payee":"Bakery","narration":"Breakfast","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"15.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-15.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}`
 	res := requestWithCookies(router, http.MethodPost, "/api/ledger/append", appendBody, cookies)
 	if res.Code != http.StatusOK {
 		t.Fatalf("append status=%d body=%s", res.Code, res.Body.String())
 	}
-
-	select {
-	case event := <-sub.ch:
-		if event.Type != "ledger.updated" {
-			t.Fatalf("event type = %s, want ledger.updated", event.Type)
-		}
-		data, ok := event.Data.(gin.H)
-		if !ok {
-			t.Fatalf("event data has unexpected type: %#v", event.Data)
-		}
-		if data["source"] != ledgerWriteSourceAppendEntry {
-			t.Fatalf("source = %#v, want %s", data["source"], ledgerWriteSourceAppendEntry)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ledger.updated event")
+	text := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "06.bean")))
+	if !strings.Contains(text, "Bakery") || !strings.Contains(text, "Breakfast") {
+		t.Fatalf("transaction was not appended:\n%s", text)
 	}
 }

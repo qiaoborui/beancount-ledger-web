@@ -57,6 +57,38 @@ func TestLoadConfigGitHubAlias(t *testing.T) {
 	}
 }
 
+func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
+	t.Setenv("LEDGER_STORAGE", "filesystem")
+	t.Setenv("LEDGER_READ_MODEL", "files")
+	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
+	t.Setenv("LEDGER_ROOT", "/tmp/ledger")
+	t.Setenv("RUNTIME_DIR", "/tmp/runtime")
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("LEDGER_GITHUB_OWNER", "example")
+	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
+	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
+
+	cfg := LoadWebConfig()
+
+	if cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict {
+		t.Fatalf("web config did not force stateless modes: %#v", cfg)
+	}
+	if cfg.LedgerRoot != "" || cfg.RuntimeDir != "" {
+		t.Fatalf("web config should not use local ledger/runtime paths: %#v", cfg)
+	}
+	if err := ValidateWebConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateWebConfigRequiresPostgresAndGitHub(t *testing.T) {
+	cfg := LoadWebConfig()
+
+	if err := ValidateWebConfig(cfg); err == nil {
+		t.Fatal("expected missing DATABASE_URL and GitHub config to be rejected")
+	}
+}
+
 func TestGitHubAPIRequiresExplicitRepoConfig(t *testing.T) {
 	cfg := Config{
 		LedgerStorage:     "github_api",
