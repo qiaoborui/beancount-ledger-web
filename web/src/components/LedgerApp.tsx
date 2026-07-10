@@ -3,6 +3,16 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { RefreshCw, WifiOff, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
@@ -190,6 +200,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(initialMatchMode);
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [conflictOperationId, setConflictOperationId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [aiOpenSignal, setAiOpenSignal] = useState(0);
   const [aiChatMounted, setAiChatMounted] = useState(false);
@@ -292,7 +303,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     clearToast: () => setToast(null),
   });
 
-  const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites } = usePendingLedgerWrites({ load, showToast, ledgerVersion });
+  const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites, discardPendingOperation } = usePendingLedgerWrites({ load, showToast, ledgerVersion });
+  const pendingConflict = useMemo(() => pendingOperations.find((operation) => operation.id === conflictOperationId && operation.status === "conflict") ?? null, [conflictOperationId, pendingOperations]);
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, showToast, enqueuePendingWrites });
   const { updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete });
   const { accountLabelMap, accountPageAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, accountBalances, netWorthRows, page, valuationCurrency });
@@ -656,7 +668,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>,
         document.body
       )}
-      {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={syncPendingWrites} /></Suspense>}
+      {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={() => void syncPendingWrites({ userInitiated: true })} /></Suspense>}
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
@@ -686,7 +698,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             <strong className="font-serif text-2xl font-medium">{header.title}</strong>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
               {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
-              {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={syncPendingWrites} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
+              {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={() => {
+                const conflict = pendingOperations.find((operation) => operation.status === "conflict");
+                if (conflict) setConflictOperationId(conflict.id);
+                else void syncPendingWrites({ userInitiated: true });
+              }} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
               <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
               {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={`索引来源: ${indexInfo.source ?? ""}`}>PG 索引 · {indexInfo.gitSHA.slice(0, 7)}</span>}
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
@@ -824,6 +840,28 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {aiChatMounted && <AiBookkeepingChat load={load} showToast={showToast} openSignal={aiOpenSignal} />}
 
       {entryOpen && <Suspense fallback={null}><LazyEntryModal onClose={() => setEntryOpen(false)}><LazyEntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></LazyEntryModal></Suspense>}
+      <AlertDialog open={Boolean(pendingConflict)} onOpenChange={(open) => !open && setConflictOperationId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>这条本地修改需要重新编辑</AlertDialogTitle>
+            <AlertDialogDescription>
+              账本已更新，浏览器保存的修改不能安全套用。请刷新后重新编辑这笔交易；丢弃只会删除浏览器中的本地修改，不会改动账本。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingConflict && <p className="rounded-lg bg-tag px-3 py-2 text-sm text-warm">
+            {pendingConflict.kind === "append" ? "新增本地交易" : pendingConflict.kind === "update-transaction" ? `修改 ${pendingConflict.source.file}:${pendingConflict.source.line}` : `删除 ${pendingConflict.source.file}:${pendingConflict.source.line}`}
+          </p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel>保留本地修改</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => {
+              if (!pendingConflict) return;
+              discardPendingOperation(pendingConflict.id);
+              setConflictOperationId(null);
+              showToast("info", "已丢弃这条本地修改，请刷新后重新编辑");
+            }}>丢弃本地修改</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

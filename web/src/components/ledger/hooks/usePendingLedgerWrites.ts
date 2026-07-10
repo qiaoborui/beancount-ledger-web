@@ -123,6 +123,14 @@ async function assertTransactionBaseVersion(operation: PendingLedgerOperation) {
   }
 }
 
+export function discardPendingLedgerOperation(operations: PendingLedgerOperation[], id: string) {
+  return operations.filter((operation) => operation.id !== id);
+}
+
+export function hasPendingOperationsToSync(operations: PendingLedgerOperation[]) {
+  return operations.some((operation) => operation.status !== "conflict");
+}
+
 export async function syncOperation(operation: PendingLedgerOperation) {
   await assertTransactionBaseVersion(operation);
   if (operation.kind === "append") {
@@ -205,7 +213,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     enqueueOperation(deleteOperation(source, reason, ledgerVersion));
   }, [enqueueOperation, ledgerVersion]);
 
-  const syncPendingWrites = useCallback(async () => {
+  const syncPendingWrites = useCallback(async ({ userInitiated = false }: { userInitiated?: boolean } = {}) => {
     const current = await readPendingOperations();
     if (!current.length || syncingPendingWrites) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -250,7 +258,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
           break;
         }
       }
-      haptic([6, 24, 10]);
+      if (userInitiated) haptic([6, 24, 10]);
       const remaining = await readPendingOperations();
       if (syncedCount > 0) {
         showToast("success", remaining.length ? `已同步 ${syncedCount} 条，仍有 ${remaining.length} 条待处理` : `已同步 ${syncedCount} 条待同步操作`);
@@ -263,6 +271,14 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     }
   }, [load, persist, showToast, syncingPendingWrites]);
 
+  const discardPendingOperation = useCallback((id: string) => {
+    setPendingOperations((current) => {
+      const next = discardPendingLedgerOperation(current, id);
+      void writePendingOperations(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const syncWhenOnline = () => {
       void syncPendingWrites();
@@ -272,7 +288,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
   }, [syncPendingWrites]);
 
   useEffect(() => {
-    if (!pendingOperations.length || syncingPendingWrites) return;
+    if (!hasPendingOperationsToSync(pendingOperations) || syncingPendingWrites) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
     const timer = window.setTimeout(() => {
       void syncPendingWrites();
@@ -301,5 +317,6 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     enqueueTransactionDelete,
     syncPendingWrites,
     syncingPendingWrites,
+    discardPendingOperation,
   };
 }

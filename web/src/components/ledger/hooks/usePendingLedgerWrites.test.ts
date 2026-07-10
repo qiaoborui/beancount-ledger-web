@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { syncOperation } from "./usePendingLedgerWrites";
+import { discardPendingLedgerOperation, hasPendingOperationsToSync, syncOperation } from "./usePendingLedgerWrites";
 import type { PendingLedgerOperation } from "../pendingLedgerOperations";
 
 function response(body: unknown, ok: boolean) {
@@ -94,5 +94,31 @@ describe("syncOperation", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/ledger/version");
+  });
+});
+
+describe("pending write conflicts", () => {
+  const conflictOperation: PendingLedgerOperation = {
+    id: "conflict-op",
+    createdAt: 1,
+    kind: "update-transaction",
+    source: { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" },
+    entry,
+    status: "conflict",
+    lastError: "账本已更新，这条本地修改需要确认后再同步",
+  };
+
+  it("keeps conflict-only queues out of automatic retries", () => {
+    expect(hasPendingOperationsToSync([conflictOperation])).toBe(false);
+    expect(hasPendingOperationsToSync([conflictOperation, { ...conflictOperation, id: "pending-op", status: "pending" }])).toBe(true);
+  });
+
+  it("discards only the selected local conflict", () => {
+    const remaining = discardPendingLedgerOperation([
+      conflictOperation,
+      { ...conflictOperation, id: "other-op", status: "pending" },
+    ], conflictOperation.id);
+
+    expect(remaining).toEqual([{ ...conflictOperation, id: "other-op", status: "pending" }]);
   });
 });
