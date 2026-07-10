@@ -206,6 +206,34 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.
 	return BuildLedgerTransactions(snapshot, start, end, unlocked), nil
 }
 
+func (s *LedgerReadService) Balances(ctx context.Context) (map[string]int, []BalanceAssertion, error) {
+	if s.indexErr != nil {
+		return nil, nil, s.indexErr
+	}
+	if s.indexStore != nil {
+		indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		revision, ok, err := s.cachedActiveRevision(indexCtx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			return s.indexStore.BalancesForRevision(indexCtx, revision.ID)
+		}
+		if s.strict {
+			return nil, nil, ErrLedgerReadModelUnavailable
+		}
+	}
+	if s.strict {
+		return nil, nil, ErrLedgerReadModelUnavailable
+	}
+	snapshot, err := s.cache.Snapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapshot.Balances, snapshot.BalanceAssertions, nil
+}
+
 func firstValuationCurrency(values []string) string {
 	if len(values) == 0 {
 		return ""

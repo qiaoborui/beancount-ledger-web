@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,21 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	unlockedTxns := unlocked["transactions"].([]Transaction)
 	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
 		t.Fatalf("unlocked transaction feed should include all transactions newest first: %#v", unlockedTxns)
+	}
+}
+
+func TestLedgerReadServiceBalancesFallsBackToCache(t *testing.T) {
+	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
+
+	balances, assertions, err := service.Balances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balances["Assets:Cash"] != 98800 || balances["Expenses:Food"] != 1200 {
+		t.Fatalf("unexpected cache balances: %#v", balances)
+	}
+	if len(assertions) != 0 {
+		t.Fatalf("unexpected cache assertions: %#v", assertions)
 	}
 }
 

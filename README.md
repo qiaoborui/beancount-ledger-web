@@ -199,6 +199,9 @@ Beancount tooling on the worker side; keep them off the hosted API service.
 The indexer holds a Postgres advisory lock while publishing, so set
 `POSTGRES_MAX_OPEN_CONNS` to at least `2` when configuring a finite pool.
 
+The indexer fingerprints `main.bean` and its recursively included `.bean` files.
+Unreferenced files therefore stay outside the read-model refresh boundary.
+
 #### GitHub Actions indexer
 
 Install `Index Ledger Web` in the private ledger repository. It checks out the

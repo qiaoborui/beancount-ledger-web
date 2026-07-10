@@ -55,6 +55,7 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 		testIndexedTransaction("2026-05-01", "Cafe", "transactions/2026/05.bean", 10, "same", 1200),
 		testIndexedTransaction("2026-05-03", "Tea", "transactions/2026/05.bean", 30, "new", 800),
 	})
+	second.BalanceAssertions = []BalanceAssertion{{Date: "2026-05-31", Account: "Assets:Cash", Amount: -2000, Currency: "CNY"}}
 	secondID, err := store.ReplaceActiveSnapshot(ctx, second, "sha-2")
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +83,16 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 	if len(txns) != 2 || txns[0].Payee != "Tea" || txns[1].Payee != "Cafe" {
 		t.Fatalf("unexpected indexed transactions: %#v", txns)
+	}
+	balances, assertions, err := store.BalancesForRevision(ctx, secondID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balances["Assets:Cash"] != -2000 || balances["Expenses:Food"] != 2000 {
+		t.Fatalf("unexpected indexed balances: %#v", balances)
+	}
+	if len(assertions) != 1 || assertions[0] != second.BalanceAssertions[0] {
+		t.Fatalf("unexpected indexed assertions: %#v", assertions)
 	}
 	var postingCount int
 	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM ledger_index_postings WHERE revision_id = $1`, secondID).Scan(&postingCount); err != nil {

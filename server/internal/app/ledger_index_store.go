@@ -317,6 +317,71 @@ ORDER BY txn_date DESC, source_line ASC, ordinal ASC`, revisionID, start, end)
 	return out, rows.Err()
 }
 
+// BalancesForRevision returns each account's balance in its configured native
+// currency. Accounts without a configured currency are included when all of
+// their postings share one currency, matching nativeAccountBalances.
+func (s *LedgerIndexStore) BalancesForRevision(ctx context.Context, revisionID int64) (map[string]int, []BalanceAssertion, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT p.account,
+       COALESCE(NULLIF(a.currency, ''), ''),
+       COALESCE(NULLIF(p.currency, ''), 'CNY'),
+       SUM(p.amount)::BIGINT
+FROM ledger_index_postings p
+LEFT JOIN ledger_index_accounts a
+  ON a.revision_id = p.revision_id AND a.account = p.account
+WHERE p.revision_id = $1
+GROUP BY p.account, a.currency, COALESCE(NULLIF(p.currency, ''), 'CNY')`, revisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	type accountBalance struct {
+		currency string
+		amounts  map[string]int
+	}
+	byAccount := map[string]accountBalance{}
+	for rows.Next() {
+		var account, currency, postingCurrency string
+		var amount int64
+		if err := rows.Scan(&account, &currency, &postingCurrency, &amount); err != nil {
+			return nil, nil, err
+		}
+		balance := byAccount[account]
+		balance.currency = currency
+		if balance.amounts == nil {
+			balance.amounts = map[string]int{}
+		}
+		balance.amounts[postingCurrency] = int(amount)
+		byAccount[account] = balance
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	balances := make(map[string]int, len(byAccount))
+	for account, balance := range byAccount {
+		if balance.currency != "" {
+			balances[account] = balance.amounts[balance.currency]
+			continue
+		}
+		if len(balance.amounts) == 1 {
+			for _, amount := range balance.amounts {
+				balances[account] = amount
+			}
+		}
+	}
+	assertions, err := loadIndexRows[BalanceAssertion](ctx, s.db, `
+SELECT payload
+FROM ledger_index_balance_assertions
+WHERE revision_id = $1
+ORDER BY ordinal`, revisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return balances, assertions, nil
+}
+
 func loadIndexRows[T any](ctx context.Context, db *sql.DB, query string, revisionID int64) ([]T, error) {
 	rows, err := db.QueryContext(ctx, query, revisionID)
 	if err != nil {
