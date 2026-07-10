@@ -101,29 +101,54 @@ previews, disable it or remove its pull-request comments after switching to the
 root services project. The standalone frontend config no longer proxies `/api/*`
 to production.
 
-### Docker with Supabase Postgres
+### Docker Compose with Supabase Postgres
 
-The local Docker compose file is configured to use the same Supabase Postgres
-runtime store and ledger read model as the hosted API. Copy `.env.example` to your
-local `.env`, set `DATABASE_URL` to the Supabase direct or session-pooler
-connection string, and keep the file uncommitted.
-
-```bash
-docker compose -f docker/docker-compose.yml up --build
-```
-
-To index a mounted local ledger into the same Supabase database, start the
-optional indexer profile whenever you want to refresh the read model:
+Compose separates the API server, static frontend, Caddy HTTPS proxy, and
+one-shot indexer.
+Copy `.env.example` to `.env`, set the GitHub and Postgres values, and keep that
+file uncommitted. Each service has a profile, so it can be built, started, and
+updated independently.
 
 ```bash
-LEDGER_HOST_PATH=/path/to/private-ledger docker compose -f docker/docker-compose.yml --profile indexer up --build
+# API only, available at http://localhost:3000
+docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d --build
+
+# Frontend only, available at http://localhost:8080
+docker compose --env-file .env -f docker/docker-compose.yml --profile frontend up -d --build
+
+# HTTPS edge proxy only. It proxies /api/* to server and every other path to frontend.
+docker compose --env-file .env -f docker/docker-compose.yml --profile caddy up -d --build
+
+# Full web application through Caddy.
+docker compose --env-file .env -f docker/docker-compose.yml --profile server --profile frontend --profile caddy up -d --build
+
+# Refresh the read model from a mounted local private ledger, then exit.
+LEDGER_HOST_PATH=/path/to/private-ledger \
+  docker compose --env-file .env -f docker/docker-compose.yml --profile indexer run --rm --build indexer
 ```
 
-The indexer is a one-shot job. It expects `LEDGER_HOST_PATH` to point at an
-existing local checkout or mounted copy of the private ledger, indexes it into
-Postgres, and exits. Clone, sync, and schedule that checkout outside
-`ledger-indexer`; the application no longer manages remote Git checkouts or
-worker loops.
+Run `docker compose --env-file .env -f docker/docker-compose.yml up -d --build server`,
+`frontend`, or `caddy` to update one long-running service. Set
+`CADDY_SITE_ADDRESS` to a domain for Caddy-managed HTTPS. The `caddy_data`
+volume retains certificates and Caddy state across Caddy image updates.
+`server` binds its published port to localhost by default; Caddy reaches it on
+the internal Compose network. Set `SERVER_BIND_ADDRESS=0.0.0.0` only when the
+API itself needs a remote listener.
+
+To serve the SPA from the `server` container without starting `frontend`, set
+`SERVER_BUILD_TARGET=standalone` and `CADDY_FRONTEND_UPSTREAM=server:3000`.
+Set `CADDY_FRONTEND_UPSTREAM=frontend:80` when the separate frontend service is
+running.
+
+For a pre-existing Caddy internal CA, set `CADDY_TLS_DIRECTIVE=tls internal`,
+select the existing `CADDY_DATA_VOLUME` and `CADDY_CONFIG_VOLUME`, then set
+`CADDY_VOLUMES_EXTERNAL=true`. The `caddy_data` volume contains the local CA
+and issued certificates, so this retains trust for already configured clients.
+
+The indexer mounts `LEDGER_HOST_PATH` at `/data/ledger`, indexes it into
+Postgres, and exits. Clone, sync, and schedule that checkout outside the
+container; use cron, systemd, GitHub Actions, or your container platform to
+invoke the Compose indexer on a schedule.
 
 ## Environment variables
 

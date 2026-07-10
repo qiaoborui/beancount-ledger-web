@@ -1,55 +1,77 @@
 name: beancount-ledger-web
 
+x-app-env: &app-env
+  env_file:
+    - path: ../.env
+      required: false
+
 services:
-  ledger-web:
+  server:
+    <<: *app-env
+    profiles: [server]
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: ledger-web
+      target: ${SERVER_BUILD_TARGET:-server}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-3000}:3000"
     environment:
-      # ── GitHub API writes ──
-      - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
-      - LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER:?Set LEDGER_GITHUB_OWNER}
-      - LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO:?Set LEDGER_GITHUB_REPO}
-      - LEDGER_GITHUB_TOKEN=${LEDGER_GITHUB_TOKEN:?Set LEDGER_GITHUB_TOKEN}
-      - LEDGER_GITHUB_API_URL=${LEDGER_GITHUB_API_URL:-}
+      PORT: "3000"
+      SERVE_STATIC: "${SERVE_STATIC:-false}"
+      STATIC_DIR: "${STATIC_DIR:-}"
+      LEDGER_ROOT: ""
+      RUNTIME_DIR: ""
+    expose:
+      - "3000"
 
-      # ── Git author ──
-      - LEDGER_GIT_AUTHOR_NAME=${LEDGER_GIT_AUTHOR_NAME:-Ledger}
-      - LEDGER_GIT_AUTHOR_EMAIL=${LEDGER_GIT_AUTHOR_EMAIL:-ledger@localhost}
-
-      # ── Runtime state in Supabase Postgres ──
-      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL to your Supabase Postgres connection string}
-      - POSTGRES_MAX_OPEN_CONNS=${POSTGRES_MAX_OPEN_CONNS:-2}
-      - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
-      - POSTGRES_CONN_MAX_IDLE_SECONDS=${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}
-
-      # ── Optional ──
-      - AUTH_SECRET=${AUTH_SECRET:-}
-      - APP_PASSWORD=${APP_PASSWORD:-}
-      - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:3000}
-      - WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN:-http://localhost:3000}
-      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-localhost}
-      - PPROF_ADDR=${PPROF_ADDR:-}
-  # ── Optional one-shot job: index the mounted ledger into Supabase Postgres ──
-  ledger-indexer:
-    profiles:
-      - indexer
+  frontend:
+    <<: *app-env
+    profiles: [frontend]
     build:
       context: ..
-      dockerfile: docker/Dockerfile.indexer
-    container_name: ledger-indexer
+      dockerfile: docker/Dockerfile
+      target: frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+  caddy:
+    <<: *app-env
+    profiles: [caddy]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: caddy
+    restart: unless-stopped
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  indexer:
+    <<: *app-env
+    profiles: [indexer]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: indexer
     restart: "no"
     environment:
-      - LEDGER_ROOT=${LEDGER_ROOT:-/data/ledger}
-      - LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH:-main}
-      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL to your Supabase Postgres connection string}
-      - POSTGRES_MAX_OPEN_CONNS=${POSTGRES_MAX_OPEN_CONNS:-2}
-      - POSTGRES_MAX_IDLE_CONNS=${POSTGRES_MAX_IDLE_CONNS:-1}
-      - POSTGRES_CONN_MAX_IDLE_SECONDS=${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}
-      - BEAN_CHECK_BIN=${BEAN_CHECK_BIN:-bean-check}
+      LEDGER_ROOT: /data/ledger
+      BEAN_CHECK_BIN: "${BEAN_CHECK_BIN:-bean-check}"
+      POSTGRES_MAX_OPEN_CONNS: "${POSTGRES_MAX_OPEN_CONNS:-2}"
+      POSTGRES_MAX_IDLE_CONNS: "${POSTGRES_MAX_IDLE_CONNS:-1}"
+      POSTGRES_CONN_MAX_IDLE_SECONDS: "${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}"
     volumes:
       - ${LEDGER_HOST_PATH:-../examples/preview-ledger}:/data/ledger:${LEDGER_MOUNT_MODE:-ro}
+
+volumes:
+  caddy_data:
+    name: ${CADDY_DATA_VOLUME:-beancount-ledger-web_caddy_data}
+    external: ${CADDY_VOLUMES_EXTERNAL:-false}
+  caddy_config:
+    name: ${CADDY_CONFIG_VOLUME:-beancount-ledger-web_caddy_config}
+    external: ${CADDY_VOLUMES_EXTERNAL:-false}

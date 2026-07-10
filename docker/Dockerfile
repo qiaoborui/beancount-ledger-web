@@ -16,12 +16,11 @@ COPY server/ ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
 
-# ── Runtime ──
-FROM debian:bookworm-slim
+# ── API runtime ──
+FROM debian:bookworm-slim AS server
 WORKDIR /app
 ENV GIN_MODE=release
-ENV SERVE_STATIC=true
-ENV STATIC_DIR=/app/web-dist
+ENV SERVE_STATIC=false
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -34,9 +33,40 @@ RUN apt-get update \
   && pip3 install --break-system-packages beancount==3.2.3
 
 COPY --from=go-builder /app/ledger-web /app/ledger-web
-COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
-COPY --from=web-builder /app/web/dist /app/web-dist
 COPY examples /app/examples
 
 EXPOSE 3000
 CMD ["/app/ledger-web"]
+
+# ── One-shot ledger indexer ──
+FROM debian:bookworm-slim AS indexer
+WORKDIR /app
+ENV GIN_MODE=release
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    git \
+    poppler-utils \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip3 install --break-system-packages beancount==3.2.3
+
+COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
+CMD ["/app/ledger-indexer"]
+
+# ── Static SPA ──
+FROM nginx:1.27-alpine AS frontend
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=web-builder /app/web/dist /srv
+
+# ── HTTPS edge proxy ──
+FROM caddy:2-alpine AS caddy
+COPY docker/Caddyfile /etc/caddy/Caddyfile
+
+# Preserve the original single-container image for direct Docker builds.
+FROM server AS standalone
+ENV SERVE_STATIC=true
+ENV STATIC_DIR=/app/web-dist
+COPY --from=web-builder /app/web/dist /app/web-dist

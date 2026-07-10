@@ -1,0 +1,13 @@
+{$CADDY_SITE_ADDRESS::80} {
+	{$CADDY_TLS_DIRECTIVE:}
+	encode zstd gzip
+
+	@api path /api/* /.well-known/webauthn
+	handle @api {
+		reverse_proxy server:3000
+	}
+
+	handle {
+		reverse_proxy {$CADDY_FRONTEND_UPSTREAM:frontend:80}
+	}
+}
