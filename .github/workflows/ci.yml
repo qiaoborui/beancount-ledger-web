@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -25,7 +29,9 @@ jobs:
       - name: Detect changed components
         id: changes
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            files=""
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
           elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
             files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
@@ -35,14 +41,17 @@ jobs:
 
           backend=false
           web=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            backend=true
+          fi
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*)
+              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|docker/*|docker/**/*|.agents/*|.agents/**/*|server/*|server/**/*|examples/*|examples/**/*)
                 backend=true
                 ;;
             esac
             case "$file" in
-              .github/workflows/*|Dockerfile.vercel|vercel.json|.dockerignore|web/*|web/**/*)
+              .github/workflows/*|vercel.json|.dockerignore|docker/*|docker/**/*|web/*|web/**/*)
                 web=true
                 ;;
             esac
@@ -86,28 +95,49 @@ jobs:
       - name: Build
         working-directory: server
         run: go build -o ../ledger-web ./cmd/ledger-web
-      - name: Pack backend artifact
-        run: |
-          mkdir -p artifact
-          cp ledger-web artifact/ledger-web
-          if [[ -d examples ]]; then cp -a examples artifact/examples; fi
-          if [[ -d .agents ]]; then cp -a .agents artifact/.agents; fi
-          cat > artifact/DEPLOYMENT.txt <<EOF
-          repository=${{ github.repository }}
-          sha=${{ env.ARTIFACT_SHA }}
-          ref=${{ github.ref }}
-          component=backend
-          target=ci
-          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-          tar -czf ledger-web-backend-${{ env.ARTIFACT_SHA }}.tar.gz -C artifact .
-      - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
+
+  server-image:
+    name: Server image
+    needs: [plan, go]
+    if: ${{ needs.plan.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        if: ${{ github.event_name != 'pull_request' }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
         with:
-          name: ledger-web-backend-${{ env.ARTIFACT_SHA }}
-          path: ledger-web-backend-${{ env.ARTIFACT_SHA }}.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-server
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-server
+            org.opencontainers.image.description=Minimal stateless ledger-web API server image
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.vercel
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=server-image
+          cache-to: type=gha,scope=server-image,mode=max
 
   web:
     name: Frontend
@@ -139,23 +169,3 @@ jobs:
       - name: Build
         working-directory: web
         run: pnpm run build
-      - name: Pack frontend artifact
-        run: |
-          mkdir -p artifact
-          cp -a web/dist artifact/dist
-          cat > artifact/DEPLOYMENT.txt <<EOF
-          repository=${{ github.repository }}
-          sha=${{ env.ARTIFACT_SHA }}
-          ref=${{ github.ref }}
-          component=frontend
-          target=ci
-          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-          tar -czf ledger-web-frontend-${{ env.ARTIFACT_SHA }}.tar.gz -C artifact .
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ledger-web-frontend-${{ env.ARTIFACT_SHA }}
-          path: ledger-web-frontend-${{ env.ARTIFACT_SHA }}.tar.gz
-          if-no-files-found: error
-          retention-days: 7

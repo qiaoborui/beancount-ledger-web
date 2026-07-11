@@ -1,12 +1,3 @@
-# ── Frontend build ──
-FROM node:24-bookworm-slim AS web-builder
-WORKDIR /app/web
-RUN npm install -g pnpm@11.5.0
-COPY web/pnpm-lock.yaml web/package.json ./
-RUN pnpm install --frozen-lockfile
-COPY web/ ./
-RUN pnpm run build
-
 # ── Backend build ──
 FROM golang:1.25-bookworm AS go-builder
 WORKDIR /app/server
@@ -17,23 +8,18 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
 
 # ── API runtime ──
-FROM debian:bookworm-slim AS server
+FROM alpine:3.22 AS server
 WORKDIR /app
 ENV GIN_MODE=release
 ENV SERVE_STATIC=false
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    python3 \
-    python3-pip \
-    git \
-    poppler-utils \
-  && rm -rf /var/lib/apt/lists/* \
-  && pip3 install --break-system-packages beancount==3.2.3
+RUN apk add --no-cache ca-certificates \
+  && addgroup -S ledger \
+  && adduser -S -G ledger ledger
 
 COPY --from=go-builder /app/ledger-web /app/ledger-web
 COPY examples /app/examples
+USER ledger
 
 EXPOSE 3000
 CMD ["/app/ledger-web"]
@@ -55,6 +41,15 @@ RUN apt-get update \
 
 COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
 CMD ["/app/ledger-indexer"]
+
+# ── Frontend build ──
+FROM node:24-bookworm-slim AS web-builder
+WORKDIR /app/web
+RUN npm install -g pnpm@11.5.0
+COPY web/pnpm-lock.yaml web/package.json ./
+RUN pnpm install --frozen-lockfile
+COPY web/ ./
+RUN pnpm run build
 
 # ── Static SPA ──
 FROM nginx:1.27-alpine AS frontend
