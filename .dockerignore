@@ -1,6 +1,7 @@
 .git
 .github
 .agents
+.codegraph
 .vercel
 **/.DS_Store
 **/.env

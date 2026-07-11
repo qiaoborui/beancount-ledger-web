@@ -9,6 +9,8 @@ services:
   server:
     <<: *app-env
     profiles: [server]
+    image: ${SERVER_IMAGE:-ghcr.io/qiaoborui/beancount-ledger-web-server:latest}
+    pull_policy: ${SERVER_PULL_POLICY:-missing}
     build:
       context: ..
       dockerfile: docker/Dockerfile

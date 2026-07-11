@@ -106,12 +106,18 @@ to production.
 Compose separates the API server, static frontend, Caddy HTTPS proxy, and
 one-shot indexer.
 Copy `.env.example` to `.env`, set the GitHub and Postgres values, and keep that
-file uncommitted. Each service has a profile, so it can be built, started, and
-updated independently.
+file uncommitted. The API server profile uses the published minimal GHCR image
+by default and still keeps a local build fallback. Each service has a profile,
+so it can be pulled, built, started, and updated independently.
 
 ```bash
-# API only, available at http://localhost:3000
-docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d --build
+# API only from the published image, available at http://localhost:3000
+docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
+docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d server
+
+# API only from a local source build.
+SERVER_IMAGE=ledger-web-server:local \
+  docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d --build server
 
 # Frontend only, available at http://localhost:8080
 docker compose --env-file .env -f docker/docker-compose.yml --profile frontend up -d --build
@@ -119,21 +125,32 @@ docker compose --env-file .env -f docker/docker-compose.yml --profile frontend u
 # HTTPS edge proxy only. It proxies /api/* to server and every other path to frontend.
 docker compose --env-file .env -f docker/docker-compose.yml --profile caddy up -d --build
 
-# Full web application through Caddy.
-docker compose --env-file .env -f docker/docker-compose.yml --profile server --profile frontend --profile caddy up -d --build
+# Full web application through Caddy, using the published API image.
+docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
+docker compose --env-file .env -f docker/docker-compose.yml --profile frontend --profile caddy up -d --build frontend caddy
+docker compose --env-file .env -f docker/docker-compose.yml --profile server --profile frontend --profile caddy up -d server frontend caddy
 
 # Refresh the read model from a mounted local private ledger, then exit.
 LEDGER_HOST_PATH=/path/to/private-ledger \
   docker compose --env-file .env -f docker/docker-compose.yml --profile indexer run --rm --build indexer
 ```
 
-Run `docker compose --env-file .env -f docker/docker-compose.yml up -d --build server`,
-`frontend`, or `caddy` to update one long-running service. Set
-`CADDY_SITE_ADDRESS` to a domain for Caddy-managed HTTPS. The `caddy_data`
-volume retains certificates and Caddy state across Caddy image updates.
+Pull and recreate `server` for routine API updates. Use
+`docker compose --env-file .env -f docker/docker-compose.yml up -d --build frontend`
+or `caddy` when those locally built services change. Set `CADDY_SITE_ADDRESS`
+to a domain for Caddy-managed HTTPS. The `caddy_data` volume retains
+certificates and Caddy state across Caddy image updates.
 `server` binds its published port to localhost by default; Caddy reaches it on
 the internal Compose network. Set `SERVER_BIND_ADDRESS=0.0.0.0` only when the
 API itself needs a remote listener.
+
+For routine server updates, pull the latest published image and recreate only
+the API container:
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
+docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d server
+```
 
 To serve the SPA from the `server` container without starting `frontend`, set
 `SERVER_BUILD_TARGET=standalone` and `CADDY_FRONTEND_UPSTREAM=server:3000`.

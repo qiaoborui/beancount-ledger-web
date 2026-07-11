@@ -3,13 +3,16 @@ WORKDIR /app/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server ./
-RUN CGO_ENABLED=0 go build -o /app/ledger-web ./cmd/ledger-web
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 
-FROM alpine:3.21 AS runner
+FROM alpine:3.22 AS runner
 WORKDIR /app
 ENV GIN_MODE=release
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates \
+  && addgroup -S ledger \
+  && adduser -S -G ledger ledger
 COPY --from=go-builder /app/ledger-web ./ledger-web
 COPY examples ./examples
+USER ledger
 EXPOSE 3000
 CMD ["./ledger-web"]
