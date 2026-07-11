@@ -299,19 +299,22 @@ func githubAPITestConfig(t *testing.T, fake *fakeGitHubLedgerAPI) Config {
 }
 
 type fakeGitHubLedgerAPI struct {
-	t          *testing.T
-	server     *httptest.Server
-	mu         sync.Mutex
-	files      map[string]string
-	blobs      map[string]string
-	blobSeq    int
-	treePaths  []string
-	updatedRef string
+	t                              *testing.T
+	server                         *httptest.Server
+	mu                             sync.Mutex
+	files                          map[string]string
+	blobs                          map[string]string
+	blobSeq                        int
+	treePaths                      []string
+	treeBlobs                      map[string]string
+	updatedRef                     string
+	commitCount                    int
+	failNextContentReadAfterCommit bool
 }
 
 func newFakeGitHubLedgerAPI(t *testing.T, files map[string]string) *fakeGitHubLedgerAPI {
 	t.Helper()
-	api := &fakeGitHubLedgerAPI{t: t, files: files, blobs: map[string]string{}}
+	api := &fakeGitHubLedgerAPI{t: t, files: files, blobs: map[string]string{}, treeBlobs: map[string]string{}}
 	api.server = httptest.NewServer(http.HandlerFunc(api.handle))
 	return api
 }
@@ -326,6 +329,12 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/git/commits/base-commit":
 		writeJSON(api.t, w, map[string]any{"sha": "base-commit", "tree": map[string]any{"sha": "base-tree"}})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/owner/ledger/contents/"):
+		if api.failNextContentReadAfterCommit && api.commitCount > 0 {
+			api.failNextContentReadAfterCommit = false
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"message":"temporary upstream failure"}`))
+			return
+		}
 		path := strings.TrimPrefix(r.URL.Path, "/repos/owner/ledger/contents/")
 		content, ok := api.files[path]
 		if !ok {
@@ -351,22 +360,29 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Tree []struct {
 				Path string `json:"path"`
+				SHA  string `json:"sha"`
 			} `json:"tree"`
 		}
 		decodeJSON(api.t, r, &body)
 		api.treePaths = api.treePaths[:0]
+		api.treeBlobs = map[string]string{}
 		for _, entry := range body.Tree {
 			api.treePaths = append(api.treePaths, entry.Path)
+			api.treeBlobs[entry.Path] = entry.SHA
 		}
 		writeJSON(api.t, w, map[string]any{"sha": "new-tree"})
 	case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/ledger/git/commits":
-		writeJSON(api.t, w, map[string]any{"sha": "new-commit", "tree": map[string]any{"sha": "new-tree"}})
+		api.commitCount++
+		writeJSON(api.t, w, map[string]any{"sha": fmt.Sprintf("new-commit-%d", api.commitCount), "tree": map[string]any{"sha": "new-tree"}})
 	case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/ledger/git/refs/heads/main":
 		var body struct {
 			SHA string `json:"sha"`
 		}
 		decodeJSON(api.t, r, &body)
 		api.updatedRef = "refs/heads/main"
+		for path, blobSHA := range api.treeBlobs {
+			api.files[path] = api.blobs[blobSHA]
+		}
 		writeJSON(api.t, w, map[string]any{"ref": api.updatedRef, "object": map[string]any{"sha": body.SHA}})
 	default:
 		api.t.Fatalf("unexpected github api request: %s %s", r.Method, r.URL.String())

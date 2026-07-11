@@ -93,9 +93,10 @@ func NewRouterWithError(cfg Config) (*gin.Engine, error) {
 		}
 		return snapshot.Commodities, nil
 	})
-	server := &Server{cfg: cfg, runtimeStore: runtimeStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, func() (*LedgerSnapshot, error) {
+	snapshot := func() (*LedgerSnapshot, error) {
 		return readService.SnapshotLite(context.Background())
-	}), db: db, readService: readService, reconcileService: NewReconciliationService(cache, writer), txService: NewTransactionService(cache, writer), limiter: limiter}
+	}
+	server := &Server{cfg: cfg, runtimeStore: runtimeStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, snapshot), db: db, readService: readService, reconcileService: NewReconciliationServiceWithSnapshot(cache, writer, snapshot), txService: NewTransactionServiceWithSnapshot(cache, writer, snapshot), limiter: limiter}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)

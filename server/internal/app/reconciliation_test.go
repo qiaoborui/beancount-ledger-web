@@ -46,3 +46,36 @@ func TestReconciliationServiceWritesAdjustment(t *testing.T) {
 		t.Fatalf("reconciliation was not written:\n%s", text)
 	}
 }
+
+func TestReconciliationServiceUsesInjectedSnapshotWithoutLocalLedger(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\n",
+		"commodities.bean":          "2026-01-01 commodity CNY\n",
+		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Equity:Balance-Adjustments CNY\n",
+		"transactions/2026/05.bean": "; 2026-05 transactions\n",
+	})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	snapshot := &LedgerSnapshot{
+		Accounts: []Account{{Account: "Assets:Cash", Currency: "CNY", Label: "Cash", Group: "cash", Active: true}},
+		Transactions: []Transaction{{
+			Date: "2026-05-01",
+			Postings: []Posting{
+				{Account: "Assets:Cash", Amount: 10000, Currency: "CNY"},
+				{Account: "Equity:Balance-Adjustments", Amount: -10000, Currency: "CNY"},
+			},
+		}},
+	}
+	service := NewReconciliationServiceWithSnapshot(nil, NewLedgerWriter(cfg, nil), func() (*LedgerSnapshot, error) {
+		return snapshot, nil
+	})
+
+	result, err := service.Reconcile(ReconcileRequest{Account: "Assets:Cash", ActualAmount: "100.00", BalanceDate: "2026-05-31"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || fake.commitCount != 1 {
+		t.Fatalf("result=%#v commits=%d", result, fake.commitCount)
+	}
+}

@@ -115,6 +115,55 @@ func TestLedgerEditorRollsBackOnBeanCheckFailure(t *testing.T) {
 	}
 }
 
+func TestGitHubLedgerEditorReturnsSuccessWithoutPostCommitRead(t *testing.T) {
+	initial := "option \"title\" \"Test\"\n"
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"main.bean": initial})
+	fake.failNextContentReadAfterCommit = true
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+	next := "option \"title\" \"Updated\"\n"
+	body := `{"path":"main.bean","content":` + quoteJSON(next) + `,"previousHash":"` + sha256Hex([]byte(initial))[:16] + `"}`
+
+	res := requestWithCookies(router, http.MethodPut, "/api/ledger/editor/file", body, cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", res.Code, res.Body.String())
+	}
+	if fake.commitCount != 1 {
+		t.Fatalf("commit count=%d, want 1", fake.commitCount)
+	}
+}
+
+func TestGitHubLedgerEditorRetryWithSameContentIsIdempotent(t *testing.T) {
+	initial := "option \"title\" \"Test\"\n"
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"main.bean": initial})
+	defer fake.server.Close()
+
+	cfg := githubAPITestConfig(t, fake)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
+	router := NewRouter(cfg)
+	cookies := loginCookies(t, router)
+	next := "option \"title\" \"Updated\"\n"
+	body := `{"path":"main.bean","content":` + quoteJSON(next) + `,"previousHash":"` + sha256Hex([]byte(initial))[:16] + `"}`
+
+	first := requestWithCookies(router, http.MethodPut, "/api/ledger/editor/file", body, cookies)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first save status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := requestWithCookies(router, http.MethodPut, "/api/ledger/editor/file", body, cookies)
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", second.Code, second.Body.String())
+	}
+	if fake.commitCount != 1 {
+		t.Fatalf("retry created duplicate commit count=%d", fake.commitCount)
+	}
+}
+
 func containsEditorPath(files []LedgerEditorFile, path string) bool {
 	for _, file := range files {
 		if file.Path == path {

@@ -6,12 +6,25 @@ import (
 )
 
 type TransactionService struct {
-	cache  *LedgerCache
-	writer *LedgerWriter
+	writer   *LedgerWriter
+	snapshot func() (*LedgerSnapshot, error)
 }
 
 func NewTransactionService(cache *LedgerCache, writer *LedgerWriter) *TransactionService {
-	return &TransactionService{cache: cache, writer: writer}
+	return NewTransactionServiceWithSnapshot(cache, writer, nil)
+}
+
+func NewTransactionServiceWithSnapshot(cache *LedgerCache, writer *LedgerWriter, snapshot func() (*LedgerSnapshot, error)) *TransactionService {
+	if snapshot == nil {
+		if cache != nil {
+			snapshot = cache.Snapshot
+		} else {
+			snapshot = func() (*LedgerSnapshot, error) {
+				return nil, errors.New("ledger snapshot is unavailable")
+			}
+		}
+	}
+	return &TransactionService{writer: writer, snapshot: snapshot}
 }
 
 func (s *TransactionService) Update(source TransactionSource, entry LedgerEntry) error {
@@ -23,7 +36,7 @@ func (s *TransactionService) Delete(source TransactionSource, reason string) err
 }
 
 func (s *TransactionService) Reverse(input ReverseTransactionRequest) (LedgerEntry, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.snapshot()
 	if err != nil {
 		return LedgerEntry{}, err
 	}

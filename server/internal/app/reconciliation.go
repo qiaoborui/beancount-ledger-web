@@ -6,8 +6,8 @@ import (
 )
 
 type ReconciliationService struct {
-	cache  *LedgerCache
-	writer *LedgerWriter
+	writer   *LedgerWriter
+	snapshot func() (*LedgerSnapshot, error)
 }
 
 type ReconciliationResult struct {
@@ -21,11 +21,24 @@ type ReconciliationResult struct {
 }
 
 func NewReconciliationService(cache *LedgerCache, writer *LedgerWriter) *ReconciliationService {
-	return &ReconciliationService{cache: cache, writer: writer}
+	return NewReconciliationServiceWithSnapshot(cache, writer, nil)
+}
+
+func NewReconciliationServiceWithSnapshot(cache *LedgerCache, writer *LedgerWriter, snapshot func() (*LedgerSnapshot, error)) *ReconciliationService {
+	if snapshot == nil {
+		if cache != nil {
+			snapshot = cache.Snapshot
+		} else {
+			snapshot = func() (*LedgerSnapshot, error) {
+				return nil, errors.New("ledger snapshot is unavailable")
+			}
+		}
+	}
+	return &ReconciliationService{writer: writer, snapshot: snapshot}
 }
 
 func (s *ReconciliationService) Reconcile(input ReconcileRequest) (ReconciliationResult, error) {
-	snapshot, err := s.cache.Snapshot()
+	snapshot, err := s.snapshot()
 	if err != nil {
 		return ReconciliationResult{}, err
 	}

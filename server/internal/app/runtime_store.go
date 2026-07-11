@@ -252,13 +252,13 @@ func (s *postgresRuntimeStore) GetJSON(ctx context.Context, scope, key string, d
 }
 
 func (s *postgresRuntimeStore) PutJSON(ctx context.Context, scope, key string, value any) error {
-	raw, err := json.Marshal(value)
+	raw, err := marshalPostgresJSON(value)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runtime_json (scope, key, value, updated_at)
-VALUES ($1, $2, $3, now())
+VALUES ($1, $2, $3::jsonb, now())
 ON CONFLICT (scope, key)
 DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, scope, key, raw)
 	return err

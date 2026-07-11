@@ -2,6 +2,10 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +13,104 @@ import (
 	"testing"
 	"time"
 )
+
+var runtimeJSONDriver = &runtimeJSONCaptureDriver{}
+
+func init() {
+	sql.Register("runtime-json-capture", runtimeJSONDriver)
+}
+
+type runtimeJSONCaptureDriver struct {
+	mu   sync.Mutex
+	args []driver.NamedValue
+}
+
+func (d *runtimeJSONCaptureDriver) Open(string) (driver.Conn, error) {
+	return &runtimeJSONCaptureConn{driver: d}, nil
+}
+
+type runtimeJSONCaptureConn struct {
+	driver *runtimeJSONCaptureDriver
+}
+
+func (c *runtimeJSONCaptureConn) Prepare(string) (driver.Stmt, error) {
+	return nil, driver.ErrSkip
+}
+
+func (c *runtimeJSONCaptureConn) Close() error { return nil }
+
+func (c *runtimeJSONCaptureConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are not supported")
+}
+
+func (c *runtimeJSONCaptureConn) ExecContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Result, error) {
+	c.driver.mu.Lock()
+	c.driver.args = append([]driver.NamedValue(nil), args...)
+	c.driver.mu.Unlock()
+	return driver.RowsAffected(1), nil
+}
+
+func TestPostgresRuntimeStoreWritesJSONAsText(t *testing.T) {
+	runtimeJSONDriver.mu.Lock()
+	runtimeJSONDriver.args = nil
+	runtimeJSONDriver.mu.Unlock()
+
+	db, err := sql.Open("runtime-json-capture", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := &postgresRuntimeStore{db: db}
+	if err := store.PutJSON(context.Background(), "auth", "passkeys", map[string]any{"ok": true}); err != nil {
+		t.Fatal(err)
+	}
+
+	runtimeJSONDriver.mu.Lock()
+	args := append([]driver.NamedValue(nil), runtimeJSONDriver.args...)
+	runtimeJSONDriver.mu.Unlock()
+	if len(args) != 3 {
+		t.Fatalf("captured args=%#v", args)
+	}
+	if _, ok := args[2].Value.(string); !ok {
+		t.Fatalf("JSONB value type=%T, want string so pgx does not encode it as bytea", args[2].Value)
+	}
+}
+
+func TestPostgresRuntimeStoreRoundTrip(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := openPostgres(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewRuntimeStoreWithDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := fmt.Sprintf("integration-%d", time.Now().UnixNano())
+	defer db.ExecContext(context.Background(), `DELETE FROM runtime_json WHERE scope = $1`, scope)
+
+	type payload struct {
+		Enabled bool     `json:"enabled"`
+		Names   []string `json:"names"`
+	}
+	want := payload{Enabled: true, Names: []string{"runtime", "postgres"}}
+	if err := store.PutJSON(context.Background(), scope, "round-trip", want); err != nil {
+		t.Fatal(err)
+	}
+	var got payload
+	ok, err := store.GetJSON(context.Background(), scope, "round-trip", &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !got.Enabled || strings.Join(got.Names, ",") != strings.Join(want.Names, ",") {
+		t.Fatalf("round trip ok=%v got=%#v", ok, got)
+	}
+}
 
 func TestFilesystemRuntimeStorePreservesLegacyPaths(t *testing.T) {
 	root := t.TempDir()
