@@ -43,6 +43,7 @@ jobs:
           web=false
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             backend=true
+            web=true
           fi
           while IFS= read -r file; do
             case "$file" in
@@ -123,6 +124,88 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=server-image
           cache-to: type=gha,scope=server-image,mode=max
+
+  indexer-image:
+    name: Indexer image
+    needs: [plan, go]
+    if: ${{ github.event_name != 'pull_request' && needs.plan.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-indexer
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-indexer
+            org.opencontainers.image.description=Ledger read-model indexer image
+      - name: Build indexer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: indexer
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=indexer-image
+          cache-to: type=gha,scope=indexer-image,mode=max
+
+  frontend-image:
+    name: Frontend image
+    needs: [plan, web]
+    if: ${{ github.event_name != 'pull_request' && needs.plan.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-frontend
+            org.opencontainers.image.description=Static frontend image for Beancount Ledger Web
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: frontend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend-image
+          cache-to: type=gha,scope=frontend-image,mode=max
 
   web:
     name: Frontend

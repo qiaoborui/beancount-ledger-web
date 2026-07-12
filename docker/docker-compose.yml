@@ -30,6 +30,8 @@ services:
   frontend:
     <<: *app-env
     profiles: [frontend]
+    image: ${FRONTEND_IMAGE:-ghcr.io/qiaoborui/beancount-ledger-web-frontend:latest}
+    pull_policy: ${FRONTEND_PULL_POLICY:-missing}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -56,6 +58,8 @@ services:
   indexer:
     <<: *app-env
     profiles: [indexer]
+    image: ${INDEXER_IMAGE:-ghcr.io/qiaoborui/beancount-ledger-web-indexer:latest}
+    pull_policy: ${INDEXER_PULL_POLICY:-missing}
     build:
       context: ..
       dockerfile: docker/Dockerfile
