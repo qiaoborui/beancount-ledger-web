@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import { Button } from "@/components/ui/button";
 import { MobileSheet } from "./MobileSheet";
 import type { LedgerNotification } from "./types";
@@ -14,7 +15,7 @@ export function NotificationCenter({ notifications, open, onClose, onChange }: {
   const warningUnread = unread.filter((notification) => notification.severity === "warning").length;
 
   async function updateStatus(ids: string[], status: LedgerNotification["status"]) {
-    const res = await fetch("/api/ledger/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, status }) });
+    const res = await apiFetch("/api/ledger/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, status }) }, { kind: "write" });
     const data = await readJson<{ error?: string; notifications?: LedgerNotification[] }>(res);
     if (res.ok) onChange(data.notifications ?? []);
   }

@@ -384,13 +384,19 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		t.Fatalf("health=%d body=%s", health.Code, health.Body.String())
 	}
 	var healthBody struct {
-		OK bool `json:"ok"`
+		OK           bool     `json:"ok"`
+		APIVersion   int      `json:"apiVersion"`
+		ClusterID    string   `json:"clusterId"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if err := json.Unmarshal(health.Body.Bytes(), &healthBody); err != nil {
 		t.Fatal(err)
 	}
 	if !healthBody.OK {
 		t.Fatalf("health should be ok: %#v", healthBody)
+	}
+	if healthBody.APIVersion != 1 || healthBody.ClusterID == "" || len(healthBody.Capabilities) == 0 {
+		t.Fatalf("health identity missing: %#v", healthBody)
 	}
 
 	badLogin := requestWithCookies(router, http.MethodPost, "/api/auth/login", `{"password":"bad"}`, nil)

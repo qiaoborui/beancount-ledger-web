@@ -17,6 +17,7 @@ import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
+import { apiEndpointSettingsChangeEvent, apiFetch, applyApiEndpointProbe, probeApiEndpoint, readApiEndpointSettings, writeApiEndpointSettings } from "@/lib/apiEndpoints";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
@@ -168,6 +169,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const page = pageProp ?? pageFromPathname(pathname);
   const homeSecondaryReady = useDeferredIdleReady(page === "home", 1200);
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
+  const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
   const [customStart, setCustomStart] = useState(timeRange.start);
@@ -221,6 +223,47 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     fetchLedgerIndexInfo().then(setIndexInfo).catch(() => setIndexInfo(null));
   }, []);
 
+  useEffect(() => {
+    if (!online) return;
+    let cancelled = false;
+    const probeConfiguredEndpoints = async () => {
+      const settings = readApiEndpointSettings();
+      const endpoints = settings.endpoints.filter((endpoint) => endpoint.enabled);
+      if (endpoints.length < 2) return;
+      const results = await Promise.all(endpoints.map((endpoint) => probeApiEndpoint(endpoint)));
+      let next = settings;
+      if (!settings.clusterId) {
+        const activeResult = results.find((result) => result.id === settings.activeId);
+        if (!activeResult?.ok) return;
+        try {
+          next = applyApiEndpointProbe(next, activeResult.id, activeResult);
+        } catch {
+          return;
+        }
+      }
+      for (const result of results) {
+        if (!result.ok) continue;
+        try {
+          next = applyApiEndpointProbe(next, result.id, result);
+        } catch {
+          // Reachable but incompatible endpoints stay excluded from read fallback.
+        }
+      }
+      if (!cancelled && JSON.stringify(next) !== JSON.stringify(settings)) writeApiEndpointSettings(next);
+    };
+    const initial = window.setTimeout(() => {
+      if (!cancelled) void probeConfiguredEndpoints();
+    }, 5000);
+    const interval = window.setInterval(() => {
+      if (!cancelled && document.visibilityState !== "hidden") void probeConfiguredEndpoints();
+    }, 60000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [online]);
+
   const { unlocked, setUnlocked } = useLedgerLock({ passkeyRegistered: hasPasskey, authed });
   useEffect(() => {
     if (unlocked) revealAllAmounts();
@@ -253,7 +296,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const lockSensitive = useCallback(async () => {
     handleSensitiveLocked();
     try {
-      await fetch("/api/auth/lock", { method: "POST" });
+      await apiFetch("/api/auth/lock", { method: "POST" }, { kind: "auth" });
     } catch {
       showToast("error", "已在本机隐藏敏感数据，但服务端锁定请求失败；请刷新后确认。");
     }
@@ -302,6 +345,23 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     showToast,
     clearToast: () => setToast(null),
   });
+
+  useEffect(() => {
+    const handleEndpointChange = () => {
+      const activeId = readApiEndpointSettings().activeId;
+      if (activeId === activeApiEndpointIdRef.current) return;
+      activeApiEndpointIdRef.current = activeId;
+      sessionStorage.removeItem("ledger_unlocked");
+      setUnlocked(false);
+      setPasskeyRegistered(null);
+      setAuthed(null);
+      void load(true).catch((error) => {
+        showToast("error", error instanceof Error ? error.message : "切换后端失败");
+      });
+    };
+    window.addEventListener(apiEndpointSettingsChangeEvent, handleEndpointChange);
+    return () => window.removeEventListener(apiEndpointSettingsChangeEvent, handleEndpointChange);
+  }, [load, setUnlocked, showToast]);
 
   const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites, discardPendingOperation } = usePendingLedgerWrites({ load, showToast, ledgerVersion });
   const pendingConflict = useMemo(() => pendingOperations.find((operation) => operation.id === conflictOperationId && operation.status === "conflict") ?? null, [conflictOperationId, pendingOperations]);

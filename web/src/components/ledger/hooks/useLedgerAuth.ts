@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import { rememberLedgerAuthenticated } from "../authState";
 import { unlockWithQuickLedgerSecret } from "../quickUnlock";
 
@@ -48,12 +49,13 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
       try {
-        const res = await fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
+        const res = await apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }, { kind: "auth" });
         if (res.ok) {
           markSensitiveUnlocked(setUnlocked, setAuthed);
           refreshAfterAuth(load, showToast);
         } else {
-          showToast("error", "密码不对");
+          const data = await readJson<{ error?: string }>(res, {});
+          showToast("error", res.status === 401 ? "密码不对" : data.error || `登录失败：${res.status}`);
         }
       } catch (error) {
         showToast("error", error instanceof Error ? error.message : "登录失败");
@@ -74,7 +76,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
         const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST" });
         if (options.error) throw new Error(options.error);
         const response = await startAuthentication({ optionsJSON: options });
-        const verify = await fetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) });
+        const verify = await apiFetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
         const data = await readJson<{ error?: string }>(verify);
         if (!verify.ok) throw new Error(data.error || "Face ID 登录失败");
         markSensitiveUnlocked(setUnlocked, setAuthed);
@@ -119,7 +121,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
         const options = await fetchJson<PublicKeyCredentialCreationOptionsJSON & { error?: string }>("/api/passkey/register/options", { method: "POST" });
         if (options.error) throw new Error(options.error);
         const response = await startRegistration({ optionsJSON: options });
-        const verify = await fetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) });
+        const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
         const data = await readJson<{ error?: string }>(verify);
         if (!verify.ok) throw new Error(data.error || "Face ID 启用失败");
         setPasskeyRegistered(true);

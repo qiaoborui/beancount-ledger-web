@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
+import { deleteIndexedCache, readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
 import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
@@ -11,13 +11,27 @@ import {
   type PendingLedgerOperation,
 } from "../pendingLedgerOperations";
 import type { LedgerVersion, Txn } from "../types";
+import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointSettingsChangeEvent, apiEndpointStorageKeyForLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 
 const pendingOperationsKey = "ledger_pending_operations";
 const indexedPendingOperationsKey = "ledger_pending_operations:v2";
 const legacyPendingWritesKey = "ledger_pending_writes";
+const pendingOperationsMigrationKey = "ledger_pending_operations:migrated:v3";
 const pendingWritesChangeEvent = "ledger-pending-writes-change";
 
-let pendingOperationsWriteChain: Promise<void> = Promise.resolve();
+const pendingOperationsWriteChains = new Map<string, Promise<boolean>>();
+
+function pendingStorageKeysForScope(scope: string) {
+  return {
+    scope,
+    local: apiEndpointStorageKeyForLedgerScope(pendingOperationsKey, scope),
+    indexed: apiEndpointStorageKeyForLedgerScope(indexedPendingOperationsKey, scope),
+  };
+}
+
+function pendingStorageKeys() {
+  return pendingStorageKeysForScope(apiEndpointLedgerScope());
+}
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -38,43 +52,126 @@ function readJsonArray(key: string): unknown[] {
 
 function readLocalPendingOperations(): PendingLedgerOperation[] {
   if (typeof window === "undefined") return [];
-  const operations = normalizePendingLedgerOperations(readJsonArray(pendingOperationsKey));
-  const legacy = migrateLegacyPendingWrites(readJsonArray(legacyPendingWritesKey));
-  if (legacy.length) {
-    const next = [...legacy, ...operations];
-    void writePendingOperations(next);
-    try {
-      localStorage.removeItem(legacyPendingWritesKey);
-    } catch {
-      // The migrated operations have already been mirrored in memory.
-    }
-    return next;
-  }
-  return operations;
+  const keys = pendingStorageKeys();
+  return normalizePendingLedgerOperations(readJsonArray(keys.local));
 }
 
-async function readPendingOperations(): Promise<PendingLedgerOperation[]> {
-  await pendingOperationsWriteChain.catch(() => undefined);
+export async function readPendingLedgerOperations(): Promise<PendingLedgerOperation[]> {
+  const keys = pendingStorageKeys();
+  await pendingOperationsWriteChains.get(keys.scope)?.catch(() => undefined);
   const local = readLocalPendingOperations();
-  const indexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(indexedPendingOperationsKey));
+  const indexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(keys.indexed));
   const merged = mergeOperationLists(indexed.length ? indexed : local, local);
-  if (merged.length || local.length) await writePendingOperations(merged, false);
-  return merged;
+  const scopeMigration = await migratePreviousSameOriginPendingOperations(merged, keys.scope);
+  const migration = await migrateLegacyPendingOperations(scopeMigration.operations, keys.scope);
+  if (!scopeMigration.persisted && !migration.persisted && (migration.operations.length || local.length)) await writePendingOperations(migration.operations, false);
+  return migration.operations;
+}
+
+async function migratePreviousSameOriginPendingOperations(current: PendingLedgerOperation[], scope: string) {
+  const previousScope = apiEndpointPreviousLedgerScope();
+  if (!previousScope || previousScope === scope) return { operations: current, persisted: false };
+  const previousKeys = pendingStorageKeysForScope(previousScope);
+  await pendingOperationsWriteChains.get(previousScope)?.catch(() => undefined);
+  const previousLocal = normalizePendingLedgerOperations(readJsonArray(previousKeys.local));
+  const previousIndexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(previousKeys.indexed));
+  const previous = mergeOperationLists(previousIndexed.length ? previousIndexed : previousLocal, previousLocal).map((operation) => ({
+    ...operation,
+    ledgerScope: scope,
+  }));
+  if (!previous.length) return { operations: current, persisted: false };
+  const next = mergeOperationLists(current, previous);
+  const persisted = await writePendingOperations(next, false);
+  if (!persisted) return { operations: next, persisted: false };
+  removeLocalStorageKey(previousKeys.local);
+  await deleteIndexedCache(previousKeys.indexed);
+  return { operations: next, persisted: true };
 }
 
 async function writePendingOperations(operations: PendingLedgerOperation[], notify = true) {
-  if (typeof window === "undefined") return Promise.resolve();
+  if (typeof window === "undefined") return false;
+  const keys = pendingStorageKeys();
   const write = async () => {
+    let localStored = false;
     try {
-      localStorage.setItem(pendingOperationsKey, JSON.stringify(operations));
+      localStorage.setItem(keys.local, JSON.stringify(operations));
+      localStored = true;
     } catch {
       // Keep the in-memory queue even if localStorage is unavailable.
     }
-    await writeIndexedCache(indexedPendingOperationsKey, operations);
+    const indexedStored = await writeIndexedCache(keys.indexed, operations);
     if (notify) window.dispatchEvent(new Event(pendingWritesChangeEvent));
+    return localStored || indexedStored;
   };
-  pendingOperationsWriteChain = pendingOperationsWriteChain.then(write, write);
-  return pendingOperationsWriteChain;
+  const chain = pendingOperationsWriteChains.get(keys.scope) ?? Promise.resolve(true);
+  const next = chain.then(write, write);
+  pendingOperationsWriteChains.set(keys.scope, next);
+  return next;
+}
+
+async function migrateLegacyPendingOperations(current: PendingLedgerOperation[], scope: string) {
+  if (typeof window === "undefined" || await pendingOperationsMigrationComplete()) return { operations: current, persisted: false };
+  const legacyIndexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(indexedPendingOperationsKey));
+  const legacyLocal = normalizePendingLedgerOperations(readJsonArray(pendingOperationsKey));
+  const legacyWrites = migrateLegacyPendingWrites(readJsonArray(legacyPendingWritesKey));
+  const legacy = mergeOperationLists(legacyIndexed, [...legacyLocal, ...legacyWrites]).map((operation) => ({
+    ...operation,
+    ledgerScope: operation.ledgerScope ?? scope,
+  }));
+  const next = mergeOperationLists(current, legacy);
+  if (!legacy.length) {
+    await markPendingOperationsMigrationComplete();
+    return { operations: current, persisted: false };
+  }
+  const persisted = await writePendingOperations(next, false);
+  if (!persisted) return { operations: next, persisted: false };
+  const marked = await markPendingOperationsMigrationComplete();
+  const localCleaned = removeLegacyLocalPendingOperations();
+  const indexedCleaned = await deleteIndexedCache(indexedPendingOperationsKey);
+  if (!marked && !(localCleaned && indexedCleaned)) {
+    return { operations: next, persisted: true };
+  }
+  return { operations: next, persisted: true };
+}
+
+async function pendingOperationsMigrationComplete() {
+  try {
+    if (localStorage.getItem(pendingOperationsMigrationKey) === "1") return true;
+  } catch {
+    // Fall through to the IndexedDB marker.
+  }
+  return Boolean(await readIndexedCache<boolean>(pendingOperationsMigrationKey));
+}
+
+async function markPendingOperationsMigrationComplete() {
+  let localMarked = false;
+  try {
+    localStorage.setItem(pendingOperationsMigrationKey, "1");
+    localMarked = localStorage.getItem(pendingOperationsMigrationKey) === "1";
+  } catch {
+    // IndexedDB provides the fallback migration marker.
+  }
+  const indexedMarked = await writeIndexedCache(pendingOperationsMigrationKey, true);
+  return localMarked || indexedMarked;
+}
+
+function removeLegacyLocalPendingOperations() {
+  try {
+    localStorage.removeItem(legacyPendingWritesKey);
+    localStorage.removeItem(pendingOperationsKey);
+    return localStorage.getItem(legacyPendingWritesKey) == null && localStorage.getItem(pendingOperationsKey) == null;
+  } catch {
+    return false;
+  }
+}
+
+function removeLocalStorageKey(key: string) {
+  try {
+    localStorage.removeItem(key);
+    return localStorage.getItem(key) == null;
+  } catch {
+    return false;
+  }
 }
 
 function mergeOperationLists(primary: PendingLedgerOperation[], secondary: PendingLedgerOperation[]) {
@@ -90,17 +187,17 @@ function mergeOperationLists(primary: PendingLedgerOperation[], secondary: Pendi
 
 function appendOperation(entry: PendingEntry, baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
   const now = Date.now();
-  return { id: makeId(), createdAt: now, updatedAt: now, kind: "append", entry, baseLedgerVersion, status: "pending" };
+  return { id: makeId(), createdAt: now, updatedAt: now, kind: "append", entry, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
 }
 
 function updateOperation(source: Txn["source"], entry: ParsedTransaction, baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
   const now = Date.now();
-  return { id: makeId(), createdAt: now, updatedAt: now, kind: "update-transaction", source, entry, baseLedgerVersion, status: "pending" };
+  return { id: makeId(), createdAt: now, updatedAt: now, kind: "update-transaction", source, entry, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
 }
 
 function deleteOperation(source: Txn["source"], reason: string, baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
   const now = Date.now();
-  return { id: makeId(), createdAt: now, updatedAt: now, kind: "delete-transaction", source, reason, baseLedgerVersion, status: "pending" };
+  return { id: makeId(), createdAt: now, updatedAt: now, kind: "delete-transaction", source, reason, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
 }
 
 export function isPendingLedgerConflict(message: string) {
@@ -116,21 +213,24 @@ export function hasPendingOperationsToSync(operations: PendingLedgerOperation[])
 }
 
 export async function syncOperation(operation: PendingLedgerOperation) {
+  if (operation.ledgerScope && operation.ledgerScope !== apiEndpointLedgerScope()) {
+    throw new Error("待同步操作属于另一个账本，已停止同步");
+  }
   if (operation.kind === "append") {
-    const res = await fetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) });
+    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) throw new Error(data.error || "同步失败");
     return;
   }
 
   if (operation.kind === "update-transaction") {
-    const res = await fetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) });
+    const res = await apiFetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) throw new Error(data.error || "修改同步失败");
     return;
   }
 
-  const res = await fetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) });
+  const res = await apiFetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) }, { kind: "write" });
   const data = await readJson<{ error?: string }>(res);
   if (!res.ok) throw new Error(data.error || "删除同步失败");
 }
@@ -141,16 +241,18 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
 
   useEffect(() => {
     const refresh = () => {
-      void readPendingOperations().then(setPendingOperations);
+      void readPendingLedgerOperations().then(setPendingOperations);
     };
     refresh();
     window.addEventListener("storage", refresh);
     window.addEventListener(pendingWritesChangeEvent, refresh);
     window.addEventListener("online", refresh);
+    window.addEventListener(apiEndpointSettingsChangeEvent, refresh);
     return () => {
       window.removeEventListener("storage", refresh);
       window.removeEventListener(pendingWritesChangeEvent, refresh);
       window.removeEventListener("online", refresh);
+      window.removeEventListener(apiEndpointSettingsChangeEvent, refresh);
     };
   }, []);
 
@@ -187,7 +289,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
   }, [enqueueOperation, ledgerVersion]);
 
   const syncPendingWrites = useCallback(async ({ userInitiated = false }: { userInitiated?: boolean } = {}) => {
-    const current = await readPendingOperations();
+    const current = await readPendingLedgerOperations();
     if (!current.length || syncingPendingWrites) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       showToast("info", `仍处于离线状态，${current.length} 条待同步操作已保留`);
@@ -200,7 +302,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     let interruptedMessage = "";
     try {
       while (true) {
-        const latest = await readPendingOperations();
+        const latest = await readPendingLedgerOperations();
         if (!latest.length) break;
         const syncIndex = latest.findIndex((operation) => operation.status !== "conflict");
         if (syncIndex < 0) break;
@@ -209,10 +311,10 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
         try {
           await syncOperation(item);
           syncedCount += 1;
-          persist((await readPendingOperations()).filter((operation) => operation.id !== item.id));
+          persist((await readPendingLedgerOperations()).filter((operation) => operation.id !== item.id));
         } catch (error) {
           const message = error instanceof Error ? error.message : "同步中断";
-          const remaining = await readPendingOperations();
+          const remaining = await readPendingLedgerOperations();
           const failedIndex = remaining.findIndex((operation) => operation.id === item.id);
           const status = isPendingLedgerConflict(message) ? "conflict" : "error";
           if (failedIndex >= 0) {
@@ -232,7 +334,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
         }
       }
       if (userInitiated) haptic([6, 24, 10]);
-      const remaining = await readPendingOperations();
+      const remaining = await readPendingLedgerOperations();
       if (syncedCount > 0) {
         showToast("success", remaining.length ? `已同步 ${syncedCount} 条，仍有 ${remaining.length} 条待处理` : `已同步 ${syncedCount} 条待同步操作`);
         await load(true);

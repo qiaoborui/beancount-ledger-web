@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { fetchJson, readJson } from "@/lib/clientFetch";
+import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey, apiFetch } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
@@ -181,17 +182,28 @@ function formatDraftSavedAt(savedAt: number | null) {
 function readImportDraft(): ImportDraft | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(importDraftKey);
+    const scopedKey = apiEndpointScopedStorageKey(importDraftKey);
+    const scoped = localStorage.getItem(scopedKey);
+    const raw = scoped ?? localStorage.getItem(importDraftKey);
     if (!raw) return null;
     const draft = JSON.parse(raw) as Partial<ImportDraft>;
     if (!draft.preview?.importId || !Array.isArray(draft.entries)) return null;
-    return {
+    const normalized = {
       savedAt: typeof draft.savedAt === "number" ? draft.savedAt : Date.now(),
       providerOverride: draft.providerOverride ?? "auto",
       alipayFundRounding: Boolean(draft.alipayFundRounding),
       preview: draft.preview,
       entries: draft.entries,
-    };
+    } satisfies ImportDraft;
+    if (!scoped) {
+      try {
+        localStorage.setItem(scopedKey, JSON.stringify(normalized));
+        if (localStorage.getItem(scopedKey)) localStorage.removeItem(importDraftKey);
+      } catch {
+        // Keep using the legacy draft until scoped storage is writable.
+      }
+    }
+    return normalized;
   } catch {
     return null;
   }
@@ -200,8 +212,13 @@ function readImportDraft(): ImportDraft | null {
 function writeImportDraft(draft: ImportDraft | null) {
   if (typeof window === "undefined") return;
   try {
-    if (!draft) localStorage.removeItem(importDraftKey);
-    else localStorage.setItem(importDraftKey, JSON.stringify(draft));
+    const scopedKey = apiEndpointScopedStorageKey(importDraftKey);
+    if (!draft) {
+      localStorage.removeItem(scopedKey);
+      localStorage.removeItem(importDraftKey);
+    } else {
+      localStorage.setItem(scopedKey, JSON.stringify(draft));
+    }
   } catch {
     // Storage can be unavailable or full for large imports; the in-memory review still works.
   }
@@ -265,7 +282,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchJson<{ providers: ImportProviderInfo[] }>("/api/ledger/imports/providers", undefined, { providers: [] })
+    fetchJson<{ providers: ImportProviderInfo[] }>("/api/ledger/imports/providers", undefined, { providers: [] }, { kind: "auth" })
       .then((data) => {
         if (!cancelled) setProviderChoices(providerChoicesFromAPI(data.providers ?? []));
       })
@@ -365,7 +382,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       if (providerOverride !== "auto") form.set("provider", providerOverride);
       form.set("file", file);
       form.set("alipayFundRounding", String(alipayFundRounding));
-      const res = await fetch("/api/ledger/imports/preview", { method: "POST", body: form });
+      const res = await apiFetch("/api/ledger/imports/preview", { method: "POST", body: form }, { kind: "write" });
       const data = await readJson<ImportPreview>(res);
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
       setPreview(data);
@@ -387,11 +404,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     try {
-      const res = await fetch("/api/ledger/imports/commit", {
+      const res = await apiFetch("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
-      });
+      }, { kind: "write" });
       const data = await readJson<CommitResult>(res);
       if (!res.ok || data.error) throw new Error(data.error || "写入失败");
       setCommitResult(data);
@@ -438,7 +455,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setDocumentsLoading(true);
     setDocumentsError("");
     try {
-      const data = await fetchJson<{ documents: ImportDocument[] }>("/api/ledger/imports/documents", undefined, { documents: [] });
+      const data = await fetchJson<{ documents: ImportDocument[] }>("/api/ledger/imports/documents", undefined, { documents: [] }, { kind: "auth" });
       setImportDocuments(data.documents ?? []);
     } catch (err) {
       setDocumentsError(err instanceof Error ? err.message : String(err));
@@ -1073,7 +1090,7 @@ function ImportHistoryPanel({
 }
 
 function importDocumentHref(document: ImportDocument) {
-  return `/api/ledger/imports/documents/file?path=${encodeURIComponent(document.path)}`;
+  return activeApiEndpointRequestUrl(`/api/ledger/imports/documents/file?path=${encodeURIComponent(document.path)}`);
 }
 
 function importDocumentTypeLabel(document: ImportDocument) {

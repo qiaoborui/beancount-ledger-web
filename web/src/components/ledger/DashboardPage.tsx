@@ -11,6 +11,7 @@ import type { TimeRange } from "@/lib/timeRange";
 import { formatAccountOptionLabel, isLedgerAccount } from "./accountDisplay";
 import { DEFAULT_DASHBOARD_FILTERS, dashboardFiltersToApiQuery, dashboardFiltersToSearchParams, hasActiveDashboardFilters, normalizeDashboardFilters, parseDashboardFiltersFromSearch, type DashboardFilterKey, type DashboardFilterState } from "./dashboardFilters";
 import type { DashboardFilterOption, DashboardSummary } from "./types";
+import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 
 const COLORS = [
   "var(--chart-palette-1)",
@@ -274,7 +275,8 @@ function useDashboardRowCollapse() {
 
 function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState, valuationCurrency: string, onSensitiveLocked: () => void) {
   const params = dashboardFiltersToApiQuery(timeRange, filters, valuationCurrency);
-  const [data, setData] = useState<DashboardSummary | null>(() => dashboardSummaryCache.get(params) ?? null);
+  const cacheKey = `${apiEndpointLedgerScope()}:${params}`;
+  const [data, setData] = useState<DashboardSummary | null>(() => dashboardSummaryCache.get(cacheKey) ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
@@ -283,14 +285,14 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
   useEffect(() => {
     let active = true;
     async function load() {
-      const cached = reloadToken === 0 ? dashboardSummaryCache.get(params) : null;
+      const cached = reloadToken === 0 ? dashboardSummaryCache.get(cacheKey) : null;
       if (cached) setData(cached);
       setLoading(!cached);
       setError("");
       try {
-        const next = await fetchDashboardSummary(params);
+        const next = await fetchDashboardSummary(params, cacheKey);
         if (!active) return;
-        dashboardSummaryCache.set(params, next);
+        dashboardSummaryCache.set(cacheKey, next);
         setData(next);
       } catch (err) {
         if (!active) return;
@@ -308,19 +310,19 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
     return () => {
       active = false;
     };
-  }, [onSensitiveLocked, params, reloadToken]);
+  }, [cacheKey, onSensitiveLocked, params, reloadToken]);
 
   return { data, loading, error, reload };
 }
 
 class DashboardLockedError extends Error {}
 
-async function fetchDashboardSummary(params: string) {
-  const existing = dashboardSummaryInFlight.get(params);
+async function fetchDashboardSummary(params: string, cacheKey: string) {
+  const existing = dashboardSummaryInFlight.get(cacheKey);
   if (existing) return existing;
 
   const request = (async () => {
-    const response = await fetch(`/api/ledger/dashboard?${params}`);
+    const response = await apiFetch(`/api/ledger/dashboard?${params}`, undefined, { kind: "read" });
     if (response.status === 423 || response.status === 401) {
       throw new DashboardLockedError("Dashboard locked");
     }
@@ -329,11 +331,11 @@ async function fetchDashboardSummary(params: string) {
     return next;
   })();
 
-  dashboardSummaryInFlight.set(params, request);
+  dashboardSummaryInFlight.set(cacheKey, request);
   try {
     return await request;
   } finally {
-    dashboardSummaryInFlight.delete(params);
+    dashboardSummaryInFlight.delete(cacheKey);
   }
 }
 

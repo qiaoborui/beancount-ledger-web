@@ -40,4 +40,13 @@ describe("ledger auth state", () => {
     expect(hasKnownLedgerAuthentication({ sessionStorage, localStorage, online: false })).toBe(false);
     expect(sessionStorage.getItem("ledger_unlocked")).toBeNull();
   });
+
+  it("keeps login state isolated by backend", () => {
+    const sessionStorage = memoryStorage();
+    const localStorage = memoryStorage();
+    rememberLedgerAuthenticated({ sessionStorage, localStorage, online: true, endpointId: "primary" });
+
+    expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: true, endpointId: "primary" })).toBe(true);
+    expect(readInitialLedgerAuthState({ sessionStorage, localStorage, online: true, endpointId: "backup" })).toBeNull();
+  });
 });

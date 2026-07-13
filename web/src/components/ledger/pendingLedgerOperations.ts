@@ -14,6 +14,7 @@ type PendingLedgerOperationBase = {
   retryCount?: number;
   lastAttemptAt?: number;
   lastError?: string;
+  ledgerScope?: string;
 };
 
 export type PendingAppendOperation = {

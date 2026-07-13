@@ -82,6 +82,7 @@ environment variables in the Vercel dashboard:
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name.
 - `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
 - `LEDGER_GIT_BRANCH=main` — branch to read and update through the GitHub API.
+- `LEDGER_CLUSTER_ID` — optional stable ledger identity for multi-backend deployments. GitHub-backed deployments derive it from owner/repository/branch automatically.
 - `DATABASE_URL` — Postgres connection string for the read model, runtime state, locks, and import preview files.
 
 Do not set `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`,
@@ -185,6 +186,7 @@ Important variables:
 - `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `ledger-web`.
 - `DATABASE_URL` — required for the ledger read model, runtime state, locks, rate limits, web push subscriptions, notifications, and import preview files.
 - `LEDGER_ROOT` — indexer-only path to a local private ledger checkout or mounted copy.
+- `LEDGER_CLUSTER_ID` — optional shared identity for several backends serving the same ledger. Filesystem mode otherwise derives an identity from the absolute `LEDGER_ROOT`; set this explicitly when replicas use different mount paths.
 - `APP_PASSWORD` — single-user login password.
 - `AUTH_SECRET` — random secret for auth cookies.
 - `PUBLIC_ORIGIN` / `WEBAUTHN_PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin, allowed passkey origins, and passkey RP ID. Keep `WEBAUTHN_RP_ID` on the original registration domain to preserve existing passkeys after a domain move.
