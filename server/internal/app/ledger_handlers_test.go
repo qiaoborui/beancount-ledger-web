@@ -354,6 +354,47 @@ func TestInvestmentSummaryCalculatesRealizedPnLAndClosedHoldings(t *testing.T) {
 	}
 }
 
+func TestInvestmentSummaryInfersRealizedPnLFromCashPosting(t *testing.T) {
+	text := []string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity SZ159350",
+		"2026-01-01 open Assets:CN:CMB:Cash CNY",
+		"2026-01-01 open Assets:CN:CMB:Securities:SZ159350 SZ159350",
+		`  alias: "招商证券深证50 ETF"`,
+		"2026-01-01 open Equity:Opening-Balances CNY",
+		"2026-01-01 open Income:Investment:Gain CNY",
+		"2026-07-10 price SZ159350 1.72 CNY",
+		`2026-06-01 * "招商证券" "buy SZ159350"`,
+		"  Assets:CN:CMB:Securities:SZ159350 100 SZ159350 {1.50 CNY}",
+		"  Equity:Opening-Balances -100 SZ159350",
+		`2026-07-10 * "招商证券" "sell SZ159350 closed"`,
+		"  Assets:CN:CMB:Securities:SZ159350 -100 SZ159350 {1.50 CNY}",
+		"  Assets:CN:CMB:Cash 172.00 CNY",
+		"  Income:Investment:Gain -22.00 CNY",
+		"",
+	}
+	lines := make([]BeanLine, 0, len(text))
+	for index, line := range text {
+		lines = append(lines, BeanLine{File: "main.bean", Line: index + 1, Text: line})
+	}
+	entries := ParseBeanLines(lines).Entries
+	summary := BuildInvestmentSummaryFromBeanEntries(entries, AccountsFromBeanEntries(entries), PricesFromBeanEntries(entries))
+
+	if summary.RealizedPnLCNY == nil || *summary.RealizedPnLCNY != 2200 {
+		t.Fatalf("realized PnL CNY = %#v, want 2200", summary.RealizedPnLCNY)
+	}
+	if len(summary.ClosedHoldings) != 1 || summary.ClosedHoldings[0].Commodity != "SZ159350" {
+		t.Fatalf("expected SZ159350 closed holding, got %#v", summary.ClosedHoldings)
+	}
+	closed := summary.ClosedHoldings[0]
+	if closed.RealizedPnL == nil || math.Abs(*closed.RealizedPnL-22) > 0.000001 || closed.RealizedCurrency != "CNY" || closed.RealizedPnLCNY == nil || *closed.RealizedPnLCNY != 2200 {
+		t.Fatalf("unexpected closed holding PnL inferred from cash posting: %#v", closed)
+	}
+	if len(closed.RealizedTrades) != 1 || closed.RealizedTrades[0].ProceedsValue == nil || math.Abs(*closed.RealizedTrades[0].ProceedsValue-172) > 0.000001 {
+		t.Fatalf("unexpected realized trade proceeds: %#v", closed.RealizedTrades)
+	}
+}
+
 func TestInvestmentSummaryFallsBackToIndexedTransactions(t *testing.T) {
 	snapshot := &LedgerSnapshot{
 		Accounts: []Account{

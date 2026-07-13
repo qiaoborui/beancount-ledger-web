@@ -740,7 +740,7 @@ func investmentActivityFromEntries(entries []BeanEntry, securities map[string]bo
 				activity.Lots[key] = append(activity.Lots[key], investmentLotFromPosting(entry.Date, posting, accountMap, commodityMap))
 				continue
 			}
-			trade := investmentRealizedTradeFromPosting(entry.Date, posting, accountMap, commodityMap, priceIndex, activity.Lots[key])
+			trade := investmentRealizedTradeFromPosting(entry.Date, posting, entry.Postings, securities, accountMap, commodityMap, priceIndex, activity.Lots[key])
 			activity.Lots[key] = consumeInvestmentLots(activity.Lots[key], -quantity)
 			activity.Realized[key] = append(activity.Realized[key], trade)
 		}
@@ -786,7 +786,7 @@ func investmentLotFromPosting(date string, posting parsedPosting, accountMap map
 	return lot
 }
 
-func investmentRealizedTradeFromPosting(date string, posting parsedPosting, accountMap map[string]Account, commodityMap map[string]Commodity, priceIndex investmentPriceIndex, lots []InvestmentLot) InvestmentRealizedTrade {
+func investmentRealizedTradeFromPosting(date string, posting parsedPosting, postings []parsedPosting, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity, priceIndex investmentPriceIndex, lots []InvestmentLot) InvestmentRealizedTrade {
 	accountName, commodity := posting.Account, posting.Currency
 	label := accountName
 	if acct := accountMap[accountName]; acct.Label != "" {
@@ -801,7 +801,7 @@ func investmentRealizedTradeFromPosting(date string, posting parsedPosting, acco
 		CommodityName: commodityName(commodityMap, commodity),
 		Quantity:      quantity,
 	}
-	if proceeds, currency := investmentSaleProceeds(posting, quantity); proceeds != nil {
+	if proceeds, currency := investmentSaleProceeds(posting, quantity, postings, securities); proceeds != nil {
 		trade.ProceedsValue = proceeds
 		trade.ProceedsCurrency = currency
 	}
@@ -818,9 +818,12 @@ func investmentRealizedTradeFromPosting(date string, posting parsedPosting, acco
 	return trade
 }
 
-func investmentSaleProceeds(posting parsedPosting, quantity float64) (*float64, string) {
-	if posting.PriceCurrency == "" || roundedZero(quantity) {
+func investmentSaleProceeds(posting parsedPosting, quantity float64, postings []parsedPosting, securities map[string]bool) (*float64, string) {
+	if roundedZero(quantity) {
 		return nil, ""
+	}
+	if posting.PriceCurrency == "" {
+		return investmentSaleProceedsFromCashPostings(postings, securities)
 	}
 	value := investmentBeanAmountValue(posting.Price, posting.PriceAmount)
 	if posting.TotalPrice {
@@ -829,6 +832,42 @@ func investmentSaleProceeds(posting parsedPosting, quantity float64) (*float64, 
 		value *= quantity
 	}
 	return &value, posting.PriceCurrency
+}
+
+func investmentSaleProceedsFromCashPostings(postings []parsedPosting, securities map[string]bool) (*float64, string) {
+	saleCount := 0
+	for _, candidate := range postings {
+		if !strings.HasPrefix(candidate.Account, "Assets:") || !securities[candidate.Currency] {
+			continue
+		}
+		if investmentPostingQuantity(candidate) < 0 {
+			saleCount++
+		}
+	}
+	if saleCount != 1 {
+		return nil, ""
+	}
+	totals := map[string]float64{}
+	for _, candidate := range postings {
+		if !strings.HasPrefix(candidate.Account, "Assets:") || securities[candidate.Currency] {
+			continue
+		}
+		amount := investmentPostingQuantity(candidate)
+		if amount <= 0 || roundedZero(amount) {
+			continue
+		}
+		totals[candidate.Currency] += amount
+	}
+	if len(totals) != 1 {
+		return nil, ""
+	}
+	for currency, total := range totals {
+		if roundedZero(total) {
+			return nil, ""
+		}
+		return &total, currency
+	}
+	return nil, ""
 }
 
 func investmentConsumedCost(lots []InvestmentLot, quantity float64) (*float64, string) {
