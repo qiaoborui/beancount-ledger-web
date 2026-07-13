@@ -1,11 +1,13 @@
 # ── Backend build ──
-FROM golang:1.25-bookworm AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /app/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
 
 # ── API runtime ──
 FROM alpine:3.22 AS server
@@ -43,7 +45,7 @@ COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
 CMD ["/app/ledger-indexer"]
 
 # ── Frontend build ──
-FROM node:24-bookworm-slim AS web-builder
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS web-builder
 WORKDIR /app/web
 RUN npm install -g pnpm@11.5.0
 COPY web/pnpm-lock.yaml web/package.json ./
