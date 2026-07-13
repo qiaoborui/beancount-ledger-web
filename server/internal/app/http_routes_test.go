@@ -123,6 +123,9 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	if !meBody.Authenticated || meBody.SensitiveUnlocked {
 		t.Fatalf("lock should keep auth but clear sensitive unlock: %#v", meBody)
 	}
+	if got := me.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("auth/me Cache-Control=%q", got)
+	}
 
 	verifyQuick := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"test-device-1","token":"`+quickBody.Token+`"}`, nil)
 	if verifyQuick.Code != http.StatusOK {
@@ -137,6 +140,13 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 	if !body.SensitiveUnlocked || body.Summary.Income != 100000 {
 		t.Fatalf("quick unlock should restore sensitive access: %#v", body)
+	}
+
+	for _, path := range []string{"/api/quick-unlock/status", "/api/passkey/status"} {
+		status := requestWithCookies(router, http.MethodGet, path, "", login.Result().Cookies())
+		if got := status.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("%s Cache-Control=%q", path, got)
+		}
 	}
 
 	sessionOnly := []*http.Cookie{}

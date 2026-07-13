@@ -322,8 +322,8 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     let passkey: { registered?: boolean };
     try {
       [me, passkey] = await Promise.all([
-        fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me"),
-        fetchJson<{ registered?: boolean }>("/api/passkey/status", undefined, { registered: false }).catch(() => ({ registered: false })),
+        fetchJson<{ authenticated?: boolean; sensitiveUnlocked?: boolean }>("/api/auth/me", { cache: "no-store" }),
+        fetchJson<{ registered?: boolean }>("/api/passkey/status", { cache: "no-store" }, { registered: false }).catch(() => ({ registered: false })),
       ]);
       if (!isCurrentLoad()) return;
       offlineNoticeKeyRef.current = null;

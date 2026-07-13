@@ -120,12 +120,12 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
 
-	readOnly30s := api.Group("", cacheControl(30))
 	readOnly60s := api.Group("", cacheControl(60))
+	authState := api.Group("", noStore())
 
-	readOnly30s.GET("/auth/me", s.me)
-	readOnly30s.GET("/quick-unlock/status", s.quickUnlockStatus)
-	readOnly60s.GET("/passkey/status", s.passkeyStatus)
+	authState.GET("/auth/me", s.me)
+	authState.GET("/quick-unlock/status", s.quickUnlockStatus)
+	authState.GET("/passkey/status", s.passkeyStatus)
 
 	api.POST("/quick-unlock/register", s.quickUnlockRegister)
 	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
@@ -194,6 +194,13 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 func cacheControl(maxAge int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", maxAge))
+		c.Next()
+	}
+}
+
+func noStore() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
 		c.Next()
 	}
 }

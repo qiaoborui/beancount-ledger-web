@@ -233,6 +233,24 @@ describe("api endpoint settings", () => {
     expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/me");
   });
 
+  it("returns post-login reads to the active backend after fallback stickiness", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("primary unavailable"))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    installMockWindow(fetchMock);
+    writeApiEndpointSettings(endpointSettings());
+    rememberBackupAuthentication();
+    installApiEndpointFetchInterceptor();
+
+    await window.fetch("/api/ledger/version");
+    await window.fetch("/api/auth/login", { method: "POST", body: "{}" });
+    await window.fetch("/api/ledger/summary");
+
+    expect(fetchMock.mock.calls[3][0]).toBe("/api/ledger/summary");
+  });
+
   it("does not turn an unauthorized backup response into an active-backend logout", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("primary unavailable"))

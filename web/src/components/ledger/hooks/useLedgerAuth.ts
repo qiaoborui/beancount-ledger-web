@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
-import { apiFetch } from "@/lib/apiEndpoints";
+import { apiEndpointAuthScope, apiFetch } from "@/lib/apiEndpoints";
 import { rememberLedgerAuthenticated } from "../authState";
 import { unlockWithQuickLedgerSecret } from "../quickUnlock";
 
@@ -25,11 +25,11 @@ type LedgerAuthInFlight = {
   passkeyRegistration: Promise<void> | null;
 };
 
-function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuthed: (authenticated: boolean) => void) {
+function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuthed: (authenticated: boolean) => void, endpointId = apiEndpointAuthScope()) {
   sessionStorage.removeItem("ledger_locked_at");
   sessionStorage.removeItem("ledger_hidden_at");
   sessionStorage.setItem("ledger_unlocked", "1");
-  rememberLedgerAuthenticated();
+  rememberLedgerAuthenticated({ sessionStorage, localStorage, endpointId });
   setUnlocked(true);
   setAuthed(true);
 }
@@ -48,10 +48,11 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
   async function login() {
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
+      const endpointId = apiEndpointAuthScope();
       try {
-        const res = await apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }, { kind: "auth" });
+        const res = await apiFetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }, { kind: "auth" });
         if (res.ok) {
-          markSensitiveUnlocked(setUnlocked, setAuthed);
+          markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
           refreshAfterAuth(load, showToast);
         } else {
           const data = await readJson<{ error?: string }>(res, {});
@@ -71,6 +72,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
   async function loginWithPasskey() {
     if (inFlight.passkeyLogin) return inFlight.passkeyLogin;
     inFlight.passkeyLogin = (async () => {
+      const endpointId = apiEndpointAuthScope();
       showToast("info", "正在唤起 Face ID...");
       try {
         const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST" });
@@ -79,7 +81,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
         const verify = await apiFetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
         const data = await readJson<{ error?: string }>(verify);
         if (!verify.ok) throw new Error(data.error || "Face ID 登录失败");
-        markSensitiveUnlocked(setUnlocked, setAuthed);
+        markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
         refreshAfterAuth(load, showToast);
         clearToast();
       } catch (error) {
@@ -96,9 +98,10 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
   async function loginWithQuickUnlock(secret: string) {
     if (inFlight.quickUnlock) return inFlight.quickUnlock;
     inFlight.quickUnlock = (async () => {
+      const endpointId = apiEndpointAuthScope();
       try {
         await unlockWithQuickLedgerSecret(secret);
-        markSensitiveUnlocked(setUnlocked, setAuthed);
+        markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
         refreshAfterAuth(load, showToast);
         clearToast();
       } catch (error) {

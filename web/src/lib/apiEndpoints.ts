@@ -310,6 +310,10 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
         continue;
       }
       recordEndpointSuccess(endpoint.id, latencyMs);
+      if (kind === "auth" && response.ok && endpoint.id === active.id) {
+        stickyReadEndpointId = "";
+        stickyReadUntil = 0;
+      }
       if (kind === "read") {
         if (endpoint.id === active.id) {
           stickyReadEndpointId = "";

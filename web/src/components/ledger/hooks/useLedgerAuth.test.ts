@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLedgerAuthActions } from "./useLedgerAuth";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { unlockWithQuickLedgerSecret } from "../quickUnlock";
+import { apiEndpointAuthStorageKey, resetApiEndpointRuntimeState, writeApiEndpointSettings } from "@/lib/apiEndpoints";
 
 vi.mock("@simplewebauthn/browser", () => ({
   startAuthentication: vi.fn(),
@@ -18,6 +19,11 @@ function memoryStorage() {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
     removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+    key: (index: number) => Array.from(values.keys())[index] ?? null,
+    get length() {
+      return values.size;
+    },
   };
 }
 
@@ -41,8 +47,10 @@ function authArgs() {
 describe("createLedgerAuthActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(globalThis, "sessionStorage", { value: memoryStorage(), configurable: true });
-    Object.defineProperty(globalThis, "localStorage", { value: memoryStorage(), configurable: true });
+    const sessionStorage = memoryStorage();
+    const localStorage = memoryStorage();
+    Object.defineProperty(globalThis, "sessionStorage", { value: sessionStorage, configurable: true });
+    Object.defineProperty(globalThis, "localStorage", { value: localStorage, configurable: true });
     vi.mocked(startAuthentication).mockResolvedValue({ id: "credential" } as never);
     vi.mocked(startRegistration).mockResolvedValue({ id: "credential" } as never);
     vi.mocked(unlockWithQuickLedgerSecret).mockResolvedValue(undefined);
@@ -55,9 +63,20 @@ describe("createLedgerAuthActions", () => {
       if (url.endsWith("/api/auth/login")) return jsonResponse({ ok: true });
       return jsonResponse({}, { status: 404 });
     }) as typeof fetch;
+    vi.stubGlobal("window", {
+      localStorage,
+      sessionStorage,
+      location: { origin: "https://app.example.com" },
+      fetch: globalThis.fetch,
+      setTimeout,
+      clearTimeout,
+      dispatchEvent: vi.fn(),
+    });
   });
 
   afterEach(() => {
+    resetApiEndpointRuntimeState();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -129,5 +148,37 @@ describe("createLedgerAuthActions", () => {
     expect(args.setUnlocked).not.toHaveBeenCalled();
     expect(args.load).not.toHaveBeenCalled();
     expect(args.showToast).toHaveBeenCalledWith("error", "bad local secret");
+  });
+
+  it("records a successful password login against the endpoint used for that login request", async () => {
+    writeApiEndpointSettings({
+      activeId: "primary",
+      autoSelect: false,
+      endpoints: [
+        { id: "same-origin", url: "", enabled: true },
+        { id: "primary", url: "https://primary.example.com", enabled: true },
+        { id: "backup", url: "https://backup.example.com", enabled: true },
+      ],
+    });
+    vi.mocked(window.fetch).mockImplementationOnce(async () => {
+      writeApiEndpointSettings({
+        activeId: "backup",
+        autoSelect: false,
+        endpoints: [
+          { id: "same-origin", url: "", enabled: true },
+          { id: "primary", url: "https://primary.example.com", enabled: true },
+          { id: "backup", url: "https://backup.example.com", enabled: true },
+        ],
+      });
+      return jsonResponse({ ok: true });
+    });
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    await actions.login();
+
+    expect(localStorage.getItem(apiEndpointAuthStorageKey("ledger_auth_known", "primary"))).toBe("1");
+    expect(localStorage.getItem(apiEndpointAuthStorageKey("ledger_auth_known", "backup"))).toBeNull();
+    expect(vi.mocked(window.fetch).mock.calls[0][1]?.headers).toEqual({ "Content-Type": "application/json" });
   });
 });
