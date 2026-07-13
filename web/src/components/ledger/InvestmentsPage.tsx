@@ -2,7 +2,7 @@ import { formatCny, formatCompactCny, formatMoney } from "@/lib/money";
 import { ChevronDown, LineChart as LineChartIcon, Search, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentSummary } from "./types";
+import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentRealizedTrade, InvestmentSummary } from "./types";
 
 type PricePoint = { date: string; price: number };
 type PortfolioPoint = { date: string; value: number };
@@ -10,6 +10,7 @@ type MoneyValue = { value: number; currency: string };
 type InstitutionOption = { key: string; label: string; holdingCount: number; positionCount: number; totalMarketValueCny: number };
 type InstitutionGroup = InstitutionOption & { holdings: InvestmentHolding[] };
 type SortKey = "market" | "profit" | "change";
+type HoldingView = "open" | "closed";
 
 const allocationColors = ["var(--chart-palette-1)", "var(--chart-palette-2)", "var(--chart-palette-4)", "var(--chart-palette-5)", "var(--chart-palette-6)"];
 const regionAccountSegments = new Set(["CN", "HK", "US", "JP", "SG", "EU", "UK", "TW"]);
@@ -23,33 +24,45 @@ const commonInstitutionLabels: Record<string, string> = {
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
   const holdings = useMemo(() => investmentHoldings(investments), [investments]);
+  const closedHoldings = useMemo(() => investmentClosedHoldings(investments), [investments]);
   const institutionGroups = useMemo(() => investmentInstitutionGroups(holdings), [holdings]);
-  const institutionOptions = useMemo(() => institutionGroups.map(({ holdings: _holdings, ...option }) => option), [institutionGroups]);
+  const closedInstitutionGroups = useMemo(() => investmentInstitutionGroups(closedHoldings), [closedHoldings]);
+  const institutionOptions = useMemo(() => mergeInstitutionOptions(institutionGroups, closedInstitutionGroups), [institutionGroups, closedInstitutionGroups]);
   const [selectedInstitution, setSelectedInstitution] = useState("all");
+  const [holdingView, setHoldingView] = useState<HoldingView>("open");
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("market");
   const [openHolding, setOpenHolding] = useState<string | null | undefined>(undefined);
 
-  const scopedGroups = useMemo(() => {
+  const scopedOpenGroups = useMemo(() => {
     if (selectedInstitution === "all") return institutionGroups;
     return institutionGroups.filter((group) => group.key === selectedInstitution);
   }, [institutionGroups, selectedInstitution]);
-  const heldHoldings = useMemo(() => scopedGroups.flatMap((group) => group.holdings).filter((holding) => Math.abs(holding.totalQuantity) > 0), [scopedGroups]);
+  const scopedClosedGroups = useMemo(() => {
+    if (selectedInstitution === "all") return closedInstitutionGroups;
+    return closedInstitutionGroups.filter((group) => group.key === selectedInstitution);
+  }, [closedInstitutionGroups, selectedInstitution]);
+  const scopedGroups = holdingView === "closed" ? scopedClosedGroups : scopedOpenGroups;
+  const heldHoldings = useMemo(() => scopedOpenGroups.flatMap((group) => group.holdings).filter((holding) => Math.abs(holding.totalQuantity) > 0), [scopedOpenGroups]);
+  const realizedHoldings = useMemo(() => [...scopedOpenGroups, ...scopedClosedGroups].flatMap((group) => group.holdings).filter((holding) => (holding.realizedTrades?.length ?? 0) > 0), [scopedOpenGroups, scopedClosedGroups]);
   const visibleGroups = useMemo(() => scopedGroups.map((group) => ({
     ...group,
     holdings: sortHoldings(filterHoldings(group.holdings, query), sortKey),
   })).filter((group) => group.holdings.length > 0), [scopedGroups, query, sortKey]);
   const visibleHoldingCount = visibleGroups.reduce((total, group) => total + group.holdings.length, 0);
+  const openHoldingCount = scopedOpenGroups.reduce((total, group) => total + group.holdings.length, 0);
+  const closedHoldingCount = scopedClosedGroups.reduce((total, group) => total + group.holdings.length, 0);
 
   const totalMarketValueCny = sumCnyValues(heldHoldings, "totalMarketValueCny");
   const latestDate = latestPriceDate(heldHoldings) || investments?.updatedAt || "";
   const costSummary = summarizeHoldingCosts(heldHoldings);
   const profitSummary = summarizeHoldingProfit(heldHoldings);
+  const realizedSummary = summarizeRealizedProfit(realizedHoldings);
   const dailySummary = summarizeDailyChange(heldHoldings);
   const portfolioSeries = useMemo(() => portfolioPriceSeries(heldHoldings, 30), [heldHoldings]);
   const allocationRows = useMemo(() => selectedInstitution === "all"
-    ? scopedGroups.map((group) => ({ label: group.label, value: group.totalMarketValueCny }))
-    : heldHoldings.map((holding) => ({ label: holding.commodity, value: holding.totalMarketValueCny ?? 0 })), [heldHoldings, scopedGroups, selectedInstitution]);
+    ? scopedOpenGroups.map((group) => ({ label: group.label, value: group.totalMarketValueCny }))
+    : heldHoldings.map((holding) => ({ label: holding.commodity, value: holding.totalMarketValueCny ?? 0 })), [heldHoldings, scopedOpenGroups, selectedInstitution]);
   const defaultOpenHolding = visibleGroups[0]?.holdings[0] ? `${visibleGroups[0].key}:${visibleGroups[0].holdings[0].commodity}` : null;
   const activeOpenHolding = openHolding === undefined ? defaultOpenHolding : openHolding;
 
@@ -62,11 +75,11 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
         latestDate={latestDate}
         costSummary={costSummary}
         profitSummary={profitSummary}
+        realizedSummary={realizedSummary}
         dailySummary={dailySummary}
-        costCoverage={countHoldingsWithCost(heldHoldings)}
-        profitCoverage={countHoldingsWithProfit(heldHoldings)}
         holdingCount={heldHoldings.length}
-        institutionCount={selectedInstitution === "all" ? institutionOptions.length : heldHoldings.length ? 1 : 0}
+        closedHoldingCount={closedHoldingCount}
+        institutionCount={selectedInstitution === "all" ? institutionOptions.length : (scopedOpenGroups.length || scopedClosedGroups.length ? 1 : 0)}
         series={portfolioSeries}
       />
 
@@ -79,9 +92,10 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
               <h2 className="font-serif text-xl font-medium text-ink">持仓明细</h2>
               <span className="ledger-chip rounded-full px-2 py-1 text-xs">{visibleHoldingCount} 只</span>
             </div>
-            <p className="mt-1 text-xs text-stone">按机构账户分组，市值统一折算为 CNY，今日涨跌按最新两条证券价格估算。</p>
+            <p className="mt-1 text-xs text-stone">{holdingView === "closed" ? "已清仓列表展示卖出后的已实现盈亏。" : "按机构账户分组，市值统一折算为 CNY，今日涨跌按最新两条证券价格估算。"}</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <HoldingViewTabs view={holdingView} openCount={openHoldingCount} closedCount={closedHoldingCount} onChange={setHoldingView} />
             <label className="relative min-w-0 sm:w-56">
               <span className="sr-only">搜索持仓</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
@@ -115,7 +129,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
           <div className="text-right">持有 / 现价</div>
           <div className="text-right">平均成本</div>
           <div className="text-right">今日涨跌</div>
-          <div className="text-right">累计盈亏</div>
+          <div className="text-right">{holdingView === "closed" ? "已实现盈亏" : "未实现盈亏"}</div>
           <div className="text-right">90 日走势</div>
           <div />
         </div>
@@ -127,12 +141,13 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
                 key={group.key}
                 group={group}
                 portfolioValueCny={totalMarketValueCny}
+                view={holdingView}
                 openHolding={activeOpenHolding}
                 onToggleHolding={(rowKey) => setOpenHolding((current) => (current ?? defaultOpenHolding) === rowKey ? null : rowKey)}
               />
             ))}
           </div>
-        ) : <EmptyState text={query ? "没有匹配的持仓" : "暂无证券商品"} />}
+        ) : <EmptyState text={query ? "没有匹配的持仓" : holdingView === "closed" ? "暂无已清仓证券" : "暂无证券商品"} />}
       </section>
     </div>
   );
@@ -164,7 +179,16 @@ function InstitutionTab({ label, detail, active, onClick }: { label: string; det
   );
 }
 
-function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profitSummary, dailySummary, costCoverage, profitCoverage, holdingCount, institutionCount, series }: { totalMarketValueCny: number; latestDate: string; costSummary: MoneyValue | null; profitSummary: MoneyValue | null; dailySummary: MoneyValue | null; costCoverage: number; profitCoverage: number; holdingCount: number; institutionCount: number; series: PortfolioPoint[] }) {
+function HoldingViewTabs({ view, openCount, closedCount, onChange }: { view: HoldingView; openCount: number; closedCount: number; onChange: (view: HoldingView) => void }) {
+  return (
+    <div className="flex rounded-[10px] border border-line bg-paper p-1 text-xs">
+      <button type="button" onClick={() => onChange("open")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "open" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>当前持仓 {openCount}</button>
+      <button type="button" onClick={() => onChange("closed")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "closed" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>已清仓 {closedCount}</button>
+    </div>
+  );
+}
+
+function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profitSummary, realizedSummary, dailySummary, holdingCount, closedHoldingCount, institutionCount, series }: { totalMarketValueCny: number; latestDate: string; costSummary: MoneyValue | null; profitSummary: MoneyValue | null; realizedSummary: MoneyValue | null; dailySummary: MoneyValue | null; holdingCount: number; closedHoldingCount: number; institutionCount: number; series: PortfolioPoint[] }) {
   const profitRatio = ratioFromMoney(profitSummary, costSummary);
   const dailyRatio = totalMarketValueCny > 0 && dailySummary?.currency === "CNY" ? dailySummary.value / (totalMarketValueCny / 100 - dailySummary.value) : null;
   return (
@@ -178,9 +202,9 @@ function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profi
           <div className="amount-gold mt-2 font-serif text-3xl font-medium tracking-[-0.012em] sm:text-4xl">{formatCny(totalMarketValueCny / 100)}</div>
           <div className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
             <OverviewMetric label="今日收益" value={formatProfit(dailySummary)} detail={dailySummary ? `${formatRatio(dailyRatio)} · 按最新两条价格估算` : "价格历史不足"} tone={profitTone(dailySummary)} />
-            <OverviewMetric label="累计盈亏" value={formatProfit(profitSummary)} detail={holdingCount ? `${profitCoverage}/${holdingCount} 只可计算 · ${formatRatio(profitRatio)}` : "暂无持仓"} tone={profitTone(profitSummary)} />
-            <OverviewMetric label="持仓成本" value={formatMoneyValue(costSummary)} detail={holdingCount ? `${costCoverage}/${holdingCount} 只有成本数据` : "暂无持仓"} tone="text-warm" />
-            <OverviewMetric label="持仓范围" value={`${holdingCount} 只`} detail={`${institutionCount} 个机构账户`} tone="text-olive" />
+            <OverviewMetric label="未实现盈亏" value={formatProfit(profitSummary)} detail={holdingCount ? `${formatRatio(profitRatio)} · 当前持仓` : "暂无当前持仓"} tone={profitTone(profitSummary)} />
+            <OverviewMetric label="已实现盈亏" value={formatProfit(realizedSummary)} detail={realizedSummary ? "来自卖出和清仓记录" : "暂无卖出记录"} tone={profitTone(realizedSummary)} />
+            <OverviewMetric label="持仓范围" value={`${holdingCount} / ${closedHoldingCount}`} detail={`${institutionCount} 个机构账户 · 当前 / 已清仓`} tone="text-olive" />
           </div>
         </div>
         <div className="min-w-0 border-t border-line bg-paper/55 px-4 py-4 sm:px-6 lg:border-l lg:border-t-0">
@@ -270,8 +294,9 @@ function AllocationBar({ rows, totalMarketValueCny, mode }: { rows: { label: str
   );
 }
 
-function InstitutionHoldingsGroup({ group, portfolioValueCny, openHolding, onToggleHolding }: { group: InstitutionGroup; portfolioValueCny: number; openHolding: string | null; onToggleHolding: (rowKey: string) => void }) {
+function InstitutionHoldingsGroup({ group, portfolioValueCny, view, openHolding, onToggleHolding }: { group: InstitutionGroup; portfolioValueCny: number; view: HoldingView; openHolding: string | null; onToggleHolding: (rowKey: string) => void }) {
   const profitSummary = summarizeHoldingProfit(group.holdings);
+  const realizedSummary = summarizeRealizedProfit(group.holdings);
   return (
     <section>
       <div className="flex flex-col gap-2 border-b border-line bg-paper/70 px-4 py-3 sm:px-5 md:flex-row md:items-center md:justify-between">
@@ -284,8 +309,8 @@ function InstitutionHoldingsGroup({ group, portfolioValueCny, openHolding, onTog
           <div className="mt-1 truncate text-xs text-stone">{group.key}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-right sm:flex sm:items-end sm:gap-6">
-          <StackedMetric primary={formatCnyValue(group.totalMarketValueCny)} secondary="机构市值" tone="text-warm" />
-          <StackedMetric primary={formatProfit(profitSummary)} secondary="未实现盈亏" tone={profitTone(profitSummary)} />
+          <StackedMetric primary={view === "closed" ? formatProfit(realizedSummary) : formatCnyValue(group.totalMarketValueCny)} secondary={view === "closed" ? "已实现盈亏" : "机构市值"} tone={view === "closed" ? profitTone(realizedSummary) : "text-warm"} />
+          <StackedMetric primary={view === "closed" ? `${group.holdingCount} 只` : formatProfit(profitSummary)} secondary={view === "closed" ? "已清仓" : "未实现盈亏"} tone={view === "closed" ? "text-olive" : profitTone(profitSummary)} />
         </div>
       </div>
       <div className="divide-y divide-line">
@@ -297,6 +322,7 @@ function InstitutionHoldingsGroup({ group, portfolioValueCny, openHolding, onTog
               key={rowKey}
               holding={holding}
               portfolioValueCny={portfolioValueCny}
+              view={view}
               expanded={expanded}
               onToggle={() => onToggleHolding(rowKey)}
             />
@@ -307,12 +333,12 @@ function InstitutionHoldingsGroup({ group, portfolioValueCny, openHolding, onTog
   );
 }
 
-function HoldingRow({ holding, portfolioValueCny, expanded, onToggle }: { holding: InvestmentHolding; portfolioValueCny: number; expanded: boolean; onToggle: () => void }) {
+function HoldingRow({ holding, portfolioValueCny, view, expanded, onToggle }: { holding: InvestmentHolding; portfolioValueCny: number; view: HoldingView; expanded: boolean; onToggle: () => void }) {
   const points = pricePoints(holding.priceHistory);
   const sparklinePoints = points.slice(-90);
   const dailyChange = latestPriceChange(points);
-  const profit = holdingProfit(holding);
-  const profitRatio = holdingProfitRatio(holding);
+  const profit = view === "closed" ? holdingRealizedProfit(holding) : holdingProfit(holding);
+  const profitRatio = view === "closed" ? holdingRealizedProfitRatio(holding) : holdingProfitRatio(holding);
   const positionRatio = portfolioValueCny > 0 ? (holding.totalMarketValueCny ?? 0) / portfolioValueCny : null;
 
   return (
@@ -336,7 +362,7 @@ function HoldingRow({ holding, portfolioValueCny, expanded, onToggle }: { holdin
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4">
             <MobileMetric label="市值 / 仓位" value={formatCnyValue(holding.totalMarketValueCny)} detail={formatUnsignedRatio(positionRatio)} />
-            <MobileMetric label="累计盈亏" value={formatProfit(profit)} detail={formatRatio(profitRatio)} tone={profitTone(profit)} />
+            <MobileMetric label={view === "closed" ? "已实现盈亏" : "未实现盈亏"} value={formatProfit(profit)} detail={formatRatio(profitRatio)} tone={profitTone(profit)} />
             <MobileMetric label="持有 / 现价" value={formatQuantity(holding.totalQuantity)} detail={formatPrice(holding.latestPrice)} />
             <MobileMetric label="今日涨跌" value={formatPriceChange(dailyChange)} detail={holding.latestPrice?.date ?? "暂无"} tone={changeTone(dailyChange)} />
           </div>
@@ -355,6 +381,7 @@ function HoldingRow({ holding, portfolioValueCny, expanded, onToggle }: { holdin
 function HoldingDetail({ holding, points }: { holding: InvestmentHolding; points: PricePoint[] }) {
   const lots = holding.lots ?? [];
   const positions = holding.positions ?? [];
+  const realizedTrades = holding.realizedTrades ?? [];
   return (
     <div className="border-t border-line bg-paper/80 px-4 py-5 sm:px-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
@@ -363,6 +390,9 @@ function HoldingDetail({ holding, points }: { holding: InvestmentHolding; points
       </div>
       <div className="mt-5">
         <InvestmentLots lots={lots} />
+      </div>
+      <div className="mt-5">
+        <InvestmentRealizedTrades trades={realizedTrades} />
       </div>
     </div>
   );
@@ -495,6 +525,47 @@ function InvestmentLots({ lots }: { lots: InvestmentLot[] }) {
   );
 }
 
+function InvestmentRealizedTrades({ trades }: { trades: InvestmentRealizedTrade[] }) {
+  if (!trades.length) return null;
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-ink">卖出记录</h3>
+        <span className="ledger-label">{trades.length} 笔</span>
+      </div>
+      <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-panel">
+        <table className="w-full min-w-[860px] border-separate border-spacing-0 text-sm">
+          <thead className="ledger-table-head">
+            <tr>
+              <TableHead align="left">卖出日期</TableHead>
+              <TableHead align="left">账户</TableHead>
+              <TableHead>股数</TableHead>
+              <TableHead>卖出收入</TableHead>
+              <TableHead>结转成本</TableHead>
+              <TableHead>已实现盈亏</TableHead>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((trade, index) => (
+              <tr key={`${trade.date}:${trade.account}:${trade.commodity}:${index}`}>
+                <TableCell align="left" strong>{trade.date}</TableCell>
+                <TableCell align="left">
+                  <div className="max-w-72 truncate text-olive">{trade.accountLabel}</div>
+                  <div className="max-w-72 truncate text-xs text-stone">{trade.account}</div>
+                </TableCell>
+                <TableCell>{formatQuantity(trade.quantity)}</TableCell>
+                <TableCell>{formatMarketValue(trade.proceedsValue, trade.proceedsCurrency)}</TableCell>
+                <TableCell>{formatMarketValue(trade.costValue, trade.costCurrency)}</TableCell>
+                <TableCell strong><span className={profitTone(realizedTradeProfit(trade))}>{formatProfit(realizedTradeProfit(trade))}</span></TableCell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function PriceSparkline({ points, currency, compact = false }: { points: PricePoint[]; currency: string; compact?: boolean }) {
   const change = rangePriceChange(points);
   if (points.length < 2) return <div className="grid h-full place-items-center text-[10px] text-stone">暂无</div>;
@@ -582,6 +653,10 @@ function investmentHoldings(investments: InvestmentSummary | null): InvestmentHo
   return legacyHoldings(investments.positions ?? [], investments.quotes ?? []);
 }
 
+function investmentClosedHoldings(investments: InvestmentSummary | null): InvestmentHolding[] {
+  return (investments?.closedHoldings ?? []).filter(isClosedHolding);
+}
+
 function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote[]): InvestmentHolding[] {
   const quoteMap = new Map(quotes.map((quote) => [quote.commodity, quote]));
   const byCommodity = new Map<string, InvestmentPosition[]>();
@@ -616,6 +691,10 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
 
 function holdingForPositions(holding: InvestmentHolding, positions: InvestmentPosition[]): InvestmentHolding | null {
   if (!positions.length) return null;
+  const accountSet = new Set(positions.map((position) => position.account));
+  const realizedTrades = (holding.realizedTrades ?? []).filter((trade) => accountSet.has(trade.account));
+  const realizedCny = sumOptionalNumbers(realizedTrades.map((trade) => trade.realizedPnlCny));
+  const realizedSameCurrency = sumSameRealizedCurrency(realizedTrades);
   const totalQuantity = positions.reduce((total, position) => total + position.quantity, 0);
   const totalCostValue = sumSameCurrency(positions, "costValue", "costCurrency");
   return {
@@ -631,6 +710,10 @@ function holdingForPositions(holding: InvestmentHolding, positions: InvestmentPo
     accountCount: new Set(positions.map((position) => position.account)).size,
     positions,
     lots: positions.flatMap((position) => position.lots ?? []),
+    realizedTrades,
+    realizedPnl: realizedSameCurrency?.value,
+    realizedCurrency: realizedSameCurrency?.currency,
+    realizedPnlCny: realizedCny,
   };
 }
 
@@ -659,7 +742,7 @@ function investmentInstitutionGroups(holdings: InvestmentHolding[]): Institution
     }
   }
   return [...groups.entries()].map(([key, group]) => {
-    const visibleHoldings = sortHoldings(group.holdings.filter(isVisibleHolding), "market");
+    const visibleHoldings = sortHoldings(group.holdings.filter(isDisplayableHolding), "market");
     return {
       key,
       label: group.label,
@@ -669,6 +752,20 @@ function investmentInstitutionGroups(holdings: InvestmentHolding[]): Institution
       totalMarketValueCny: sumCnyValues(visibleHoldings, "totalMarketValueCny"),
     };
   }).filter((group) => group.holdings.length > 0).sort((left, right) => right.totalMarketValueCny - left.totalMarketValueCny || left.label.localeCompare(right.label, "zh-CN"));
+}
+
+function mergeInstitutionOptions(...groupsList: InstitutionGroup[][]): InstitutionOption[] {
+  const byKey = new Map<string, InstitutionOption>();
+  for (const groups of groupsList) {
+    for (const group of groups) {
+      const current = byKey.get(group.key) ?? { key: group.key, label: group.label, holdingCount: 0, positionCount: 0, totalMarketValueCny: 0 };
+      current.holdingCount += group.holdingCount;
+      current.positionCount += group.positionCount;
+      current.totalMarketValueCny += group.totalMarketValueCny;
+      byKey.set(group.key, current);
+    }
+  }
+  return [...byKey.values()].sort((left, right) => right.totalMarketValueCny - left.totalMarketValueCny || left.label.localeCompare(right.label, "zh-CN"));
 }
 
 function institutionKey(account: string) {
@@ -705,6 +802,14 @@ function sortHoldings(holdings: InvestmentHolding[], sortKey: SortKey) {
 
 function isVisibleHolding(holding: InvestmentHolding) {
   return holding.commodity.trim() !== "" && Math.abs(holding.totalQuantity) > 0;
+}
+
+function isClosedHolding(holding: InvestmentHolding) {
+  return holding.commodity.trim() !== "" && Math.abs(holding.totalQuantity) <= 0.00000001 && (holding.realizedTrades?.length ?? 0) > 0;
+}
+
+function isDisplayableHolding(holding: InvestmentHolding) {
+  return isVisibleHolding(holding) || isClosedHolding(holding);
 }
 
 function pricePoints(history?: CommodityPrice[] | null): PricePoint[] {
@@ -765,6 +870,26 @@ function holdingProfitRatio(holding: InvestmentHolding) {
   return null;
 }
 
+function realizedTradeProfit(trade: InvestmentRealizedTrade): MoneyValue | null {
+  if (trade.realizedPnlCny != null) return { value: trade.realizedPnlCny / 100, currency: "CNY" };
+  if (trade.realizedPnl == null || !trade.realizedCurrency) return null;
+  return { value: trade.realizedPnl, currency: trade.realizedCurrency };
+}
+
+function holdingRealizedProfit(holding: InvestmentHolding): MoneyValue | null {
+  if (holding.realizedPnlCny != null) return { value: holding.realizedPnlCny / 100, currency: "CNY" };
+  if (holding.realizedPnl == null || !holding.realizedCurrency) return summarizeRealizedProfitFromTrades(holding.realizedTrades ?? []);
+  return { value: holding.realizedPnl, currency: holding.realizedCurrency };
+}
+
+function holdingRealizedProfitRatio(holding: InvestmentHolding) {
+  const profit = holdingRealizedProfit(holding);
+  if (!profit || profit.currency === "CNY") return null;
+  const cost = sumSameRealizedCost(holding.realizedTrades ?? []);
+  if (!cost || cost.currency !== profit.currency || cost.value === 0) return null;
+  return profit.value / cost.value;
+}
+
 function summarizeHoldingCosts(holdings: InvestmentHolding[]): MoneyValue | null {
   const cnyCents = holdings.reduce((total, holding) => holding.totalCostValueCny == null ? total : total + holding.totalCostValueCny, 0);
   const cnyCount = holdings.filter((holding) => holding.totalCostValueCny != null).length;
@@ -792,6 +917,28 @@ function summarizeHoldingProfit(holdings: InvestmentHolding[]): MoneyValue | nul
   if (totals.size !== 1) return null;
   const [[currency, value]] = [...totals.entries()];
   return { value, currency };
+}
+
+function summarizeRealizedProfit(holdings: InvestmentHolding[]): MoneyValue | null {
+  const cnyProfits = holdings.flatMap((holding) => holding.realizedPnlCny != null ? [holding.realizedPnlCny / 100] : []);
+  const realizedCount = holdings.filter((holding) => holdingRealizedProfit(holding) != null).length;
+  if (cnyProfits.length > 0 && cnyProfits.length === realizedCount) return { value: cnyProfits.reduce((total, value) => total + value, 0), currency: "CNY" };
+  const totals = new Map<string, number>();
+  for (const holding of holdings) {
+    const profit = holdingRealizedProfit(holding);
+    if (!profit) continue;
+    totals.set(profit.currency, (totals.get(profit.currency) ?? 0) + profit.value);
+  }
+  if (totals.size !== 1) return null;
+  const [[currency, value]] = [...totals.entries()];
+  return { value, currency };
+}
+
+function summarizeRealizedProfitFromTrades(trades: InvestmentRealizedTrade[]): MoneyValue | null {
+  const cnyProfits = trades.flatMap((trade) => trade.realizedPnlCny != null ? [trade.realizedPnlCny / 100] : []);
+  const realizedCount = trades.filter((trade) => realizedTradeProfit(trade) != null).length;
+  if (cnyProfits.length > 0 && cnyProfits.length === realizedCount) return { value: cnyProfits.reduce((total, value) => total + value, 0), currency: "CNY" };
+  return sumSameRealizedCurrency(trades);
 }
 
 function summarizeDailyChange(holdings: InvestmentHolding[]): MoneyValue | null {
@@ -828,6 +975,18 @@ function sumSameCurrency<T extends InvestmentPosition>(rows: T[], valueKey: "mar
   return rows.reduce((total, row) => total + Number(row[valueKey] ?? 0), 0);
 }
 
+function sumSameRealizedCurrency(trades: InvestmentRealizedTrade[]): MoneyValue | null {
+  const currency = sameString(trades.map((trade) => trade.realizedCurrency));
+  if (!currency || trades.some((trade) => trade.realizedPnl == null)) return null;
+  return { value: trades.reduce((total, trade) => total + Number(trade.realizedPnl ?? 0), 0), currency };
+}
+
+function sumSameRealizedCost(trades: InvestmentRealizedTrade[]): MoneyValue | null {
+  const currency = sameString(trades.map((trade) => trade.costCurrency));
+  if (!currency || trades.some((trade) => trade.costValue == null)) return null;
+  return { value: trades.reduce((total, trade) => total + Number(trade.costValue ?? 0), 0), currency };
+}
+
 function sameString(values: (string | undefined)[]) {
   const present = values.filter((value): value is string => Boolean(value));
   return present.length === values.length && new Set(present).size === 1 ? present[0] : undefined;
@@ -843,7 +1002,7 @@ function marketSortValue(holding: InvestmentHolding) {
 }
 
 function profitSortValue(holding: InvestmentHolding) {
-  return holdingProfitRatio(holding) ?? -Infinity;
+  return holdingProfitRatio(holding) ?? holdingRealizedProfitRatio(holding) ?? holdingRealizedProfit(holding)?.value ?? -Infinity;
 }
 
 function formatQuantity(value: number) {

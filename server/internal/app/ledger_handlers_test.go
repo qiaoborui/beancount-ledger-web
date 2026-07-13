@@ -284,6 +284,76 @@ func TestInvestmentSummaryPreservesSecurityDecimalPrecision(t *testing.T) {
 	}
 }
 
+func TestInvestmentSummaryCalculatesRealizedPnLAndClosedHoldings(t *testing.T) {
+	text := []string{
+		"2026-01-01 commodity CNY",
+		"2026-01-01 commodity USD",
+		"2026-01-01 commodity QQQ",
+		"2026-01-01 commodity VOO",
+		"2026-01-01 open Assets:Broker:USD USD",
+		"2026-01-01 open Assets:Broker:QQQ QQQ",
+		`  alias: "券商 QQQ 持仓"`,
+		"2026-01-01 open Assets:Broker:VOO VOO",
+		`  alias: "券商 VOO 持仓"`,
+		"2026-01-01 open Equity:Opening-Balances USD",
+		"2026-01-01 open Income:Investment:Gain USD",
+		"2026-06-30 price USD 7.00 CNY",
+		"2026-06-30 price QQQ 130.00 USD",
+		"2026-06-30 price VOO 45.00 USD",
+		`2026-05-01 * "Broker" "buy QQQ first lot"`,
+		"  Assets:Broker:QQQ 1 QQQ {100.00 USD}",
+		"  Equity:Opening-Balances -1 QQQ",
+		`2026-05-02 * "Broker" "buy QQQ second lot"`,
+		"  Assets:Broker:QQQ 1 QQQ {120.00 USD}",
+		"  Equity:Opening-Balances -1 QQQ",
+		`2026-06-01 * "Broker" "sell QQQ partial"`,
+		"  Assets:Broker:QQQ -1.5 QQQ {100.00 USD} @ 130.00 USD",
+		"  Assets:Broker:USD 195.00 USD",
+		"  Income:Investment:Gain -35.00 USD",
+		`2026-05-01 * "Broker" "buy VOO"`,
+		"  Assets:Broker:VOO 2 VOO {50.00 USD}",
+		"  Equity:Opening-Balances -2 VOO",
+		`2026-06-02 * "Broker" "sell VOO closed"`,
+		"  Assets:Broker:VOO -2 VOO {50.00 USD} @ 45.00 USD",
+		"  Assets:Broker:USD 90.00 USD",
+		"  Income:Investment:Gain 10.00 USD",
+		"",
+	}
+	lines := make([]BeanLine, 0, len(text))
+	for index, line := range text {
+		lines = append(lines, BeanLine{File: "main.bean", Line: index + 1, Text: line})
+	}
+	entries := ParseBeanLines(lines).Entries
+	summary := BuildInvestmentSummaryFromBeanEntries(entries, AccountsFromBeanEntries(entries), PricesFromBeanEntries(entries))
+
+	if summary.RealizedPnLCNY == nil || *summary.RealizedPnLCNY != 17500 {
+		t.Fatalf("realized PnL CNY = %#v, want 17500", summary.RealizedPnLCNY)
+	}
+	if len(summary.Holdings) != 1 || summary.Holdings[0].Commodity != "QQQ" {
+		t.Fatalf("expected only current QQQ holding, got %#v", summary.Holdings)
+	}
+	qqq := summary.Holdings[0]
+	if math.Abs(qqq.TotalQuantity-0.5) > 0.000000001 || qqq.TotalCostValue == nil || math.Abs(*qqq.TotalCostValue-60) > 0.000001 || qqq.AverageCost == nil || math.Abs(*qqq.AverageCost-120) > 0.000001 {
+		t.Fatalf("unexpected remaining QQQ cost basis after FIFO sale: %#v", qqq)
+	}
+	if qqq.RealizedPnL == nil || math.Abs(*qqq.RealizedPnL-35) > 0.000001 || qqq.RealizedCurrency != "USD" || qqq.RealizedPnLCNY == nil || *qqq.RealizedPnLCNY != 24500 {
+		t.Fatalf("unexpected QQQ realized PnL: %#v", qqq)
+	}
+	if len(qqq.RealizedTrades) != 1 || qqq.RealizedTrades[0].CostValue == nil || math.Abs(*qqq.RealizedTrades[0].CostValue-160) > 0.000001 || qqq.RealizedTrades[0].ProceedsValue == nil || math.Abs(*qqq.RealizedTrades[0].ProceedsValue-195) > 0.000001 {
+		t.Fatalf("unexpected QQQ realized trade: %#v", qqq.RealizedTrades)
+	}
+	if len(qqq.Lots) != 1 || math.Abs(qqq.Lots[0].Quantity-0.5) > 0.000000001 || qqq.Lots[0].CostValue == nil || math.Abs(*qqq.Lots[0].CostValue-60) > 0.000001 {
+		t.Fatalf("unexpected remaining QQQ lot: %#v", qqq.Lots)
+	}
+	if len(summary.ClosedHoldings) != 1 || summary.ClosedHoldings[0].Commodity != "VOO" {
+		t.Fatalf("expected VOO closed holding, got %#v", summary.ClosedHoldings)
+	}
+	closed := summary.ClosedHoldings[0]
+	if !roundedZero(closed.TotalQuantity) || closed.RealizedPnL == nil || math.Abs(*closed.RealizedPnL+10) > 0.000001 || closed.RealizedPnLCNY == nil || *closed.RealizedPnLCNY != -7000 {
+		t.Fatalf("unexpected VOO closed holding PnL: %#v", closed)
+	}
+}
+
 func TestInvestmentSummaryFallsBackToIndexedTransactions(t *testing.T) {
 	snapshot := &LedgerSnapshot{
 		Accounts: []Account{
