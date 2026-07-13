@@ -22,20 +22,24 @@ type CommodityPrice struct {
 }
 
 type InvestmentPosition struct {
-	Account        string          `json:"account"`
-	AccountLabel   string          `json:"accountLabel"`
-	Commodity      string          `json:"commodity"`
-	CommodityName  string          `json:"commodityName"`
-	Quantity       float64         `json:"quantity"`
-	LatestPrice    *CommodityPrice `json:"latestPrice,omitempty"`
-	AverageCost    *float64        `json:"averageCost,omitempty"`
-	CostValue      *float64        `json:"costValue,omitempty"`
-	CostCurrency   string          `json:"costCurrency,omitempty"`
-	CostValueCNY   *int            `json:"costValueCny,omitempty"`
-	MarketValue    *float64        `json:"marketValue,omitempty"`
-	MarketCurrency string          `json:"marketCurrency,omitempty"`
-	MarketValueCNY *int            `json:"marketValueCny,omitempty"`
-	Lots           []InvestmentLot `json:"lots"`
+	Account          string                    `json:"account"`
+	AccountLabel     string                    `json:"accountLabel"`
+	Commodity        string                    `json:"commodity"`
+	CommodityName    string                    `json:"commodityName"`
+	Quantity         float64                   `json:"quantity"`
+	LatestPrice      *CommodityPrice           `json:"latestPrice,omitempty"`
+	AverageCost      *float64                  `json:"averageCost,omitempty"`
+	CostValue        *float64                  `json:"costValue,omitempty"`
+	CostCurrency     string                    `json:"costCurrency,omitempty"`
+	CostValueCNY     *int                      `json:"costValueCny,omitempty"`
+	MarketValue      *float64                  `json:"marketValue,omitempty"`
+	MarketCurrency   string                    `json:"marketCurrency,omitempty"`
+	MarketValueCNY   *int                      `json:"marketValueCny,omitempty"`
+	Lots             []InvestmentLot           `json:"lots"`
+	RealizedTrades   []InvestmentRealizedTrade `json:"realizedTrades"`
+	RealizedPnL      *float64                  `json:"realizedPnl,omitempty"`
+	RealizedCurrency string                    `json:"realizedCurrency,omitempty"`
+	RealizedPnLCNY   *int                      `json:"realizedPnlCny,omitempty"`
 }
 
 type InvestmentLot struct {
@@ -50,6 +54,22 @@ type InvestmentLot struct {
 	CostCurrency  string   `json:"costCurrency,omitempty"`
 }
 
+type InvestmentRealizedTrade struct {
+	Date             string   `json:"date"`
+	Account          string   `json:"account"`
+	AccountLabel     string   `json:"accountLabel"`
+	Commodity        string   `json:"commodity"`
+	CommodityName    string   `json:"commodityName"`
+	Quantity         float64  `json:"quantity"`
+	ProceedsValue    *float64 `json:"proceedsValue,omitempty"`
+	ProceedsCurrency string   `json:"proceedsCurrency,omitempty"`
+	CostValue        *float64 `json:"costValue,omitempty"`
+	CostCurrency     string   `json:"costCurrency,omitempty"`
+	RealizedPnL      *float64 `json:"realizedPnl,omitempty"`
+	RealizedCurrency string   `json:"realizedCurrency,omitempty"`
+	RealizedPnLCNY   *int     `json:"realizedPnlCny,omitempty"`
+}
+
 type InvestmentQuote struct {
 	Commodity        string          `json:"commodity"`
 	CommodityName    string          `json:"commodityName"`
@@ -61,26 +81,32 @@ type InvestmentQuote struct {
 }
 
 type InvestmentHolding struct {
-	Commodity           string               `json:"commodity"`
-	CommodityName       string               `json:"commodityName"`
-	LatestPrice         *CommodityPrice      `json:"latestPrice,omitempty"`
-	PriceHistory        []CommodityPrice     `json:"priceHistory"`
-	TotalQuantity       float64              `json:"totalQuantity"`
-	AverageCost         *float64             `json:"averageCost,omitempty"`
-	TotalCostValue      *float64             `json:"totalCostValue,omitempty"`
-	CostCurrency        string               `json:"costCurrency,omitempty"`
-	TotalCostValueCNY   *int                 `json:"totalCostValueCny,omitempty"`
-	TotalMarketValue    *float64             `json:"totalMarketValue,omitempty"`
-	MarketCurrency      string               `json:"marketCurrency,omitempty"`
-	TotalMarketValueCNY *int                 `json:"totalMarketValueCny,omitempty"`
-	AccountCount        int                  `json:"accountCount"`
-	Positions           []InvestmentPosition `json:"positions"`
-	Lots                []InvestmentLot      `json:"lots"`
+	Commodity           string                    `json:"commodity"`
+	CommodityName       string                    `json:"commodityName"`
+	LatestPrice         *CommodityPrice           `json:"latestPrice,omitempty"`
+	PriceHistory        []CommodityPrice          `json:"priceHistory"`
+	TotalQuantity       float64                   `json:"totalQuantity"`
+	AverageCost         *float64                  `json:"averageCost,omitempty"`
+	TotalCostValue      *float64                  `json:"totalCostValue,omitempty"`
+	CostCurrency        string                    `json:"costCurrency,omitempty"`
+	TotalCostValueCNY   *int                      `json:"totalCostValueCny,omitempty"`
+	TotalMarketValue    *float64                  `json:"totalMarketValue,omitempty"`
+	MarketCurrency      string                    `json:"marketCurrency,omitempty"`
+	TotalMarketValueCNY *int                      `json:"totalMarketValueCny,omitempty"`
+	AccountCount        int                       `json:"accountCount"`
+	Positions           []InvestmentPosition      `json:"positions"`
+	Lots                []InvestmentLot           `json:"lots"`
+	RealizedTrades      []InvestmentRealizedTrade `json:"realizedTrades"`
+	RealizedPnL         *float64                  `json:"realizedPnl,omitempty"`
+	RealizedCurrency    string                    `json:"realizedCurrency,omitempty"`
+	RealizedPnLCNY      *int                      `json:"realizedPnlCny,omitempty"`
 }
 
 type InvestmentSummary struct {
 	TotalMarketValueCNY int                  `json:"totalMarketValueCny"`
+	RealizedPnLCNY      *int                 `json:"realizedPnlCny,omitempty"`
 	Holdings            []InvestmentHolding  `json:"holdings"`
+	ClosedHoldings      []InvestmentHolding  `json:"closedHoldings,omitempty"`
 	Positions           []InvestmentPosition `json:"positions"`
 	Lots                []InvestmentLot      `json:"lots"`
 	Quotes              []InvestmentQuote    `json:"quotes"`
@@ -137,8 +163,9 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 	latestPrices := latestInvestmentPrices(prices)
 	priceHistory := investmentPriceHistory(prices)
 	positionQuantities := investmentQuantities(entries, securities)
-	positionCosts := investmentCosts(entries, securities)
-	positionLots := investmentLots(entries, securities, accountMap, commodityMap)
+	activity := investmentActivityFromEntries(entries, securities, accountMap, commodityMap, priceIndex)
+	positionLots := activity.Lots
+	positionCosts := investmentCostsFromLots(positionLots)
 	positions := make([]InvestmentPosition, 0, len(positionQuantities))
 	quoteQuantity := map[string]float64{}
 	quotePositionCount := map[string]int{}
@@ -155,13 +182,14 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 			label = acct.Label
 		}
 		position := InvestmentPosition{
-			Account:       accountName,
-			AccountLabel:  label,
-			Commodity:     commodity,
-			CommodityName: commodityName(commodityMap, commodity),
-			Quantity:      quantity,
-			LatestPrice:   latestPrices[commodity],
-			Lots:          positionLots[key],
+			Account:        accountName,
+			AccountLabel:   label,
+			Commodity:      commodity,
+			CommodityName:  commodityName(commodityMap, commodity),
+			Quantity:       quantity,
+			LatestPrice:    latestPrices[commodity],
+			Lots:           positionLots[key],
+			RealizedTrades: activity.Realized[key],
 		}
 		if cost := positionCosts[key]; cost.valid() && !roundedZero(quantity) {
 			value := cost.value
@@ -182,6 +210,7 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 				totalCNY += *cny
 			}
 		}
+		addPositionRealized(&position, priceIndex)
 		positions = append(positions, position)
 		quoteQuantity[commodity] += quantity
 		quotePositionCount[commodity]++
@@ -232,7 +261,9 @@ func BuildInvestmentSummaryFromBeanEntries(entries []BeanEntry, accounts []Accou
 
 	lots := summaryLots(positionLots, positions)
 	holdings := investmentHoldings(commodityMap, latestPrices, priceHistory, positions, quoteQuantity, priceIndex)
-	return InvestmentSummary{TotalMarketValueCNY: totalCNY, Holdings: holdings, Positions: positions, Lots: lots, Quotes: quotes, UpdatedAt: updatedAt}
+	closedHoldings := closedInvestmentHoldings(commodityMap, latestPrices, priceHistory, positionQuantities, activity.Realized, accountMap, priceIndex)
+	realizedPnLCNY := realizedTradesCNY(activity.Realized)
+	return InvestmentSummary{TotalMarketValueCNY: totalCNY, RealizedPnLCNY: realizedPnLCNY, Holdings: holdings, ClosedHoldings: closedHoldings, Positions: positions, Lots: lots, Quotes: quotes, UpdatedAt: updatedAt}
 }
 
 func BuildInvestmentSummaryFromTransactions(txns []Transaction, accounts []Account, prices []Price, commodities []string) InvestmentSummary {
@@ -418,7 +449,9 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 		}
 		holding.Positions = append(holding.Positions, position)
 		holding.Lots = append(holding.Lots, position.Lots...)
+		holding.RealizedTrades = append(holding.RealizedTrades, position.RealizedTrades...)
 		addPositionCost(holding, position)
+		addPositionRealizedToHolding(holding, position)
 	}
 	holdings := make([]InvestmentHolding, 0, len(byCommodity))
 	for _, holding := range byCommodity {
@@ -443,6 +476,7 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 			}
 		}
 		sortInvestmentLots(holding.Lots)
+		sortInvestmentRealizedTrades(holding.RealizedTrades)
 		holdings = append(holdings, *holding)
 	}
 	sort.Slice(holdings, func(i, j int) bool {
@@ -458,6 +492,37 @@ func investmentHoldings(commodityMap map[string]Commodity, latestPrices map[stri
 	return holdings
 }
 
+func closedInvestmentHoldings(commodityMap map[string]Commodity, latestPrices map[string]*CommodityPrice, priceHistory map[string][]CommodityPrice, quantities map[string]float64, realized map[string][]InvestmentRealizedTrade, accountMap map[string]Account, priceIndex investmentPriceIndex) []InvestmentHolding {
+	positions := []InvestmentPosition{}
+	commodityQuantities := map[string]float64{}
+	for key, trades := range realized {
+		if len(trades) == 0 || !roundedZero(quantities[key]) {
+			continue
+		}
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		accountName, commodity := parts[0], parts[1]
+		label := accountName
+		if acct := accountMap[accountName]; acct.Label != "" {
+			label = acct.Label
+		}
+		position := InvestmentPosition{
+			Account:        accountName,
+			AccountLabel:   label,
+			Commodity:      commodity,
+			CommodityName:  commodityName(commodityMap, commodity),
+			LatestPrice:    latestPrices[commodity],
+			RealizedTrades: trades,
+		}
+		addPositionRealized(&position, priceIndex)
+		positions = append(positions, position)
+		commodityQuantities[commodity] += quantities[key]
+	}
+	return investmentHoldings(commodityMap, latestPrices, priceHistory, positions, commodityQuantities, priceIndex)
+}
+
 func summaryLots(positionLots map[string][]InvestmentLot, positions []InvestmentPosition) []InvestmentLot {
 	held := map[string]bool{}
 	for _, position := range positions {
@@ -471,6 +536,24 @@ func summaryLots(positionLots map[string][]InvestmentLot, positions []Investment
 	}
 	sortInvestmentLots(lots)
 	return lots
+}
+
+func realizedTradesCNY(realized map[string][]InvestmentRealizedTrade) *int {
+	total := 0
+	count := 0
+	for _, trades := range realized {
+		for _, trade := range trades {
+			if trade.RealizedPnLCNY == nil {
+				continue
+			}
+			total += *trade.RealizedPnLCNY
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	return &total
 }
 
 func addPositionCost(holding *InvestmentHolding, position InvestmentPosition) {
@@ -498,6 +581,71 @@ func addPositionCost(holding *InvestmentHolding, position InvestmentPosition) {
 	}
 	total += *position.CostValue
 	holding.TotalCostValue = &total
+}
+
+func addPositionRealized(position *InvestmentPosition, priceIndex investmentPriceIndex) {
+	addRealizedTotals(position.RealizedTrades, func(value float64, currency string, cny *int) {
+		position.RealizedPnL = &value
+		position.RealizedCurrency = currency
+		position.RealizedPnLCNY = cny
+	}, priceIndex)
+}
+
+func addPositionRealizedToHolding(holding *InvestmentHolding, position InvestmentPosition) {
+	if position.RealizedPnLCNY != nil {
+		totalCNY := 0
+		if holding.RealizedPnLCNY != nil {
+			totalCNY = *holding.RealizedPnLCNY
+		}
+		totalCNY += *position.RealizedPnLCNY
+		holding.RealizedPnLCNY = &totalCNY
+	}
+	if position.RealizedPnL == nil || position.RealizedCurrency == "" {
+		return
+	}
+	if holding.RealizedCurrency != "" && holding.RealizedCurrency != position.RealizedCurrency {
+		holding.RealizedPnL = nil
+		holding.RealizedCurrency = ""
+		return
+	}
+	holding.RealizedCurrency = position.RealizedCurrency
+	total := 0.0
+	if holding.RealizedPnL != nil {
+		total = *holding.RealizedPnL
+	}
+	total += *position.RealizedPnL
+	holding.RealizedPnL = &total
+}
+
+func addRealizedTotals(trades []InvestmentRealizedTrade, set func(float64, string, *int), priceIndex investmentPriceIndex) {
+	currency := ""
+	value := 0.0
+	cnyTotal := 0
+	cnyCount := 0
+	for _, trade := range trades {
+		if trade.RealizedPnL == nil || trade.RealizedCurrency == "" {
+			continue
+		}
+		if currency != "" && currency != trade.RealizedCurrency {
+			return
+		}
+		currency = trade.RealizedCurrency
+		value += *trade.RealizedPnL
+		if trade.RealizedPnLCNY != nil {
+			cnyTotal += *trade.RealizedPnLCNY
+			cnyCount++
+		}
+	}
+	if currency == "" {
+		return
+	}
+	var cny *int
+	if cnyCount > 0 {
+		cny = &cnyTotal
+	} else {
+		cny = marketValueCNY(value, currency, priceIndex)
+	}
+	set(value, currency, cny)
 }
 
 func commodityPriceHistory(priceHistory map[string][]CommodityPrice, commodity string) []CommodityPrice {
@@ -539,43 +687,41 @@ type investmentCost struct {
 	mixed    bool
 }
 
+type investmentActivity struct {
+	Lots     map[string][]InvestmentLot
+	Realized map[string][]InvestmentRealizedTrade
+}
+
 func (cost investmentCost) valid() bool {
 	return cost.currency != "" && !cost.mixed && !roundedZero(cost.value)
 }
 
-func investmentCosts(entries []BeanEntry, securities map[string]bool) map[string]investmentCost {
+func investmentCostsFromLots(lots map[string][]InvestmentLot) map[string]investmentCost {
 	costs := map[string]investmentCost{}
-	for _, entry := range entries {
-		if entry.Kind != "transaction" {
-			continue
-		}
-		for _, posting := range entry.Postings {
-			if posting.CostCurrency == "" || !strings.HasPrefix(posting.Account, "Assets:") || !securities[posting.Currency] {
+	for key, rows := range lots {
+		current := investmentCost{}
+		for _, lot := range rows {
+			if lot.CostCurrency == "" {
 				continue
 			}
-			key := posting.Account + "\x00" + posting.Currency
-			current := costs[key]
-			currency := posting.CostCurrency
-			if current.currency != "" && current.currency != currency {
+			if current.currency != "" && current.currency != lot.CostCurrency {
 				current.mixed = true
-				costs[key] = current
 				continue
 			}
-			current.currency = currency
-			quantity := investmentPostingQuantity(posting)
-			if posting.TotalCost {
-				current.value += investmentBeanAmountValue(posting.Cost, posting.CostAmount)
-			} else {
-				current.value += quantity * investmentBeanAmountValue(posting.Cost, posting.CostAmount)
+			current.currency = lot.CostCurrency
+			if lot.CostValue != nil {
+				current.value += *lot.CostValue
+			} else if lot.UnitCost != nil {
+				current.value += lot.Quantity * *lot.UnitCost
 			}
-			costs[key] = current
 		}
+		costs[key] = current
 	}
 	return costs
 }
 
-func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
-	lots := map[string][]InvestmentLot{}
+func investmentActivityFromEntries(entries []BeanEntry, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity, priceIndex investmentPriceIndex) investmentActivity {
+	activity := investmentActivity{Lots: map[string][]InvestmentLot{}, Realized: map[string][]InvestmentRealizedTrade{}}
 	for _, entry := range entries {
 		if entry.Kind != "transaction" {
 			continue
@@ -585,44 +731,168 @@ func investmentLots(entries []BeanEntry, securities map[string]bool, accountMap 
 				continue
 			}
 			quantity := investmentPostingQuantity(posting)
-			if quantity <= 0 || roundedZero(quantity) {
+			if roundedZero(quantity) {
 				continue
 			}
 			accountName, commodity := posting.Account, posting.Currency
-			label := accountName
-			if acct := accountMap[accountName]; acct.Label != "" {
-				label = acct.Label
-			}
-			lot := InvestmentLot{
-				Date:          entry.Date,
-				Account:       accountName,
-				AccountLabel:  label,
-				Commodity:     commodity,
-				CommodityName: commodityName(commodityMap, commodity),
-				Quantity:      quantity,
-			}
-			if posting.CostCurrency != "" {
-				if posting.TotalCost {
-					value := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
-					unit := value / quantity
-					lot.UnitCost = &unit
-					lot.CostValue = &value
-				} else {
-					unit := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
-					value := quantity * unit
-					lot.UnitCost = &unit
-					lot.CostValue = &value
-				}
-				lot.CostCurrency = posting.CostCurrency
-			}
 			key := accountName + "\x00" + commodity
-			lots[key] = append(lots[key], lot)
+			if quantity > 0 {
+				activity.Lots[key] = append(activity.Lots[key], investmentLotFromPosting(entry.Date, posting, accountMap, commodityMap))
+				continue
+			}
+			trade := investmentRealizedTradeFromPosting(entry.Date, posting, accountMap, commodityMap, priceIndex, activity.Lots[key])
+			activity.Lots[key] = consumeInvestmentLots(activity.Lots[key], -quantity)
+			activity.Realized[key] = append(activity.Realized[key], trade)
 		}
 	}
-	for key := range lots {
-		sortInvestmentLots(lots[key])
+	for key := range activity.Lots {
+		sortInvestmentLots(activity.Lots[key])
 	}
-	return lots
+	for key := range activity.Realized {
+		sortInvestmentRealizedTrades(activity.Realized[key])
+	}
+	return activity
+}
+
+func investmentLotFromPosting(date string, posting parsedPosting, accountMap map[string]Account, commodityMap map[string]Commodity) InvestmentLot {
+	accountName, commodity := posting.Account, posting.Currency
+	label := accountName
+	if acct := accountMap[accountName]; acct.Label != "" {
+		label = acct.Label
+	}
+	quantity := investmentPostingQuantity(posting)
+	lot := InvestmentLot{
+		Date:          date,
+		Account:       accountName,
+		AccountLabel:  label,
+		Commodity:     commodity,
+		CommodityName: commodityName(commodityMap, commodity),
+		Quantity:      quantity,
+	}
+	if posting.CostCurrency != "" {
+		if posting.TotalCost {
+			value := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
+			unit := value / quantity
+			lot.UnitCost = &unit
+			lot.CostValue = &value
+		} else {
+			unit := investmentBeanAmountValue(posting.Cost, posting.CostAmount)
+			value := quantity * unit
+			lot.UnitCost = &unit
+			lot.CostValue = &value
+		}
+		lot.CostCurrency = posting.CostCurrency
+	}
+	return lot
+}
+
+func investmentRealizedTradeFromPosting(date string, posting parsedPosting, accountMap map[string]Account, commodityMap map[string]Commodity, priceIndex investmentPriceIndex, lots []InvestmentLot) InvestmentRealizedTrade {
+	accountName, commodity := posting.Account, posting.Currency
+	label := accountName
+	if acct := accountMap[accountName]; acct.Label != "" {
+		label = acct.Label
+	}
+	quantity := -investmentPostingQuantity(posting)
+	trade := InvestmentRealizedTrade{
+		Date:          date,
+		Account:       accountName,
+		AccountLabel:  label,
+		Commodity:     commodity,
+		CommodityName: commodityName(commodityMap, commodity),
+		Quantity:      quantity,
+	}
+	if proceeds, currency := investmentSaleProceeds(posting, quantity); proceeds != nil {
+		trade.ProceedsValue = proceeds
+		trade.ProceedsCurrency = currency
+	}
+	if cost, currency := investmentConsumedCost(lots, quantity); cost != nil {
+		trade.CostValue = cost
+		trade.CostCurrency = currency
+	}
+	if trade.ProceedsValue != nil && trade.CostValue != nil && trade.ProceedsCurrency != "" && trade.ProceedsCurrency == trade.CostCurrency {
+		pnl := *trade.ProceedsValue - *trade.CostValue
+		trade.RealizedPnL = &pnl
+		trade.RealizedCurrency = trade.ProceedsCurrency
+		trade.RealizedPnLCNY = marketValueCNY(pnl, trade.RealizedCurrency, priceIndex)
+	}
+	return trade
+}
+
+func investmentSaleProceeds(posting parsedPosting, quantity float64) (*float64, string) {
+	if posting.PriceCurrency == "" || roundedZero(quantity) {
+		return nil, ""
+	}
+	value := investmentBeanAmountValue(posting.Price, posting.PriceAmount)
+	if posting.TotalPrice {
+		value = math.Abs(value)
+	} else {
+		value *= quantity
+	}
+	return &value, posting.PriceCurrency
+}
+
+func investmentConsumedCost(lots []InvestmentLot, quantity float64) (*float64, string) {
+	remaining := quantity
+	total := 0.0
+	currency := ""
+	covered := 0.0
+	for _, lot := range lots {
+		if roundedZero(remaining) {
+			break
+		}
+		consume := math.Min(lot.Quantity, remaining)
+		if roundedZero(consume) {
+			continue
+		}
+		if lot.CostCurrency == "" {
+			remaining -= consume
+			continue
+		}
+		if currency != "" && currency != lot.CostCurrency {
+			return nil, ""
+		}
+		currency = lot.CostCurrency
+		if lot.CostValue != nil && !roundedZero(lot.Quantity) {
+			total += *lot.CostValue * consume / lot.Quantity
+			covered += consume
+		} else if lot.UnitCost != nil {
+			total += *lot.UnitCost * consume
+			covered += consume
+		}
+		remaining -= consume
+	}
+	if currency == "" || math.Abs(covered-quantity) > 0.00000001 {
+		return nil, ""
+	}
+	return &total, currency
+}
+
+func consumeInvestmentLots(lots []InvestmentLot, quantity float64) []InvestmentLot {
+	remaining := quantity
+	out := make([]InvestmentLot, 0, len(lots))
+	for _, lot := range lots {
+		if roundedZero(remaining) {
+			out = append(out, lot)
+			continue
+		}
+		if lot.Quantity <= remaining || roundedZero(lot.Quantity-remaining) {
+			remaining -= lot.Quantity
+			continue
+		}
+		originalQuantity := lot.Quantity
+		consume := remaining
+		remaining = 0
+		lot.Quantity -= consume
+		if lot.CostValue != nil && !roundedZero(originalQuantity) {
+			value := *lot.CostValue * lot.Quantity / originalQuantity
+			lot.CostValue = &value
+		} else if lot.UnitCost != nil {
+			value := *lot.UnitCost * lot.Quantity
+			lot.CostValue = &value
+		}
+		out = append(out, lot)
+	}
+	return out
 }
 
 func investmentLotsFromTransactions(txns []Transaction, securities map[string]bool, accountMap map[string]Account, commodityMap map[string]Commodity) map[string][]InvestmentLot {
@@ -667,6 +937,18 @@ func sortInvestmentLots(lots []InvestmentLot) {
 			return lots[i].Commodity < lots[j].Commodity
 		}
 		return lots[i].Account < lots[j].Account
+	})
+}
+
+func sortInvestmentRealizedTrades(trades []InvestmentRealizedTrade) {
+	sort.Slice(trades, func(i, j int) bool {
+		if trades[i].Date != trades[j].Date {
+			return trades[i].Date > trades[j].Date
+		}
+		if trades[i].Commodity != trades[j].Commodity {
+			return trades[i].Commodity < trades[j].Commodity
+		}
+		return trades[i].Account < trades[j].Account
 	})
 }
 

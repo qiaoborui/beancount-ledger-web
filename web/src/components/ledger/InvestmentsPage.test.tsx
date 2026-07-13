@@ -239,7 +239,8 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("买入批次");
     expect(html).toContain("买入日期");
     expect(html).toContain("2026-06-16");
-    expect(html).toContain("持仓成本");
+    expect(html).toContain("未实现盈亏");
+    expect(html).toContain("已实现盈亏");
     expect(html).toContain("持有 / 现价");
     expect(html).toContain("平均成本");
     expect(html).toContain("总成本");
@@ -301,8 +302,84 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("¥1.7702");
     expect(html).toContain("¥2,124.24");
     expect(html).toContain("+¥23.76");
-    expect(html).toContain("持仓成本");
+    expect(html).toContain("未实现盈亏");
     expect(html).toContain("招商证券");
+  });
+
+  it("shows realized profit summary and closed holding count", () => {
+    const investments: InvestmentSummary = {
+      totalMarketValueCny: 0,
+      realizedPnlCny: -7000,
+      updatedAt: "2026-06-30",
+      positions: [],
+      lots: [],
+      quotes: [],
+      holdings: [],
+      closedHoldings: [
+        {
+          commodity: "VOO",
+          commodityName: "Vanguard S&P 500 ETF",
+          latestPrice: { date: "2026-06-30", commodity: "VOO", amount: 45, currency: "USD" },
+          priceHistory: [],
+          totalQuantity: 0,
+          accountCount: 1,
+          positions: [
+            {
+              account: "Assets:Broker:VOO",
+              accountLabel: "券商 VOO 持仓",
+              commodity: "VOO",
+              commodityName: "Vanguard S&P 500 ETF",
+              quantity: 0,
+              realizedTrades: [
+                {
+                  date: "2026-06-02",
+                  account: "Assets:Broker:VOO",
+                  accountLabel: "券商 VOO 持仓",
+                  commodity: "VOO",
+                  commodityName: "Vanguard S&P 500 ETF",
+                  quantity: 2,
+                  proceedsValue: 90,
+                  proceedsCurrency: "USD",
+                  costValue: 100,
+                  costCurrency: "USD",
+                  realizedPnl: -10,
+                  realizedCurrency: "USD",
+                  realizedPnlCny: -7000,
+                },
+              ],
+            },
+          ],
+          lots: [],
+          realizedTrades: [
+            {
+              date: "2026-06-02",
+              account: "Assets:Broker:VOO",
+              accountLabel: "券商 VOO 持仓",
+              commodity: "VOO",
+              commodityName: "Vanguard S&P 500 ETF",
+              quantity: 2,
+              proceedsValue: 90,
+              proceedsCurrency: "USD",
+              costValue: 100,
+              costCurrency: "USD",
+              realizedPnl: -10,
+              realizedCurrency: "USD",
+              realizedPnlCny: -7000,
+            },
+          ],
+          realizedPnl: -10,
+          realizedCurrency: "USD",
+          realizedPnlCny: -7000,
+        },
+      ],
+    };
+
+    const html = renderToString(<InvestmentsPage investments={investments} />);
+
+    expect(html).toContain("已实现盈亏");
+    expect(html).toContain("-¥70.00");
+    expect(html).toContain("已清仓 <!-- -->1");
+    expect(html).toContain("0 / 1");
   });
 
   it("does not chart partial portfolio history as total assets", () => {
