@@ -227,20 +227,25 @@ describe("InvestmentsPage", () => {
 
     const html = renderToString(<InvestmentsPage investments={investments} />);
 
+    expect(html).toContain("持仓总资产");
+    expect(html).toContain("今日收益");
+    expect(html).toContain("仓位分布");
+    expect(html).toContain("全部账户");
+    expect(html).toContain("众安银行 NVDA 持仓");
+    expect(html).toContain("券商 QQQ 持仓");
     expect(html).toContain("US$635.97");
     expect(html).toContain("买入批次");
+    expect(html).toContain("买入日期");
     expect(html).toContain("2026-06-16");
-    expect(html).toContain("1/2 有成本");
-    expect(html).toContain("2 笔买入");
-    expect(html).toContain("持有股数");
+    expect(html).toContain("持仓成本");
+    expect(html).toContain("持有 / 现价");
     expect(html).toContain("平均成本");
     expect(html).toContain("总成本");
     expect(html).toContain("US$209.50");
     expect(html).toContain("US$628.50");
+    expect(html).toContain("+3.31%");
     expect(html).toContain("QQQ");
     expect(html).toContain("3");
-    expect(html).not.toContain("买入日期");
-    expect(html).not.toContain("账户拆分");
     expect(html).not.toContain("$636");
   });
 
@@ -294,7 +299,47 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("¥1.7702");
     expect(html).toContain("¥2,124.24");
     expect(html).toContain("+¥23.76");
-    expect(html).toContain("折算成本");
+    expect(html).toContain("持仓成本");
+  });
+
+  it("does not chart partial portfolio history as total assets", () => {
+    const investments: InvestmentSummary = {
+      totalMarketValueCny: 300000,
+      positions: [],
+      quotes: [],
+      holdings: [
+        {
+          commodity: "AAA",
+          commodityName: "Alpha",
+          latestPrice: { date: "2026-06-30", commodity: "AAA", amount: 12, currency: "USD" },
+          priceHistory: [
+            { date: "2026-06-29", commodity: "AAA", amount: 10, currency: "USD" },
+            { date: "2026-06-30", commodity: "AAA", amount: 12, currency: "USD" },
+          ],
+          totalQuantity: 1,
+          totalMarketValueCny: 100000,
+          accountCount: 1,
+          positions: [],
+          lots: [],
+        },
+        {
+          commodity: "BBB",
+          commodityName: "Beta",
+          latestPrice: { date: "2026-06-30", commodity: "BBB", amount: 20, currency: "USD" },
+          priceHistory: [],
+          totalQuantity: 1,
+          totalMarketValueCny: 200000,
+          accountCount: 1,
+          positions: [],
+          lots: [],
+        },
+      ],
+    };
+
+    const html = renderToString(<InvestmentsPage investments={investments} />);
+
+    expect(html).toContain("近 30 个价格点");
+    expect(html.match(/价格历史不足/g)).toHaveLength(2);
   });
 
 });
