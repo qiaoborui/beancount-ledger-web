@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
 import type { LedgerVersion, Txn } from "../types";
 
 const version: LedgerVersion = { version: "v1", fileCount: 1, latestMtimeMs: 123 };
@@ -103,5 +103,13 @@ describe("shouldShowOfflineLedgerNotice", () => {
 describe("shouldFetchFullBootstrap", () => {
   it("always hydrates full data after the lite bootstrap", () => {
     expect(shouldFetchFullBootstrap()).toBe(true);
+  });
+});
+
+describe("bootstrapSensitiveUnlockState", () => {
+  it("does not interpret a missing bootstrap field as a confirmed server lock", () => {
+    expect(bootstrapSensitiveUnlockState({})).toBeNull();
+    expect(bootstrapSensitiveUnlockState({ sensitiveUnlocked: false })).toBe(false);
+    expect(bootstrapSensitiveUnlockState({ sensitiveUnlocked: true })).toBe(true);
   });
 });

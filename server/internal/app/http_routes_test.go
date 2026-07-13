@@ -41,6 +41,10 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	if summary.Code != http.StatusOK {
 		t.Fatalf("summary status = %d body=%s", summary.Code, summary.Body.String())
 	}
+	bootstrap := requestWithCookies(router, http.MethodGet, "/api/ledger/bootstrap?start=2026-05-01&end=2026-06-01", "", login.Result().Cookies())
+	if got := bootstrap.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("ledger/bootstrap Cache-Control=%q", got)
+	}
 	var body struct {
 		Summary struct {
 			Income  int `json:"income"`

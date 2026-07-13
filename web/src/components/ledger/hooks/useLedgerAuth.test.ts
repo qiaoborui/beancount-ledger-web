@@ -92,6 +92,19 @@ describe("createLedgerAuthActions", () => {
     expect(args.clearToast).toHaveBeenCalled();
   });
 
+  it("uses an explicit main password to unlock an existing session", async () => {
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    await actions.loginWithPassword("fallback-secret");
+
+    const loginCall = vi.mocked(window.fetch).mock.calls.find(([input]) => String(input).endsWith("/api/auth/login"));
+    expect(loginCall?.[1]?.body).toBe(JSON.stringify({ password: "fallback-secret" }));
+    expect(args.setUnlocked).toHaveBeenCalledWith(true);
+    expect(args.load).toHaveBeenCalledWith(true, { sensitiveUnlocked: true });
+    expect(args.clearToast).toHaveBeenCalled();
+  });
+
   it("coalesces repeated passkey login clicks into one browser prompt", async () => {
     const args = authArgs();
     const actions = createLedgerAuthActions(args);

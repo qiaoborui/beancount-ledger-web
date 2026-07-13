@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { writeApiEndpointSettings } from "@/lib/apiEndpoints";
-import { LoginScreen } from "./AuthScreens";
+import { LoginScreen, SensitiveUnlockPanel } from "./AuthScreens";
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -41,5 +41,19 @@ describe("LoginScreen", () => {
 
     expect(html).toContain("https://backup.example.com");
     expect(html).toContain("切换后端");
+  });
+
+  it("offers the main password when no quick unlock method is available", () => {
+    const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered={false} onUnlock={() => {}} onPasswordUnlock={() => {}} />);
+
+    expect(html).toContain("主密码");
+    expect(html).toContain('type="password"');
+  });
+
+  it("keeps the main-password fallback visible beside Face ID", () => {
+    const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered onUnlock={() => {}} onPasswordUnlock={() => {}} />);
+
+    expect(html).toContain("Face ID / Passkey");
+    expect(html).toContain("或使用主密码");
   });
 });

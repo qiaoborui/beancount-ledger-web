@@ -74,6 +74,10 @@ export type LedgerBootstrapResponse = {
   sensitiveUnlocked?: boolean;
 };
 
+export function bootstrapSensitiveUnlockState(data: LedgerBootstrapResponse): boolean | null {
+  return typeof data.sensitiveUnlocked === "boolean" ? data.sensitiveUnlocked : null;
+}
+
 type LedgerLoadOptions = {
   sensitiveUnlocked?: boolean;
 };
@@ -110,7 +114,7 @@ export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
 }
 
 export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now()) {
-  const serverSensitiveUnlocked = Boolean(data.sensitiveUnlocked);
+  const serverSensitiveUnlocked = bootstrapSensitiveUnlockState(data) === true;
   const cacheUnlocked = clientUnlocked && serverSensitiveUnlocked;
   const responseValuationCurrency = data.valuationCurrency ?? fallbackValuationCurrency;
   const inc = data.incomeStatement ?? { income: [], expense: [], totalIncome: 0, totalExpense: 0, netIncome: 0, valuationCurrency: responseValuationCurrency, expenseAnalytics: [], topPayees: [], topPaymentAccounts: [] };
@@ -147,7 +151,7 @@ export function shouldFetchFullBootstrap() {
   return true;
 }
 
-export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveLocked, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveLocked: () => void; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
   if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
   const initialCache = initialCacheRef.current;
@@ -261,12 +265,13 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         const liteQuery = new URLSearchParams(timeRangeToParams(range));
         liteQuery.set("valuationCurrency", valuationCurrency);
         liteQuery.set("lite", "1");
-        const liteData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${liteQuery}`);
+        const liteData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${liteQuery}`, { cache: "no-store" });
         if (apiEndpointLedgerScope() !== ledgerScope) return;
-        const serverSensitiveUnlocked = Boolean(liteData.sensitiveUnlocked);
-        if (clientUnlocked && !serverSensitiveUnlocked) {
+        const serverSensitiveUnlocked = bootstrapSensitiveUnlockState(liteData);
+        if (clientUnlocked && serverSensitiveUnlocked === false) {
           latestContextRef.current = { range, unlocked: false, valuationCurrency, ledgerScope };
-          onSensitiveLocked();
+          sessionStorage.removeItem("ledger_unlocked");
+          onSensitiveUnlockChange(false);
         }
         const version = liteData.ledgerVersion ?? await fetchLedgerVersion().catch(() => null);
         if (apiEndpointLedgerScope() !== ledgerScope) return;
@@ -282,18 +287,18 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         if (shouldFetchFullBootstrap()) {
           const fullQuery = new URLSearchParams(timeRangeToParams(range));
           fullQuery.set("valuationCurrency", valuationCurrency);
-          const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`);
+          const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`, { cache: "no-store" });
           if (apiEndpointLedgerScope() !== ledgerScope) return;
           const fullVersion = fullData.ledgerVersion ?? version;
           const {
             cache: fullCache,
             cacheUnlocked: fullCacheUnlocked,
             responseValuationCurrency: fullResponseValuationCurrency,
-            serverSensitiveUnlocked: fullServerSensitiveUnlocked,
           } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
-          if (clientUnlocked && !fullServerSensitiveUnlocked) {
+          if (clientUnlocked && bootstrapSensitiveUnlockState(fullData) === false) {
             latestContextRef.current = { range, unlocked: false, valuationCurrency, ledgerScope };
-            onSensitiveLocked();
+            sessionStorage.removeItem("ledger_unlocked");
+            onSensitiveUnlockChange(false);
           }
           applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency, ledgerScope);
           if (fullCacheUnlocked) {
@@ -311,7 +316,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     const promise = run();
     freshInFlightRef.current.set(inFlightKey, promise);
     return promise;
-  }, [applyCache, onSensitiveLocked, unlocked, valuationCurrency]);
+  }, [applyCache, onSensitiveUnlockChange, unlocked, valuationCurrency]);
 
   const load = useCallback(async (forceFresh = false, options: LedgerLoadOptions = {}) => {
     const loadSequence = loadSequenceRef.current + 1;

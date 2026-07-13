@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 import { shouldOfferHeaderSensitiveUnlock } from "./headerUnlock";
 
 const baseState = {
-  hasPasskey: false,
-  passkeyStatusLoaded: false,
-  quickUnlockEnabled: false,
   offlineSensitiveUnlockAvailable: false,
   online: true,
   unlocked: false,
@@ -15,11 +12,15 @@ describe("shouldOfferHeaderSensitiveUnlock", () => {
     expect(shouldOfferHeaderSensitiveUnlock(baseState)).toBe(true);
   });
 
-  it("hides the header unlock entry after loading confirms no unlock method is available", () => {
-    expect(shouldOfferHeaderSensitiveUnlock({ ...baseState, passkeyStatusLoaded: true })).toBe(false);
+  it("keeps the header unlock entry available for the main-password fallback", () => {
+    expect(shouldOfferHeaderSensitiveUnlock(baseState)).toBe(true);
   });
 
   it("does not offer unlock while sensitive data is already unlocked", () => {
-    expect(shouldOfferHeaderSensitiveUnlock({ ...baseState, hasPasskey: true, unlocked: true })).toBe(false);
+    expect(shouldOfferHeaderSensitiveUnlock({ ...baseState, unlocked: true })).toBe(false);
+  });
+
+  it("does not offer the online password fallback while fully offline", () => {
+    expect(shouldOfferHeaderSensitiveUnlock({ ...baseState, online: false })).toBe(false);
   });
 });

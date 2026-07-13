@@ -246,11 +246,15 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     };
   }, [authed, online]);
 
-  const handleSensitiveLocked = useCallback(() => {
+  const handleServerSensitiveLocked = useCallback(() => {
     sessionStorage.removeItem("ledger_unlocked");
-    sessionStorage.setItem("ledger_locked_at", String(Date.now()));
     setUnlocked(false);
   }, [setUnlocked]);
+
+  const handleSensitiveLocked = useCallback(() => {
+    sessionStorage.setItem("ledger_locked_at", String(Date.now()));
+    handleServerSensitiveLocked();
+  }, [handleServerSensitiveLocked]);
 
   const lockSensitive = useCallback(async () => {
     handleSensitiveLocked();
@@ -287,14 +291,13 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     timeRange,
     unlocked,
     valuationCurrency,
-    onSensitiveLocked: handleSensitiveLocked,
     onSensitiveUnlockChange: setUnlocked,
     onAuthChange: setAuthed,
     onPasskeyRegistered: setPasskeyRegistered,
     showToast,
   });
 
-  const { login, loginWithPasskey, loginWithQuickUnlock, registerPasskey } = useLedgerAuth({
+  const { login, loginWithPassword, loginWithPasskey, loginWithQuickUnlock, registerPasskey } = useLedgerAuth({
     password,
     setPassword,
     setAuthed,
@@ -519,9 +522,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
   const headerSensitiveUnlockAvailable = shouldOfferHeaderSensitiveUnlock({
-    hasPasskey,
-    passkeyStatusLoaded,
-    quickUnlockEnabled,
     offlineSensitiveUnlockAvailable,
     online,
     unlocked,
@@ -545,12 +545,19 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       setUnlocking(false);
     }
   };
-  const unlockOnlineSensitive = () => {
-    if (quickUnlockEnabled) {
-      setShowUnlockModal(true);
-      return;
+  const unlockPasswordSensitive = async (inputPassword: string) => {
+    setUnlocking(true);
+    try {
+      await loginWithPassword(inputPassword);
+      setShowUnlockModal(false);
+    } catch {
+      // Error handled by loginWithPassword
+    } finally {
+      setUnlocking(false);
     }
-    void loginWithPasskey();
+  };
+  const unlockOnlineSensitive = () => {
+    setShowUnlockModal(true);
   };
   const handleHeaderUnlockSensitive = () => {
     if (!offlineSensitiveUnlockAvailable) {
@@ -578,6 +585,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       passkeyRegistered={hasPasskey}
       onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
       onUnlock={loginWithPasskey}
+      onPasswordUnlock={(inputPassword) => { void unlockPasswordSensitive(inputPassword); }}
       unlocking={unlocking}
     />
   );
@@ -673,13 +681,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             <button type="button" className="absolute right-5 top-5 z-10 grid h-10 w-10 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag" onClick={() => setShowUnlockModal(false)} aria-label="关闭"><X className="h-5 w-5" /></button>
             <SensitiveUnlockPanel
               title="快速解锁"
-              description="输入本机快速解锁码查看敏感数据。"
+              description="使用本机快速解锁、Face ID / Passkey 或主密码查看敏感数据。"
               message={sensitiveMessage}
               quickUnlockEnabled={quickUnlockEnabled}
               quickUnlockMode={quickUnlockMode}
               passkeyRegistered={hasPasskey}
               onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
               onUnlock={loginWithPasskey}
+              onPasswordUnlock={(inputPassword) => { void unlockPasswordSensitive(inputPassword); }}
               unlocking={unlocking}
               autoFocusInput
             />
@@ -799,14 +808,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
-      {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要解锁后查看。"))}
+      {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要解锁后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要解锁后查看。"))}
       {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
       {page === "currencies" && <Suspense fallback={<RouteFallback label="正在准备货币与汇率…" />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={unlockOnlineSensitive} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
       {page === "accounts" && (() => {
         const detailAccount = accountFromPathname(pathname);
-        if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要解锁后查看。");
+        if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要解锁后查看。");
         return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} /></></Suspense>;
       })()}
       {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} /></Suspense>}

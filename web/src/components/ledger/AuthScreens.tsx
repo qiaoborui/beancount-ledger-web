@@ -147,6 +147,7 @@ export function SensitiveUnlockPanel({
   passkeyRegistered,
   onQuickUnlock,
   onUnlock,
+  onPasswordUnlock,
   unlocking,
   autoFocusInput,
 }: {
@@ -163,6 +164,7 @@ export function SensitiveUnlockPanel({
   passkeyRegistered?: boolean;
   onQuickUnlock?: (secret: string) => void;
   onUnlock: () => void;
+  onPasswordUnlock?: (password: string) => void;
   unlocking?: boolean;
   autoFocusInput?: boolean;
 }) {
@@ -187,13 +189,23 @@ export function SensitiveUnlockPanel({
     ) : (
       <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
         {passkeyRegistered && <Button className="h-12 rounded-xl px-5" onClick={onUnlock}>使用 Face ID / Passkey 查看</Button>}
-        {!passkeyRegistered && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式。用主密码登录并查看一次敏感数据后，可以在设置里启用本机快速解锁。</p>}
+        {!passkeyRegistered && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式，可以使用主密码解锁。</p>}
       </div>
     )}
+    {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && !quickUnlockEnabled && !passkeyRegistered} showSeparator={Boolean(quickUnlockEnabled || passkeyRegistered)} />}
     {offline && !offlineUnlockAvailable && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">当前离线；需要先在线解锁并在设置里启用离线解锁码。</p>}
     {message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}
     <p className="mt-4 text-xs text-stone">解锁后 15 分钟内可查看余额和净资产；重新打开仍可先直接聊天。</p>
   </section>;
+}
+
+function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, showSeparator }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; showSeparator: boolean }) {
+  const [password, setPassword] = useState("");
+  return <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
+    {showSeparator && <div className="text-xs text-stone">或使用主密码</div>}
+    <Input autoFocus={autoFocusInput} type="password" autoComplete="current-password" className="h-12 rounded-xl bg-panel text-center" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
+    <Button variant={showSeparator ? "outline" : "default"} className="h-12 rounded-xl px-5" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "使用主密码解锁"}</Button>
+  </div>;
 }
 
 export function PasskeyBanner({ onRegister }: { onRegister: () => void }) {
