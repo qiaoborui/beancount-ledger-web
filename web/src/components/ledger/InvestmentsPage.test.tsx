@@ -230,9 +230,11 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("持仓总资产");
     expect(html).toContain("今日收益");
     expect(html).toContain("仓位分布");
-    expect(html).toContain("全部账户");
+    expect(html).toContain("全部机构");
+    expect(html).toContain("按机构账户");
+    expect(html).toContain("众安银行");
+    expect(html).toContain("券商");
     expect(html).toContain("众安银行 NVDA 持仓");
-    expect(html).toContain("券商 QQQ 持仓");
     expect(html).toContain("US$635.97");
     expect(html).toContain("买入批次");
     expect(html).toContain("买入日期");
@@ -300,6 +302,7 @@ describe("InvestmentsPage", () => {
     expect(html).toContain("¥2,124.24");
     expect(html).toContain("+¥23.76");
     expect(html).toContain("持仓成本");
+    expect(html).toContain("招商证券");
   });
 
   it("does not chart partial portfolio history as total assets", () => {

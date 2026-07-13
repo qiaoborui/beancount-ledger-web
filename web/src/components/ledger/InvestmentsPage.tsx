@@ -7,28 +7,39 @@ import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPositi
 type PricePoint = { date: string; price: number };
 type PortfolioPoint = { date: string; value: number };
 type MoneyValue = { value: number; currency: string };
-type AccountOption = { account: string; label: string };
+type InstitutionOption = { key: string; label: string; holdingCount: number; positionCount: number; totalMarketValueCny: number };
+type InstitutionGroup = InstitutionOption & { holdings: InvestmentHolding[] };
 type SortKey = "market" | "profit" | "change";
 
 const allocationColors = ["var(--chart-palette-1)", "var(--chart-palette-2)", "var(--chart-palette-4)", "var(--chart-palette-5)", "var(--chart-palette-6)"];
+const regionAccountSegments = new Set(["CN", "HK", "US", "JP", "SG", "EU", "UK", "TW"]);
+const commonInstitutionLabels: Record<string, string> = {
+  Broker: "券商",
+  CMB: "招商证券",
+  HSBC: "汇丰",
+  ZABank: "众安银行",
+  ZA: "众安",
+};
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
   const holdings = useMemo(() => investmentHoldings(investments), [investments]);
-  const accountOptions = useMemo(() => investmentAccounts(investments?.positions ?? []), [investments]);
-  const [selectedAccount, setSelectedAccount] = useState("all");
+  const institutionGroups = useMemo(() => investmentInstitutionGroups(holdings), [holdings]);
+  const institutionOptions = useMemo(() => institutionGroups.map(({ holdings: _holdings, ...option }) => option), [institutionGroups]);
+  const [selectedInstitution, setSelectedInstitution] = useState("all");
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("market");
-  const [openHolding, setOpenHolding] = useState<string | null>(() => holdings[0]?.commodity ?? null);
+  const [openHolding, setOpenHolding] = useState<string | null | undefined>(undefined);
 
-  const scopedHoldings = useMemo(() => {
-    if (selectedAccount === "all") return holdings;
-    return holdings.flatMap((holding) => {
-      const scoped = holdingForAccount(holding, selectedAccount);
-      return scoped ? [scoped] : [];
-    });
-  }, [holdings, selectedAccount]);
-  const heldHoldings = scopedHoldings.filter((holding) => Math.abs(holding.totalQuantity) > 0);
-  const visibleHoldings = useMemo(() => sortHoldings(filterHoldings(heldHoldings, query), sortKey), [heldHoldings, query, sortKey]);
+  const scopedGroups = useMemo(() => {
+    if (selectedInstitution === "all") return institutionGroups;
+    return institutionGroups.filter((group) => group.key === selectedInstitution);
+  }, [institutionGroups, selectedInstitution]);
+  const heldHoldings = useMemo(() => scopedGroups.flatMap((group) => group.holdings).filter((holding) => Math.abs(holding.totalQuantity) > 0), [scopedGroups]);
+  const visibleGroups = useMemo(() => scopedGroups.map((group) => ({
+    ...group,
+    holdings: sortHoldings(filterHoldings(group.holdings, query), sortKey),
+  })).filter((group) => group.holdings.length > 0), [scopedGroups, query, sortKey]);
+  const visibleHoldingCount = visibleGroups.reduce((total, group) => total + group.holdings.length, 0);
 
   const totalMarketValueCny = sumCnyValues(heldHoldings, "totalMarketValueCny");
   const latestDate = latestPriceDate(heldHoldings) || investments?.updatedAt || "";
@@ -36,10 +47,15 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
   const profitSummary = summarizeHoldingProfit(heldHoldings);
   const dailySummary = summarizeDailyChange(heldHoldings);
   const portfolioSeries = useMemo(() => portfolioPriceSeries(heldHoldings, 30), [heldHoldings]);
+  const allocationRows = useMemo(() => selectedInstitution === "all"
+    ? scopedGroups.map((group) => ({ label: group.label, value: group.totalMarketValueCny }))
+    : heldHoldings.map((holding) => ({ label: holding.commodity, value: holding.totalMarketValueCny ?? 0 })), [heldHoldings, scopedGroups, selectedInstitution]);
+  const defaultOpenHolding = visibleGroups[0]?.holdings[0] ? `${visibleGroups[0].key}:${visibleGroups[0].holdings[0].commodity}` : null;
+  const activeOpenHolding = openHolding === undefined ? defaultOpenHolding : openHolding;
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <AccountTabs options={accountOptions} selected={selectedAccount} onChange={setSelectedAccount} />
+      <InstitutionTabs options={institutionOptions} selected={selectedInstitution} onChange={setSelectedInstitution} />
 
       <PortfolioOverview
         totalMarketValueCny={totalMarketValueCny}
@@ -50,20 +66,20 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
         costCoverage={countHoldingsWithCost(heldHoldings)}
         profitCoverage={countHoldingsWithProfit(heldHoldings)}
         holdingCount={heldHoldings.length}
-        accountCount={selectedAccount === "all" ? accountOptions.length : heldHoldings.length ? 1 : 0}
+        institutionCount={selectedInstitution === "all" ? institutionOptions.length : heldHoldings.length ? 1 : 0}
         series={portfolioSeries}
       />
 
-      <AllocationBar holdings={heldHoldings} totalMarketValueCny={totalMarketValueCny} />
+      <AllocationBar rows={allocationRows} totalMarketValueCny={totalMarketValueCny} mode={selectedInstitution === "all" ? "institution" : "security"} />
 
       <section className="overflow-hidden rounded-[14px] border border-line bg-panel">
         <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-serif text-xl font-medium text-ink">持仓明细</h2>
-              <span className="ledger-chip rounded-full px-2 py-1 text-xs">{visibleHoldings.length} 只</span>
+              <span className="ledger-chip rounded-full px-2 py-1 text-xs">{visibleHoldingCount} 只</span>
             </div>
-            <p className="mt-1 text-xs text-stone">市值统一折算为 CNY，今日涨跌按最新两条证券价格估算。</p>
+            <p className="mt-1 text-xs text-stone">按机构账户分组，市值统一折算为 CNY，今日涨跌按最新两条证券价格估算。</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <label className="relative min-w-0 sm:w-56">
@@ -104,20 +120,17 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
           <div />
         </div>
 
-        {visibleHoldings.length ? (
+        {visibleGroups.length ? (
           <div className="divide-y divide-line">
-            {visibleHoldings.map((holding) => {
-              const expanded = openHolding === holding.commodity;
-              return (
-                <HoldingRow
-                  key={`${selectedAccount}:${holding.commodity}`}
-                  holding={holding}
-                  portfolioValueCny={totalMarketValueCny}
-                  expanded={expanded}
-                  onToggle={() => setOpenHolding((current) => current === holding.commodity ? null : holding.commodity)}
-                />
-              );
-            })}
+            {visibleGroups.map((group) => (
+              <InstitutionHoldingsGroup
+                key={group.key}
+                group={group}
+                portfolioValueCny={totalMarketValueCny}
+                openHolding={activeOpenHolding}
+                onToggleHolding={(rowKey) => setOpenHolding((current) => (current ?? defaultOpenHolding) === rowKey ? null : rowKey)}
+              />
+            ))}
           </div>
         ) : <EmptyState text={query ? "没有匹配的持仓" : "暂无证券商品"} />}
       </section>
@@ -125,19 +138,19 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
   );
 }
 
-function AccountTabs({ options, selected, onChange }: { options: AccountOption[]; selected: string; onChange: (account: string) => void }) {
+function InstitutionTabs({ options, selected, onChange }: { options: InstitutionOption[]; selected: string; onChange: (account: string) => void }) {
   if (options.length <= 1) return null;
   return (
-    <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="证券账户">
-      <AccountTab label="全部账户" detail={`${options.length}`} active={selected === "all"} onClick={() => onChange("all")} />
+    <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="持仓机构">
+      <InstitutionTab label="全部机构" detail={`${options.length}`} active={selected === "all"} onClick={() => onChange("all")} />
       {options.map((option) => (
-        <AccountTab key={option.account} label={option.label} active={selected === option.account} onClick={() => onChange(option.account)} />
+        <InstitutionTab key={option.key} label={option.label} detail={`${option.holdingCount} 只`} active={selected === option.key} onClick={() => onChange(option.key)} />
       ))}
     </nav>
   );
 }
 
-function AccountTab({ label, detail, active, onClick }: { label: string; detail?: string; active: boolean; onClick: () => void }) {
+function InstitutionTab({ label, detail, active, onClick }: { label: string; detail?: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -151,7 +164,7 @@ function AccountTab({ label, detail, active, onClick }: { label: string; detail?
   );
 }
 
-function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profitSummary, dailySummary, costCoverage, profitCoverage, holdingCount, accountCount, series }: { totalMarketValueCny: number; latestDate: string; costSummary: MoneyValue | null; profitSummary: MoneyValue | null; dailySummary: MoneyValue | null; costCoverage: number; profitCoverage: number; holdingCount: number; accountCount: number; series: PortfolioPoint[] }) {
+function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profitSummary, dailySummary, costCoverage, profitCoverage, holdingCount, institutionCount, series }: { totalMarketValueCny: number; latestDate: string; costSummary: MoneyValue | null; profitSummary: MoneyValue | null; dailySummary: MoneyValue | null; costCoverage: number; profitCoverage: number; holdingCount: number; institutionCount: number; series: PortfolioPoint[] }) {
   const profitRatio = ratioFromMoney(profitSummary, costSummary);
   const dailyRatio = totalMarketValueCny > 0 && dailySummary?.currency === "CNY" ? dailySummary.value / (totalMarketValueCny / 100 - dailySummary.value) : null;
   return (
@@ -167,7 +180,7 @@ function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profi
             <OverviewMetric label="今日收益" value={formatProfit(dailySummary)} detail={dailySummary ? `${formatRatio(dailyRatio)} · 按最新两条价格估算` : "价格历史不足"} tone={profitTone(dailySummary)} />
             <OverviewMetric label="累计盈亏" value={formatProfit(profitSummary)} detail={holdingCount ? `${profitCoverage}/${holdingCount} 只可计算 · ${formatRatio(profitRatio)}` : "暂无持仓"} tone={profitTone(profitSummary)} />
             <OverviewMetric label="持仓成本" value={formatMoneyValue(costSummary)} detail={holdingCount ? `${costCoverage}/${holdingCount} 只有成本数据` : "暂无持仓"} tone="text-warm" />
-            <OverviewMetric label="持仓范围" value={`${holdingCount} 只`} detail={`${accountCount} 个证券账户`} tone="text-olive" />
+            <OverviewMetric label="持仓范围" value={`${holdingCount} 只`} detail={`${institutionCount} 个机构账户`} tone="text-olive" />
           </div>
         </div>
         <div className="min-w-0 border-t border-line bg-paper/55 px-4 py-4 sm:px-6 lg:border-l lg:border-t-0">
@@ -222,21 +235,21 @@ function PortfolioChart({ rows }: { rows: PortfolioPoint[] }) {
   );
 }
 
-function AllocationBar({ holdings, totalMarketValueCny }: { holdings: InvestmentHolding[]; totalMarketValueCny: number }) {
-  const rows = holdings
-    .filter((holding) => (holding.totalMarketValueCny ?? 0) > 0)
-    .sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0));
-  if (!rows.length || totalMarketValueCny <= 0) return null;
-  const visibleRows = rows.slice(0, 4);
-  const visibleValue = visibleRows.reduce((total, holding) => total + (holding.totalMarketValueCny ?? 0), 0);
-  const allocationRows = visibleRows.map((holding, index) => ({ label: holding.commodity, value: holding.totalMarketValueCny ?? 0, color: allocationColors[index] }));
+function AllocationBar({ rows, totalMarketValueCny, mode }: { rows: { label: string; value: number }[]; totalMarketValueCny: number; mode: "institution" | "security" }) {
+  const sortedRows = rows
+    .filter((row) => row.value > 0)
+    .sort((left, right) => right.value - left.value);
+  if (!sortedRows.length || totalMarketValueCny <= 0) return null;
+  const visibleRows = sortedRows.slice(0, 4);
+  const visibleValue = visibleRows.reduce((total, row) => total + row.value, 0);
+  const allocationRows = visibleRows.map((row, index) => ({ ...row, color: allocationColors[index] }));
   if (visibleValue < totalMarketValueCny) allocationRows.push({ label: "其他", value: totalMarketValueCny - visibleValue, color: allocationColors[4] });
   return (
     <section className="rounded-[14px] border border-line bg-panel px-4 py-4 sm:px-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
         <div className="shrink-0">
           <div className="text-sm font-medium text-ink">仓位分布</div>
-          <div className="mt-0.5 text-xs text-stone">按折算市值</div>
+          <div className="mt-0.5 text-xs text-stone">{mode === "institution" ? "按机构账户" : "按股票"} · 按折算市值</div>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex h-2.5 overflow-hidden rounded-full bg-paper">
@@ -252,6 +265,43 @@ function AllocationBar({ holdings, totalMarketValueCny }: { holdings: Investment
             ))}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function InstitutionHoldingsGroup({ group, portfolioValueCny, openHolding, onToggleHolding }: { group: InstitutionGroup; portfolioValueCny: number; openHolding: string | null; onToggleHolding: (rowKey: string) => void }) {
+  const profitSummary = summarizeHoldingProfit(group.holdings);
+  return (
+    <section>
+      <div className="flex flex-col gap-2 border-b border-line bg-paper/70 px-4 py-3 sm:px-5 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-sm font-semibold text-ink">{group.label}</h3>
+            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{group.holdingCount} 只股票</span>
+            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{group.positionCount} 个账户</span>
+          </div>
+          <div className="mt-1 truncate text-xs text-stone">{group.key}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-right sm:flex sm:items-end sm:gap-6">
+          <StackedMetric primary={formatCnyValue(group.totalMarketValueCny)} secondary="机构市值" tone="text-warm" />
+          <StackedMetric primary={formatProfit(profitSummary)} secondary="未实现盈亏" tone={profitTone(profitSummary)} />
+        </div>
+      </div>
+      <div className="divide-y divide-line">
+        {group.holdings.map((holding) => {
+          const rowKey = `${group.key}:${holding.commodity}`;
+          const expanded = openHolding === rowKey;
+          return (
+            <HoldingRow
+              key={rowKey}
+              holding={holding}
+              portfolioValueCny={portfolioValueCny}
+              expanded={expanded}
+              onToggle={() => onToggleHolding(rowKey)}
+            />
+          );
+        })}
       </div>
     </section>
   );
@@ -510,7 +560,25 @@ function EmptyInline({ text }: { text: string }) {
 
 function investmentHoldings(investments: InvestmentSummary | null): InvestmentHolding[] {
   if (!investments) return [];
-  if (investments.holdings?.length) return investments.holdings.filter(isVisibleHolding);
+  if (investments.holdings?.length) {
+    const positionsByCommodity = new Map<string, InvestmentPosition[]>();
+    for (const position of investments.positions ?? []) {
+      positionsByCommodity.set(position.commodity, [...(positionsByCommodity.get(position.commodity) ?? []), position]);
+    }
+    return investments.holdings
+      .map((holding) => {
+        if (holding.positions?.length) return holding;
+        const positions = positionsByCommodity.get(holding.commodity) ?? [];
+        if (!positions.length) return holding;
+        return {
+          ...holding,
+          accountCount: positions.length,
+          positions,
+          lots: holding.lots?.length ? holding.lots : positions.flatMap((position) => position.lots ?? []),
+        };
+      })
+      .filter(isVisibleHolding);
+  }
   return legacyHoldings(investments.positions ?? [], investments.quotes ?? []);
 }
 
@@ -546,8 +614,7 @@ function legacyHoldings(positions: InvestmentPosition[], quotes: InvestmentQuote
   }).filter(isVisibleHolding).sort((left, right) => (right.totalMarketValueCny ?? 0) - (left.totalMarketValueCny ?? 0) || left.commodity.localeCompare(right.commodity));
 }
 
-function holdingForAccount(holding: InvestmentHolding, account: string): InvestmentHolding | null {
-  const positions = (holding.positions ?? []).filter((position) => position.account === account);
+function holdingForPositions(holding: InvestmentHolding, positions: InvestmentPosition[]): InvestmentHolding | null {
   if (!positions.length) return null;
   const totalQuantity = positions.reduce((total, position) => total + position.quantity, 0);
   const totalCostValue = sumSameCurrency(positions, "costValue", "costCurrency");
@@ -561,22 +628,71 @@ function holdingForAccount(holding: InvestmentHolding, account: string): Investm
     totalMarketValue: sumSameCurrency(positions, "marketValue", "marketCurrency"),
     marketCurrency: sameString(positions.map((position) => position.marketCurrency)),
     totalMarketValueCny: sumOptionalNumbers(positions.map((position) => position.marketValueCny)),
-    accountCount: positions.length,
+    accountCount: new Set(positions.map((position) => position.account)).size,
     positions,
     lots: positions.flatMap((position) => position.lots ?? []),
   };
 }
 
-function investmentAccounts(positions: InvestmentPosition[]): AccountOption[] {
-  const accounts = new Map<string, string>();
-  for (const position of positions) accounts.set(position.account, position.accountLabel || position.account.split(":").at(-2) || position.account);
-  return [...accounts.entries()].map(([account, label]) => ({ account, label })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+function investmentInstitutionGroups(holdings: InvestmentHolding[]): InstitutionGroup[] {
+  const groups = new Map<string, { label: string; holdings: InvestmentHolding[] }>();
+  for (const holding of holdings) {
+    const positions = holding.positions ?? [];
+    if (!positions.length) {
+      const key = "unassigned";
+      const group = groups.get(key) ?? { label: "未分组账户", holdings: [] };
+      group.holdings.push(holding);
+      groups.set(key, group);
+      continue;
+    }
+    const positionsByInstitution = new Map<string, InvestmentPosition[]>();
+    for (const position of positions) {
+      const key = institutionKey(position.account);
+      positionsByInstitution.set(key, [...(positionsByInstitution.get(key) ?? []), position]);
+    }
+    for (const [key, rows] of positionsByInstitution) {
+      const scoped = holdingForPositions(holding, rows);
+      if (!scoped) continue;
+      const group = groups.get(key) ?? { label: institutionLabel(rows[0]?.account ?? key), holdings: [] };
+      group.holdings.push(scoped);
+      groups.set(key, group);
+    }
+  }
+  return [...groups.entries()].map(([key, group]) => {
+    const visibleHoldings = sortHoldings(group.holdings.filter(isVisibleHolding), "market");
+    return {
+      key,
+      label: group.label,
+      holdings: visibleHoldings,
+      holdingCount: visibleHoldings.length,
+      positionCount: new Set(visibleHoldings.flatMap((holding) => (holding.positions ?? []).map((position) => position.account))).size,
+      totalMarketValueCny: sumCnyValues(visibleHoldings, "totalMarketValueCny"),
+    };
+  }).filter((group) => group.holdings.length > 0).sort((left, right) => right.totalMarketValueCny - left.totalMarketValueCny || left.label.localeCompare(right.label, "zh-CN"));
+}
+
+function institutionKey(account: string) {
+  const parts = account.split(":").filter(Boolean);
+  if (parts[0] === "Assets") {
+    if (parts.length >= 3 && regionAccountSegments.has(parts[1] ?? "")) return parts.slice(0, 3).join(":");
+    if (parts.length >= 2) return parts.slice(0, 2).join(":");
+  }
+  return parts.slice(0, Math.min(parts.length, 3)).join(":") || account;
+}
+
+function institutionLabel(account: string) {
+  const parts = institutionKey(account).split(":");
+  const segment = parts.at(-1) || account;
+  return commonInstitutionLabels[segment] ?? segment.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
 function filterHoldings(holdings: InvestmentHolding[], query: string) {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return holdings;
-  return holdings.filter((holding) => `${holding.commodity} ${holding.commodityName}`.toLocaleLowerCase().includes(normalized));
+  return holdings.filter((holding) => {
+    const accountText = (holding.positions ?? []).map((position) => `${position.accountLabel} ${position.account}`).join(" ");
+    return `${holding.commodity} ${holding.commodityName} ${accountText}`.toLocaleLowerCase().includes(normalized);
+  });
 }
 
 function sortHoldings(holdings: InvestmentHolding[], sortKey: SortKey) {
