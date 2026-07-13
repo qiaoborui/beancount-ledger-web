@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  apiEndpointSettingsChangeEvent,
+  applyApiEndpointProbe,
+  createApiEndpointId,
+  displayApiEndpointUrl,
+  isSameOriginApiEndpoint,
+  normalizeApiEndpointUrl,
+  probeApiEndpoint,
+  readApiEndpointSettings,
+  withActiveApiEndpoint,
+  writeApiEndpointSettings,
+  type ApiEndpointSettings,
+} from "@/lib/apiEndpoints";
 import type { QuickUnlockMode } from "./quickUnlock";
 
 export function AppSkeleton() {
@@ -8,11 +21,106 @@ export function AppSkeleton() {
 }
 
 export function LoginScreen({ password, setPassword, passkeyRegistered, toastText, onLogin, onPasskeyLogin }: { password: string; setPassword: (value: string) => void; passkeyRegistered: boolean; toastText?: string; onLogin: () => void; onPasskeyLogin: () => void }) {
+  const [endpointSettings, setEndpointSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
+  const [showEndpointSettings, setShowEndpointSettings] = useState(false);
+  const [draftEndpointUrl, setDraftEndpointUrl] = useState("");
+  const [endpointMessage, setEndpointMessage] = useState("");
+  const enabledEndpoints = endpointSettings.endpoints.filter((endpoint) => endpoint.enabled);
+  const activeEndpoint = enabledEndpoints.find((endpoint) => endpoint.id === endpointSettings.activeId) ?? enabledEndpoints[0];
+
+  useEffect(() => {
+    const refresh = () => setEndpointSettings(readApiEndpointSettings());
+    window.addEventListener(apiEndpointSettingsChangeEvent, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(apiEndpointSettingsChangeEvent, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+
+  async function selectEndpoint(activeId: string) {
+    const endpoint = endpointSettings.endpoints.find((item) => item.id === activeId && item.enabled);
+    if (!endpoint || endpoint.id === endpointSettings.activeId) return;
+    setEndpointMessage("正在验证所选后端…");
+    try {
+      const result = await probeApiEndpoint(endpoint);
+      const verified = applyApiEndpointProbe(endpointSettings, endpoint.id, result);
+      const next = withActiveApiEndpoint(verified, endpoint.id);
+      if (next.activeId !== endpoint.id) throw new Error("所选后端与当前账本不兼容");
+      setEndpointMessage("已切换后端，请重新登录。");
+      setEndpointSettings(next);
+      writeApiEndpointSettings(next);
+    } catch (error) {
+      setEndpointMessage(error instanceof Error ? error.message : "切换后端失败");
+    }
+  }
+
+  async function addEndpoint() {
+    try {
+      const url = normalizeApiEndpointUrl(draftEndpointUrl);
+      const existing = endpointSettings.endpoints.find((endpoint) => endpoint.url === url);
+      if (existing) {
+        setDraftEndpointUrl("");
+        const enabledSettings: ApiEndpointSettings = {
+          ...endpointSettings,
+          endpoints: endpointSettings.endpoints.map((endpoint) => endpoint.id === existing.id ? { ...endpoint, enabled: true } : endpoint),
+        };
+        const result = await probeApiEndpoint({ ...existing, enabled: true });
+        const verified = applyApiEndpointProbe(enabledSettings, existing.id, result);
+        const next = withActiveApiEndpoint(verified, existing.id);
+        if (next.activeId !== existing.id) throw new Error("这个后端与当前账本不兼容");
+        setEndpointMessage("这个后端已存在，已验证并切换。");
+        setEndpointSettings(next);
+        writeApiEndpointSettings(next);
+        return;
+      }
+      const id = createApiEndpointId();
+      const endpoint = { id, url, enabled: true };
+      let next: ApiEndpointSettings = {
+        ...endpointSettings,
+        activeId: id,
+        endpoints: [...endpointSettings.endpoints, endpoint],
+      };
+      setEndpointMessage("正在验证新后端…");
+      const result = await probeApiEndpoint(endpoint);
+      next = applyApiEndpointProbe(next, endpoint.id, result);
+      setDraftEndpointUrl("");
+      setEndpointMessage("已添加，正在连接新后端…");
+      setEndpointSettings(next);
+      writeApiEndpointSettings(next);
+    } catch (error) {
+      setEndpointMessage(error instanceof Error ? error.message : "添加后端失败");
+    }
+  }
+
   return <div className="grid min-h-dvh place-items-center bg-paper px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
-    <div className="card w-full max-w-sm p-7">
+    <div className="card w-full max-w-md p-7">
       <div className="mb-7 h-1 w-12 rounded-full bg-brand" />
       <h1 className="font-serif text-3xl font-medium">我的账本</h1>
       <p className="mt-2 text-sm leading-6 text-olive">私人财务札记。输入密码后再读取本地账本数据。</p>
+      <div className="mt-5 rounded-2xl border border-line bg-panel p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs text-stone">当前后端</div>
+            <div className="mt-1 break-all text-sm font-medium text-ink">{activeEndpoint ? displayApiEndpointUrl(activeEndpoint) : "没有可用后端"}</div>
+          </div>
+          <button type="button" className="shrink-0 text-sm font-medium text-brand" onClick={() => setShowEndpointSettings((value) => !value)} aria-expanded={showEndpointSettings}>{showEndpointSettings ? "收起" : "切换后端"}</button>
+        </div>
+        {showEndpointSettings && <div className="mt-3 space-y-3 border-t border-line pt-3">
+          <label className="block">
+            <span className="mb-1.5 block text-xs text-stone">使用后端</span>
+            <select className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm text-ink" value={activeEndpoint?.id ?? ""} onChange={(event) => void selectEndpoint(event.target.value)}>
+              {enabledEndpoints.map((endpoint) => <option key={endpoint.id} value={endpoint.id}>{isSameOriginApiEndpoint(endpoint) ? `当前站点 · ${displayApiEndpointUrl(endpoint)}` : endpoint.url}</option>)}
+            </select>
+          </label>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Input value={draftEndpointUrl} onChange={(event) => setDraftEndpointUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void addEndpoint()} placeholder="https://api.example.com" className="h-11 rounded-xl bg-paper" />
+            <Button type="button" variant="outline" className="h-11 rounded-xl bg-paper" onClick={() => void addEndpoint()}>添加并切换</Button>
+          </div>
+          <p className="text-xs leading-5 text-stone">自定义后端必须使用 HTTPS，并允许当前站点跨域访问。多个后端应连接同一个账本。</p>
+          {endpointMessage && <p className="text-xs text-stone">{endpointMessage}</p>}
+        </div>}
+      </div>
       <Input type="password" className="mt-6 h-12 rounded-xl bg-panel" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
       <Button className="mt-4 h-12 w-full rounded-xl" onClick={onLogin}>密码登录</Button>
       {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" onClick={onPasskeyLogin}>使用 Face ID / Passkey 登录</Button>}

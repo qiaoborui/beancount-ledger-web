@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, FileCode2, FolderOpen, RotateCcw, Save, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/apiEndpoints";
 
 type LedgerEditorFile = {
   path: string;
@@ -424,7 +425,7 @@ function buildLineDiff(before: string, after: string): DiffLine[] {
 }
 
 async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const response = await apiFetch(input, init);
   const text = await response.text();
   const data = text ? JSON.parse(text) as T & { error?: string } : null;
   if (!response.ok) {

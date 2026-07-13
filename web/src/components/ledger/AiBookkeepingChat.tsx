@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { readAiEventStream, type AiToolEvent } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
 import { LedgerAiConfirmationCard } from "./LedgerAiConfirmationCard";
@@ -110,7 +111,7 @@ export function AiBookkeepingChat({ load, showToast, openSignal = 0 }: { load: (
     setTools(bookkeepingDraftTools);
     setStreamingStatus("读取当前记账草稿");
     try {
-      const res = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) });
+      const res = await apiFetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftEntries: previews, stream: true }) }, { kind: "write" });
       const data = await readAiEventStream<{ entries?: ParsedTransaction[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, {
         onMessage: (message) => updateMessage(assistantId, message),
         onStatus: setStreamingStatus,
@@ -159,7 +160,7 @@ export function AiBookkeepingChat({ load, showToast, openSignal = 0 }: { load: (
     setTools((current) => upsertLedgerAiTool(current, { ...writeLedgerTool, status: "running", input: { entries: previews.length } }));
     try {
       const entriesToWrite = previews;
-      const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: entriesToWrite }) });
+      const res = await apiFetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: entriesToWrite }) }, { kind: "write" });
       const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || "写入失败");
       const count = typeof data.count === "number" ? data.count : entriesToWrite.length;

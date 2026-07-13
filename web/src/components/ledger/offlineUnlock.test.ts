@@ -15,6 +15,16 @@ function memoryStorage() {
   } satisfies Storage;
 }
 
+function installLedgerSettings(storage: Storage, clusterId: string) {
+  storage.setItem("ledger_api_endpoints:v2", JSON.stringify({
+    activeId: "same-origin",
+    autoSelect: false,
+    clusterId,
+    apiVersion: 1,
+    endpoints: [{ id: "same-origin", url: "", enabled: true, clusterId, apiVersion: 1 }],
+  }));
+}
+
 describe("offline ledger unlock", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -28,5 +38,18 @@ describe("offline ledger unlock", () => {
     expect(hasOfflineLedgerUnlock()).toBe(true);
     await expect(verifyOfflineLedgerUnlock("123456")).resolves.toBeUndefined();
     await expect(verifyOfflineLedgerUnlock("000000")).rejects.toThrow();
+  });
+
+  it("keeps offline unlock configuration isolated by ledger", async () => {
+    const storage = memoryStorage();
+    installLedgerSettings(storage, "ledger-one");
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("window", { localStorage: storage, location: { origin: "https://app.example.com" } } as unknown as Window & typeof globalThis);
+
+    await enableOfflineLedgerUnlock("123456");
+    expect(hasOfflineLedgerUnlock()).toBe(true);
+
+    installLedgerSettings(storage, "ledger-two");
+    expect(hasOfflineLedgerUnlock()).toBe(false);
   });
 });

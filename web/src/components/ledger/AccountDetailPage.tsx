@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ClientNavLink } from "./ClientNavLink";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -150,7 +151,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
 
   useEffect(() => {
     const encoded = encodeURIComponent(account);
-    fetch(`/api/ledger/accounts/detail?account=${encoded}`)
+    apiFetch(`/api/ledger/accounts/detail?account=${encoded}`, undefined, { kind: "read" })
       .then(async (res) => {
         if (res.status === 423) onSensitiveLocked?.();
         return readJson<AccountDetail & { error?: string }>(res);

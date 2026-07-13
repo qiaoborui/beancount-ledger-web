@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	AppRoot                 string
+	LedgerClusterID         string
 	LedgerRoot              string
 	RuntimeDir              string
 	StaticDir               string
@@ -41,6 +42,7 @@ func LoadConfig() Config {
 
 	return Config{
 		AppRoot:                 "",
+		LedgerClusterID:         strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		LedgerRoot:              filepath.Clean(ledgerRoot),
 		RuntimeDir:              filepath.Clean(runtimeDir),
 		StaticDir:               filepath.Clean(env("STATIC_DIR", "")),
@@ -83,6 +85,7 @@ func LoadIndexerConfig() Config {
 func loadBaseConfig() Config {
 	return Config{
 		AppRoot:                 "",
+		LedgerClusterID:         strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		StaticDir:               filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:             envBool("SERVE_STATIC", false),
 		Port:                    env("PORT", "3000"),

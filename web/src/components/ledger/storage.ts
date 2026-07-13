@@ -2,6 +2,7 @@ import { readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
 import type { LedgerCache, LedgerNavHref, PrivacySettings, ThemeMode } from "./types";
 import type { TimeRange } from "@/lib/timeRange";
 import { timeRangeCacheKey } from "@/lib/timeRange";
+import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointStorageKeyForLedgerScope } from "@/lib/apiEndpoints";
 
 export const defaultPrivacySettings: PrivacySettings = {
   showHomeSummaryAmounts: true,
@@ -17,6 +18,26 @@ const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/dashboard", "/transactions", 
 const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
 const mobileTabsKey = "ledger_mobile_tabs";
+const legacyCacheScopeKey = "ledger_cache_legacy_scope:v1";
+
+function legacyCacheBelongsToScope(ledgerScope: string) {
+  if (typeof window === "undefined") return false;
+  try {
+    const claimed = localStorage.getItem(legacyCacheScopeKey);
+    if (claimed) {
+      if (claimed === ledgerScope) return true;
+      if (claimed === apiEndpointPreviousLedgerScope() && ledgerScope.startsWith("cluster:")) {
+        localStorage.setItem(legacyCacheScopeKey, ledgerScope);
+        return localStorage.getItem(legacyCacheScopeKey) === ledgerScope;
+      }
+      return false;
+    }
+    localStorage.setItem(legacyCacheScopeKey, ledgerScope);
+    return localStorage.getItem(legacyCacheScopeKey) === ledgerScope;
+  } catch {
+    return false;
+  }
+}
 
 function readLocalLedgerCache(key: string): LedgerCache | null {
   if (typeof window === "undefined") return null;
@@ -29,12 +50,52 @@ function readLocalLedgerCache(key: string): LedgerCache | null {
 }
 
 export function readLedgerCache(timeRange: TimeRange, valuationCurrency = "CNY"): LedgerCache | null {
-  return readLocalLedgerCache(timeRangeCacheKey(timeRange, valuationCurrency));
+  const legacyKey = timeRangeCacheKey(timeRange, valuationCurrency);
+  const ledgerScope = apiEndpointLedgerScope();
+  const key = apiEndpointStorageKeyForLedgerScope(legacyKey, ledgerScope);
+  const scoped = readLocalLedgerCache(key);
+  if (scoped) return scoped;
+  const previousScope = apiEndpointPreviousLedgerScope();
+  const previous = previousScope ? readLocalLedgerCache(apiEndpointStorageKeyForLedgerScope(legacyKey, previousScope)) : null;
+  if (previous) {
+    try {
+      localStorage.setItem(key, JSON.stringify(previous));
+    } catch {
+      // Keep reading the previous same-origin scope until migration succeeds.
+    }
+    return previous;
+  }
+  if (!legacyCacheBelongsToScope(ledgerScope)) return null;
+  const legacy = readLocalLedgerCache(legacyKey);
+  if (legacy) {
+    try {
+      localStorage.setItem(key, JSON.stringify(legacy));
+    } catch {
+      // Keep reading the claimed legacy cache until scoped storage is writable.
+    }
+  }
+  return legacy;
 }
 
 export async function readLedgerCacheAsync(timeRange: TimeRange, valuationCurrency = "CNY"): Promise<LedgerCache | null> {
-  const key = timeRangeCacheKey(timeRange, valuationCurrency);
-  return await readIndexedCache<LedgerCache>(key) ?? readLocalLedgerCache(key);
+  const legacyKey = timeRangeCacheKey(timeRange, valuationCurrency);
+  const ledgerScope = apiEndpointLedgerScope();
+  const key = apiEndpointStorageKeyForLedgerScope(legacyKey, ledgerScope);
+  const scoped = await readIndexedCache<LedgerCache>(key) ?? readLocalLedgerCache(key);
+  if (scoped) return scoped;
+  const previousScope = apiEndpointPreviousLedgerScope();
+  if (previousScope) {
+    const previousKey = apiEndpointStorageKeyForLedgerScope(legacyKey, previousScope);
+    const previous = await readIndexedCache<LedgerCache>(previousKey) ?? readLocalLedgerCache(previousKey);
+    if (previous) {
+      void writeIndexedCache(key, previous);
+      return previous;
+    }
+  }
+  if (!legacyCacheBelongsToScope(ledgerScope)) return null;
+  const legacy = await readIndexedCache<LedgerCache>(legacyKey) ?? readLocalLedgerCache(legacyKey);
+  if (legacy) void writeIndexedCache(key, legacy);
+  return legacy;
 }
 
 function runWhenIdle(task: () => void) {
@@ -47,9 +108,9 @@ function runWhenIdle(task: () => void) {
   window.setTimeout(task, 0);
 }
 
-export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache, valuationCurrency = "CNY") {
+export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache, valuationCurrency = "CNY", ledgerScope = apiEndpointLedgerScope()) {
   if (typeof window === "undefined") return;
-  const key = timeRangeCacheKey(timeRange, valuationCurrency);
+  const key = apiEndpointStorageKeyForLedgerScope(timeRangeCacheKey(timeRange, valuationCurrency), ledgerScope);
   void writeIndexedCache(key, cache);
   runWhenIdle(() => {
     try {

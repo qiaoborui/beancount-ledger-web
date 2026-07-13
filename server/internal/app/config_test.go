@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,34 @@ func TestLoadConfigFilesystemRespectsLedgerRoot(t *testing.T) {
 
 	if cfg.LedgerRoot != filepath.Clean(ledgerRoot) {
 		t.Fatalf("LedgerRoot=%q, want %q", cfg.LedgerRoot, filepath.Clean(ledgerRoot))
+	}
+}
+
+func TestLoadConfigReadsLedgerClusterID(t *testing.T) {
+	t.Setenv("LEDGER_CLUSTER_ID", "personal-ledger")
+
+	cfg := LoadConfig()
+
+	if cfg.LedgerClusterID != "personal-ledger" {
+		t.Fatalf("LedgerClusterID=%q, want personal-ledger", cfg.LedgerClusterID)
+	}
+}
+
+func TestLedgerClusterIDFallsBackToGitHubRepository(t *testing.T) {
+	cfg := Config{LedgerGitHubOwner: "Example", LedgerGitHubRepo: "Ledger", LedgerGitBranch: "preview"}
+
+	if got := ledgerClusterID(cfg); got != "github:example/ledger@preview" {
+		t.Fatalf("ledgerClusterID=%q", got)
+	}
+}
+
+func TestLedgerClusterIDFallsBackToFilesystemLedgerRoot(t *testing.T) {
+	ledgerRoot := t.TempDir()
+	first := ledgerClusterID(Config{LedgerRoot: ledgerRoot})
+	second := ledgerClusterID(Config{LedgerRoot: filepath.Clean(ledgerRoot)})
+
+	if !strings.HasPrefix(first, "filesystem:") || first != second {
+		t.Fatalf("ledgerClusterID=%q second=%q", first, second)
 	}
 }
 

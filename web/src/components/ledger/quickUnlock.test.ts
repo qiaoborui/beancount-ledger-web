@@ -15,6 +15,19 @@ function memoryStorage() {
   } satisfies Storage;
 }
 
+function installEndpointSettings(storage: Storage, activeId: string) {
+  storage.setItem("ledger_api_endpoints:v2", JSON.stringify({
+    activeId,
+    autoSelect: false,
+    clusterId: "ledger-one",
+    apiVersion: 1,
+    endpoints: [
+      { id: "primary", url: "https://primary.example.com", enabled: true, clusterId: "ledger-one", apiVersion: 1 },
+      { id: "backup", url: "https://backup.example.com", enabled: true, clusterId: "ledger-one", apiVersion: 1 },
+    ],
+  }));
+}
+
 describe("quick ledger unlock", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -41,5 +54,20 @@ describe("quick ledger unlock", () => {
     expect(getQuickLedgerUnlockMode()).toBe("numeric");
     await expect(unlockWithQuickLedgerSecret("7")).resolves.toBeUndefined();
     await expect(unlockWithQuickLedgerSecret("8")).rejects.toThrow();
+  });
+
+  it("keeps quick unlock device tokens isolated by backend", async () => {
+    const storage = memoryStorage();
+    installEndpointSettings(storage, "primary");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ deviceId: "device-primary", token: "server-token" }), { status: 200 }));
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("window", { localStorage: storage, location: { origin: "https://app.example.com" }, fetch: fetchMock, dispatchEvent: vi.fn() } as unknown as Window & typeof globalThis);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await enableQuickLedgerUnlock("7", "numeric");
+    expect(hasQuickLedgerUnlock()).toBe(true);
+
+    installEndpointSettings(storage, "backup");
+    expect(hasQuickLedgerUnlock()).toBe(false);
   });
 });

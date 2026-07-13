@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -196,15 +199,22 @@ func cacheControl(maxAge int) gin.HandlerFunc {
 }
 
 func (s *Server) health(c *gin.Context) {
+	identity := gin.H{
+		"apiVersion":   1,
+		"clusterId":    ledgerClusterID(s.cfg),
+		"capabilities": []string{"read-fallback", "cookie-auth", "ledger-version"},
+	}
 	if s.indexStoreErr != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		body := gin.H{
 			"ok":               false,
 			"uptimeSeconds":    int(time.Since(startedAt).Seconds()),
 			"ledgerReadModel":  s.cfg.LedgerReadModel,
 			"readModelStrict":  s.cfg.ReadModelStrict,
 			"ledgerIndexError": s.indexStoreErr.Error(),
 			"runtimeBackend":   runtimeBackend(s.cfg),
-		})
+		}
+		mergeHealthIdentity(body, identity)
+		c.JSON(http.StatusServiceUnavailable, body)
 		return
 	}
 	if s.indexStore != nil {
@@ -226,11 +236,14 @@ func (s *Server) health(c *gin.Context) {
 		if err != nil {
 			body["error"] = err.Error()
 		}
+		mergeHealthIdentity(body, identity)
 		c.JSON(status(err == nil && indexed, http.StatusOK, http.StatusServiceUnavailable), body)
 		return
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "error": err.Error()})
+		body := gin.H{"ok": false, "error": err.Error()}
+		mergeHealthIdentity(body, identity)
+		c.JSON(http.StatusServiceUnavailable, body)
 		return
 	}
 	_, ledgerErr := os.Stat(s.cfg.LedgerRoot)
@@ -251,7 +264,38 @@ func (s *Server) health(c *gin.Context) {
 	if runtimeDirRequired {
 		body["runtimeDirExists"] = runtimeDirExists
 	}
+	mergeHealthIdentity(body, identity)
 	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
+}
+
+func ledgerClusterID(cfg Config) string {
+	if configured := strings.TrimSpace(cfg.LedgerClusterID); configured != "" {
+		return configured
+	}
+	owner := strings.TrimSpace(cfg.LedgerGitHubOwner)
+	repo := strings.TrimSpace(cfg.LedgerGitHubRepo)
+	if owner != "" && repo != "" {
+		branch := strings.TrimSpace(cfg.LedgerGitBranch)
+		if branch == "" {
+			branch = "main"
+		}
+		return fmt.Sprintf("github:%s/%s@%s", strings.ToLower(owner), strings.ToLower(repo), branch)
+	}
+	ledgerRoot := strings.TrimSpace(cfg.LedgerRoot)
+	if ledgerRoot == "" || ledgerRoot == "." {
+		return "unconfigured"
+	}
+	if absolute, err := filepath.Abs(ledgerRoot); err == nil {
+		ledgerRoot = absolute
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(ledgerRoot)))
+	return "filesystem:" + hex.EncodeToString(sum[:12])
+}
+
+func mergeHealthIdentity(body, identity gin.H) {
+	for key, value := range identity {
+		body[key] = value
+	}
 }
 
 func (s *Server) indexInfo(c *gin.Context) {

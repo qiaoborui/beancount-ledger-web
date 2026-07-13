@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Ban, Check, Pencil, Plus, Trash2 } from "lucide-react";
 import { readAiEventStream, type AiToolEvent } from "@/lib/aiStream";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import type { AccountOperation } from "./types";
 import { LedgerAiChatShell, type LedgerAiChatMessage } from "./LedgerAiChatShell";
 import { LedgerAiConfirmationCard } from "./LedgerAiConfirmationCard";
@@ -78,7 +79,7 @@ export function AccountAgentChat({ open, onClose, onChanged, showToast }: { open
     setTools(accountDraftTools);
     setStreamingStatus("读取账户草稿和账户表");
     try {
-      const res = await fetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations, stream: true }) });
+      const res = await apiFetch("/api/ai/accounts-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, messages: historyForApi, draftOperations: operations, stream: true }) }, { kind: "write" });
       const data = await readAiEventStream<{ operations?: AccountOperation[]; message?: string; plan?: LedgerAiPlan; sources?: LedgerAiSource[] }>(res, {
         onMessage: (message) => updateMessage(assistantId, message),
         onStatus: setStreamingStatus,
@@ -125,7 +126,7 @@ export function AccountAgentChat({ open, onClose, onChanged, showToast }: { open
     setStatus("writing");
     setTools((current) => upsertLedgerAiTool(current, { ...writeAccountsTool, status: "running", input: { operations: operations.length } }));
     try {
-      const res = await fetch("/api/ledger/accounts/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operations }) });
+      const res = await apiFetch("/api/ledger/accounts/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operations }) }, { kind: "write" });
       const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || "账户写入失败");
       const count = typeof data.count === "number" ? data.count : operations.length;

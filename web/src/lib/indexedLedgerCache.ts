@@ -61,10 +61,21 @@ export async function readIndexedCache<T>(key: string): Promise<T | null> {
   }
 }
 
-export async function writeIndexedCache<T>(key: string, value: T): Promise<void> {
+export async function writeIndexedCache<T>(key: string, value: T): Promise<boolean> {
   try {
     await withStore<IDBValidKey>("readwrite", (store) => store.put({ key, value, updatedAt: Date.now() } satisfies CacheRecord<T>));
+    return true;
   } catch {
     // IndexedDB may be unavailable in private mode or blocked by browser settings.
+    return false;
+  }
+}
+
+export async function deleteIndexedCache(key: string): Promise<boolean> {
+  try {
+    await withStore<undefined>("readwrite", (store) => store.delete(key));
+    return true;
+  } catch {
+    return false;
   }
 }

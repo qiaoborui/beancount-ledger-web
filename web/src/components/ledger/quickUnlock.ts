@@ -1,4 +1,5 @@
 import { fetchJson, readJson } from "@/lib/clientFetch";
+import { apiEndpointAuthScope, apiEndpointAuthStorageKey, apiFetch } from "@/lib/apiEndpoints";
 
 export type QuickUnlockMode = "numeric" | "text";
 
@@ -26,14 +27,21 @@ function browserStorage() {
   return globalThis.localStorage ?? null;
 }
 
-function readConfig(): QuickUnlockConfig | null {
+function scopedConfigKey(endpointId: string) {
+  return apiEndpointAuthStorageKey(configKey, endpointId);
+}
+
+function readConfig(endpointId = apiEndpointAuthScope()): QuickUnlockConfig | null {
   try {
-    const raw = browserStorage()?.getItem(configKey);
+    const storage = browserStorage();
+    const key = scopedConfigKey(endpointId);
+    const scoped = storage?.getItem(key);
+    const raw = scoped ?? storage?.getItem(configKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<QuickUnlockConfig>;
     if (parsed.version !== 1 || !parsed.deviceId || !parsed.mode || !parsed.salt || !parsed.tokenIv || !parsed.tokenCiphertext) return null;
     if (parsed.mode !== "numeric" && parsed.mode !== "text") return null;
-    return {
+    const config = {
       version: 1,
       deviceId: parsed.deviceId,
       mode: parsed.mode,
@@ -42,19 +50,31 @@ function readConfig(): QuickUnlockConfig | null {
       tokenIv: parsed.tokenIv,
       tokenCiphertext: parsed.tokenCiphertext,
       createdAt: parsed.createdAt || Date.now(),
-    };
+    } satisfies QuickUnlockConfig;
+    if (!scoped && storage) {
+      try {
+        const serialized = JSON.stringify(config);
+        storage.setItem(key, serialized);
+        if (storage.getItem(key) === serialized) storage.removeItem(configKey);
+      } catch {
+        // Keep using the legacy config until scoped storage is writable.
+      }
+    }
+    return config;
   } catch {
     return null;
   }
 }
 
-function writeConfig(config: QuickUnlockConfig) {
-  browserStorage()?.setItem(configKey, JSON.stringify(config));
+function writeConfig(config: QuickUnlockConfig, endpointId = apiEndpointAuthScope()) {
+  browserStorage()?.setItem(scopedConfigKey(endpointId), JSON.stringify(config));
 }
 
-export function removeQuickLedgerUnlock() {
+export function removeQuickLedgerUnlock(endpointId = apiEndpointAuthScope()) {
   try {
-    browserStorage()?.removeItem(configKey);
+    const storage = browserStorage();
+    storage?.removeItem(scopedConfigKey(endpointId));
+    if (endpointId === "same-origin") storage?.removeItem(configKey);
   } catch {
     // Storage may be unavailable in private mode.
   }
@@ -146,6 +166,7 @@ function defaultDeviceName(mode: QuickUnlockMode) {
 
 export async function enableQuickLedgerUnlock(secret: string, mode: QuickUnlockMode) {
   if (!quickUnlockSecretIsValid(secret, mode)) throw new Error(mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
+  const endpointId = apiEndpointAuthScope();
   const registered = await fetchJson<QuickUnlockRegisterResponse>("/api/quick-unlock/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -153,32 +174,34 @@ export async function enableQuickLedgerUnlock(secret: string, mode: QuickUnlockM
   });
   const configBase = { version: 1 as const, deviceId: registered.deviceId, mode, salt: bytesToBase64(randomBytes(16)), iterations, createdAt: Date.now() };
   const encrypted = await encryptText(registered.token, secret, configBase);
-  writeConfig({ ...configBase, tokenIv: encrypted.iv, tokenCiphertext: encrypted.ciphertext });
+  writeConfig({ ...configBase, tokenIv: encrypted.iv, tokenCiphertext: encrypted.ciphertext }, endpointId);
 }
 
 export async function unlockWithQuickLedgerSecret(secret: string) {
-  const config = readConfig();
+  const endpointId = apiEndpointAuthScope();
+  const config = readConfig(endpointId);
   if (!config) throw new Error("还没有设置本机快速解锁");
   if (!quickUnlockSecretIsValid(secret, config.mode)) throw new Error(config.mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
   const token = await decryptText(config.tokenCiphertext, config.tokenIv, secret, config);
-  const verify = await fetch("/api/quick-unlock/verify", {
+  const verify = await apiFetch("/api/quick-unlock/verify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ deviceId: config.deviceId, token }),
-  });
+  }, { kind: "auth" });
   const data = await readJson<{ error?: string }>(verify);
   if (!verify.ok) throw new Error(data.error || "快速解锁失败");
 }
 
 export async function revokeQuickLedgerUnlock() {
-  const config = readConfig();
-  removeQuickLedgerUnlock();
+  const endpointId = apiEndpointAuthScope();
+  const config = readConfig(endpointId);
+  removeQuickLedgerUnlock(endpointId);
   if (!config) return;
-  const res = await fetch("/api/quick-unlock/revoke", {
+  const res = await apiFetch("/api/quick-unlock/revoke", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ deviceId: config.deviceId }),
-  });
+  }, { kind: "auth" });
   if (!res.ok) {
     const data = await readJson<{ error?: string }>(res);
     throw new Error(data.error || "撤销快速解锁失败");

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ClientNavLink } from "./ClientNavLink";
 import { Bot, ChevronDown, Eye, EyeOff, GripVertical, ListChecks, Pencil, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -477,7 +478,7 @@ export function AccountManager({ accounts, onAdded, showToast }: { accounts: Acc
   const visibleGroups = groups.map((group) => ({ ...group, rows: accounts.filter((account) => account.group === group.key) })).filter((group) => group.rows.length > 0);
   async function submit() {
     setMessage("写入中...");
-    const res = await fetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: currency.trim().toUpperCase() }) });
+    const res = await apiFetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: currency.trim().toUpperCase() }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) { setMessage(data.error || "新增失败"); return; }
     setMessage("账户已新增");

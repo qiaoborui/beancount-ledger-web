@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { ManualForm } from "../types";
@@ -29,7 +30,7 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
   const [manual, setManual] = useState<ManualForm>(() => emptyManual());
 
   async function appendEntry(entry: ParsedTransaction | BalanceAssertion) {
-    const res = await fetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) {
       showToast("error", data.error || "写入失败");
@@ -47,7 +48,7 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
     setParseStatus("parsing");
     setParseMessage("正在解析，请保持弹窗打开…");
     try {
-      const res = await fetch("/api/ai/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: nl }) });
+      const res = await apiFetch("/api/ai/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: nl }) }, { kind: "write" });
       const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; entry?: ParsedTransaction }>(res);
       if (!res.ok) throw new Error(data.error || "解析失败");
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : data.entry ? [data.entry as ParsedTransaction] : [];
@@ -135,7 +136,7 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
     resetDraft();
     showToast("info", `正在写入 ${entries.length} 条记录`);
     try {
-      const res = await fetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries }) });
+      const res = await apiFetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries }) }, { kind: "write" });
       const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || "写入失败");
       const count = typeof data.count === "number" ? data.count : entries.length;

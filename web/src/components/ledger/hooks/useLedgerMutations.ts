@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { readJson } from "@/lib/clientFetch";
+import { apiFetch } from "@/lib/apiEndpoints";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { Txn } from "../types";
@@ -53,7 +54,7 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
   }
 
   async function reverseTransaction(source: Txn["source"], date: string) {
-    const res = await fetch("/api/ledger/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, date }) });
+    const res = await apiFetch("/api/ledger/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, date }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) return showToast("error", data.error || "冲销失败");
     haptic(8);
@@ -62,7 +63,7 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
   }
 
   async function reconcileAccount(input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) {
-    const res = await fetch("/api/ledger/reconciliation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+    const res = await apiFetch("/api/ledger/reconciliation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, { kind: "write" });
     const data = await readJson<{ error?: string; diff?: number }>(res);
     if (!res.ok) return showToast("error", data.error || "对账写入失败");
     haptic([6, 24, 10]);
