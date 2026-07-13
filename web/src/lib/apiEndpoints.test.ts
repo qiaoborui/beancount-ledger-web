@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   activeApiEndpointRequestUrl,
+  apiEndpointAuthScope,
   apiEndpointScopedStorageKey,
   apiEndpointAuthStorageKey,
   applyApiEndpointProbe,
+  currentApiEndpoint,
   installApiEndpointFetchInterceptor,
   normalizeApiEndpointUrl,
   orderedApiEndpoints,
@@ -179,7 +181,7 @@ describe("api endpoint settings", () => {
     expect(fetchMock.mock.calls[2][0]).toBe("https://backup.example.com/api/ledger/summary");
   });
 
-  it("returns to the active backend after the fallback stickiness window expires", async () => {
+  it("keeps the fallback backend as the full session backend", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("cold start"))
       .mockResolvedValueOnce(new Response("{}", { status: 200 }));
@@ -190,7 +192,12 @@ describe("api endpoint settings", () => {
 
     await window.fetch("/api/ledger/version");
 
-    expect(orderedApiEndpoints(endpointSettings(), "GET", Date.now() + 31000)[0].id).toBe("same-origin");
+    expect(orderedApiEndpoints(endpointSettings(), "GET", Date.now() + 31000)[0].id).toBe("backup");
+    expect(currentApiEndpoint(endpointSettings(), Date.now() + 31000).id).toBe("backup");
+    expect(apiEndpointAuthScope()).toBe("backup");
+    window.localStorage.removeItem(apiEndpointAuthStorageKey("ledger_auth_known", "backup"));
+    expect(currentApiEndpoint(endpointSettings()).id).toBe("backup");
+    expect(activeApiEndpointRequestUrl("/api/ledger/export")).toBe("https://backup.example.com/api/ledger/export");
   });
 
   it("does not automatically fall back for mutating requests", async () => {
@@ -217,7 +224,7 @@ describe("api endpoint settings", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/me");
   });
 
-  it("keeps authentication on the active backend after read fallback becomes sticky", async () => {
+  it("keeps authentication on the session backend after read fallback", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("primary unavailable"))
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
@@ -230,10 +237,10 @@ describe("api endpoint settings", () => {
     await window.fetch("/api/ledger/version");
     await window.fetch("/api/auth/me");
 
-    expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/me");
+    expect(fetchMock.mock.calls[2][0]).toBe("https://backup.example.com/api/auth/me");
   });
 
-  it("returns post-login reads to the active backend after fallback stickiness", async () => {
+  it("keeps post-login reads on the session backend", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError("primary unavailable"))
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
@@ -248,7 +255,25 @@ describe("api endpoint settings", () => {
     await window.fetch("/api/auth/login", { method: "POST", body: "{}" });
     await window.fetch("/api/ledger/summary");
 
-    expect(fetchMock.mock.calls[3][0]).toBe("/api/ledger/summary");
+    expect(fetchMock.mock.calls[2][0]).toBe("https://backup.example.com/api/auth/login");
+    expect(fetchMock.mock.calls[3][0]).toBe("https://backup.example.com/api/ledger/summary");
+  });
+
+  it("routes writes through the session backend without retrying them", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("primary unavailable"))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockRejectedValueOnce(new TypeError("write response lost"));
+    installMockWindow(fetchMock);
+    writeApiEndpointSettings(endpointSettings());
+    rememberBackupAuthentication();
+    installApiEndpointFetchInterceptor();
+
+    await window.fetch("/api/ledger/version");
+    await expect(window.fetch("/api/ledger/append", { method: "POST", body: "{}" })).rejects.toThrow("write response lost");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe("https://backup.example.com/api/ledger/append");
   });
 
   it("does not turn an unauthorized backup response into an active-backend logout", async () => {

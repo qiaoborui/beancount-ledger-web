@@ -52,10 +52,9 @@ const fallbackStatusCodes = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522
 const safeMethodTimeoutMs = 4500;
 const cooldownBaseMs = 15000;
 const cooldownMaxMs = 5 * 60 * 1000;
-const stickyReadDurationMs = 30000;
 let generatedEndpointId = 0;
-let stickyReadEndpointId = "";
-let stickyReadUntil = 0;
+let sessionEndpointId = "";
+let sessionActiveEndpointId = "";
 let volatileSettings: ApiEndpointSettings | null = null;
 let volatileSettingsOnly = false;
 const runtimeStatuses = new Map<string, ApiEndpointRuntimeStatus>();
@@ -158,15 +157,15 @@ export function apiEndpointPreviousLedgerScope(settings = readApiEndpointSetting
   return undefined;
 }
 
-export function apiEndpointAuthScope(settings = readApiEndpointSettings()) {
-  return settings.activeId || sameOriginEndpointId;
+export function apiEndpointAuthScope(settings = readApiEndpointSettings()): string {
+  return currentApiEndpoint(settings).id;
 }
 
-export function apiEndpointAuthStorageKey(key: string, endpointId = apiEndpointAuthScope()) {
+export function apiEndpointAuthStorageKey(key: string, endpointId: string = apiEndpointAuthScope()): string {
   return `${key}:${endpointId}`;
 }
 
-export function hasKnownApiEndpointAuthentication(endpointId: string) {
+export function hasKnownApiEndpointAuthentication(endpointId: string): boolean {
   if (typeof window === "undefined") return false;
   try {
     return window.sessionStorage?.getItem(apiEndpointAuthStorageKey(sessionAuthedKey, endpointId)) === "1"
@@ -191,7 +190,7 @@ export function buildApiEndpointRequestUrl(endpoint: ApiEndpoint, pathWithSearch
 }
 
 export function activeApiEndpointRequestUrl(pathWithSearch: string, settings = readApiEndpointSettings()) {
-  return buildApiEndpointRequestUrl(activeApiEndpoint(settings), pathWithSearch);
+  return buildApiEndpointRequestUrl(currentApiEndpoint(settings), pathWithSearch);
 }
 
 export function orderedApiEndpoints(settings = readApiEndpointSettings(), method = "GET", now = Date.now()) {
@@ -201,23 +200,34 @@ export function orderedApiEndpoints(settings = readApiEndpointSettings(), method
 
   if (!endpointMatchesLedger(settings, active)) return [active];
 
-  const compatible = enabled.filter((endpoint) => endpointMatchesLedger(settings, endpoint) && (endpoint.id === active.id || hasKnownApiEndpointAuthentication(endpoint.id)));
+  const compatible = enabled.filter((endpoint) => endpointMatchesLedger(settings, endpoint) && (
+    endpoint.id === active.id
+    || (sessionActiveEndpointId === active.id && endpoint.id === sessionEndpointId)
+    || hasKnownApiEndpointAuthentication(endpoint.id)
+  ));
   const available = compatible.filter((endpoint) => !endpointCoolingDown(endpoint.id, now));
   const candidates = available.length ? available : compatible;
-  if (stickyReadUntil <= now) {
-    stickyReadEndpointId = "";
-    stickyReadUntil = 0;
-  }
-  const sticky = candidates.find((endpoint) => endpoint.id === stickyReadEndpointId);
-  const rest = candidates.filter((endpoint) => endpoint.id !== sticky?.id && endpoint.id !== active.id);
+  const session = sessionActiveEndpointId === active.id
+    ? candidates.find((endpoint) => endpoint.id === sessionEndpointId && !endpointCoolingDown(endpoint.id, now))
+    : undefined;
+  const rest = candidates.filter((endpoint) => endpoint.id !== session?.id && endpoint.id !== active.id);
   rest.sort(compareEndpointRuntimeStatus);
-  if (sticky) return [sticky, ...(active.id === sticky.id || !candidates.includes(active) ? [] : [active]), ...rest];
+  if (session) return [session, ...(active.id === session.id || !candidates.includes(active) ? [] : [active]), ...rest];
   return [active, ...rest.filter((endpoint) => endpoint.id !== active.id)];
 }
 
 export function activeApiEndpoint(settings = readApiEndpointSettings()) {
   const enabled = settings.endpoints.filter((endpoint) => endpoint.enabled);
   return enabled.find((endpoint) => endpoint.id === settings.activeId) ?? enabled[0] ?? sameOriginApiEndpoint;
+}
+
+export function currentApiEndpoint(settings = readApiEndpointSettings(), now = Date.now()): ApiEndpoint {
+  const active = activeApiEndpoint(settings);
+  if (!sessionEndpointId || sessionActiveEndpointId !== active.id) return active;
+  return settings.endpoints.find((endpoint) => endpoint.id === sessionEndpointId
+    && endpoint.enabled
+    && endpointMatchesLedger(settings, endpoint)
+    && !endpointCoolingDown(endpoint.id, now)) ?? active;
 }
 
 export function withActiveApiEndpoint(settings: ApiEndpointSettings, activeId: string) {
@@ -265,8 +275,7 @@ export function apiEndpointForResponse(response: Response) {
 
 export function resetApiEndpointRuntimeState() {
   runtimeStatuses.clear();
-  stickyReadEndpointId = "";
-  stickyReadUntil = 0;
+  clearSessionEndpoint();
   volatileSettings = null;
   volatileSettingsOnly = false;
 }
@@ -282,7 +291,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
     ? [options.endpoint]
     : kind === "read"
       ? orderedApiEndpoints(settings, target.method)
-      : [activeApiEndpoint(settings)];
+      : [currentApiEndpoint(settings)];
   if (!attempts.length) return originalFetch()(input, init);
 
   const fetcher = originalFetch();
@@ -304,23 +313,19 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
         if (canRetry) continue;
         break;
       }
-      if (canRetry && fallbackStatusCodes.has(response.status)) {
+      if (fallbackStatusCodes.has(response.status)) {
         recordEndpointFailure(endpoint.id, `HTTP ${response.status}`);
         lastResponse = response;
-        continue;
+        if (canRetry) continue;
+        return response;
       }
       recordEndpointSuccess(endpoint.id, latencyMs);
-      if (kind === "auth" && response.ok && endpoint.id === active.id) {
-        stickyReadEndpointId = "";
-        stickyReadUntil = 0;
-      }
       if (kind === "read") {
         if (endpoint.id === active.id) {
-          stickyReadEndpointId = "";
-          stickyReadUntil = 0;
-        } else if (stickyReadEndpointId !== endpoint.id) {
-          stickyReadEndpointId = endpoint.id;
-          stickyReadUntil = Date.now() + stickyReadDurationMs;
+          clearSessionEndpoint();
+        } else if (sessionEndpointId !== endpoint.id || sessionActiveEndpointId !== active.id) {
+          sessionEndpointId = endpoint.id;
+          sessionActiveEndpointId = active.id;
         }
       }
       return response;
@@ -547,9 +552,13 @@ function recordEndpointFailure(id: string, error: string) {
     cooldownUntil: Date.now() + cooldownMs,
     lastError: error,
   });
-  if (stickyReadEndpointId === id) stickyReadEndpointId = "";
-  if (!stickyReadEndpointId) stickyReadUntil = 0;
+  if (sessionEndpointId === id) clearSessionEndpoint();
   dispatchEndpointHealthChange();
+}
+
+function clearSessionEndpoint() {
+  sessionEndpointId = "";
+  sessionActiveEndpointId = "";
 }
 
 function dispatchEndpointHealthChange() {

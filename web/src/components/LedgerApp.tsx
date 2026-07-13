@@ -17,7 +17,7 @@ import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
 import type { TimeRange, TimePreset } from "@/lib/timeRange";
-import { apiEndpointSettingsChangeEvent, apiFetch, applyApiEndpointProbe, probeApiEndpoint, readApiEndpointSettings, writeApiEndpointSettings } from "@/lib/apiEndpoints";
+import { apiEndpointSettingsChangeEvent, apiFetch, readApiEndpointSettings } from "@/lib/apiEndpoints";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
@@ -222,47 +222,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   useEffect(() => {
     fetchLedgerIndexInfo().then(setIndexInfo).catch(() => setIndexInfo(null));
   }, []);
-
-  useEffect(() => {
-    if (!online) return;
-    let cancelled = false;
-    const probeConfiguredEndpoints = async () => {
-      const settings = readApiEndpointSettings();
-      const endpoints = settings.endpoints.filter((endpoint) => endpoint.enabled);
-      if (endpoints.length < 2) return;
-      const results = await Promise.all(endpoints.map((endpoint) => probeApiEndpoint(endpoint)));
-      let next = settings;
-      if (!settings.clusterId) {
-        const activeResult = results.find((result) => result.id === settings.activeId);
-        if (!activeResult?.ok) return;
-        try {
-          next = applyApiEndpointProbe(next, activeResult.id, activeResult);
-        } catch {
-          return;
-        }
-      }
-      for (const result of results) {
-        if (!result.ok) continue;
-        try {
-          next = applyApiEndpointProbe(next, result.id, result);
-        } catch {
-          // Reachable but incompatible endpoints stay excluded from read fallback.
-        }
-      }
-      if (!cancelled && JSON.stringify(next) !== JSON.stringify(settings)) writeApiEndpointSettings(next);
-    };
-    const initial = window.setTimeout(() => {
-      if (!cancelled) void probeConfiguredEndpoints();
-    }, 5000);
-    const interval = window.setInterval(() => {
-      if (!cancelled && document.visibilityState !== "hidden") void probeConfiguredEndpoints();
-    }, 60000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
-    };
-  }, [online]);
 
   const { unlocked, setUnlocked } = useLedgerLock({ passkeyRegistered: hasPasskey, authed });
   useEffect(() => {

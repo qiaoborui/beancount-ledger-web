@@ -209,7 +209,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"read-fallback", "cookie-auth", "ledger-version"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version"},
 	}
 	if s.indexStoreErr != nil {
 		body := gin.H{

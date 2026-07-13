@@ -168,7 +168,7 @@ function ApiEndpointSettingsPanel() {
   const [settings, setSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
   const [draftUrl, setDraftUrl] = useState("");
   const [message, setMessage] = useState("");
-  const [testing, setTesting] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
   const [probeResults, setProbeResults] = useState<Record<string, ApiEndpointProbeResult>>({});
   const [, setHealthRevision] = useState(0);
 
@@ -184,7 +184,7 @@ function ApiEndpointSettingsPanel() {
     if (notice) setMessage(notice);
   }
 
-  async function addEndpoint() {
+  function addEndpoint() {
     try {
       const url = normalizeApiEndpointUrl(draftUrl);
       if (settings.endpoints.some((endpoint) => endpoint.url === url)) {
@@ -192,21 +192,12 @@ function ApiEndpointSettingsPanel() {
         return;
       }
       const endpoint = { id: createApiEndpointId(), url, enabled: true };
-      let next: ApiEndpointSettings = {
+      const next: ApiEndpointSettings = {
         ...settings,
         endpoints: [...settings.endpoints, endpoint],
       };
-      const active = settings.endpoints.find((item) => item.id === settings.activeId);
-      if (active) {
-        const activeResult = await probeApiEndpoint(active);
-        setProbeResults((current) => ({ ...current, [active.id]: activeResult }));
-        next = applyApiEndpointProbe(next, active.id, activeResult);
-      }
-      const result = await probeApiEndpoint(endpoint);
-      setProbeResults((current) => ({ ...current, [endpoint.id]: result }));
-      next = applyApiEndpointProbe(next, endpoint.id, result);
       setDraftUrl("");
-      save(next, "已添加后端。");
+      save(next, "已添加后端；需要时请单独测速或直接切换验证。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "添加失败");
     }
@@ -249,59 +240,27 @@ function ApiEndpointSettingsPanel() {
     save({ ...settings, activeId: nextActiveId, endpoints: nextEndpoints }, "已移除后端。");
   }
 
-  async function testEndpoints() {
-    if (testing) return;
-    setTesting(true);
+  async function testEndpoint(endpoint: ApiEndpoint) {
+    if (testingId || !endpoint.enabled) return;
+    setTestingId(endpoint.id);
     setMessage("");
     try {
-      const enabled = settings.endpoints.filter((endpoint) => endpoint.enabled);
-      const results = await Promise.all(enabled.map((endpoint) => probeApiEndpoint(endpoint)));
-      if (!settings.clusterId && !settings.autoSelect) {
-        const activeResult = results.find((result) => result.id === settings.activeId);
+      const result = await probeApiEndpoint(endpoint);
+      let compatibleResult = result;
+      if (result.ok) {
         try {
-          if (!activeResult) throw new Error("默认后端未启用");
-          applyApiEndpointProbe(settings, activeResult.id, activeResult);
+          const next = applyApiEndpointProbe(settings, endpoint.id, result);
+          save(next, `${endpointLabel(endpoint)} 测速完成：${result.latencyMs}ms。`);
         } catch (error) {
-          const checkedResults = results.map((result) => {
-            if (!result.ok) return result;
-            try {
-              applyApiEndpointProbe({ ...settings, clusterId: undefined, apiVersion: undefined }, result.id, result);
-              return result;
-            } catch (probeError) {
-              return { ...result, ok: false, error: probeError instanceof Error ? probeError.message : "后端不兼容" };
-            }
-          });
-          setProbeResults((current) => ({ ...current, ...Object.fromEntries(checkedResults.map((result) => [result.id, result])) }));
-          setMessage(`默认后端无法建立账本身份：${error instanceof Error ? error.message : "验证失败"}。请直接点击目标后端完成验证和切换。`);
-          return;
+          compatibleResult = { ...result, ok: false, error: error instanceof Error ? error.message : "后端不兼容" };
+          setMessage(compatibleResult.error ?? "后端不兼容");
         }
-      }
-      let nextSettings = settings;
-      const compatibleResults = results.map((result) => {
-        if (!result.ok) return result;
-        try {
-          nextSettings = applyApiEndpointProbe(nextSettings, result.id, result);
-          return result;
-        } catch (error) {
-          return { ...result, ok: false, error: error instanceof Error ? error.message : "后端不兼容" };
-        }
-      });
-      const byId = Object.fromEntries(compatibleResults.map((result) => [result.id, result]));
-      setProbeResults((current) => ({ ...current, ...byId }));
-      if (nextSettings !== settings) {
-        setSettings(nextSettings);
-        writeApiEndpointSettings(nextSettings);
-      }
-      const fastest = compatibleResults.filter((result) => result.ok && result.latencyMs !== undefined).sort((a, b) => (a.latencyMs ?? Infinity) - (b.latencyMs ?? Infinity))[0];
-      if (settings.autoSelect && fastest && fastest.id !== settings.activeId) {
-        save({ ...nextSettings, activeId: fastest.id }, "已自动选择测速最快的兼容后端。");
-      } else if (fastest) {
-        setMessage(`最快可用后端：${endpointLabel(settings.endpoints.find((endpoint) => endpoint.id === fastest.id))}，${fastest.latencyMs}ms。`);
       } else {
-        setMessage("没有测到可用后端，请检查地址和 CORS 配置。");
+        setMessage(result.error ?? "测速失败");
       }
+      setProbeResults((current) => ({ ...current, [endpoint.id]: compatibleResult }));
     } finally {
-      setTesting(false);
+      setTestingId(null);
     }
   }
 
@@ -310,17 +269,7 @@ function ApiEndpointSettingsPanel() {
       <div>
         <div className="text-xs uppercase tracking-[0.24em] text-stone">request endpoints</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">请求地址管理</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">前端默认请求一个后端，已验证且登录过的备用后端可承接账本读取。鉴权和写入只使用默认后端，避免登录状态混淆或重复提交；所有后端应连接同一个账本。</p>
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-3">
-        <div className="inline-flex h-11 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm text-olive">
-          <Switch checked={settings.autoSelect} onCheckedChange={(checked) => save({ ...settings, autoSelect: checked })} />
-          测速后自动选择
-        </div>
-        <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-medium text-paper disabled:opacity-50" disabled={testing} onClick={() => void testEndpoints()}>
-          {testing ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-          测速
-        </button>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">当前会话由一个后端完整承接读取、鉴权和写入。只有安全读请求可在故障时切到已验证且登录过的后端，写请求不会跨后端重试；所有后端应连接同一个账本。</p>
       </div>
     </div>
     <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -344,7 +293,7 @@ function ApiEndpointSettingsPanel() {
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-ink">{sameOrigin ? "当前站点" : endpoint.label || `备用后端 ${index}`}</span>
                   {active && <span className="rounded-full bg-brand px-2 py-0.5 text-xs text-paper">默认</span>}
-                  {!active && endpoint.enabled && <span className={`rounded-full px-2 py-0.5 text-xs ${knownAuthentication ? "bg-brand/10 text-brand" : "bg-tag text-stone"}`}>{knownAuthentication ? "可读取故障转移" : "需切换登录一次"}</span>}
+                  {!active && endpoint.enabled && <span className={`rounded-full px-2 py-0.5 text-xs ${knownAuthentication ? "bg-brand/10 text-brand" : "bg-tag text-stone"}`}>{knownAuthentication ? "可完整接管" : "需切换登录一次"}</span>}
                   {!endpoint.enabled && <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">已停用</span>}
                 </span>
                 <span className="mt-1 block break-all text-sm leading-6 text-olive">{displayApiEndpointUrl(endpoint)}</span>
@@ -352,6 +301,10 @@ function ApiEndpointSettingsPanel() {
             </button>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <EndpointProbeBadge result={result} endpointId={endpoint.id} />
+              <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={!endpoint.enabled || testingId !== null} onClick={() => void testEndpoint(endpoint)}>
+                {testingId === endpoint.id ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                测速
+              </button>
               <IconButton label="上移" disabled={sameOrigin || index <= 1} onClick={() => moveEndpoint(endpoint.id, -1)}><ArrowUp className="h-4 w-4" /></IconButton>
               <IconButton label="下移" disabled={sameOrigin || index === settings.endpoints.length - 1} onClick={() => moveEndpoint(endpoint.id, 1)}><ArrowDown className="h-4 w-4" /></IconButton>
               <button type="button" className="h-9 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={sameOrigin || active} onClick={() => updateEndpoint(endpoint.id, { enabled: !endpoint.enabled })}>{endpoint.enabled ? "停用" : "启用"}</button>
@@ -361,7 +314,7 @@ function ApiEndpointSettingsPanel() {
         </div>;
       })}
     </div>
-    <p className="mt-3 text-xs leading-5 text-stone">自定义后端必须是 HTTPS，并需要在后端允许当前前端 Origin 的 CORS。设置只保存在当前浏览器。</p>
+    <p className="mt-3 text-xs leading-5 text-stone">测速只请求所点的后端，不会批量唤醒其他地址。自定义后端必须是 HTTPS，并需要允许当前前端 Origin 的 CORS；设置只保存在当前浏览器。</p>
     {message && <p className="mt-3 text-sm text-stone">{message}</p>}
   </section>;
 }
