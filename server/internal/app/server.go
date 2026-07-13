@@ -137,9 +137,9 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/passkey/register/verify", s.passkeyRegisterVerify)
 
 	ledger := api.Group("/ledger")
+	ledger.GET("/bootstrap", noStore(), s.ledgerBootstrap)
 
 	ledgerRead30s := ledger.Group("", cacheControl(30))
-	ledgerRead30s.GET("/bootstrap", s.ledgerBootstrap)
 	ledgerRead30s.GET("/summary", s.summary)
 	ledgerRead30s.GET("/transactions", s.transactions)
 	ledgerRead30s.GET("/income-statement", s.incomeStatement)

@@ -45,27 +45,37 @@ function refreshAfterAuth(load: LedgerAuthLoad, showToast: LedgerAuthArgs["showT
 }
 
 export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = { login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null }) {
-  async function login() {
+  async function loginWithPassword(inputPassword: string) {
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
       const endpointId = apiEndpointAuthScope();
       try {
-        const res = await apiFetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }, { kind: "auth" });
-        if (res.ok) {
-          markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
-          refreshAfterAuth(load, showToast);
-        } else {
+        const res = await apiFetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: inputPassword }) }, { kind: "auth" });
+        if (!res.ok) {
           const data = await readJson<{ error?: string }>(res, {});
-          showToast("error", res.status === 401 ? "密码不对" : data.error || `登录失败：${res.status}`);
+          throw new Error(res.status === 401 ? "密码不对" : data.error || `登录失败：${res.status}`);
         }
+        markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
+        refreshAfterAuth(load, showToast);
+        clearToast();
       } catch (error) {
-        showToast("error", error instanceof Error ? error.message : "登录失败");
+        const message = error instanceof Error ? error.message : "登录失败";
+        showToast("error", message);
+        throw error;
       }
     })();
     try {
       await inFlight.login;
     } finally {
       inFlight.login = null;
+    }
+  }
+
+  async function login() {
+    try {
+      await loginWithPassword(password);
+    } catch {
+      // The login screen displays the error through the shared toast.
     }
   }
 
@@ -140,7 +150,7 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
-  return { password, setPassword, login, loginWithPasskey, loginWithQuickUnlock, registerPasskey };
+  return { password, setPassword, login, loginWithPassword, loginWithPasskey, loginWithQuickUnlock, registerPasskey };
 }
 
 export function useLedgerAuth(args: LedgerAuthArgs) {
