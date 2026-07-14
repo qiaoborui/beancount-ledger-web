@@ -567,8 +567,8 @@ func (s *Server) alipaySmallPurseSnapshot(ctx context.Context) (*LedgerSnapshot,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.readService != nil {
-		return s.readService.SnapshotLite(ctx)
+	if s.snapshotPort != nil {
+		return s.snapshotPort.SnapshotLite(ctx)
 	}
 	cache := s.cache
 	if cache == nil {

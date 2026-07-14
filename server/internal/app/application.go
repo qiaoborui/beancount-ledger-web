@@ -25,7 +25,8 @@ type applicationDependencies struct {
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
-	readService      ledgerReadService
+	queryPort        LedgerQueryPort
+	snapshotPort     LedgerSnapshotPort
 	reconcileService *ReconciliationService
 	txService        *TransactionService
 	limiter          RateLimiter
@@ -45,7 +46,8 @@ func NewApplication(cfg Config) (*Application, error) {
 		cache:            dependencies.cache,
 		writer:           dependencies.writer,
 		accountService:   dependencies.accountService,
-		readService:      dependencies.readService,
+		queryPort:        dependencies.queryPort,
+		snapshotPort:     dependencies.snapshotPort,
 		reconcileService: dependencies.reconcileService,
 		txService:        dependencies.txService,
 		limiter:          dependencies.limiter,
@@ -94,7 +96,8 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 
 	dependencies.cache = NewLedgerCache(cfg)
 	readService := NewLedgerReadServiceWithIndex(dependencies.cache, dependencies.indexStore, dependencies.indexStoreErr, cfg.ReadModelStrict)
-	dependencies.readService = readService
+	dependencies.queryPort = readService
+	dependencies.snapshotPort = readService
 	dependencies.writer = NewLedgerWriterWithRuntimeStoreAndCommodities(cfg, dependencies.cache, dependencies.runtimeStore, func() ([]string, error) {
 		snapshot, err := readService.SnapshotLite(context.Background())
 		if err != nil {

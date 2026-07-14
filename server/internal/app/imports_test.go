@@ -702,26 +702,28 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHub
 		{OrderID: "read-model-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},
 	})
 
+	readPorts := fakeLedgerReadPorts{snapshot: &LedgerSnapshot{
+		LedgerVersion: LedgerVersion{Version: "read-model"},
+		Transactions: []Transaction{
+			{Date: "2026-06-28", Postings: []Posting{
+				{Account: "Assets:SmallPurse", Amount: 80000, Currency: "CNY"},
+				{Account: "Assets:CN:MYBank:Yulibao", Amount: -80000, Currency: "CNY"},
+			}},
+			{Date: "2026-06-29", Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 5000, Currency: "CNY"},
+				{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 5000, Currency: "CNY"},
+				{Account: "Assets:SmallPurse", Amount: -10000, Currency: "CNY"},
+			}},
+			{Date: "2026-06-30", Postings: []Posting{
+				{Account: "Assets:SmallPurse", Amount: 50000, Currency: "CNY"},
+				{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -50000, Currency: "CNY"},
+			}},
+		},
+	}}
 	server := &Server{
-		cfg: cfg,
-		readService: fakeLedgerReadService{snapshot: &LedgerSnapshot{
-			LedgerVersion: LedgerVersion{Version: "read-model"},
-			Transactions: []Transaction{
-				{Date: "2026-06-28", Postings: []Posting{
-					{Account: "Assets:SmallPurse", Amount: 80000, Currency: "CNY"},
-					{Account: "Assets:CN:MYBank:Yulibao", Amount: -80000, Currency: "CNY"},
-				}},
-				{Date: "2026-06-29", Postings: []Posting{
-					{Account: "Expenses:Food", Amount: 5000, Currency: "CNY"},
-					{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 5000, Currency: "CNY"},
-					{Account: "Assets:SmallPurse", Amount: -10000, Currency: "CNY"},
-				}},
-				{Date: "2026-06-30", Postings: []Posting{
-					{Account: "Assets:SmallPurse", Amount: 50000, Currency: "CNY"},
-					{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -50000, Currency: "CNY"},
-				}},
-			},
-		}},
+		cfg:          cfg,
+		queryPort:    readPorts,
+		snapshotPort: readPorts,
 	}
 	output := filepath.Join(t.TempDir(), "smallpurse.bean")
 	importer, ok := importProvider("alipay-small-purse")
@@ -1768,42 +1770,42 @@ func requirePostingLine(t *testing.T, beanText, account, amount string) {
 	}
 }
 
-type fakeLedgerReadService struct {
+type fakeLedgerReadPorts struct {
 	snapshot *LedgerSnapshot
 }
 
-func (s fakeLedgerReadService) Version(context.Context) (LedgerVersion, error) {
+func (s fakeLedgerReadPorts) Version(context.Context) (LedgerVersion, error) {
 	return s.snapshot.LedgerVersion, nil
 }
 
-func (s fakeLedgerReadService) Snapshot(context.Context) (*LedgerSnapshot, error) {
+func (s fakeLedgerReadPorts) Snapshot(context.Context) (*LedgerSnapshot, error) {
 	return s.snapshot, nil
 }
 
-func (s fakeLedgerReadService) SnapshotLite(context.Context) (*LedgerSnapshot, error) {
+func (s fakeLedgerReadPorts) SnapshotLite(context.Context) (*LedgerSnapshot, error) {
 	return s.snapshot, nil
 }
 
-func (s fakeLedgerReadService) Bootstrap(string, string, bool, ...string) (BootstrapResult, error) {
+func (s fakeLedgerReadPorts) Bootstrap(string, string, bool, ...string) (BootstrapResult, error) {
 	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) BootstrapLite(string, string, bool, ...string) (BootstrapResult, error) {
+func (s fakeLedgerReadPorts) BootstrapLite(string, string, bool, ...string) (BootstrapResult, error) {
 	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (SummaryQueryResult, error) {
+func (s fakeLedgerReadPorts) Summary(string, string, bool, ...string) (SummaryQueryResult, error) {
 	return SummaryQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) Transactions(string, string, bool) (TransactionQueryResult, error) {
+func (s fakeLedgerReadPorts) Transactions(string, string, bool) (TransactionQueryResult, error) {
 	return TransactionQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) Balances(context.Context) (map[string]int, []BalanceAssertion, error) {
+func (s fakeLedgerReadPorts) Balances(context.Context) (map[string]int, []BalanceAssertion, error) {
 	return nil, nil, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error) {
+func (s fakeLedgerReadPorts) IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error) {
 	return IncomeStatementQueryResult{}, errors.New("unused fake ledger read service method")
 }

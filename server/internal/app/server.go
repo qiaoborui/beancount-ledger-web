@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -23,22 +22,11 @@ type Server struct {
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
-	readService      ledgerReadService
+	queryPort        LedgerQueryPort
+	snapshotPort     LedgerSnapshotPort
 	reconcileService *ReconciliationService
 	txService        *TransactionService
 	limiter          RateLimiter
-}
-
-type ledgerReadService interface {
-	Version(context.Context) (LedgerVersion, error)
-	Snapshot(context.Context) (*LedgerSnapshot, error)
-	SnapshotLite(context.Context) (*LedgerSnapshot, error)
-	Bootstrap(string, string, bool, ...string) (BootstrapResult, error)
-	BootstrapLite(string, string, bool, ...string) (BootstrapResult, error)
-	Summary(string, string, bool, ...string) (SummaryQueryResult, error)
-	Transactions(string, string, bool) (TransactionQueryResult, error)
-	Balances(context.Context) (map[string]int, []BalanceAssertion, error)
-	IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error)
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {

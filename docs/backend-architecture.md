@@ -56,6 +56,10 @@ use typed results; their handlers own HTTP status and JSON serialization while
 the services own range, privacy, and read-model selection. The ledger read
 service implementation and interface expose no Gin response types.
 
+`LedgerQueryPort` is the transport-facing application read boundary.
+`LedgerSnapshotPort` isolates legacy consumers that still require raw ledger
+snapshots, so typed query consumers do not inherit snapshot coupling.
+
 ## Domain and infrastructure files
 
 - `server/internal/ledger` owns infrastructure-free ledger value types. The
