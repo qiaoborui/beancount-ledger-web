@@ -161,39 +161,43 @@ func clearSensitiveCookie(c *gin.Context) {
 }
 
 func setAuthCookie(c *gin.Context, name, value string, maxAge int) {
-	sameSite := http.SameSiteLaxMode
-	secure := gin.Mode() == gin.ReleaseMode
-	if requestUsesConfiguredCrossOrigin(c) {
-		sameSite = http.SameSiteNoneMode
-		secure = true
-	}
+	sameSite, secure, partitioned := authCookiePolicy(c)
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Path:     "/",
-		MaxAge:   maxAge,
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: sameSite,
+		Name:        name,
+		Value:       value,
+		Path:        "/",
+		MaxAge:      maxAge,
+		Secure:      secure,
+		HttpOnly:    true,
+		SameSite:    sameSite,
+		Partitioned: partitioned,
 	})
 }
 
 func clearAuthCookie(c *gin.Context, name string) {
+	sameSite, secure, partitioned := authCookiePolicy(c)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:        name,
+		Value:       "",
+		Path:        "/",
+		MaxAge:      -1,
+		Secure:      secure,
+		HttpOnly:    true,
+		SameSite:    sameSite,
+		Partitioned: partitioned,
+	})
+}
+
+func authCookiePolicy(c *gin.Context) (http.SameSite, bool, bool) {
 	sameSite := http.SameSiteLaxMode
 	secure := gin.Mode() == gin.ReleaseMode
+	partitioned := false
 	if requestUsesConfiguredCrossOrigin(c) {
 		sameSite = http.SameSiteNoneMode
 		secure = true
+		partitioned = true
 	}
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     name,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Secure:   secure,
-		HttpOnly: true,
-		SameSite: sameSite,
-	})
+	return sameSite, secure, partitioned
 }
 
 func sameOriginMiddleware() gin.HandlerFunc {
