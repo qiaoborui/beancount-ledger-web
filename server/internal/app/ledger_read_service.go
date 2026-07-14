@@ -166,10 +166,10 @@ func (s *LedgerReadService) BootstrapLite(start, end string, unlocked bool, rawV
 	return BuildLedgerBootstrapLite(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
-func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
+func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuationCurrency ...string) (SummaryQueryResult, error) {
 	snapshot, err := s.SnapshotLite(context.Background())
 	if err != nil {
-		return nil, err
+		return SummaryQueryResult{}, err
 	}
 	return BuildLedgerSummary(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
@@ -326,12 +326,26 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 	}
 }
 
-func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
+func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) SummaryQueryResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
 	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
-	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
+	return SummaryQueryResult{
+		Start:             start,
+		End:               end,
+		Summary:           summary,
+		Balances:          statusMap(unlocked, snapshot.Balances),
+		AccountBalances:   statusAccountBalances(unlocked, accountBalances),
+		NetWorthHistory:   netWorthRows,
+		MonthEndNetWorth:  monthEndRows,
+		NetWorthWindows:   windows,
+		CreditCards:       creditCards,
+		Commodities:       snapshot.Commodities,
+		Prices:            snapshot.Prices,
+		ValuationCurrency: valuationCurrency,
+		SensitiveUnlocked: unlocked,
+	}
 }
 
 func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) TransactionQueryResult {
@@ -432,10 +446,10 @@ func scopedLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked b
 	return summary
 }
 
-func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) ([]NetWorthPoint, []NetWorthPoint, any, []CreditCardAnalytics) {
+func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) ([]NetWorthPoint, []NetWorthPoint, *NetWorthWindows, []CreditCardAnalytics) {
 	netWorthRows := []NetWorthPoint{}
 	monthEndRows := []NetWorthPoint{}
-	var windows any
+	var windows *NetWorthWindows
 	creditCards := []CreditCardAnalytics{}
 	if !unlocked {
 		return netWorthRows, monthEndRows, windows, creditCards
@@ -447,7 +461,8 @@ func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked
 		}
 	}
 	monthEndRows = MonthEndNetWorth(netWorthRows)
-	windows = NetWorthChangeWindows(allRows)
+	netWorthWindows := NetWorthChangeWindows(allRows)
+	windows = &netWorthWindows
 	creditCards = CreditCardsInCurrency(snapshot.Transactions, snapshot.Balances, snapshot.Accounts, start, end, snapshot.Prices, valuationCurrency)
 	return netWorthRows, monthEndRows, windows, creditCards
 }

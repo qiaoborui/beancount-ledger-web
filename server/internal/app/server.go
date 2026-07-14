@@ -35,7 +35,7 @@ type ledgerReadService interface {
 	SnapshotLite(context.Context) (*LedgerSnapshot, error)
 	Bootstrap(string, string, bool, ...string) (gin.H, error)
 	BootstrapLite(string, string, bool, ...string) (gin.H, error)
-	Summary(string, string, bool, ...string) (gin.H, error)
+	Summary(string, string, bool, ...string) (SummaryQueryResult, error)
 	Transactions(string, string, bool) (TransactionQueryResult, error)
 	Balances(context.Context) (map[string]int, []BalanceAssertion, error)
 	IncomeStatement(string, string, bool, ...string) (gin.H, error)
