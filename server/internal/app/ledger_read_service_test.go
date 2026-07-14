@@ -53,6 +53,31 @@ func TestTransactionQueryResultJSONContract(t *testing.T) {
 	}
 }
 
+func TestSummaryQueryResultJSONContract(t *testing.T) {
+	payload := SummaryQueryResult{
+		Start:             "2026-05-01",
+		End:               "2026-06-01",
+		Summary:           Summary{Currency: "CNY", Days: map[string]map[string]int{}, Categories: map[string]int{}},
+		Balances:          map[string]int{},
+		AccountBalances:   []AccountBalance{},
+		NetWorthHistory:   []NetWorthPoint{},
+		MonthEndNetWorth:  []NetWorthPoint{},
+		CreditCards:       []CreditCardAnalytics{},
+		Commodities:       []string{},
+		Prices:            []Price{},
+		ValuationCurrency: "CNY",
+		SensitiveUnlocked: false,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"start":"2026-05-01","end":"2026-06-01","summary":{"currency":"CNY","income":0,"expense":0,"net":0,"days":{},"categories":{}},"balances":{},"accountBalances":[],"netWorthHistory":[],"monthEndNetWorth":[],"netWorthWindows":null,"creditCards":[],"commodities":[],"prices":[],"valuationCurrency":"CNY","sensitiveUnlocked":false}`
+	if string(raw) != want {
+		t.Fatalf("summary query JSON = %s, want %s", raw, want)
+	}
+}
+
 func TestLedgerReadServiceBalancesFallsBackToCache(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
@@ -139,12 +164,22 @@ func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lockedSummary := locked["summary"].(Summary)
+	lockedSummary := locked.Summary
 	if lockedSummary.Income != 0 || lockedSummary.Net != 0 || lockedSummary.Expense != 1200 {
 		t.Fatalf("locked summary should hide income while preserving expense: %#v", lockedSummary)
 	}
-	if balances := locked["balances"].(map[string]int); len(balances) != 0 {
+	if balances := locked.Balances; len(balances) != 0 {
 		t.Fatalf("locked summary should hide balances: %#v", balances)
+	}
+	if locked.Start != "2026-05-01" || locked.End != "2026-06-01" || locked.SensitiveUnlocked || locked.NetWorthWindows != nil {
+		t.Fatalf("locked summary query metadata changed: %#v", locked)
+	}
+	unlockedSummary, err := service.Summary("2026-05-01", "2026-06-01", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unlockedSummary.SensitiveUnlocked || len(unlockedSummary.Balances) == 0 || unlockedSummary.NetWorthWindows == nil {
+		t.Fatalf("unlocked summary query metadata changed: %#v", unlockedSummary)
 	}
 
 	lockedIncome, err := service.IncomeStatement("2026-05-01", "2026-06-01", false)

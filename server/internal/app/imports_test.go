@@ -1793,8 +1793,8 @@ func (s fakeLedgerReadService) BootstrapLite(string, string, bool, ...string) (g
 	return nil, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (gin.H, error) {
-	return nil, errors.New("unused fake ledger read service method")
+func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (SummaryQueryResult, error) {
+	return SummaryQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
 func (s fakeLedgerReadService) Transactions(string, string, bool) (TransactionQueryResult, error) {
