@@ -31,6 +31,11 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	if login.Code != http.StatusOK {
 		t.Fatalf("login status = %d body=%s", login.Code, login.Body.String())
 	}
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.SameSite != http.SameSiteLaxMode || cookie.Partitioned {
+			t.Fatalf("expected same-origin cookie to remain unpartitioned, got name=%s sameSite=%v partitioned=%v", cookie.Name, cookie.SameSite, cookie.Partitioned)
+		}
+	}
 
 	summary := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", nil)
@@ -246,8 +251,31 @@ func TestConfiguredCORSOriginCanUseCookieAuth(t *testing.T) {
 	if len(cookies) == 0 {
 		t.Fatal("expected auth cookies")
 	}
-	if cookies[0].SameSite != http.SameSiteNoneMode || !cookies[0].Secure {
-		t.Fatalf("expected cross-site secure cookie, got sameSite=%v secure=%v", cookies[0].SameSite, cookies[0].Secure)
+	for _, cookie := range cookies {
+		if cookie.SameSite != http.SameSiteNoneMode || !cookie.Secure || !cookie.Partitioned {
+			t.Fatalf("expected cross-site partitioned secure cookie, got name=%s sameSite=%v secure=%v partitioned=%v", cookie.Name, cookie.SameSite, cookie.Secure, cookie.Partitioned)
+		}
+	}
+
+	logout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	logout.Header.Set("Origin", "https://frontend.example.com")
+	logout.Header.Set("Sec-Fetch-Site", "cross-site")
+	for _, cookie := range cookies {
+		logout.AddCookie(cookie)
+	}
+	logoutRes := httptest.NewRecorder()
+	router.ServeHTTP(logoutRes, logout)
+	if logoutRes.Code != http.StatusOK {
+		t.Fatalf("logout status=%d body=%s", logoutRes.Code, logoutRes.Body.String())
+	}
+	clearedCookies := logoutRes.Result().Cookies()
+	if len(clearedCookies) != len(cookies) {
+		t.Fatalf("cleared cookie count=%d want=%d", len(clearedCookies), len(cookies))
+	}
+	for _, cookie := range clearedCookies {
+		if cookie.MaxAge >= 0 || cookie.SameSite != http.SameSiteNoneMode || !cookie.Secure || !cookie.Partitioned {
+			t.Fatalf("expected matching cross-site cookie deletion, got name=%s maxAge=%d sameSite=%v secure=%v partitioned=%v", cookie.Name, cookie.MaxAge, cookie.SameSite, cookie.Secure, cookie.Partitioned)
+		}
 	}
 }
 
