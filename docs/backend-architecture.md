@@ -51,10 +51,10 @@ return the response. New request bodies should be named DTOs in `schemas.go` or
 a feature-specific schema file, not anonymous structs inside handlers.
 
 Read services return typed application results instead of Gin maps as each
-query is migrated. The summary, transaction, and income statement feeds use
-`SummaryQueryResult`, `TransactionQueryResult`, and
-`IncomeStatementQueryResult`; their handlers own HTTP status and JSON
-serialization while the services own range, privacy, and read-model selection.
+query is migrated. Bootstrap, summary, transaction, and income statement feeds
+use typed results; their handlers own HTTP status and JSON serialization while
+the services own range, privacy, and read-model selection. The ledger read
+service implementation and interface expose no Gin response types.
 
 ## Domain and infrastructure files
 

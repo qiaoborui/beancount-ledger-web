@@ -100,6 +100,83 @@ func TestIncomeStatementQueryResultJSONContract(t *testing.T) {
 	}
 }
 
+func TestBootstrapResultJSONContract(t *testing.T) {
+	payload := BootstrapResult{
+		Start:              "2026-05-01",
+		End:                "2026-06-01",
+		Summary:            Summary{Currency: "CNY", Days: map[string]map[string]int{}, Categories: map[string]int{}},
+		Balances:           map[string]int{},
+		AccountBalances:    []AccountBalance{},
+		NetWorthHistory:    []NetWorthPoint{},
+		MonthEndNetWorth:   []NetWorthPoint{},
+		CreditCards:        []CreditCardAnalytics{},
+		Investments:        InvestmentSummary{},
+		Transactions:       []Transaction{},
+		ReconciliationRows: []ReconciliationRow{},
+		Accounts:           []Account{},
+		Commodities:        []string{},
+		Prices:             []Price{},
+		ValuationCurrency:  "CNY",
+		IncomeStatement: IncomeStatementResult{
+			Income:             []IncomeStatementNode{},
+			Expense:            []IncomeStatementNode{},
+			ExpenseAnalytics:   []ExpenseCategoryAnalytics{},
+			TopPayees:          []PayeeAnalytics{},
+			TopPaymentAccounts: []AccountAnalytics{},
+			ValuationCurrency:  "CNY",
+		},
+		AccountStatuses:   []AccountStatus{},
+		LedgerVersion:     LedgerVersion{Version: "version", LatestMtime: 1, FileCount: 2},
+		SensitiveUnlocked: false,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	wantFields := []string{
+		"start", "end", "summary", "balances", "accountBalances", "netWorthHistory",
+		"monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
+		"reconciliationRows", "accounts", "commodities", "prices", "valuationCurrency",
+		"incomeStatement", "accountStatuses", "ledgerVersion", "sensitiveUnlocked",
+	}
+	if len(fields) != len(wantFields) {
+		t.Fatalf("bootstrap JSON fields = %d, want %d: %s", len(fields), len(wantFields), raw)
+	}
+	for _, field := range wantFields {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("bootstrap JSON missing %q: %s", field, raw)
+		}
+	}
+	if string(fields["netWorthWindows"]) != "null" || string(fields["reconciliationRows"]) != "[]" || string(fields["sensitiveUnlocked"]) != "false" {
+		t.Fatalf("bootstrap JSON empty and privacy semantics changed: %s", raw)
+	}
+}
+
+func TestReconciliationRowJSONContract(t *testing.T) {
+	alias := "现金"
+	payload := ReconciliationRow{
+		Account:       "Assets:Cash",
+		Alias:         &alias,
+		Label:         "现金",
+		Currency:      "CNY",
+		LedgerBalance: 98800,
+		Status:        "asserted",
+		LastAssertion: &BalanceAssertion{Date: "2026-05-31", Account: "Assets:Cash", Amount: 98800, Currency: "CNY"},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"account":"Assets:Cash","alias":"现金","label":"现金","currency":"CNY","ledgerBalance":98800,"status":"asserted","lastAssertion":{"date":"2026-05-31","account":"Assets:Cash","amount":98800,"currency":"CNY"}}`
+	if string(raw) != want {
+		t.Fatalf("reconciliation row JSON = %s, want %s", raw, want)
+	}
+}
+
 func TestLedgerReadServiceBalancesFallsBackToCache(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
@@ -237,7 +314,7 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	incomeStatement := bootstrap["incomeStatement"].(IncomeStatementResult)
+	incomeStatement := bootstrap.IncomeStatement
 	raw, err := json.Marshal(incomeStatement)
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +331,25 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	}
 	if incomeStatement.TotalIncome != 100000 || incomeStatement.NetIncome != 98800 {
 		t.Fatalf("nested income statement totals changed: %#v", incomeStatement)
+	}
+	if !bootstrap.SensitiveUnlocked || len(bootstrap.Balances) == 0 || len(bootstrap.ReconciliationRows) == 0 || len(bootstrap.AccountStatuses) == 0 {
+		t.Fatalf("full unlocked bootstrap fields changed: %#v", bootstrap)
+	}
+
+	lite, err := service.BootstrapLite("2026-05-01", "2026-06-01", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lite.NetWorthWindows != nil || len(lite.ReconciliationRows) != 0 || len(lite.AccountStatuses) != 0 {
+		t.Fatalf("lite bootstrap should keep expensive derived fields empty: %#v", lite)
+	}
+
+	locked, err := service.Bootstrap("2026-05-01", "2026-06-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked.SensitiveUnlocked || len(locked.Balances) != 0 || len(locked.ReconciliationRows) != 0 || len(locked.AccountStatuses) != 0 {
+		t.Fatalf("locked bootstrap should hide sensitive fields: %#v", locked)
 	}
 }
 
