@@ -1,5 +1,4 @@
-export type TimePreset = "week" | "month" | "quarter" | "year" | "all" | "custom";
-export type TimeRange = { start: string; end: string; preset: TimePreset };
+export type { TimePreset, TimeRange } from "@/lib/timeRange";
 export type Summary = { currency?: string; income: number; expense: number; net: number; days: Record<string, { income: number; expense: number }>; categories: Record<string, number> };
 export type MetadataValue = string | number | boolean;
 export type Txn = { date: string; payee: string; narration: string; metadata?: Record<string, MetadataValue>; tags?: string[]; postings: { account: string; amount: number; currency?: string }[]; source: { file: string; line: number; hash?: string; gitSha?: string }; pending?: { kind: "append" | "update-transaction"; operationId: string } };

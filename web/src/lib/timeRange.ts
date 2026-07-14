@@ -1,10 +1,84 @@
-export type TimePreset = "week" | "month" | "quarter" | "year" | "all" | "custom";
+export type TimePreset = "last7" | "last30" | "last90" | "last12months" | "week" | "month" | "quarter" | "year" | "all" | "custom";
 
 export type TimeRange = {
   start: string; // YYYY-MM-DD
   end: string; // YYYY-MM-DD
   preset: TimePreset;
 };
+
+const rollingDayPresets: Partial<Record<TimePreset, number>> = {
+  last7: 7,
+  last30: 30,
+  last90: 90,
+};
+
+const rollingPresetLabels: Partial<Record<TimePreset, string>> = {
+  last7: "过去 7 天",
+  last30: "过去 30 天",
+  last90: "过去 90 天",
+  last12months: "过去 12 个月",
+};
+
+function parseDate(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function formatDate(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function shiftDate(value: string, days: number): string {
+  const date = parseDate(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return formatDate(date);
+}
+
+function shiftDateMonths(value: string, months: number): string {
+  const date = parseDate(value);
+  const targetMonthStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+  const lastTargetDay = new Date(Date.UTC(targetMonthStart.getUTCFullYear(), targetMonthStart.getUTCMonth() + 1, 0)).getUTCDate();
+  targetMonthStart.setUTCDate(Math.min(date.getUTCDate(), lastTargetDay));
+  return formatDate(targetMonthStart);
+}
+
+function currentDate(referenceDate?: string): string {
+  if (referenceDate) return referenceDate;
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function rollingDayRange(days: number, referenceDate?: string): { start: string; end: string } {
+  const inclusiveEnd = currentDate(referenceDate);
+  return {
+    start: shiftDate(inclusiveEnd, -(days - 1)),
+    end: shiftDate(inclusiveEnd, 1),
+  };
+}
+
+function rollingTwelveMonthRange(referenceDate?: string): { start: string; end: string } {
+  const inclusiveEnd = currentDate(referenceDate);
+  const endDate = parseDate(inclusiveEnd);
+  const targetYear = endDate.getUTCFullYear() - 1;
+  const targetMonth = endDate.getUTCMonth();
+  const lastTargetDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const startDate = new Date(Date.UTC(targetYear, targetMonth, Math.min(endDate.getUTCDate(), lastTargetDay)));
+  startDate.setUTCDate(startDate.getUTCDate() + 1);
+  return { start: formatDate(startDate), end: shiftDate(inclusiveEnd, 1) };
+}
+
+export function isRollingTimePreset(preset: TimePreset): boolean {
+  return preset in rollingPresetLabels;
+}
+
+export function inclusiveEndDate(range: TimeRange): string {
+  if (range.preset === "all") return range.end;
+  return shiftDate(range.end, -1);
+}
+
+export function exclusiveEndDate(inclusiveEnd: string): string {
+  return shiftDate(inclusiveEnd, 1);
+}
 
 /** 当前月份字符串 "YYYY-MM" */
 export function currentMonth(): string {
@@ -79,12 +153,22 @@ function currentQuarter(referenceDate?: string): { year: number; quarter: number
 
 /** 构建时间范围 */
 export function makeTimeRange(preset: TimePreset, referenceDate?: string): TimeRange {
-  const ref = referenceDate ?? new Date().toISOString().slice(0, 10);
+  const ref = currentDate(referenceDate);
   const d = new Date(ref);
   const year = d.getFullYear();
   const month = d.getMonth() + 1;
 
   switch (preset) {
+    case "last7":
+    case "last30":
+    case "last90": {
+      const { start, end } = rollingDayRange(rollingDayPresets[preset]!, ref);
+      return { start, end, preset };
+    }
+    case "last12months": {
+      const { start, end } = rollingTwelveMonthRange(ref);
+      return { start, end, preset };
+    }
     case "week": {
       const { start, end } = weekRange(ref);
       return { start, end, preset };
@@ -120,6 +204,23 @@ export function makeTimeRange(preset: TimePreset, referenceDate?: string): TimeR
 export function navigateTimeRange(range: TimeRange, delta: -1 | 1): TimeRange {
   if (range.preset === "all" || range.preset === "custom") return range;
 
+  if (range.preset === "last12months") {
+    return {
+      start: shiftDateMonths(range.start, delta * 12),
+      end: shiftDateMonths(range.end, delta * 12),
+      preset: range.preset,
+    };
+  }
+
+  if (range.preset === "last7" || range.preset === "last30" || range.preset === "last90") {
+    const days = Math.round((parseDate(range.end).getTime() - parseDate(range.start).getTime()) / 86400000);
+    return {
+      start: shiftDate(range.start, delta * days),
+      end: shiftDate(range.end, delta * days),
+      preset: range.preset,
+    };
+  }
+
   if (range.preset === "week") {
     const d = new Date(range.start);
     d.setDate(d.getDate() + delta * 7);
@@ -151,6 +252,12 @@ export function navigateTimeRange(range: TimeRange, delta: -1 | 1): TimeRange {
   return range;
 }
 
+export function canNavigateTimeRange(range: TimeRange, delta: -1 | 1, referenceDate?: string): boolean {
+  if (range.preset === "all" || range.preset === "custom") return false;
+  if (delta < 0 || !isRollingTimePreset(range.preset)) return true;
+  return range.end < shiftDate(currentDate(referenceDate), 1);
+}
+
 /** 转为 API 查询参数字符串 */
 export function timeRangeToParams(range: TimeRange): string {
   return `start=${range.start}&end=${range.end}`;
@@ -159,6 +266,14 @@ export function timeRangeToParams(range: TimeRange): string {
 /** 格式化时间范围标题 */
 export function formatTimeRangeLabel(range: TimeRange): string {
   switch (range.preset) {
+    case "last7":
+    case "last30":
+    case "last90":
+    case "last12months": {
+      const currentRange = makeTimeRange(range.preset);
+      if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabels[range.preset]!;
+      return `${range.start} ~ ${inclusiveEndDate(range)}`;
+    }
     case "week": {
       const s = range.start.slice(5).replace("-", "/").replace(/^0/, "");
       // end is exclusive (下一周一)，往前退一天得到周日
@@ -180,8 +295,32 @@ export function formatTimeRangeLabel(range: TimeRange): string {
     case "all":
       return "全部时间";
     case "custom":
-      return `${range.start} ~ ${range.end}`;
+      return `${range.start} ~ ${inclusiveEndDate(range)}`;
   }
+}
+
+export function formatTimeRangePickerLabel(range: TimeRange, referenceDate?: string): string {
+  if (isRollingTimePreset(range.preset)) {
+    const currentRange = makeTimeRange(range.preset, referenceDate);
+    if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabels[range.preset]!;
+    if (range.preset === "last12months") return "12 个月范围";
+    const days = Math.round((parseDate(range.end).getTime() - parseDate(range.start).getTime()) / 86400000);
+    return `${days} 天范围`;
+  }
+
+  const currentRange = makeTimeRange(range.preset, referenceDate);
+  if (range.start === currentRange.start && range.end === currentRange.end) {
+    if (range.preset === "week") return "当前周";
+    if (range.preset === "month") return "当前月";
+    if (range.preset === "quarter") return "当前季度";
+    if (range.preset === "year") return "当前年";
+  }
+  return formatTimeRangeLabel(range);
+}
+
+export function formatTimeRangeDateSpan(range: TimeRange): string {
+  if (range.preset === "all") return "全部账本日期";
+  return `${range.start} 至 ${inclusiveEndDate(range)}`;
 }
 
 /** 获取时间范围内的所有月份 */
@@ -226,6 +365,11 @@ export function parseApiTimeParams(searchParams: URLSearchParams): { start: stri
 export function timeRangeCacheKey(range: TimeRange, valuationCurrency = "CNY"): string {
   const suffix = `_valuation_${valuationCurrency}`;
   switch (range.preset) {
+    case "last7":
+    case "last30":
+    case "last90":
+    case "last12months":
+      return `ledger_cache_${range.preset}_${range.start}_${range.end}${suffix}`;
     case "week": {
       const { year, week } = weekLabel(range.start);
       return `ledger_cache_${year}-W${week}${suffix}`;

@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
-import { makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
-import type { TimeRange, TimePreset } from "@/lib/timeRange";
+import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
+import type { TimeRange } from "@/lib/timeRange";
 import { apiEndpointSettingsChangeEvent, apiFetch, readApiEndpointSettings } from "@/lib/apiEndpoints";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
@@ -44,6 +44,7 @@ import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
 import { Toast } from "./ledger/shared";
 import { haptic } from "./ledger/haptics";
+import { TimeRangePicker } from "./ledger/TimeRangePicker";
 import {
   loadAccountDetailPage,
   loadAccountPanels,
@@ -140,15 +141,6 @@ function accountFromPathname(pathname: string): string | null {
   }
 }
 
-const TIME_PRESETS: { key: TimePreset; label: string }[] = [
-  { key: "week", label: "本周" },
-  { key: "month", label: "本月" },
-  { key: "quarter", label: "本季" },
-  { key: "year", label: "今年" },
-  { key: "all", label: "全部" },
-  { key: "custom", label: "自定义" },
-];
-
 const TRANSACTION_QUICK_VIEWS = [
   { id: "food", label: "本月餐饮", detail: "Expenses:Food 及子分类", category: "Expenses:Food", mode: "prefix" as const },
   { id: "unknown", label: "Unknown 待整理", detail: "精确查看 Expenses:Unknown", category: "Expenses:Unknown", mode: "exact" as const },
@@ -172,8 +164,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
-  const [customStart, setCustomStart] = useState(timeRange.start);
-  const [customEnd, setCustomEnd] = useState(timeRange.end);
   const { toast, setToast, showToast } = useToast();
   const online = useNetworkStatus();
   const { getScrollTop, scrollToTop } = useRouteScrollMemory(pathname);
@@ -337,22 +327,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
   useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => router.push("/accounts") });
 
-  function setPreset(preset: TimePreset) {
-    if (preset === "custom") {
-      const range: TimeRange = { start: timeRange.start, end: timeRange.end, preset: "custom" };
-      setCustomStart(range.start);
-      setCustomEnd(range.end);
-      setTimeRange(range);
-    } else {
-      setTimeRange(makeTimeRange(preset));
-    }
-  }
-
-  function applyCustomRange() {
-    const range: TimeRange = { start: customStart, end: customEnd, preset: "custom" };
-    setTimeRange(range);
-  }
-
   useEffect(() => {
     setMobileTabHrefs(readMobileTabHrefs());
   }, []);
@@ -503,10 +477,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       }
       if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
         const currentHeader = pageHeader(page, timeRange);
-        const canMove = currentHeader.monthScoped && timeRange.preset !== "all" && timeRange.preset !== "custom";
-        if (!canMove) return;
+        const delta = event.key === "ArrowLeft" ? -1 : 1;
+        if (!currentHeader.monthScoped || !canNavigateTimeRange(timeRange, delta)) return;
         event.preventDefault();
-        setTimeRange(navigateTimeRange(timeRange, event.key === "ArrowLeft" ? -1 : 1));
+        setTimeRange(navigateTimeRange(timeRange, delta));
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -591,7 +565,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   );
   const header = pageHeader(page, timeRange);
   const canShowTimeControls = header.monthScoped;
-  const canNavigate = canShowTimeControls && timeRange.preset !== "all" && timeRange.preset !== "custom";
+  const canNavigatePrevious = canShowTimeControls && canNavigateTimeRange(timeRange, -1);
+  const canNavigateNext = canShowTimeControls && canNavigateTimeRange(timeRange, 1);
 
   function handleActiveRouteTap() {
     if (getScrollTop() > 8) {
@@ -650,8 +625,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "ai-entry", label: "AI 记账助理", detail: "用自然语言生成预览", keywords: ["ai", "chat"], run: openAiEntry },
     { id: "search-transactions", label: "搜索流水", detail: "跳到流水页并聚焦搜索框", shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
     { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
-    { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, -1)) },
-    { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigate && setTimeRange(navigateTimeRange(timeRange, 1)) },
+    { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
+    { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
     ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { preloadLedgerRoute(item.href); router.push(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
   ];
@@ -709,18 +684,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-      {/* ── 时间范围选择器 ── */}
       <div className="mb-6 min-w-0 max-w-full">
-        {/* 第一行：标题 + 翻页按钮 */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {canNavigate && (
-            <button
-              className="rounded-xl border border-line bg-panel px-3 py-2 text-brand"
-              onClick={() => setTimeRange(navigateTimeRange(timeRange, -1))}
-            >
-              ‹
-            </button>
-          )}
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-[0.22em] text-stone">{header.eyebrow}</div>
             <strong className="font-serif text-2xl font-medium">{header.title}</strong>
@@ -751,59 +716,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               </form>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {canNavigate && (
-              <button
-                className="rounded-xl border border-line bg-panel px-3 py-2 text-brand"
-                onClick={() => setTimeRange(navigateTimeRange(timeRange, 1))}
-              >
-                ›
-              </button>
-            )}
-          </div>
+          {canShowTimeControls && <TimeRangePicker range={timeRange} onChange={setTimeRange} />}
         </div>
-
-        {/* 第二行：快捷按钮组 */}
-        {canShowTimeControls && (
-          <div className="mt-3 flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <div className="grid w-full min-w-0 grid-cols-6 overflow-hidden rounded-xl border border-line sm:flex sm:w-auto">
-              {TIME_PRESETS.map((p) => (
-                <button
-                  key={p.key}
-                  className={`min-w-0 whitespace-nowrap px-2 py-1.5 text-sm transition-colors sm:px-3 ${timeRange.preset === p.key ? "bg-brand text-paper" : "bg-panel text-warm hover:bg-tag"}`}
-                  onClick={() => setPreset(p.key)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            {/* 自定义范围：date input */}
-            {timeRange.preset === "custom" && (
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
-                  value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                />
-                <span className="text-sm text-stone">~</span>
-                <input
-                  type="date"
-                  className="rounded-xl border border-line bg-panel px-2 py-1.5 text-sm"
-                  value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                />
-                <button
-                  className="rounded-xl border border-line bg-panel px-3 py-1.5 text-sm text-brand hover:bg-tag"
-                  onClick={applyCustomRange}
-                >
-                  确定
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
