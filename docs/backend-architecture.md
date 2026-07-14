@@ -52,8 +52,15 @@ a feature-specific schema file, not anonymous structs inside handlers.
 
 ## Domain and infrastructure files
 
-- `ledger.go`, `cache.go`, `writer.go`, and `money.go` parse, cache, render, and
-  validate ledger writes.
+- `server/internal/ledger` owns infrastructure-free ledger value types. The
+  first extracted values are exact Beancount amounts and metadata values. Its
+  architecture test recursively scans the package tree and permits only an
+  explicit set of pure standard-library dependencies.
+- `server/internal/app/domain_models.go` provides temporary type aliases so the
+  existing application keeps its current contract while code moves package by
+  package.
+- `ledger.go`, `cache.go`, `writer.go`, and `money.go` continue to parse, cache,
+  render, and validate ledger writes.
 - `analytics.go`, `diagnostics.go`, and `notifications.go` are read-model and
   notification logic.
 - `imports.go`, `import_parsing.go`, and `cmb_pdf.go` own import preview,
@@ -61,10 +68,10 @@ a feature-specific schema file, not anonymous structs inside handlers.
 - `ai.go`, `github_ledger.go`, `auth.go`, `passkeys.go`, `push.go`, and
   `rate_limit.go` own external integrations and support services.
 
-The next extraction step moves ledger models and pure parsing rules into an
-infrastructure-free package. Feature modules can then depend on consumer-owned
-ports while filesystem, GitHub, Postgres, AI, and Web Push become adapters wired
-only by the composition root.
+The next extraction step separates transport DTOs from canonical transactions
+and accounts before moving those entities into the ledger package. Feature
+modules can then depend on consumer-owned ports while filesystem, GitHub,
+Postgres, AI, and Web Push become adapters wired only by the composition root.
 
 ## Validation
 

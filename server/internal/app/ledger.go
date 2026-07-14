@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-type MetadataValue any
-
 type BeanLine struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
