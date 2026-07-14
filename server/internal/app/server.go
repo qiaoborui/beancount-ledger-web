@@ -38,7 +38,7 @@ type ledgerReadService interface {
 	Summary(string, string, bool, ...string) (SummaryQueryResult, error)
 	Transactions(string, string, bool) (TransactionQueryResult, error)
 	Balances(context.Context) (map[string]int, []BalanceAssertion, error)
-	IncomeStatement(string, string, bool, ...string) (gin.H, error)
+	IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error)
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {

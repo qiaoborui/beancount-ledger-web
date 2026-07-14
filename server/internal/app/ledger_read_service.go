@@ -241,10 +241,10 @@ func firstValuationCurrency(values []string) string {
 	return values[0]
 }
 
-func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
+func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, rawValuationCurrency ...string) (IncomeStatementQueryResult, error) {
 	snapshot, err := s.SnapshotLite(context.Background())
 	if err != nil {
-		return nil, err
+		return IncomeStatementQueryResult{}, err
 	}
 	return BuildLedgerIncomeStatement(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
@@ -291,16 +291,16 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	expense, _, _ := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
-	incomeStatement := gin.H{
-		"expense":            []IncomeStatementNode{},
-		"totalExpense":       summary.Expense,
-		"expenseAnalytics":   expense,
-		"topPayees":          []interface{}{},
-		"topPaymentAccounts": []interface{}{},
-		"income":             []IncomeStatementNode{},
-		"totalIncome":        statusInt(unlocked, summary.Income),
-		"netIncome":          statusInt(unlocked, summary.Net),
-		"valuationCurrency":  valuationCurrency,
+	incomeStatement := IncomeStatementResult{
+		Expense:            []IncomeStatementNode{},
+		TotalExpense:       summary.Expense,
+		ExpenseAnalytics:   expense,
+		TopPayees:          []PayeeAnalytics{},
+		TopPaymentAccounts: []AccountAnalytics{},
+		Income:             []IncomeStatementNode{},
+		TotalIncome:        statusInt(unlocked, summary.Income),
+		NetIncome:          statusInt(unlocked, summary.Net),
+		ValuationCurrency:  valuationCurrency,
 	}
 	return gin.H{
 		"start":              start,
@@ -365,17 +365,17 @@ func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end stri
 	return TransactionQueryResult{Start: start, End: end, Transactions: transactions, SensitiveUnlocked: unlocked}
 }
 
-func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) gin.H {
+func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) IncomeStatementQueryResult {
 	valuationCurrency := ValidValuationCurrency(firstValuationCurrency(rawValuationCurrency), snapshot.Commodities)
-	payload := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
-	payload["start"] = start
-	payload["end"] = end
-	payload["valuationCurrency"] = valuationCurrency
-	payload["sensitiveUnlocked"] = unlocked
-	return payload
+	return IncomeStatementQueryResult{
+		Start:                 start,
+		End:                   end,
+		IncomeStatementResult: buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency),
+		SensitiveUnlocked:     unlocked,
+	}
 }
 
-func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) gin.H {
+func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) IncomeStatementResult {
 	expense, topPayees, topAccounts := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
 	allIncomeNodes, expenseNodes, totalIncome, totalExpense, netIncome := IncomeStatementTreeInCurrency(start, end, snapshot.Transactions, snapshot.Prices, valuationCurrency)
 	accountMap := snapshotAccountMap(snapshot)
@@ -385,7 +385,17 @@ func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end strin
 	if unlocked {
 		incomeNodes = allIncomeNodes
 	}
-	return gin.H{"income": incomeNodes, "expense": expenseNodes, "totalIncome": statusInt(unlocked, totalIncome), "totalExpense": totalExpense, "expenseAnalytics": expense, "topPayees": topPayees, "topPaymentAccounts": topAccounts, "netIncome": statusInt(unlocked, netIncome), "valuationCurrency": valuationCurrency}
+	return IncomeStatementResult{
+		Income:             incomeNodes,
+		Expense:            expenseNodes,
+		TotalIncome:        statusInt(unlocked, totalIncome),
+		TotalExpense:       totalExpense,
+		ExpenseAnalytics:   expense,
+		TopPayees:          topPayees,
+		TopPaymentAccounts: topAccounts,
+		NetIncome:          statusInt(unlocked, netIncome),
+		ValuationCurrency:  valuationCurrency,
+	}
 }
 
 func FilterLedgerTransactions(txns []Transaction, start, end string, unlocked bool) []Transaction {
