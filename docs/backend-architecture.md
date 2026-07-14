@@ -50,6 +50,11 @@ Handlers should stay small: authenticate, bind/validate, call domain logic, and
 return the response. New request bodies should be named DTOs in `schemas.go` or
 a feature-specific schema file, not anonymous structs inside handlers.
 
+Read services return typed application results instead of Gin maps as each
+query is migrated. The transaction feed uses `TransactionQueryResult`; its
+handler owns HTTP status and JSON serialization while the service owns range,
+privacy, and read-model selection.
+
 ## Domain and infrastructure files
 
 - `server/internal/ledger` owns infrastructure-free ledger value types. The

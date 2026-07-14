@@ -1797,8 +1797,8 @@ func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (gin.H, 
 	return nil, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) Transactions(string, string, bool) (gin.H, error) {
-	return nil, errors.New("unused fake ledger read service method")
+func (s fakeLedgerReadService) Transactions(string, string, bool) (TransactionQueryResult, error) {
+	return TransactionQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
 func (s fakeLedgerReadService) Balances(context.Context) (map[string]int, []BalanceAssertion, error) {

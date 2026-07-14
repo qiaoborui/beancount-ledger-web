@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,18 +15,41 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lockedTxns := locked["transactions"].([]Transaction)
+	lockedTxns := locked.Transactions
 	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
 		t.Fatalf("locked transaction feed should hide income transactions: %#v", lockedTxns)
+	}
+	if locked.Start != "2026-05-01" || locked.End != "2026-06-01" || locked.SensitiveUnlocked {
+		t.Fatalf("locked transaction query metadata changed: %#v", locked)
 	}
 
 	unlocked, err := service.Transactions("2026-05-01", "2026-06-01", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unlockedTxns := unlocked["transactions"].([]Transaction)
+	unlockedTxns := unlocked.Transactions
 	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
 		t.Fatalf("unlocked transaction feed should include all transactions newest first: %#v", unlockedTxns)
+	}
+	if !unlocked.SensitiveUnlocked {
+		t.Fatalf("unlocked transaction query metadata changed: %#v", unlocked)
+	}
+}
+
+func TestTransactionQueryResultJSONContract(t *testing.T) {
+	payload := TransactionQueryResult{
+		Start:             "2026-05-01",
+		End:               "2026-06-01",
+		Transactions:      []Transaction{},
+		SensitiveUnlocked: false,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"start":"2026-05-01","end":"2026-06-01","transactions":[],"sensitiveUnlocked":false}`
+	if string(raw) != want {
+		t.Fatalf("transaction query JSON = %s, want %s", raw, want)
 	}
 }
 
@@ -63,13 +87,13 @@ func TestBuildLedgerTransactionsFromIndexedRangeRespectSensitiveUnlock(t *testin
 	}
 
 	locked := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", false)
-	lockedTxns := locked["transactions"].([]Transaction)
+	lockedTxns := locked.Transactions
 	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
 		t.Fatalf("direct indexed feed should hide income transactions: %#v", lockedTxns)
 	}
 
 	unlocked := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", true)
-	unlockedTxns := unlocked["transactions"].([]Transaction)
+	unlockedTxns := unlocked.Transactions
 	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
 		t.Fatalf("direct indexed feed should preserve database order: %#v", unlockedTxns)
 	}
@@ -102,7 +126,7 @@ func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 	}
 
 	payload := BuildLedgerTransactions(snapshot, "2026-05-01", "2026-06-01", false)
-	txns := payload["transactions"].([]Transaction)
+	txns := payload.Transactions
 	if len(txns) != 1 || txns[0].Payee != "Cafe" {
 		t.Fatalf("cached transaction filtering should preserve locked privacy: %#v", txns)
 	}
@@ -171,7 +195,7 @@ func BenchmarkBuildLedgerTransactionsCached(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		payload := BuildLedgerTransactions(snapshot, "2026-05-01", "2026-06-01", true)
-		if len(payload["transactions"].([]Transaction)) != len(snapshot.Transactions) {
+		if len(payload.Transactions) != len(snapshot.Transactions) {
 			b.Fatal("missing transactions")
 		}
 	}
@@ -184,7 +208,7 @@ func BenchmarkBuildLedgerTransactionsFromIndexedRange(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		payload := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", true)
-		if len(payload["transactions"].([]Transaction)) != len(snapshot.Transactions) {
+		if len(payload.Transactions) != len(snapshot.Transactions) {
 			b.Fatal("missing transactions")
 		}
 	}

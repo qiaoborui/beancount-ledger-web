@@ -174,21 +174,21 @@ func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuati
 	return BuildLedgerSummary(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
-func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.H, error) {
+func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (TransactionQueryResult, error) {
 	if s.indexErr != nil {
-		return nil, s.indexErr
+		return TransactionQueryResult{}, s.indexErr
 	}
 	if s.indexStore != nil {
 		indexCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		revision, ok, err := s.cachedActiveRevision(indexCtx)
 		if err != nil {
-			return nil, err
+			return TransactionQueryResult{}, err
 		}
 		if ok {
 			txns, err := s.indexStore.TransactionsForRevision(indexCtx, revision.ID, start, end)
 			if err != nil {
-				return nil, err
+				return TransactionQueryResult{}, err
 			}
 			for index := range txns {
 				txns[index].Source.GitSHA = revision.GitSHA
@@ -196,12 +196,12 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (gin.
 			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked), nil
 		}
 		if s.strict {
-			return nil, ErrLedgerReadModelUnavailable
+			return TransactionQueryResult{}, ErrLedgerReadModelUnavailable
 		}
 	}
 	snapshot, err := s.Snapshot(context.Background())
 	if err != nil {
-		return nil, err
+		return TransactionQueryResult{}, err
 	}
 	return BuildLedgerTransactions(snapshot, start, end, unlocked), nil
 }
@@ -334,15 +334,21 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	return gin.H{"start": start, "end": end, "summary": summary, "balances": statusMap(unlocked, snapshot.Balances), "accountBalances": statusAccountBalances(unlocked, accountBalances), "netWorthHistory": netWorthRows, "monthEndNetWorth": monthEndRows, "netWorthWindows": windows, "creditCards": creditCards, "commodities": snapshot.Commodities, "prices": snapshot.Prices, "valuationCurrency": valuationCurrency, "sensitiveUnlocked": unlocked}
 }
 
-func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) gin.H {
-	return gin.H{"start": start, "end": end, "transactions": filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked), "sensitiveUnlocked": unlocked}
+func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) TransactionQueryResult {
+	return TransactionQueryResult{
+		Start:             start,
+		End:               end,
+		Transactions:      filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		SensitiveUnlocked: unlocked,
+	}
 }
 
-func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end string, unlocked bool) gin.H {
-	if unlocked {
-		return gin.H{"start": start, "end": end, "transactions": txns, "sensitiveUnlocked": true}
+func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end string, unlocked bool) TransactionQueryResult {
+	transactions := txns
+	if !unlocked {
+		transactions = filterSensitiveTransactions(txns)
 	}
-	return gin.H{"start": start, "end": end, "transactions": filterSensitiveTransactions(txns), "sensitiveUnlocked": false}
+	return TransactionQueryResult{Start: start, End: end, Transactions: transactions, SensitiveUnlocked: unlocked}
 }
 
 func BuildLedgerIncomeStatement(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency ...string) gin.H {
