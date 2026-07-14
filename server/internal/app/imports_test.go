@@ -18,7 +18,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	pdf "github.com/ledongthuc/pdf"
 )
 
@@ -1785,12 +1784,12 @@ func (s fakeLedgerReadService) SnapshotLite(context.Context) (*LedgerSnapshot, e
 	return s.snapshot, nil
 }
 
-func (s fakeLedgerReadService) Bootstrap(string, string, bool, ...string) (gin.H, error) {
-	return nil, errors.New("unused fake ledger read service method")
+func (s fakeLedgerReadService) Bootstrap(string, string, bool, ...string) (BootstrapResult, error) {
+	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) BootstrapLite(string, string, bool, ...string) (gin.H, error) {
-	return nil, errors.New("unused fake ledger read service method")
+func (s fakeLedgerReadService) BootstrapLite(string, string, bool, ...string) (BootstrapResult, error) {
+	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
 func (s fakeLedgerReadService) Summary(string, string, bool, ...string) (SummaryQueryResult, error) {

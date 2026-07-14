@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 type LedgerReadService struct {
@@ -147,21 +145,21 @@ func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) 
 
 var ErrLedgerReadModelUnavailable = errors.New("ledger read model has no active revision; run ledger-indexer first")
 
-func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
+func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, rawValuationCurrency ...string) (BootstrapResult, error) {
 	snapshot, err := s.SnapshotLite(context.Background())
 	if unlocked {
 		snapshot, err = s.Snapshot(context.Background())
 	}
 	if err != nil {
-		return nil, err
+		return BootstrapResult{}, err
 	}
 	return BuildLedgerBootstrap(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
-func (s *LedgerReadService) BootstrapLite(start, end string, unlocked bool, rawValuationCurrency ...string) (gin.H, error) {
+func (s *LedgerReadService) BootstrapLite(start, end string, unlocked bool, rawValuationCurrency ...string) (BootstrapResult, error) {
 	snapshot, err := s.SnapshotLite(context.Background())
 	if err != nil {
-		return nil, err
+		return BootstrapResult{}, err
 	}
 	return BuildLedgerBootstrapLite(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
@@ -249,12 +247,12 @@ func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, ra
 	return BuildLedgerIncomeStatement(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
-func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
+func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) BootstrapResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
 	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
-	reconciliationRows := []gin.H{}
+	reconciliationRows := []ReconciliationRow{}
 	accountStatuses := []AccountStatus{}
 	investments := InvestmentSummary{}
 	if unlocked {
@@ -263,31 +261,31 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		investments = BuildInvestmentSummaryFromSnapshot(snapshot)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
-	return gin.H{
-		"start":              start,
-		"end":                end,
-		"summary":            summary,
-		"balances":           statusMap(unlocked, snapshot.Balances),
-		"accountBalances":    statusAccountBalances(unlocked, accountBalances),
-		"netWorthHistory":    netWorthRows,
-		"monthEndNetWorth":   monthEndRows,
-		"netWorthWindows":    windows,
-		"creditCards":        creditCards,
-		"investments":        investments,
-		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
-		"reconciliationRows": reconciliationRows,
-		"accounts":           snapshot.Accounts,
-		"commodities":        snapshot.Commodities,
-		"prices":             snapshot.Prices,
-		"valuationCurrency":  valuationCurrency,
-		"incomeStatement":    incomeStatement,
-		"accountStatuses":    accountStatuses,
-		"ledgerVersion":      snapshot.LedgerVersion,
-		"sensitiveUnlocked":  unlocked,
+	return BootstrapResult{
+		Start:              start,
+		End:                end,
+		Summary:            summary,
+		Balances:           statusMap(unlocked, snapshot.Balances),
+		AccountBalances:    statusAccountBalances(unlocked, accountBalances),
+		NetWorthHistory:    netWorthRows,
+		MonthEndNetWorth:   monthEndRows,
+		NetWorthWindows:    windows,
+		CreditCards:        creditCards,
+		Investments:        investments,
+		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		ReconciliationRows: reconciliationRows,
+		Accounts:           snapshot.Accounts,
+		Commodities:        snapshot.Commodities,
+		Prices:             snapshot.Prices,
+		ValuationCurrency:  valuationCurrency,
+		IncomeStatement:    incomeStatement,
+		AccountStatuses:    accountStatuses,
+		LedgerVersion:      snapshot.LedgerVersion,
+		SensitiveUnlocked:  unlocked,
 	}
 }
 
-func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) gin.H {
+func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency string) BootstrapResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	expense, _, _ := ExpenseAnalyticsInCurrency(snapshot.Transactions, start, end, snapshot.Accounts, snapshot.Prices, valuationCurrency)
@@ -302,27 +300,27 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 		NetIncome:          statusInt(unlocked, summary.Net),
 		ValuationCurrency:  valuationCurrency,
 	}
-	return gin.H{
-		"start":              start,
-		"end":                end,
-		"summary":            summary,
-		"balances":           statusMap(unlocked, snapshot.Balances),
-		"accountBalances":    statusAccountBalances(unlocked, snapshotAccountBalances(snapshot, valuationCurrency)),
-		"netWorthHistory":    []NetWorthPoint{},
-		"monthEndNetWorth":   []NetWorthPoint{},
-		"netWorthWindows":    nil,
-		"creditCards":        []CreditCardAnalytics{},
-		"investments":        InvestmentSummary{},
-		"transactions":       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
-		"reconciliationRows": []gin.H{},
-		"accounts":           snapshot.Accounts,
-		"commodities":        snapshot.Commodities,
-		"prices":             snapshot.Prices,
-		"valuationCurrency":  valuationCurrency,
-		"incomeStatement":    incomeStatement,
-		"accountStatuses":    []AccountStatus{},
-		"ledgerVersion":      snapshot.LedgerVersion,
-		"sensitiveUnlocked":  unlocked,
+	return BootstrapResult{
+		Start:              start,
+		End:                end,
+		Summary:            summary,
+		Balances:           statusMap(unlocked, snapshot.Balances),
+		AccountBalances:    statusAccountBalances(unlocked, snapshotAccountBalances(snapshot, valuationCurrency)),
+		NetWorthHistory:    []NetWorthPoint{},
+		MonthEndNetWorth:   []NetWorthPoint{},
+		NetWorthWindows:    nil,
+		CreditCards:        []CreditCardAnalytics{},
+		Investments:        InvestmentSummary{},
+		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		ReconciliationRows: []ReconciliationRow{},
+		Accounts:           snapshot.Accounts,
+		Commodities:        snapshot.Commodities,
+		Prices:             snapshot.Prices,
+		ValuationCurrency:  valuationCurrency,
+		IncomeStatement:    incomeStatement,
+		AccountStatuses:    []AccountStatus{},
+		LedgerVersion:      snapshot.LedgerVersion,
+		SensitiveUnlocked:  unlocked,
 	}
 }
 

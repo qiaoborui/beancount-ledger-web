@@ -55,7 +55,7 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 	start, end := parseTimeParams(c)
 	unlocked := isSensitiveUnlocked(c)
 	isLite := c.Query("lite") == "1"
-	var payload gin.H
+	var payload BootstrapResult
 	var err error
 	if isLite {
 		payload, err = s.readService.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
@@ -273,8 +273,8 @@ func (s *Server) reconciliation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "monthPrefix": start[:7], "rows": buildReconciliationRows(snapshot, start, end)})
 }
 
-func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.H {
-	rows := []gin.H{}
+func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []ReconciliationRow {
+	rows := []ReconciliationRow{}
 	for _, account := range snapshot.Accounts {
 		if !account.Active || !(strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
 			continue
@@ -293,7 +293,15 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []gin.
 				status = "asserted"
 			}
 		}
-		rows = append(rows, gin.H{"account": account.Account, "alias": account.Alias, "label": account.Label, "currency": defaultAccountCurrency(account.Account, account.Currency), "ledgerBalance": snapshot.Balances[account.Account], "status": status, "lastAssertion": last})
+		rows = append(rows, ReconciliationRow{
+			Account:       account.Account,
+			Alias:         account.Alias,
+			Label:         account.Label,
+			Currency:      defaultAccountCurrency(account.Account, account.Currency),
+			LedgerBalance: snapshot.Balances[account.Account],
+			Status:        status,
+			LastAssertion: last,
+		})
 	}
 	return rows
 }
