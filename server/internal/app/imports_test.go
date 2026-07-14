@@ -1805,6 +1805,6 @@ func (s fakeLedgerReadService) Balances(context.Context) (map[string]int, []Bala
 	return nil, nil, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadService) IncomeStatement(string, string, bool, ...string) (gin.H, error) {
-	return nil, errors.New("unused fake ledger read service method")
+func (s fakeLedgerReadService) IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error) {
+	return IncomeStatementQueryResult{}, errors.New("unused fake ledger read service method")
 }

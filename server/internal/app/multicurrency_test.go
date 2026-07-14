@@ -81,7 +81,7 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 		t.Fatalf("USD dashboard valuation KPIs = %#v currency=%s, want assets/netWorth 15081 and expense 298", usdSummary.KPIs, usdSummary.Currency)
 	}
 	incomePayload := BuildLedgerIncomeStatement(snapshot, "2026-05-01", "2026-06-01", true, "USD")
-	if incomePayload["valuationCurrency"] != "USD" || incomePayload["totalIncome"] != 14084 || incomePayload["totalExpense"] != 298 || incomePayload["netIncome"] != 13786 {
+	if incomePayload.ValuationCurrency != "USD" || incomePayload.TotalIncome != 14084 || incomePayload.TotalExpense != 298 || incomePayload.NetIncome != 13786 {
 		t.Fatalf("USD income statement payload = %#v, want USD totals income=14084 expense=298 net=13786", incomePayload)
 	}
 	t.Setenv("APP_PASSWORD", "secret")

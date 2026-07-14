@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
@@ -75,6 +73,30 @@ func TestSummaryQueryResultJSONContract(t *testing.T) {
 	want := `{"start":"2026-05-01","end":"2026-06-01","summary":{"currency":"CNY","income":0,"expense":0,"net":0,"days":{},"categories":{}},"balances":{},"accountBalances":[],"netWorthHistory":[],"monthEndNetWorth":[],"netWorthWindows":null,"creditCards":[],"commodities":[],"prices":[],"valuationCurrency":"CNY","sensitiveUnlocked":false}`
 	if string(raw) != want {
 		t.Fatalf("summary query JSON = %s, want %s", raw, want)
+	}
+}
+
+func TestIncomeStatementQueryResultJSONContract(t *testing.T) {
+	payload := IncomeStatementQueryResult{
+		Start: "2026-05-01",
+		End:   "2026-06-01",
+		IncomeStatementResult: IncomeStatementResult{
+			Income:             []IncomeStatementNode{},
+			Expense:            []IncomeStatementNode{},
+			ExpenseAnalytics:   []ExpenseCategoryAnalytics{},
+			TopPayees:          []PayeeAnalytics{},
+			TopPaymentAccounts: []AccountAnalytics{},
+			ValuationCurrency:  "CNY",
+		},
+		SensitiveUnlocked: false,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"start":"2026-05-01","end":"2026-06-01","income":[],"expense":[],"totalIncome":0,"totalExpense":0,"expenseAnalytics":[],"topPayees":[],"topPaymentAccounts":[],"netIncome":0,"valuationCurrency":"CNY","sensitiveUnlocked":false}`
+	if string(raw) != want {
+		t.Fatalf("income statement query JSON = %s, want %s", raw, want)
 	}
 }
 
@@ -186,21 +208,24 @@ func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if income := lockedIncome["income"].([]IncomeStatementNode); len(income) != 0 {
+	if income := lockedIncome.Income; len(income) != 0 {
 		t.Fatalf("locked income statement should hide income nodes: %#v", income)
 	}
-	if lockedIncome["totalIncome"].(int) != 0 || lockedIncome["netIncome"].(int) != 0 || lockedIncome["totalExpense"].(int) != 1200 {
+	if lockedIncome.TotalIncome != 0 || lockedIncome.NetIncome != 0 || lockedIncome.TotalExpense != 1200 {
 		t.Fatalf("locked income statement totals should hide income: %#v", lockedIncome)
+	}
+	if lockedIncome.Start != "2026-05-01" || lockedIncome.End != "2026-06-01" || lockedIncome.SensitiveUnlocked {
+		t.Fatalf("locked income statement query metadata changed: %#v", lockedIncome)
 	}
 
 	unlocked, err := service.IncomeStatement("2026-05-01", "2026-06-01", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if income := unlocked["income"].([]IncomeStatementNode); len(income) != 1 || income[0].Account != "Income:Salary" {
+	if income := unlocked.Income; len(income) != 1 || income[0].Account != "Income:Salary" {
 		t.Fatalf("unlocked income statement should include income nodes: %#v", income)
 	}
-	if unlocked["totalIncome"].(int) != 100000 || unlocked["netIncome"].(int) != 98800 {
+	if unlocked.TotalIncome != 100000 || unlocked.NetIncome != 98800 || !unlocked.SensitiveUnlocked {
 		t.Fatalf("unlocked income statement totals should include income: %#v", unlocked)
 	}
 }
@@ -212,14 +237,22 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	incomeStatement := bootstrap["incomeStatement"].(gin.H)
-	if _, ok := incomeStatement["start"]; ok {
-		t.Fatalf("nested income statement should not include top-level date fields: %#v", incomeStatement)
+	incomeStatement := bootstrap["incomeStatement"].(IncomeStatementResult)
+	raw, err := json.Marshal(incomeStatement)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if incomeStatement["valuationCurrency"].(string) != "CNY" {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["start"]; ok {
+		t.Fatalf("nested income statement should not include top-level date fields: %s", raw)
+	}
+	if incomeStatement.ValuationCurrency != "CNY" {
 		t.Fatalf("nested income statement should include valuation currency: %#v", incomeStatement)
 	}
-	if incomeStatement["totalIncome"].(int) != 100000 || incomeStatement["netIncome"].(int) != 98800 {
+	if incomeStatement.TotalIncome != 100000 || incomeStatement.NetIncome != 98800 {
 		t.Fatalf("nested income statement totals changed: %#v", incomeStatement)
 	}
 }

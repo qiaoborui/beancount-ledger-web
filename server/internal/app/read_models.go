@@ -1,5 +1,24 @@
 package app
 
+type IncomeStatementResult struct {
+	Income             []IncomeStatementNode      `json:"income"`
+	Expense            []IncomeStatementNode      `json:"expense"`
+	TotalIncome        int                        `json:"totalIncome"`
+	TotalExpense       int                        `json:"totalExpense"`
+	ExpenseAnalytics   []ExpenseCategoryAnalytics `json:"expenseAnalytics"`
+	TopPayees          []PayeeAnalytics           `json:"topPayees"`
+	TopPaymentAccounts []AccountAnalytics         `json:"topPaymentAccounts"`
+	NetIncome          int                        `json:"netIncome"`
+	ValuationCurrency  string                     `json:"valuationCurrency"`
+}
+
+type IncomeStatementQueryResult struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+	IncomeStatementResult
+	SensitiveUnlocked bool `json:"sensitiveUnlocked"`
+}
+
 type SummaryQueryResult struct {
 	Start             string                `json:"start"`
 	End               string                `json:"end"`

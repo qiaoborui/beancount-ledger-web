@@ -51,8 +51,9 @@ return the response. New request bodies should be named DTOs in `schemas.go` or
 a feature-specific schema file, not anonymous structs inside handlers.
 
 Read services return typed application results instead of Gin maps as each
-query is migrated. The summary and transaction feeds use `SummaryQueryResult`
-and `TransactionQueryResult`; their handlers own HTTP status and JSON
+query is migrated. The summary, transaction, and income statement feeds use
+`SummaryQueryResult`, `TransactionQueryResult`, and
+`IncomeStatementQueryResult`; their handlers own HTTP status and JSON
 serialization while the services own range, privacy, and read-model selection.
 
 ## Domain and infrastructure files
