@@ -724,7 +724,7 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} />
+      <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} expandOnWideScreens />
     </div>
   </ChartBox>;
 }
@@ -775,9 +775,9 @@ function useFocusedSeries<T extends { account: string }>(series: T[]) {
   return { focusedAccount, visibleSeries, toggleFocus };
 }
 
-function InteractiveLegend({ series, focusedAccount, onToggle }: { series: { account: string; alias?: string | null; label: string }[]; focusedAccount: string | null; onToggle: (account: string) => void }) {
+export function InteractiveLegend({ series, focusedAccount, onToggle, expandOnWideScreens = false }: { series: { account: string; alias?: string | null; label: string }[]; focusedAccount: string | null; onToggle: (account: string) => void; expandOnWideScreens?: boolean }) {
   if (!series.length) return null;
-  return <div className="mt-2 flex max-h-20 flex-wrap items-center justify-center gap-x-3 gap-y-2 overflow-y-auto px-1 text-xs" aria-label="图例">
+  return <div className={`mt-2 flex max-h-20 flex-wrap items-center justify-center gap-x-3 gap-y-2 overflow-y-auto px-1 text-xs ${expandOnWideScreens ? "sm:max-h-none sm:overflow-visible" : ""}`} aria-label="图例">
     {series.map((item, index) => {
       const selected = focusedAccount === item.account;
       const muted = focusedAccount != null && !selected;
