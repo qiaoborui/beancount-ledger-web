@@ -5,15 +5,15 @@ import (
 )
 
 func (s *Server) ledgerSnapshot(ctx context.Context) (*LedgerSnapshot, error) {
-	if s.readService != nil {
-		return s.readService.Snapshot(ctx)
+	if s.snapshotPort != nil {
+		return s.snapshotPort.Snapshot(ctx)
 	}
 	return s.cache.Snapshot()
 }
 
 func (s *Server) ledgerSnapshotLite(ctx context.Context) (*LedgerSnapshot, error) {
-	if s.readService != nil {
-		return s.readService.SnapshotLite(ctx)
+	if s.snapshotPort != nil {
+		return s.snapshotPort.SnapshotLite(ctx)
 	}
 	return s.cache.Snapshot()
 }

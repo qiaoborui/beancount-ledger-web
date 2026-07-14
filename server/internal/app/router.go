@@ -16,7 +16,7 @@ func (s *Server) ledgerVersion(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	version, err := s.readService.Version(c.Request.Context())
+	version, err := s.queryPort.Version(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -58,9 +58,9 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 	var payload BootstrapResult
 	var err error
 	if isLite {
-		payload, err = s.readService.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
+		payload, err = s.queryPort.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
 	} else {
-		payload, err = s.readService.Bootstrap(start, end, unlocked, c.Query("valuationCurrency"))
+		payload, err = s.queryPort.Bootstrap(start, end, unlocked, c.Query("valuationCurrency"))
 	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -86,7 +86,7 @@ func (s *Server) summary(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Summary(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
+	payload, err := s.queryPort.Summary(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -99,7 +99,7 @@ func (s *Server) transactions(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.Transactions(start, end, isSensitiveUnlocked(c))
+	payload, err := s.queryPort.Transactions(start, end, isSensitiveUnlocked(c))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -111,7 +111,7 @@ func (s *Server) balances(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
-	if s.readService == nil {
+	if s.queryPort == nil {
 		snapshot, err := s.ledgerSnapshotLite(c.Request.Context())
 		if err != nil {
 			errorJSON(c, http.StatusBadRequest, err)
@@ -120,7 +120,7 @@ func (s *Server) balances(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"balances": snapshot.Balances, "assertions": snapshot.BalanceAssertions})
 		return
 	}
-	balances, assertions, err := s.readService.Balances(c.Request.Context())
+	balances, assertions, err := s.queryPort.Balances(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -133,7 +133,7 @@ func (s *Server) incomeStatement(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.readService.IncomeStatement(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
+	payload, err := s.queryPort.IncomeStatement(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
