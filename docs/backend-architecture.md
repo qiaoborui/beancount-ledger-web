@@ -1,27 +1,48 @@
 # Backend architecture
 
-The Go backend is organized around a thin HTTP layer, explicit request schemas,
-and domain-oriented services. It still lives under `server/internal/app` today,
-but files are split by responsibility so future package extraction is mechanical.
+The Go backend is a modularizing monolith with an explicit application
+lifecycle, a Gin HTTP layer, request schemas, and domain-oriented services. Most
+code still lives under `server/internal/app`; the composition root now separates
+resource wiring from route construction so later package extraction can proceed
+without changing the process entry point.
 
 ## Runtime flow
 
 ```text
 cmd/ledger-web
-  -> LoadConfig
-  -> StartLedgerScheduler
-  -> NewRouter
-      -> handlers
-          -> ledger cache/writer
-          -> analytics/imports/ai/git/passkey/push services
+  -> LoadWebConfig
+  -> NewApplication
+      -> buildApplicationDependencies
+          -> runtime store / database / rate limiter
+          -> ledger cache / read service / writer
+          -> account / transaction / reconciliation services
+      -> newRouter
+          -> Server handlers
+  -> http.Server
+      -> graceful shutdown
+      -> Application.Close
 ```
+
+## Composition and lifecycle
+
+- `application.go` owns the transitional composition root. `NewApplication`
+  creates infrastructure and services explicitly, exposes an `http.Handler`,
+  and records every opened resource.
+- `Application.Close` closes resources once in reverse construction order and
+  joins close errors so one failure does not skip later cleanup.
+- `cmd/ledger-web` owns the `http.Server`. `SIGINT` and `SIGTERM` trigger a
+  bounded graceful shutdown before application resources are closed.
+- Process entry points construct `Application` directly so resource ownership
+  remains explicit. Tests use a helper that registers `Application.Close` with
+  `testing.T.Cleanup`.
 
 ## HTTP layer
 
-- `server.go` owns `Server`, Gin setup, route registration, health, and static
-  fallback selection.
+- `application.go` constructs the current service graph and owns its resources.
+- `server.go` owns the transitional `Server`, Gin setup, route registration,
+  health, and static fallback selection.
 - `*_handlers.go` files own route handlers by API area: auth, ledger, imports,
-  AI, and Git.
+  and AI.
 - `util.go` owns JSON binding and response helpers.
 - `schemas.go` owns named request DTOs and semantic validation.
 
@@ -37,8 +58,13 @@ a feature-specific schema file, not anonymous structs inside handlers.
   notification logic.
 - `imports.go`, `import_parsing.go`, and `cmb_pdf.go` own import preview,
   commit, provider parsing, and CMB PDF helpers.
-- `ai.go`, `git.go`, `auth.go`, `passkeys.go`, `push.go`, `scheduler.go`, and
+- `ai.go`, `github_ledger.go`, `auth.go`, `passkeys.go`, `push.go`, and
   `rate_limit.go` own external integrations and support services.
+
+The next extraction step moves ledger models and pure parsing rules into an
+infrastructure-free package. Feature modules can then depend on consumer-owned
+ports while filesystem, GitHub, Postgres, AI, and Web Push become adapters wired
+only by the composition root.
 
 ## Validation
 

@@ -15,7 +15,7 @@ import (
 func TestRouterAuthAndSummary(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	unauth := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", nil)
@@ -189,7 +189,7 @@ func TestRouterAuthAndSummary(t *testing.T) {
 func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/lock", nil)
@@ -221,7 +221,7 @@ func TestConfiguredCORSOriginCanUseCookieAuth(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
 	t.Setenv("LEDGER_CORS_ORIGINS", "https://frontend.example.com")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	preflight := httptest.NewRequest(http.MethodOptions, "/api/auth/login", nil)
 	preflight.Header.Set("Origin", "https://frontend.example.com")
@@ -285,7 +285,7 @@ func TestStaticFallbackCacheHeaders(t *testing.T) {
 	mustWrite(t, filepath.Join(cfg.StaticDir, "index.html"), "<!doctype html>")
 	mustWrite(t, filepath.Join(cfg.StaticDir, "assets", "app.123.js"), "console.log('ok')")
 	mustWrite(t, filepath.Join(cfg.StaticDir, "sw.js"), "")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	index := httptest.NewRecorder()
 	router.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -323,7 +323,7 @@ func TestStaticFallbackCacheHeaders(t *testing.T) {
 
 func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	cfg := testLedger(t)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	actual := map[string]bool{}
 	for _, route := range router.Routes() {
 		if strings.HasPrefix(route.Path, "/api/") {
@@ -418,7 +418,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 	runGit(t, cfg, "init")
 	runGit(t, cfg, "config", "user.email", "ledger@example.test")
 	runGit(t, cfg, "config", "user.name", "Ledger Test")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	health := requestWithCookies(router, http.MethodGet, "/api/health", "", nil)

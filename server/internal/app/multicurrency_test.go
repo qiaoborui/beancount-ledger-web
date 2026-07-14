@@ -85,7 +85,7 @@ func TestMultiCurrencyBalancesUseNativeAmountAndCNYValuation(t *testing.T) {
 		t.Fatalf("USD income statement payload = %#v, want USD totals income=14084 expense=298 net=13786", incomePayload)
 	}
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/income-statement?start=2026-05-01&end=2026-06-01&valuationCurrency=USD", "", cookies)
 	if res.Code != http.StatusOK {

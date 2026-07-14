@@ -20,7 +20,7 @@ func TestLedgerEditorFilesReadAndSave(t *testing.T) {
 	t.Setenv("APP_PASSWORD", "secret")
 	mustWrite(t, filepath.Join(cfg.RuntimeDir, "state.bean"), "should not show\n")
 
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	files := requestWithCookies(router, http.MethodGet, "/api/ledger/editor/files", "", cookies)
@@ -75,7 +75,7 @@ func TestLedgerEditorRejectsUnsafeAndStaleWrites(t *testing.T) {
 	}
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	traversal := requestWithCookies(router, http.MethodGet, "/api/ledger/editor/file?path=../secret.bean", "", cookies)
@@ -101,7 +101,7 @@ func TestLedgerEditorRollsBackOnBeanCheckFailure(t *testing.T) {
 	}
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	before := string(mustRead(t, filepath.Join(cfg.LedgerRoot, "main.bean")))
@@ -124,7 +124,7 @@ func TestGitHubLedgerEditorReturnsSuccessWithoutPostCommitRead(t *testing.T) {
 	cfg := githubAPITestConfig(t, fake)
 	t.Setenv("APP_PASSWORD", "secret")
 	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 	next := "option \"title\" \"Updated\"\n"
 	body := `{"path":"main.bean","content":` + quoteJSON(next) + `,"previousHash":"` + sha256Hex([]byte(initial))[:16] + `"}`
@@ -146,7 +146,7 @@ func TestGitHubLedgerEditorRetryWithSameContentIsIdempotent(t *testing.T) {
 	cfg := githubAPITestConfig(t, fake)
 	t.Setenv("APP_PASSWORD", "secret")
 	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 	next := "option \"title\" \"Updated\"\n"
 	body := `{"path":"main.bean","content":` + quoteJSON(next) + `,"previousHash":"` + sha256Hex([]byte(initial))[:16] + `"}`
