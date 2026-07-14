@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -21,7 +20,6 @@ type Server struct {
 	runtimeStore     RuntimeStore
 	indexStore       *LedgerIndexStore
 	indexStoreErr    error
-	db               *sql.DB
 	cache            *LedgerCache
 	writer           *LedgerWriter
 	accountService   *AccountService
@@ -43,63 +41,7 @@ type ledgerReadService interface {
 	IncomeStatement(string, string, bool, ...string) (gin.H, error)
 }
 
-func NewRouter(cfg Config) *gin.Engine {
-	router, err := NewRouterWithError(cfg)
-	if err != nil {
-		panic(err)
-	}
-	return router
-}
-
-func NewRouterWithError(cfg Config) (*gin.Engine, error) {
-	var runtimeStore RuntimeStore
-	var indexStore *LedgerIndexStore
-	var indexStoreErr error
-	var db *sql.DB
-	var limiter RateLimiter
-	if cfg.DatabaseURL != "" {
-		var err error
-		db, err = openPostgres(cfg.DatabaseURL)
-		if err != nil {
-			return nil, err
-		}
-		runtimeStore, err = NewRuntimeStoreWithDB(db)
-		if err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		if ledgerReadModelEnabled(cfg) {
-			indexStore, indexStoreErr = NewLedgerIndexStoreWithDB(db, cfg)
-		}
-		limiter, err = NewPostgresRateLimiter(db)
-		if err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-	} else {
-		var err error
-		runtimeStore, err = NewRuntimeStore(cfg)
-		if err != nil {
-			return nil, err
-		}
-		if ledgerReadModelEnabled(cfg) {
-			indexStore, indexStoreErr = NewLedgerIndexStore(cfg)
-		}
-		limiter = NewRateLimiter()
-	}
-	cache := NewLedgerCache(cfg)
-	readService := NewLedgerReadServiceWithIndex(cache, indexStore, indexStoreErr, cfg.ReadModelStrict)
-	writer := NewLedgerWriterWithRuntimeStoreAndCommodities(cfg, cache, runtimeStore, func() ([]string, error) {
-		snapshot, err := readService.SnapshotLite(context.Background())
-		if err != nil {
-			return nil, err
-		}
-		return snapshot.Commodities, nil
-	})
-	snapshot := func() (*LedgerSnapshot, error) {
-		return readService.SnapshotLite(context.Background())
-	}
-	server := &Server{cfg: cfg, runtimeStore: runtimeStore, indexStore: indexStore, indexStoreErr: indexStoreErr, cache: cache, writer: writer, accountService: NewAccountServiceWithSnapshot(cache, writer, snapshot), db: db, readService: readService, reconcileService: NewReconciliationServiceWithSnapshot(cache, writer, snapshot), txService: NewTransactionServiceWithSnapshot(cache, writer, snapshot), limiter: limiter}
+func newRouter(cfg Config, server *Server) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
@@ -111,7 +53,7 @@ func NewRouterWithError(cfg Config) (*gin.Engine, error) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		})
 	}
-	return router, nil
+	return router
 }
 
 func (s *Server) registerAPI(api *gin.RouterGroup) {

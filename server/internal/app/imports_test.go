@@ -64,7 +64,7 @@ func TestImportPreviewAndCommit(t *testing.T) {
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("PYTHON_BIN", fakePython)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	var form bytes.Buffer
@@ -300,7 +300,7 @@ func TestDedupImportBeanTextFallsBackToFundingPosting(t *testing.T) {
 func TestImportProvidersEndpoint(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	recorder := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/providers", "", cookies)
@@ -1431,7 +1431,7 @@ func TestCcbCreditAllPlatformPreview(t *testing.T) {
 	}, "\n"))
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	var form bytes.Buffer

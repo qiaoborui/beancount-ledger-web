@@ -14,7 +14,7 @@ import (
 func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/accounts/detail?account=Assets%3ACash", "", cookies)
@@ -48,7 +48,7 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 func TestIncomeStatementReturnsCategoryTree(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/income-statement?start=2026-05-01&end=2026-06-01", "", cookies)
@@ -133,7 +133,7 @@ func TestInvestmentsReturnsCommodityPricesAndPositions(t *testing.T) {
 		"",
 	}, "\n"))
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/investments", "", cookies)
@@ -432,7 +432,7 @@ func TestAccountsParseAdditionalIncludedFiles(t *testing.T) {
 func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/dashboard?start=2026-05-01&end=2026-06-01", "", cookies)
@@ -569,7 +569,7 @@ func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	}
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	updateBody := `{"source":{"file":"` + filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean") + `","line":1},"entry":{"kind":"transaction","date":"2026-05-01","payee":"Cafe","narration":"Dinner","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"20.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-20.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}}`
@@ -630,7 +630,7 @@ func TestAppendEntryTracksLedgerWritesInFiles(t *testing.T) {
 	runGit(t, cfg, "commit", "-m", "initial ledger")
 	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "true")
 
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 	appendBody := `{"kind":"transaction","date":"2026-06-02","payee":"Bakery","narration":"Breakfast","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"15.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-15.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}`
 	res := requestWithCookies(router, http.MethodPost, "/api/ledger/append", appendBody, cookies)
@@ -659,7 +659,7 @@ func TestAppendEntryWritesTransaction(t *testing.T) {
 	t.Setenv("BEAN_CHECK_BIN", beanCheck)
 	t.Setenv("APP_PASSWORD", "secret")
 
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 	appendBody := `{"kind":"transaction","date":"2026-06-02","payee":"Bakery","narration":"Breakfast","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"15.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-15.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}`
 	res := requestWithCookies(router, http.MethodPost, "/api/ledger/append", appendBody, cookies)

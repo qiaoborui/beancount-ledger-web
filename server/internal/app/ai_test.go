@@ -23,7 +23,7 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodPost, "/api/ai/parse", `{"input":"买零食 8 元"}`, cookies)
@@ -66,7 +66,7 @@ func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[{"role":"assistant","text":"你好"}],"draftEntries":[]}`, cookies)
@@ -120,7 +120,7 @@ func TestAIChatRouteStreamsAssistantMessageAndFinalDraft(t *testing.T) {
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[],"draftEntries":[],"stream":true}`, cookies)
@@ -170,7 +170,7 @@ func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodPost, "/api/ai/accounts-chat", `{"message":"帮我加一个差旅分类","messages":[{"role":"assistant","text":"你好"}],"draftOperations":[]}`, cookies)

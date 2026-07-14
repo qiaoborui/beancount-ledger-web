@@ -14,7 +14,7 @@ import (
 func TestRateLimitUsesRemoteAddrByDefault(t *testing.T) {
 	limiter := NewRateLimiter()
 	cfg := testLedger(t)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	server := &Server{cfg: cfg, limiter: limiter}
 	router.Handle(http.MethodGet, "/limited", func(c *gin.Context) {
 		if server.limiter.Check(c, "test", 1, 60_000_000_000) {
@@ -43,7 +43,7 @@ func TestRateLimitUsesRemoteAddrByDefault(t *testing.T) {
 func TestPasskeyStatusAndOptionsPersistSession(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	status := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/passkey/status", nil)
@@ -114,7 +114,7 @@ func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	t.Setenv("PUBLIC_ORIGIN", "https://ledger.example.com")
 	t.Setenv("WEBAUTHN_RP_ID", "ledger.example.com")
 	t.Setenv("WEBAUTHN_PUBLIC_ORIGIN", "https://ledger.example.com, https://other.example.com")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	wellKnown := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/webauthn", nil)
@@ -160,7 +160,7 @@ func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
 	mustWrite(t, filepath.Join(cfg.RuntimeDir, "passkeys.json"), `{"credentials":[{"id":"AQID","publicKey":"BAUG","counter":7,"transports":["internal"]}]}`)
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/passkey/login/options", nil)
@@ -187,7 +187,7 @@ func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 func TestPasskeyVerifyRoutesRequireActiveChallenge(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	register := requestWithCookies(router, http.MethodPost, "/api/passkey/register/verify", `{}`, cookies)
@@ -205,7 +205,7 @@ func TestPushSubscriptionLifecycle(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
 	t.Setenv("WEB_PUSH_VAPID_PUBLIC_KEY", "public-key")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	subscription := `{"subscription":{"endpoint":"https://push.example/sub/1","keys":{"p256dh":"p256dh","auth":"auth"}}}`
@@ -259,7 +259,7 @@ func TestPushSubscriptionLifecycle(t *testing.T) {
 func TestPushNotificationRoutesValidateRequestsAndConfiguration(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	invalidSave := requestWithCookies(router, http.MethodPost, "/api/push/subscription", `{"subscription":{"endpoint":"","keys":{"auth":"","p256dh":""}}}`, cookies)
@@ -294,7 +294,7 @@ func TestInsightsAndNotifications(t *testing.T) {
 		"",
 	}, "\n"))
 	t.Setenv("APP_PASSWORD", "secret")
-	router := NewRouter(cfg)
+	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ledger/insights?month=2026-05", "", cookies)

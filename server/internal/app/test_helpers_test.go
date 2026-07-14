@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func testLedger(t *testing.T) Config {
@@ -48,6 +50,20 @@ func testLedger(t *testing.T) Config {
 		"",
 	}, "\n"))
 	return Config{AppRoot: root, LedgerRoot: root, RuntimeDir: filepath.Join(root, ".runtime"), StaticDir: filepath.Join(root, "dist"), Port: "0"}
+}
+
+func testRouter(t *testing.T, cfg Config) *gin.Engine {
+	t.Helper()
+	application, err := NewApplication(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := application.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return application.router
 }
 
 func mustWrite(t *testing.T, file string, text string) {
