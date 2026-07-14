@@ -17,11 +17,6 @@ type BeanParseError struct {
 	Message string `json:"message"`
 }
 
-type BeanAmount struct {
-	Number   string
-	Currency string
-}
-
 type BeanEntry struct {
 	Kind          string
 	Date          string
@@ -771,26 +766,6 @@ func directNumberText(tokens []beanToken) (string, bool) {
 		return "", false
 	}
 	return strings.ReplaceAll(tokens[0].Value, ",", ""), true
-}
-
-func (amount BeanAmount) String() string {
-	if amount.Currency == "" {
-		return amount.Number
-	}
-	return strings.TrimSpace(amount.Number + " " + amount.Currency)
-}
-
-func (amount BeanAmount) Cents() int {
-	if amount.Number == "" {
-		return 0
-	}
-	rat, ok := new(big.Rat).SetString(amount.Number)
-	if !ok {
-		return cents(amount.Number)
-	}
-	rat.Mul(rat, big.NewRat(100, 1))
-	value, _ := rat.Float64()
-	return int(math.Round(value))
 }
 
 type numberExprParser struct {
