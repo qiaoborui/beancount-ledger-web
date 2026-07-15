@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
-import { fetchJson, readJson } from "@/lib/clientFetch";
+import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { ApiResponseError, fetchJson, readJson } from "@/lib/clientFetch";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey, apiFetch } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -92,11 +92,13 @@ type ImportDraft = {
   preview: ImportPreview;
   entries: ImportEntry[];
 };
+type GmailImportStatus = { configured: boolean; connected: boolean; email?: string; label?: string; watchExpiration?: number; lastSyncAt?: string | null; lastError?: string | null; allowedSenders?: string[]; oauthRedirectUrl?: string };
+type GmailPendingImport = { id: string; importId?: string; messageId: string; sender: string; subject: string; receivedAt: string; filename: string; provider?: Provider; candidateCount: number; status: "processing" | "ready" | "failed" | "committing" | "committed" | "dismissed"; error?: string; createdAt: string; updatedAt: string };
 
 const importDraftKey = "ledger_import_review_draft";
 
 const fallbackProviderChoices: ProviderChoice[] = [
-  { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF" },
+  { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF / EML / ZIP" },
   { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
   { value: "alipay-small-purse", label: "支付宝小荷包", detail: "小荷包余额收支明细 XLSX，共同资金池消费", accept: ".xlsx" },
   { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
@@ -149,6 +151,10 @@ export function latestImportDocumentsByProvider(documents: ImportDocument[]) {
     }
   }
   return latest;
+}
+
+export function reviewableGmailPendingImports(items: GmailPendingImport[]) {
+  return items.filter((item) => item.status === "ready" || item.status === "failed");
 }
 
 function formatImportTotals(entries: ImportEntry[]) {
@@ -250,6 +256,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [importDocuments, setImportDocuments] = useState<ImportDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState("");
+  const [gmailStatus, setGmailStatus] = useState<GmailImportStatus | null>(null);
+  const [pendingImports, setPendingImports] = useState<GmailPendingImport[]>([]);
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [activePendingId, setActivePendingId] = useState("");
 
   const accountOptions = useMemo(() => {
     const accounts = preview?.accountOptions ?? [];
@@ -267,6 +277,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
   const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
   const latestImportsByProvider = useMemo(() => latestImportDocumentsByProvider(importDocuments), [importDocuments]);
+  const reviewablePendingImports = useMemo(() => reviewableGmailPendingImports(pendingImports), [pendingImports]);
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -296,6 +307,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   useEffect(() => {
     void loadImportDocuments();
+    void loadGmailAutomation();
   }, []);
 
   useEffect(() => {
@@ -346,6 +358,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setReviewOpen(false);
     setDraftSavedAt(null);
     setError("");
+    setActivePendingId("");
     writeImportDraft(null);
   }
 
@@ -362,6 +375,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setDraftSavedAt(null);
     setError("");
     setDiscardDialogOpen(false);
+    setActivePendingId("");
     writeImportDraft(null);
   }
 
@@ -417,6 +431,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       writeImportDraft(null);
       setDraftSavedAt(null);
       void loadImportDocuments();
+      void loadGmailAutomation();
       onImported?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -461,6 +476,93 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setDocumentsError(err instanceof Error ? err.message : String(err));
     } finally {
       setDocumentsLoading(false);
+    }
+  }
+
+  async function loadGmailAutomation() {
+    try {
+      const status = await fetchJson<GmailImportStatus>("/api/integrations/gmail/status", undefined, { configured: false, connected: false }, { kind: "auth" });
+      setGmailStatus(status);
+      try {
+        const pending = await fetchJson<{ items: GmailPendingImport[] }>("/api/ledger/imports/pending", undefined, { items: [] }, { kind: "auth" });
+        setPendingImports(pending.items ?? []);
+      } catch (err) {
+        if (err instanceof ApiResponseError && err.status === 423) {
+          setPendingImports([]);
+          return;
+        }
+        throw err;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function connectGmail() {
+    setGmailLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/integrations/gmail/connect", { method: "POST" }, { kind: "write" });
+      const data = await readJson<{ url?: string; error?: string }>(res);
+      if (!res.ok || !data.url) throw new Error(data.error || "无法开始 Gmail 授权");
+      window.location.assign(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setGmailLoading(false);
+    }
+  }
+
+  async function syncGmail() {
+    setGmailLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/integrations/gmail/sync", { method: "POST" }, { kind: "write" });
+      const data = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Gmail 同步失败");
+      await loadGmailAutomation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGmailLoading(false);
+    }
+  }
+
+  async function openPendingImport(item: GmailPendingImport) {
+    if (item.status !== "ready") return;
+    setGmailLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, { kind: "auth" });
+      const data = await readJson<{ item?: GmailPendingImport; preview?: ImportPreview; error?: string }>(res);
+      if (!res.ok || !data.preview?.importId) throw new Error(data.error || "自动账单预览不存在");
+      setFile(null);
+      setPreview(data.preview);
+      setEntries(data.preview.entries);
+      setSelectedEntryId(data.preview.entries[0]?.id ?? "");
+      setCommitResult(null);
+      setResultOpen(false);
+      setDraftSavedAt(Date.now());
+      setActivePendingId(item.id);
+      setReviewOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGmailLoading(false);
+    }
+  }
+
+  async function dismissPendingImport(item: GmailPendingImport) {
+    setGmailLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, { method: "DELETE" }, { kind: "write" });
+      const data = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "忽略自动账单失败");
+      await loadGmailAutomation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGmailLoading(false);
     }
   }
 
@@ -515,6 +617,52 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   return (
     <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
       <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
+        <CardContent className="space-y-4 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-medium text-ink"><Mail className="h-4 w-4 text-brand" />Gmail 自动账单</div>
+              <div className="mt-1 text-sm text-stone">
+                {gmailStatus?.connected ? `${gmailStatus.email} · 监听 ${gmailStatus.label}` : gmailStatus?.configured ? `等待连接 · 监听 ${gmailStatus.label}` : "配置 Gmail API 与 Pub/Sub 后即可连接"}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {gmailStatus?.connected ? (
+                <Button variant="outline" onClick={() => void syncGmail()} disabled={gmailLoading}>
+                  {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}立即同步
+                </Button>
+              ) : (
+                <Button onClick={() => void connectGmail()} disabled={gmailLoading || !gmailStatus?.configured}>
+                  {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}连接 Gmail
+                </Button>
+              )}
+            </div>
+          </div>
+          {gmailStatus?.lastError ? <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><span>{gmailStatus.lastError}</span></Alert> : null}
+          {reviewablePendingImports.length > 0 ? (
+            <div className="grid gap-2">
+              {reviewablePendingImports.map((item) => (
+                <div key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-line bg-paper p-3 sm:flex-row sm:items-center">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--selected-bg)] text-brand"><Inbox className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
+                      <span className="truncate text-sm font-medium text-ink">{item.subject || item.filename}</span>
+                    </div>
+                    <div className="mt-1 truncate text-xs text-stone">{item.sender} · {item.filename}{item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}</div>
+                    {item.error ? <div className="mt-1 line-clamp-2 text-xs text-destructive">{item.error}</div> : null}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />忽略</Button>
+                    {item.status === "ready" ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>Review<ArrowRight className="h-4 w-4" /></Button> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : gmailStatus?.connected ? <div className="rounded-2xl border border-dashed border-line px-4 py-5 text-center text-sm text-stone">当前没有待 Review 的 Gmail 账单</div> : null}
+        </CardContent>
+      </Card>
+
+      <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
         <CardContent className="grid min-w-0 items-start gap-4 bg-paper/45 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(260px,380px)_minmax(0,1fr)] xl:grid-cols-[minmax(280px,400px)_minmax(0,1fr)]">
           <div className="min-w-0">
             <div
@@ -540,7 +688,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 resetForFile(event.dataTransfer.files?.[0] ?? null);
               }}
             >
-              <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf,.eml,.html,.htm" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
+              <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf,.eml,.html,.htm,.zip" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
               <div className="grid h-14 w-14 place-items-center rounded-2xl border border-line bg-panel text-brand shadow-sm transition group-hover:scale-105">
                 <UploadCloud className="h-7 w-7" />
               </div>
@@ -672,7 +820,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
-                {isRestoredDraft ? <Badge variant="secondary">已恢复草稿</Badge> : null}
+                {activePendingId ? <Badge variant="secondary">Gmail 自动导入</Badge> : isRestoredDraft ? <Badge variant="secondary">已恢复草稿</Badge> : null}
                 <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
                 <span className="text-sm text-stone">{entries.length} 条交易</span>
               </div>

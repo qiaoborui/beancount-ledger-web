@@ -194,7 +194,14 @@ Important variables:
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
 - `LEDGER_ENABLED_MODULES` — optional comma-separated allowlist for statically linked modules. Leave it empty to enable all built-in modules: `importers`, `web-push`, and `notifications`.
 - `LEDGER_NOTIFICATION_REFRESH_INTERVAL` — optional periodic notification refresh interval such as `15m`; use `off` (the default) to keep notification refresh request-driven.
+- `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_OAUTH_REDIRECT_URL` — personal Google OAuth web-client configuration for Gmail read-only access.
+- `GMAIL_PUBSUB_TOPIC` / `GMAIL_PUBSUB_AUDIENCE` / `GMAIL_PUBSUB_SERVICE_ACCOUNT` — authenticated Gmail Watch delivery to the Go API.
+- `GMAIL_LABEL` / `GMAIL_ALLOWED_SENDERS` — Label-scoped mailbox watch plus an exact sender allowlist enforced again by the backend.
+- `GMAIL_TOKEN_ENCRYPTION_KEY` — base64-encoded 32-byte key used to encrypt the stored Gmail refresh token.
+- `CRON_SECRET` — protects the Cloud Scheduler Gmail event drain and daily Vercel Gmail Watch renewal requests.
 - `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`, `RUNTIME_DIR`, `LEDGER_INDEX_INTERVAL_SECONDS`, and `LEDGER_GIT_SCHEDULER` — removed from production runtime configuration.
+
+See [docs/gmail-import-automation.md](docs/gmail-import-automation.md) for the Gmail filter, OAuth, Pub/Sub, and Vercel setup. The same import endpoint also accepts plain or six-digit ZipCrypto ZIP uploads and archives the original ZIP beside the committed import.
 
 ### Postgres ledger read model
 

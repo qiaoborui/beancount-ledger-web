@@ -375,6 +375,9 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/imports/documents/file": true,
 		"POST /api/ledger/imports/preview":       true,
 		"POST /api/ledger/imports/commit":        true,
+		"GET /api/ledger/imports/pending":        true,
+		"GET /api/ledger/imports/pending/:id":    true,
+		"DELETE /api/ledger/imports/pending/:id": true,
 		"GET /api/ledger/editor/files":           true,
 		"GET /api/ledger/editor/file":            true,
 		"PUT /api/ledger/editor/file":            true,
@@ -386,6 +389,16 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"DELETE /api/push/subscription":          true,
 		"PUT /api/push/subscription":             true,
 		"POST /api/push/notify":                  true,
+		"GET /api/integrations/gmail/status":     true,
+		"POST /api/integrations/gmail/connect":   true,
+		"GET /api/integrations/gmail/callback":   true,
+		"GET /api/integrations/gmail/renew":      true,
+		"POST /api/integrations/gmail/renew":     true,
+		"POST /api/integrations/gmail/sync":      true,
+		"DELETE /api/integrations/gmail":         true,
+		"POST /api/integrations/gmail/pubsub":    true,
+		"GET /api/integrations/gmail/drain":      true,
+		"POST /api/integrations/gmail/drain":     true,
 	}
 	missing := []string{}
 	for route := range actual {

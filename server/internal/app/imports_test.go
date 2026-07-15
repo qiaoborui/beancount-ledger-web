@@ -872,7 +872,7 @@ func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
 		"  Assets:Cash                          -8.00 CNY",
 	}, "\n")
 
-	_, err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash")
+	_, err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash", "test-import")
 	if err == nil {
 		t.Fatal("expected bean-check failure")
 	}
@@ -883,6 +883,41 @@ func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Fatalf("%s should have been removed after rollback, err=%v", file, err)
 		}
+	}
+}
+
+func TestImportedBeanWriteIsIdempotentByImportID(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
+	server.writer = NewLedgerWriter(cfg, server.cache)
+	sourceFile := filepath.Join(t.TempDir(), "statement.csv")
+	mustWrite(t, sourceFile, "date,payee,amount\n2026-06-01,Shop,8.00\n")
+	outputFile := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "idempotent.bean")
+	documentFile := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports", "idempotent.csv")
+	monthFile := transactionFileForDate(cfg, "2026-06-01")
+	beanText := "2026-06-01 * \"Shop\" \"Snack\"\n  Expenses:Food  8.00 CNY\n  Assets:Cash  -8.00 CNY"
+	for range 2 {
+		written, err := server.writeImportedBeanFile(outputFile, monthFile, beanText, "alipay", "2026-06-01", "2026-06-02", sourceFile, documentFile, "Assets:Cash", "stable-import-id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if written.OutputFile != outputFile {
+			t.Fatalf("output file=%s", written.OutputFile)
+		}
+	}
+	content := string(mustRead(t, outputFile))
+	if strings.Count(content, "; import-id: stable-import-id") != 1 {
+		t.Fatalf("missing stable import marker:\n%s", content)
+	}
+	entries, err := os.ReadDir(filepath.Dir(outputFile))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("import files=%v err=%v", entries, err)
 	}
 }
 

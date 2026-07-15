@@ -106,8 +106,11 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledgerRead30s.GET("/imports/providers", s.importsProviders)
 	ledgerRead30s.GET("/imports/documents", s.importsDocuments)
 	ledgerRead30s.GET("/imports/documents/file", s.importsDocumentFile)
+	ledger.GET("/imports/pending", noStore(), s.gmailPendingImports)
+	ledger.GET("/imports/pending/:id", noStore(), s.gmailPendingImport)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)
+	ledger.DELETE("/imports/pending/:id", s.gmailDismissPendingImport)
 
 	ledgerRead30s.GET("/editor/files", s.editorFiles)
 	ledgerRead30s.GET("/editor/file", s.editorFile)
@@ -122,6 +125,17 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.DELETE("/push/subscription", s.pushDelete)
 	api.PUT("/push/subscription", s.pushTest)
 	api.POST("/push/notify", s.pushNotify)
+
+	authState.GET("/integrations/gmail/status", s.gmailStatus)
+	api.POST("/integrations/gmail/connect", s.gmailConnectStart)
+	api.GET("/integrations/gmail/callback", s.gmailOAuthCallback)
+	api.GET("/integrations/gmail/renew", s.gmailRenew)
+	api.POST("/integrations/gmail/renew", s.gmailRenew)
+	api.POST("/integrations/gmail/sync", s.gmailSyncNow)
+	api.DELETE("/integrations/gmail", s.gmailDisconnect)
+	api.POST("/integrations/gmail/pubsub", s.gmailPubSub)
+	api.GET("/integrations/gmail/drain", s.gmailDrain)
+	api.POST("/integrations/gmail/drain", s.gmailDrain)
 }
 
 func cacheControl(maxAge int) gin.HandlerFunc {

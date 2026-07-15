@@ -1,9 +1,12 @@
 package app
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +32,19 @@ type Config struct {
 	ReadModelStrict             bool
 	EnabledModules              []string
 	NotificationRefreshInterval string
+	GmailClientID               string
+	GmailClientSecret           string
+	GmailOAuthRedirectURL       string
+	GmailPubSubTopic            string
+	GmailPubSubAudience         string
+	GmailPubSubServiceAccount   string
+	GmailLabel                  string
+	GmailAllowedSenders         []string
+	GmailTokenEncryptionKey     string
+	GmailSyncLookbackDays       int
+	GmailZipPasswords           []string
+	GmailZipTimeoutSeconds      int
+	CronSecret                  string
 }
 
 func LoadConfig() Config {
@@ -64,6 +80,19 @@ func LoadConfig() Config {
 		ReadModelStrict:             envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
 		EnabledModules:              parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 		NotificationRefreshInterval: env("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "off"),
+		GmailClientID:               strings.TrimSpace(os.Getenv("GMAIL_CLIENT_ID")),
+		GmailClientSecret:           strings.TrimSpace(os.Getenv("GMAIL_CLIENT_SECRET")),
+		GmailOAuthRedirectURL:       strings.TrimSpace(os.Getenv("GMAIL_OAUTH_REDIRECT_URL")),
+		GmailPubSubTopic:            strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_TOPIC")),
+		GmailPubSubAudience:         strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_AUDIENCE")),
+		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
+		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
+		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
+		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
+		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
+		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
+		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 	}
 }
 
@@ -104,7 +133,39 @@ func loadBaseConfig() Config {
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		EnabledModules:              parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 		NotificationRefreshInterval: env("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "off"),
+		GmailClientID:               strings.TrimSpace(os.Getenv("GMAIL_CLIENT_ID")),
+		GmailClientSecret:           strings.TrimSpace(os.Getenv("GMAIL_CLIENT_SECRET")),
+		GmailOAuthRedirectURL:       strings.TrimSpace(os.Getenv("GMAIL_OAUTH_REDIRECT_URL")),
+		GmailPubSubTopic:            strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_TOPIC")),
+		GmailPubSubAudience:         strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_AUDIENCE")),
+		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
+		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
+		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
+		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
+		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
+		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
+		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 	}
+}
+
+func parseCSVLower(raw string) []string {
+	values := parseCSV(raw)
+	for index := range values {
+		values[index] = strings.ToLower(values[index])
+	}
+	return values
+}
+
+func parseCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func parseEnabledModules(raw string) []string {
@@ -135,6 +196,9 @@ func ValidateWebConfig(cfg Config) error {
 		return err
 	}
 	if _, err := notificationRefreshInterval(cfg.NotificationRefreshInterval); err != nil {
+		return err
+	}
+	if err := validateGmailAutomationConfig(cfg); err != nil {
 		return err
 	}
 	if cfg.DatabaseURL == "" {
@@ -178,6 +242,9 @@ func ValidateConfig(cfg Config) error {
 	if _, err := notificationRefreshInterval(cfg.NotificationRefreshInterval); err != nil {
 		return err
 	}
+	if err := validateGmailAutomationConfig(cfg); err != nil {
+		return err
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.LedgerStorage)) {
 	case "", "filesystem", "file", "github_api":
 	case "remote_git", "git":
@@ -198,6 +265,51 @@ func ValidateConfig(cfg Config) error {
 	}
 	if cfg.ReadModelStrict && !ledgerReadModelEnabled(cfg) {
 		return errors.New("LEDGER_READ_MODEL_STRICT=true requires LEDGER_READ_MODEL=postgres")
+	}
+	return nil
+}
+
+func gmailAutomationConfigured(cfg Config) bool {
+	return cfg.GmailClientID != "" || cfg.GmailClientSecret != "" || cfg.GmailOAuthRedirectURL != "" || cfg.GmailPubSubTopic != "" || cfg.GmailPubSubAudience != "" || cfg.GmailPubSubServiceAccount != "" || cfg.GmailTokenEncryptionKey != "" || len(cfg.GmailAllowedSenders) > 0
+}
+
+func validateGmailAutomationConfig(cfg Config) error {
+	if !gmailAutomationConfigured(cfg) {
+		return nil
+	}
+	required := map[string]string{
+		"GMAIL_CLIENT_ID":              cfg.GmailClientID,
+		"GMAIL_CLIENT_SECRET":          cfg.GmailClientSecret,
+		"GMAIL_OAUTH_REDIRECT_URL":     cfg.GmailOAuthRedirectURL,
+		"GMAIL_PUBSUB_TOPIC":           cfg.GmailPubSubTopic,
+		"GMAIL_PUBSUB_AUDIENCE":        cfg.GmailPubSubAudience,
+		"GMAIL_PUBSUB_SERVICE_ACCOUNT": cfg.GmailPubSubServiceAccount,
+		"GMAIL_TOKEN_ENCRYPTION_KEY":   cfg.GmailTokenEncryptionKey,
+		"CRON_SECRET":                  cfg.CronSecret,
+	}
+	for name, value := range required {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required when Gmail automation is configured", name)
+		}
+	}
+	if len(cfg.GmailAllowedSenders) == 0 {
+		return errors.New("GMAIL_ALLOWED_SENDERS is required when Gmail automation is configured")
+	}
+	if !strings.HasPrefix(cfg.GmailPubSubTopic, "projects/") || !strings.Contains(cfg.GmailPubSubTopic, "/topics/") {
+		return errors.New("GMAIL_PUBSUB_TOPIC must use projects/<project>/topics/<topic>")
+	}
+	key, err := base64.RawStdEncoding.DecodeString(cfg.GmailTokenEncryptionKey)
+	if err != nil {
+		key, err = base64.StdEncoding.DecodeString(cfg.GmailTokenEncryptionKey)
+	}
+	if err != nil || len(key) != 32 {
+		return errors.New("GMAIL_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
+	}
+	if cfg.GmailSyncLookbackDays < 1 || cfg.GmailSyncLookbackDays > 365 {
+		return errors.New("GMAIL_SYNC_LOOKBACK_DAYS must be between 1 and 365")
+	}
+	if cfg.GmailZipTimeoutSeconds < 1 || cfg.GmailZipTimeoutSeconds > 120 {
+		return errors.New("GMAIL_ZIP_TIMEOUT_SECONDS must be between 1 and 120")
 	}
 	return nil
 }
@@ -226,4 +338,16 @@ func envBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

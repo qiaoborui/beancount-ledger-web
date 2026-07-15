@@ -41,6 +41,12 @@ func TestFilesystemRuntimeFileStoreMaterializeFile(t *testing.T) {
 	if string(raw) != "statement" {
 		t.Fatalf("materialized content = %q", string(raw))
 	}
+	if err := store.DeleteFile(ctx, "imports", "preview123/original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetFile(ctx, "imports", "preview123/original"); err != nil || ok {
+		t.Fatalf("deleted file ok=%v err=%v", ok, err)
+	}
 }
 
 func TestImportMetadataFilesystemPathCompatibility(t *testing.T) {
@@ -62,5 +68,11 @@ func TestImportMetadataFilesystemPathCompatibility(t *testing.T) {
 	}
 	if got.Provider != meta.Provider || got.OriginalFilename != meta.OriginalFilename || got.InputFile != meta.InputFile {
 		t.Fatalf("meta = %#v", got)
+	}
+	if err := server.runtime().DeleteJSON(ctx, "imports", importFileKey("preview123", "meta")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.readImportMeta(ctx, "preview123"); !os.IsNotExist(err) {
+		t.Fatalf("deleted meta err=%v", err)
 	}
 }

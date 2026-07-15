@@ -71,7 +71,7 @@ func (s *Server) pushStatus(c *gin.Context) {
 	if !ok {
 		return
 	}
-	store := channel.readPushStore()
+	store := channel.readPushStore(context.Background())
 	publicKey := publicVapidKey()
 	c.JSON(http.StatusOK, gin.H{
 		"publicKey":  publicKey,
@@ -214,9 +214,9 @@ func publicVapidKey() string {
 	return strings.TrimSpace(os.Getenv("WEB_PUSH_VAPID_PUBLIC_KEY"))
 }
 
-func (c *webPushNotificationChannel) readPushStore() pushStore {
+func (c *webPushNotificationChannel) readPushStore(ctx context.Context) pushStore {
 	var store pushStore
-	ok, err := c.runtimeStore.GetJSON(context.Background(), "push", "subscriptions", &store)
+	ok, err := c.runtimeStore.GetJSON(ctx, "push", "subscriptions", &store)
 	if err != nil || !ok {
 		return pushStore{Version: 1, Subscriptions: []StoredPushSubscription{}}
 	}
@@ -229,8 +229,8 @@ func (c *webPushNotificationChannel) readPushStore() pushStore {
 	return store
 }
 
-func (c *webPushNotificationChannel) writePushStore(store pushStore) error {
-	return c.runtimeStore.PutJSON(context.Background(), "push", "subscriptions", store)
+func (c *webPushNotificationChannel) writePushStore(ctx context.Context, store pushStore) error {
+	return c.runtimeStore.PutJSON(ctx, "push", "subscriptions", store)
 }
 
 func (c *webPushNotificationChannel) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
@@ -239,8 +239,8 @@ func (c *webPushNotificationChannel) savePushSubscription(subscription PushSubsc
 		id = id[:48]
 	}
 	count := 0
-	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
-		store := c.readPushStore()
+	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func(lockCtx context.Context) error {
+		store := c.readPushStore(lockCtx)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		found := false
 		for i := range store.Subscriptions {
@@ -256,7 +256,7 @@ func (c *webPushNotificationChannel) savePushSubscription(subscription PushSubsc
 			store.Subscriptions = append(store.Subscriptions, StoredPushSubscription{ID: id, Subscription: subscription, UserAgent: userAgent, CreatedAt: now, UpdatedAt: now})
 		}
 		count = len(store.Subscriptions)
-		return c.writePushStore(store)
+		return c.writePushStore(lockCtx, store)
 	})
 	return id, count, err
 }
@@ -264,8 +264,8 @@ func (c *webPushNotificationChannel) savePushSubscription(subscription PushSubsc
 func (c *webPushNotificationChannel) removePushSubscription(endpoint string) (int, int, error) {
 	removed := 0
 	count := 0
-	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
-		store := c.readPushStore()
+	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func(lockCtx context.Context) error {
+		store := c.readPushStore(lockCtx)
 		kept := store.Subscriptions[:0]
 		for _, item := range store.Subscriptions {
 			if item.Subscription.Endpoint == endpoint {
@@ -277,7 +277,7 @@ func (c *webPushNotificationChannel) removePushSubscription(endpoint string) (in
 		store.Subscriptions = kept
 		count = len(store.Subscriptions)
 		if removed > 0 {
-			return c.writePushStore(store)
+			return c.writePushStore(lockCtx, store)
 		}
 		return nil
 	})
@@ -290,7 +290,7 @@ func (c *webPushNotificationChannel) Send(ctx context.Context, message Notificat
 	if publicKey == "" || privateKey == "" {
 		return NotificationDeliveryResult{}, errors.New("WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_VAPID_PRIVATE_KEY are required")
 	}
-	store := c.readPushStore()
+	store := c.readPushStore(context.Background())
 	data, err := json.Marshal(map[string]string{"title": message.Title, "body": message.Body, "url": message.URL, "tag": message.Tag})
 	if err != nil {
 		return NotificationDeliveryResult{}, err
@@ -326,8 +326,8 @@ func (c *webPushNotificationChannel) Send(ctx context.Context, message Notificat
 		}
 	}
 	if len(dead) > 0 {
-		err = c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
-			latest := c.readPushStore()
+		err = c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func(lockCtx context.Context) error {
+			latest := c.readPushStore(lockCtx)
 			kept := latest.Subscriptions[:0]
 			for _, item := range latest.Subscriptions {
 				if dead[item.Subscription.Endpoint] {
@@ -337,7 +337,7 @@ func (c *webPushNotificationChannel) Send(ctx context.Context, message Notificat
 				kept = append(kept, item)
 			}
 			latest.Subscriptions = kept
-			return c.writePushStore(latest)
+			return c.writePushStore(lockCtx, latest)
 		})
 		if err != nil {
 			return result, err

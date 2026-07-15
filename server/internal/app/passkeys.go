@@ -64,7 +64,7 @@ func (u passkeyUser) WebAuthnCredentials() []webauthn.Credential {
 }
 
 func (s *Server) passkeyStatus(c *gin.Context) {
-	store := s.readPasskeyStore()
+	store := s.readPasskeyStore(context.Background())
 	c.JSON(http.StatusOK, gin.H{"registered": len(store.Credentials) > 0})
 }
 
@@ -145,7 +145,7 @@ func (s *Server) passkeyLoginOptions(c *gin.Context) {
 	if !s.limiter.Check(c, "passkey.login.options", 20, timeMinute()) {
 		return
 	}
-	store := s.readPasskeyStore()
+	store := s.readPasskeyStore(context.Background())
 	if len(store.Credentials) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No passkey registered"})
 		return
@@ -246,9 +246,9 @@ func (s *Server) webAuthnRelatedOrigins(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"origins": origins})
 }
 
-func (s *Server) readPasskeyStore() passkeyStore {
+func (s *Server) readPasskeyStore(ctx context.Context) passkeyStore {
 	var store passkeyStore
-	ok, err := s.runtime().GetJSON(context.Background(), "auth", "passkeys", &store)
+	ok, err := s.runtime().GetJSON(ctx, "auth", "passkeys", &store)
 	if err != nil || !ok {
 		return passkeyStore{Credentials: []StoredPasskey{}}
 	}
@@ -259,20 +259,20 @@ func (s *Server) readPasskeyStore() passkeyStore {
 	return store
 }
 
-func (s *Server) writePasskeyStore(store passkeyStore) error {
-	return s.runtime().PutJSON(context.Background(), "auth", "passkeys", store)
+func (s *Server) writePasskeyStore(ctx context.Context, store passkeyStore) error {
+	return s.runtime().PutJSON(ctx, "auth", "passkeys", store)
 }
 
 func (s *Server) savePasskeySession(session *webauthn.SessionData) error {
 	if session == nil || strings.TrimSpace(session.Challenge) == "" {
 		return errors.New("No active passkey challenge")
 	}
-	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
-		store := s.readPasskeyStore()
+	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		now := time.Now()
 		store.normalizePasskeySessions(now)
 		store.Sessions[session.Challenge] = storedPasskeySession{Session: session, CreatedAt: now}
-		return s.writePasskeyStore(store)
+		return s.writePasskeyStore(lockCtx, store)
 	})
 }
 
@@ -281,8 +281,8 @@ func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData,
 		return nil, errors.New("No active passkey challenge")
 	}
 	var session *webauthn.SessionData
-	err := s.runtime().WithLock(context.Background(), "passkeys", func() error {
-		store := s.readPasskeyStore()
+	err := s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		store.normalizePasskeySessions(time.Now())
 		stored, ok := store.Sessions[challenge]
 		if !ok || stored.Session == nil {
@@ -290,7 +290,7 @@ func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData,
 		}
 		session = stored.Session
 		delete(store.Sessions, challenge)
-		return s.writePasskeyStore(store)
+		return s.writePasskeyStore(lockCtx, store)
 	})
 	if err != nil {
 		return nil, err
@@ -300,11 +300,11 @@ func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData,
 
 func (s *Server) hasPasskeySession() bool {
 	hasSession := false
-	_ = s.runtime().WithLock(context.Background(), "passkeys", func() error {
-		store := s.readPasskeyStore()
+	_ = s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		store.normalizePasskeySessions(time.Now())
 		hasSession = len(store.Sessions) > 0
-		return s.writePasskeyStore(store)
+		return s.writePasskeyStore(lockCtx, store)
 	})
 	return hasSession
 }
@@ -345,8 +345,8 @@ func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
 }
 
 func (s *Server) savePasskey(credential *webauthn.Credential) error {
-	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
-		store := s.readPasskeyStore()
+	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		id := base64.RawURLEncoding.EncodeToString(credential.ID)
 		transports := make([]string, 0, len(credential.Transport))
 		for _, transport := range credential.Transport {
@@ -371,7 +371,7 @@ func (s *Server) savePasskey(credential *webauthn.Credential) error {
 		if !replaced {
 			store.Credentials = append(store.Credentials, stored)
 		}
-		return s.writePasskeyStore(store)
+		return s.writePasskeyStore(lockCtx, store)
 	})
 }
 
@@ -380,15 +380,15 @@ func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
 }
 
 func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligible bool, backupState bool) error {
-	return s.runtime().WithLock(context.Background(), "passkeys", func() error {
-		store := s.readPasskeyStore()
+	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		encoded := base64.RawURLEncoding.EncodeToString(id)
 		for i := range store.Credentials {
 			if store.Credentials[i].ID == encoded {
 				store.Credentials[i].Counter = counter
 				store.Credentials[i].BackupEligible = boolPtr(backupEligible)
 				store.Credentials[i].BackupState = boolPtr(backupState)
-				return s.writePasskeyStore(store)
+				return s.writePasskeyStore(lockCtx, store)
 			}
 		}
 		return errors.New("Unknown passkey")
@@ -396,7 +396,7 @@ func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligib
 }
 
 func (s *Server) passkeyUser() passkeyUser {
-	store := s.readPasskeyStore()
+	store := s.readPasskeyStore(context.Background())
 	credentials := []webauthn.Credential{}
 	for _, stored := range store.Credentials {
 		id, err := decodeBase64URL(stored.ID)
@@ -429,7 +429,7 @@ func (s *Server) passkeyUser() passkeyUser {
 
 func (s *Server) passkeyUserByCredential(rawID, userHandle []byte, backupEligible bool, backupState bool) (webauthn.User, error) {
 	encoded := base64.RawURLEncoding.EncodeToString(rawID)
-	store := s.readPasskeyStore()
+	store := s.readPasskeyStore(context.Background())
 	for _, credential := range store.Credentials {
 		if credential.ID == encoded {
 			user := s.passkeyUser()

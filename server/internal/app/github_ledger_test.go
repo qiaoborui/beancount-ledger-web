@@ -80,6 +80,7 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 		sourceFile,
 		filepath.Join(cfg.LedgerRoot, "transactions", "2026", "documents", "imports", "statement.csv"),
 		"Assets:Cash",
+		"test-import",
 	)
 	if err != nil {
 		t.Fatal(err)
