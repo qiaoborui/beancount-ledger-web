@@ -144,7 +144,7 @@ func TestFilesystemRuntimeStoreLockSerializes(t *testing.T) {
 	done := make(chan struct{}, 2)
 
 	go func() {
-		_ = store.WithLock(context.Background(), "same", func() error {
+		_ = store.WithLock(context.Background(), "same", func(context.Context) error {
 			orderMu.Lock()
 			order = append(order, "first")
 			orderMu.Unlock()
@@ -157,7 +157,7 @@ func TestFilesystemRuntimeStoreLockSerializes(t *testing.T) {
 
 	<-firstStarted
 	go func() {
-		_ = store.WithLock(context.Background(), "same", func() error {
+		_ = store.WithLock(context.Background(), "same", func(context.Context) error {
 			orderMu.Lock()
 			order = append(order, "second")
 			orderMu.Unlock()

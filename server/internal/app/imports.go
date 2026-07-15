@@ -97,10 +97,73 @@ type ImportDocument struct {
 	ModTime   string `json:"modTime"`
 }
 
+type importUpload struct {
+	Filename string
+	Content  []byte
+}
+
 func (s *Server) createImportPreview(ctx context.Context, providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
-	importID := randomID()
+	input, err := importUploadFromMultipart(header)
+	if err != nil {
+		return nil, err
+	}
+	var original *importUpload
+	if originalHeader != nil {
+		value, err := importUploadFromMultipart(originalHeader)
+		if err != nil {
+			return nil, err
+		}
+		original = &value
+	}
+	if strings.EqualFold(filepath.Ext(input.Filename), ".zip") {
+		timeoutSeconds := s.cfg.GmailZipTimeoutSeconds
+		if timeoutSeconds <= 0 {
+			timeoutSeconds = 20
+		}
+		zipContext, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		extracted, _, err := extractImportZIP(zipContext, input.Content, s.cfg.GmailZipPasswords)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		if original == nil {
+			archive := input
+			original = &archive
+		}
+		input = extracted
+	}
+	return s.createImportPreviewFromUploads(ctx, providerOverride, alipayFundRounding, input, original)
+}
+
+func importUploadFromMultipart(header *multipart.FileHeader) (importUpload, error) {
+	if header == nil {
+		return importUpload{}, errors.New("账单文件不能为空")
+	}
+	if header.Size > 10*1024*1024 {
+		return importUpload{}, errors.New("账单文件超过 10MB")
+	}
+	content, err := readMultipartFile(header)
+	if err != nil {
+		return importUpload{}, err
+	}
+	return importUpload{Filename: header.Filename, Content: content}, nil
+}
+
+func (s *Server) createImportPreviewFromUploads(ctx context.Context, providerOverride string, alipayFundRounding bool, input importUpload, original *importUpload) (result ginH, resultErr error) {
+	return s.createImportPreviewFromUploadsWithID(ctx, randomID(), providerOverride, alipayFundRounding, input, original)
+}
+
+func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, importID, providerOverride string, alipayFundRounding bool, input importUpload, original *importUpload) (result ginH, resultErr error) {
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
+		return nil, errors.New("导入 ID 无效")
+	}
 	defer os.RemoveAll(importRuntimeDir(s.cfg, importID))
-	upload, err := s.saveImportUpload(ctx, header, originalHeader, providerOverride, importID)
+	defer func() {
+		if resultErr != nil {
+			_ = s.cleanupImportRuntime(context.Background(), importID)
+		}
+	}()
+	upload, err := s.saveImportUpload(ctx, input, original, providerOverride, importID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +275,7 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 		return nil, err
 	}
 	rawRowCount, filteredRowCount := importer.RowCounts(prepared, sourceAnalysis, generatedSummary)
-	return ginH{
+	result = ginH{
 		"importId":              importID,
 		"provider":              upload.Provider,
 		"providerDetection":     upload.ProviderDetection,
@@ -230,7 +293,11 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 		"dateStart":             nullableString(dateStart),
 		"dateEnd":               nullableString(dateEnd),
 		"warnings":              warnings,
-	}, nil
+	}
+	if err := s.writeImportPreview(ctx, importID, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Server) dedupGeneratedBeanWithReadModel(ctx context.Context, beanText, statementHash string) (string, int, error) {
@@ -429,19 +496,23 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 			fallbackDocumentAccount = entries[0].Postings[len(entries[0].Postings)-1].Account
 		}
 	}
-	outputFile := importOutputPath(s.cfg, summary.DateStart, summary.DateEnd, provider, importID[:min(len(importID), 6)])
-	documentFile := importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)])
+	outputFile := importOutputPath(s.cfg, summary.DateStart, summary.DateEnd, provider, importID)
+	documentFile := importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID)
 	monthFile := transactionFileForDate(s.cfg, summary.DateStart)
 	documentAccount := s.providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
 	sourceDocumentFile := meta.InputFile
 	if meta.DocumentFile != "" {
 		sourceDocumentFile = meta.DocumentFile
 	}
-	written, err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount)
+	written, err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount, importID)
 	if err != nil {
 		return nil, err
 	}
-	return ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}, nil
+	result := ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}
+	if err := s.cleanupImportRuntime(ctx, importID); err != nil {
+		result["runtimeCleanupError"] = err.Error()
+	}
+	return result, nil
 }
 
 func (s *Server) listImportDocuments() ([]ImportDocument, error) {
@@ -568,19 +639,16 @@ func cleanImportDocumentRel(rawPath string) (string, error) {
 	return path, nil
 }
 
-func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *multipart.FileHeader, providerOverride, importID string) (importMeta, error) {
-	if header.Size > 10*1024*1024 {
+func (s *Server) saveImportUpload(ctx context.Context, input importUpload, original *importUpload, providerOverride, importID string) (importMeta, error) {
+	if len(input.Content) > 10*1024*1024 {
 		return importMeta{}, errors.New("账单文件超过 10MB")
 	}
-	originalName := header.Filename
+	originalName := input.Filename
 	if strings.TrimSpace(originalName) == "" {
 		originalName = "bill"
 	}
 	ext := strings.ToLower(filepath.Ext(originalName))
-	content, err := readMultipartFile(header)
-	if err != nil {
-		return importMeta{}, err
-	}
+	content := input.Content
 	detection, err := s.importerRegistry().Detect(originalName, content, providerOverride)
 	if err != nil {
 		return importMeta{}, err
@@ -605,18 +673,15 @@ func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *m
 		return importMeta{}, err
 	}
 	meta := importMeta{Provider: detection.Provider, OriginalFilename: originalName, InputFilename: originalName, InputFile: inputFile, InputFileKey: inputFileKey, ProviderDetection: detection, StatementHash: sha256Hex(content)}
-	if originalHeader != nil {
-		if originalHeader.Size > 10*1024*1024 {
+	if original != nil {
+		if len(original.Content) > 10*1024*1024 {
 			return importMeta{}, errors.New("原始账单文件超过 10MB")
 		}
-		originalDocumentName := strings.TrimSpace(originalHeader.Filename)
+		originalDocumentName := strings.TrimSpace(original.Filename)
 		if originalDocumentName == "" {
 			originalDocumentName = originalName
 		}
-		originalContent, err := readMultipartFile(originalHeader)
-		if err != nil {
-			return importMeta{}, err
-		}
+		originalContent := original.Content
 		originalExt := strings.ToLower(filepath.Ext(originalDocumentName))
 		if originalExt == "" {
 			originalExt = ".pdf"
@@ -902,10 +967,20 @@ type writtenImportFiles struct {
 	DocumentFile string
 }
 
-func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount string) (writtenImportFiles, error) {
+func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID string) (writtenImportFiles, error) {
 	written := writtenImportFiles{MonthFile: monthFile}
 	err := s.writer.RunTransactionWithSource(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
 		var err error
+		marker := "; import-id: " + importID
+		if existing, readErr := tx.ReadFile(outputFile); readErr == nil && strings.Contains(string(existing), marker) {
+			written.OutputFile = outputFile
+			if documentFile != "" {
+				written.DocumentFile = documentFile
+			}
+			return nil
+		} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return readErr
+		}
 		outputFile, err = tx.UniquePath(outputFile)
 		if err != nil {
 			return err
@@ -926,7 +1001,7 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 			written.DocumentFile = documentFile
 			documentLine = documentDirective(end, documentAccount, outputFile, documentFile) + "\n\n"
 		}
-		header := fmt.Sprintf("; %s import: %s .. %s\n", s.importProviderTitle(provider), start, end)
+		header := fmt.Sprintf("; %s import: %s .. %s\n%s\n", s.importProviderTitle(provider), start, end, marker)
 		if err := tx.WriteFile(outputFile, []byte(header+documentLine+strings.TrimRight(beanText, "\n")+"\n"), 0o644); err != nil {
 			return err
 		}

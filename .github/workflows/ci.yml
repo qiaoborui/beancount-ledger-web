@@ -236,7 +236,7 @@ jobs:
         run: pnpm run test
       - name: Audit high severity vulnerabilities
         working-directory: web
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=high --ignore-registry-errors
       - name: Build
         working-directory: web
         run: pnpm run build

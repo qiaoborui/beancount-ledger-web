@@ -233,8 +233,8 @@ func (s *NotificationService) refreshMonth(month string, snapshot *LedgerSnapsho
 
 func (s *NotificationService) UpdateStatus(ids []string, status string) ([]StoredNotification, error) {
 	updated := []StoredNotification{}
-	err := s.runtimeStore.WithLock(context.Background(), "notifications", func() error {
-		store := s.readStore()
+	err := s.runtimeStore.WithLock(context.Background(), "notifications", func(lockCtx context.Context) error {
+		store := s.readStore(lockCtx)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		idSet := map[string]bool{}
 		for _, id := range ids {
@@ -261,7 +261,7 @@ func (s *NotificationService) UpdateStatus(ids []string, status string) ([]Store
 			}
 			updated = append(updated, *notification)
 		}
-		return s.writeStore(store)
+		return s.writeStore(lockCtx, store)
 	})
 	return updated, err
 }
@@ -412,8 +412,8 @@ func (s *NotificationService) detectInsights(month string, snapshot *LedgerSnaps
 func (s *NotificationService) mergeInsightsIntoNotifications(month string, insights []Insight) ([]StoredNotification, error) {
 	created := []StoredNotification{}
 	var notifications []StoredNotification
-	err := s.runtimeStore.WithLock(context.Background(), "notifications", func() error {
-		store := s.readStore()
+	err := s.runtimeStore.WithLock(context.Background(), "notifications", func(lockCtx context.Context) error {
+		store := s.readStore(lockCtx)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		currentIDs := map[string]bool{}
 		for _, insight := range insights {
@@ -458,7 +458,7 @@ func (s *NotificationService) mergeInsightsIntoNotifications(month string, insig
 				notification.UpdatedAt = now
 			}
 		}
-		if err := s.writeStore(store); err != nil {
+		if err := s.writeStore(lockCtx, store); err != nil {
 			return err
 		}
 		notifications = s.notificationsForMonth(store.Notifications, month)
@@ -478,9 +478,9 @@ func (s *NotificationService) mergeInsightsIntoNotifications(month string, insig
 	return notifications, nil
 }
 
-func (s *NotificationService) readStore() notificationStore {
+func (s *NotificationService) readStore(ctx context.Context) notificationStore {
 	var store notificationStore
-	ok, err := s.runtimeStore.GetJSON(context.Background(), "notifications", "store", &store)
+	ok, err := s.runtimeStore.GetJSON(ctx, "notifications", "store", &store)
 	if err != nil || !ok {
 		return notificationStore{Version: 1, Notifications: []StoredNotification{}}
 	}
@@ -493,8 +493,8 @@ func (s *NotificationService) readStore() notificationStore {
 	return store
 }
 
-func (s *NotificationService) writeStore(store notificationStore) error {
-	return s.runtimeStore.PutJSON(context.Background(), "notifications", "store", store)
+func (s *NotificationService) writeStore(ctx context.Context, store notificationStore) error {
+	return s.runtimeStore.PutJSON(ctx, "notifications", "store", store)
 }
 
 func (s *NotificationService) notificationsForMonth(notifications []StoredNotification, month string) []StoredNotification {

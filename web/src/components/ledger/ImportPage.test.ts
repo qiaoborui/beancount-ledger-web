@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { importFlowForEntry, latestImportDocumentsByProvider } from "./ImportPage";
+import { importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -111,5 +111,18 @@ describe("latest import coverage by provider", () => {
     ]);
 
     expect(Object.keys(latest)).toEqual(["cmb"]);
+  });
+});
+
+describe("Gmail pending imports", () => {
+  it("keeps ready and failed items in the Review inbox", () => {
+    const base = { id: "pending", messageId: "message", sender: "bill@example.com", subject: "账单", receivedAt: "2026-07-15T00:00:00Z", filename: "statement.csv", candidateCount: 1, createdAt: "2026-07-15T00:00:00Z", updatedAt: "2026-07-15T00:00:00Z" };
+    const visible = reviewableGmailPendingImports([
+      { ...base, id: "ready", status: "ready" },
+      { ...base, id: "failed", status: "failed" },
+      { ...base, id: "committed", status: "committed" },
+      { ...base, id: "dismissed", status: "dismissed" },
+    ]);
+    expect(visible.map((item) => item.id)).toEqual(["ready", "failed"]);
   });
 });

@@ -22,10 +22,12 @@ type RuntimeFile struct {
 type RuntimeStore interface {
 	GetJSON(ctx context.Context, scope, key string, dest any) (bool, error)
 	PutJSON(ctx context.Context, scope, key string, value any) error
+	DeleteJSON(ctx context.Context, scope, key string) error
 	GetFile(ctx context.Context, scope, key string) (RuntimeFile, bool, error)
 	PutFile(ctx context.Context, scope, key string, content []byte) error
+	DeleteFile(ctx context.Context, scope, key string) error
 	MaterializeFile(ctx context.Context, scope, key, localPath string) (bool, error)
-	WithLock(ctx context.Context, name string, fn func() error) error
+	WithLock(ctx context.Context, name string, fn func(context.Context) error) error
 }
 
 func NewRuntimeStore(cfg Config) (RuntimeStore, error) {
@@ -88,6 +90,10 @@ func (s *errorRuntimeStore) PutJSON(context.Context, string, string, any) error 
 	return s.err
 }
 
+func (s *errorRuntimeStore) DeleteJSON(context.Context, string, string) error {
+	return s.err
+}
+
 func (s *errorRuntimeStore) GetFile(context.Context, string, string) (RuntimeFile, bool, error) {
 	return RuntimeFile{}, false, s.err
 }
@@ -96,11 +102,15 @@ func (s *errorRuntimeStore) PutFile(context.Context, string, string, []byte) err
 	return s.err
 }
 
+func (s *errorRuntimeStore) DeleteFile(context.Context, string, string) error {
+	return s.err
+}
+
 func (s *errorRuntimeStore) MaterializeFile(context.Context, string, string, string) (bool, error) {
 	return false, s.err
 }
 
-func (s *errorRuntimeStore) WithLock(_ context.Context, _ string, _ func() error) error {
+func (s *errorRuntimeStore) WithLock(_ context.Context, _ string, _ func(context.Context) error) error {
 	return s.err
 }
 
@@ -140,6 +150,14 @@ func (s *filesystemRuntimeStore) PutJSON(_ context.Context, scope, key string, v
 	return os.WriteFile(path, content, 0o600)
 }
 
+func (s *filesystemRuntimeStore) DeleteJSON(_ context.Context, scope, key string) error {
+	err := os.Remove(s.path(scope, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 func (s *filesystemRuntimeStore) GetFile(_ context.Context, scope, key string) (RuntimeFile, bool, error) {
 	path := s.filePath(scope, key)
 	content, err := os.ReadFile(path)
@@ -164,6 +182,14 @@ func (s *filesystemRuntimeStore) PutFile(_ context.Context, scope, key string, c
 	return os.WriteFile(path, content, 0o600)
 }
 
+func (s *filesystemRuntimeStore) DeleteFile(_ context.Context, scope, key string) error {
+	err := os.Remove(s.filePath(scope, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 func (s *filesystemRuntimeStore) MaterializeFile(ctx context.Context, scope, key, localPath string) (bool, error) {
 	file, ok, err := s.GetFile(ctx, scope, key)
 	if err != nil || !ok {
@@ -175,10 +201,10 @@ func (s *filesystemRuntimeStore) MaterializeFile(ctx context.Context, scope, key
 	return true, os.WriteFile(localPath, file.Content, 0o600)
 }
 
-func (s *filesystemRuntimeStore) WithLock(_ context.Context, _ string, fn func() error) error {
+func (s *filesystemRuntimeStore) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fn()
+	return fn(ctx)
 }
 
 func (s *filesystemRuntimeStore) path(scope, key string) string {
@@ -215,6 +241,20 @@ type postgresRuntimeStore struct {
 	db *sql.DB
 }
 
+type runtimeSQLExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type runtimeSQLExecutorKey struct{}
+
+func (s *postgresRuntimeStore) executor(ctx context.Context) runtimeSQLExecutor {
+	if executor, ok := ctx.Value(runtimeSQLExecutorKey{}).(runtimeSQLExecutor); ok {
+		return executor
+	}
+	return s.db
+}
+
 func (s *postgresRuntimeStore) ensureSchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS runtime_json (
@@ -238,7 +278,7 @@ CREATE TABLE IF NOT EXISTS runtime_files (
 
 func (s *postgresRuntimeStore) GetJSON(ctx context.Context, scope, key string, dest any) (bool, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM runtime_json WHERE scope = $1 AND key = $2`, scope, key).Scan(&raw)
+	err := s.executor(ctx).QueryRowContext(ctx, `SELECT value FROM runtime_json WHERE scope = $1 AND key = $2`, scope, key).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -256,7 +296,7 @@ func (s *postgresRuntimeStore) PutJSON(ctx context.Context, scope, key string, v
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.executor(ctx).ExecContext(ctx, `
 INSERT INTO runtime_json (scope, key, value, updated_at)
 VALUES ($1, $2, $3::jsonb, now())
 ON CONFLICT (scope, key)
@@ -264,9 +304,14 @@ DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, scope, key, raw)
 	return err
 }
 
+func (s *postgresRuntimeStore) DeleteJSON(ctx context.Context, scope, key string) error {
+	_, err := s.executor(ctx).ExecContext(ctx, `DELETE FROM runtime_json WHERE scope = $1 AND key = $2`, scope, key)
+	return err
+}
+
 func (s *postgresRuntimeStore) GetFile(ctx context.Context, scope, key string) (RuntimeFile, bool, error) {
 	var file RuntimeFile
-	err := s.db.QueryRowContext(ctx, `SELECT content, size, updated_at FROM runtime_files WHERE scope = $1 AND key = $2`, scope, key).Scan(&file.Content, &file.Size, &file.UpdatedAt)
+	err := s.executor(ctx).QueryRowContext(ctx, `SELECT content, size, updated_at FROM runtime_files WHERE scope = $1 AND key = $2`, scope, key).Scan(&file.Content, &file.Size, &file.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeFile{}, false, nil
 	}
@@ -277,11 +322,16 @@ func (s *postgresRuntimeStore) GetFile(ctx context.Context, scope, key string) (
 }
 
 func (s *postgresRuntimeStore) PutFile(ctx context.Context, scope, key string, content []byte) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.executor(ctx).ExecContext(ctx, `
 INSERT INTO runtime_files (scope, key, content, size, updated_at)
 VALUES ($1, $2, $3, $4, now())
 ON CONFLICT (scope, key)
 DO UPDATE SET content = EXCLUDED.content, size = EXCLUDED.size, updated_at = now()`, scope, key, content, len(content))
+	return err
+}
+
+func (s *postgresRuntimeStore) DeleteFile(ctx context.Context, scope, key string) error {
+	_, err := s.executor(ctx).ExecContext(ctx, `DELETE FROM runtime_files WHERE scope = $1 AND key = $2`, scope, key)
 	return err
 }
 
@@ -296,17 +346,20 @@ func (s *postgresRuntimeStore) MaterializeFile(ctx context.Context, scope, key, 
 	return true, os.WriteFile(localPath, file.Content, 0o600)
 }
 
-func (s *postgresRuntimeStore) WithLock(ctx context.Context, name string, fn func() error) error {
-	conn, err := s.db.Conn(ctx)
+func (s *postgresRuntimeStore) WithLock(ctx context.Context, name string, fn func(context.Context) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, name); err != nil {
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, name); err != nil {
 		return err
 	}
-	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, name)
-	return fn()
+	lockedCtx := context.WithValue(ctx, runtimeSQLExecutorKey{}, runtimeSQLExecutor(tx))
+	if err := fn(lockedCtx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func cleanRuntimeFileStorePath(scope, key string) string {

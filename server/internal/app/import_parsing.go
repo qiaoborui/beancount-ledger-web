@@ -286,6 +286,37 @@ func (s *Server) readImportMeta(ctx context.Context, importID string) (importMet
 	return meta, nil
 }
 
+func (s *Server) writeImportPreview(ctx context.Context, importID string, preview ginH) error {
+	return s.runtime().PutJSON(ctx, "imports", importFileKey(importID, "preview"), preview)
+}
+
+func (s *Server) readImportPreview(ctx context.Context, importID string) (ginH, error) {
+	var preview ginH
+	ok, err := s.runtime().GetJSON(ctx, "imports", importFileKey(importID, "preview"), &preview)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return preview, nil
+}
+
+func (s *Server) cleanupImportRuntime(ctx context.Context, importID string) error {
+	errs := []error{}
+	for _, name := range []string{"meta", "preview"} {
+		if err := s.runtime().DeleteJSON(ctx, "imports", importFileKey(importID, name)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, name := range []string{"original", "document", "generated", "deduped"} {
+		if err := s.runtime().DeleteFile(ctx, "imports", importFileKey(importID, name)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func importFileKey(importID, name string) string {
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
 		importID = "invalid"

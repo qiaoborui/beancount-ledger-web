@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"time"
@@ -104,14 +105,36 @@ func (s *Server) importsCommit(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
+	if pending, err := s.isGmailPendingImport(c.Request.Context(), input.ImportID); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	} else if pending && !requireSensitive(c) {
+		return
+	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	claimedPending, err := s.claimGmailPendingImport(c.Request.Context(), input.ImportID)
+	if err != nil {
+		errorJSON(c, http.StatusConflict, err)
+		return
+	}
 	result, err := s.commitImport(c.Request.Context(), input.ImportID, input.Provider, input.Entries)
 	if err != nil {
+		if claimedPending {
+			if statusErr := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "ready", err.Error()); statusErr != nil {
+				err = fmt.Errorf("%w; 恢复自动账单状态失败: %v", err, statusErr)
+			}
+		}
 		errorJSON(c, http.StatusBadRequest, err)
 		return
+	}
+	if claimedPending {
+		if err := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "committed", ""); err != nil {
+			errorJSON(c, http.StatusInternalServerError, fmt.Errorf("账本已写入，自动账单状态同步失败，请重试: %w", err))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, result)
 }

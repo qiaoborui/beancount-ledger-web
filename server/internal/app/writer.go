@@ -141,7 +141,7 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 
 func (w *LedgerWriter) runGitHubAPITransaction(source string, apply func(*LedgerWriteTransaction) error) error {
 	if w.runtimeStore != nil {
-		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func() error {
+		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func(context.Context) error {
 			return w.runGitHubAPITransactionLocked(source, apply)
 		})
 	}

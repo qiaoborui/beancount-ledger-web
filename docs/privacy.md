@@ -25,5 +25,8 @@ The stateless `ledger-web` service stores runtime state in Postgres:
 - web push subscriptions
 - distributed locks and rate-limit buckets
 - import preview metadata and uploaded files
+- encrypted Gmail refresh token, mailbox history cursor, and pending bill-import metadata
+
+Gmail message bodies and attachments are read only for messages carrying the configured bill Label and matching the exact sender allowlist. Raw EML and import files remain in the runtime store while they await Review; committed source documents are archived in the private ledger repository through the existing import flow.
 
 Older filesystem runtime directories can be migrated with `ledger-state-migrate`.

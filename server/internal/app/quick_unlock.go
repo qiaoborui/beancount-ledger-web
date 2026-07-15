@@ -44,7 +44,7 @@ func (s *Server) quickUnlockStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	store := s.readQuickUnlockStore()
+	store := s.readQuickUnlockStore(context.Background())
 	devices := make([]quickUnlockPublicDevice, 0, len(store.Devices))
 	for _, device := range store.Devices {
 		devices = append(devices, quickUnlockPublicDevice{
@@ -135,9 +135,9 @@ func (s *Server) quickUnlockRevoke(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (s *Server) readQuickUnlockStore() quickUnlockStore {
+func (s *Server) readQuickUnlockStore(ctx context.Context) quickUnlockStore {
 	var store quickUnlockStore
-	ok, err := s.runtime().GetJSON(context.Background(), "auth", "quick-unlock", &store)
+	ok, err := s.runtime().GetJSON(ctx, "auth", "quick-unlock", &store)
 	if err != nil || !ok {
 		return quickUnlockStore{Version: 1, Devices: []quickUnlockDevice{}}
 	}
@@ -150,14 +150,14 @@ func (s *Server) readQuickUnlockStore() quickUnlockStore {
 	return store
 }
 
-func (s *Server) writeQuickUnlockStore(store quickUnlockStore) error {
+func (s *Server) writeQuickUnlockStore(ctx context.Context, store quickUnlockStore) error {
 	store.Version = 1
-	return s.runtime().PutJSON(context.Background(), "auth", "quick-unlock", store)
+	return s.runtime().PutJSON(ctx, "auth", "quick-unlock", store)
 }
 
 func (s *Server) saveQuickUnlockDevice(device quickUnlockDevice) error {
-	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func() error {
-		store := s.readQuickUnlockStore()
+	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
+		store := s.readQuickUnlockStore(lockCtx)
 		next := make([]quickUnlockDevice, 0, len(store.Devices)+1)
 		for _, existing := range store.Devices {
 			if existing.ID == device.ID {
@@ -167,14 +167,14 @@ func (s *Server) saveQuickUnlockDevice(device quickUnlockDevice) error {
 		}
 		next = append(next, device)
 		store.Devices = next
-		return s.writeQuickUnlockStore(store)
+		return s.writeQuickUnlockStore(lockCtx, store)
 	})
 }
 
 func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
 	tokenHash := quickUnlockTokenHash(token)
-	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func() error {
-		store := s.readQuickUnlockStore()
+	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
+		store := s.readQuickUnlockStore(lockCtx)
 		now := time.Now()
 		for index := range store.Devices {
 			device := &store.Devices[index]
@@ -185,15 +185,15 @@ func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
 				return errors.New("quick unlock token mismatch")
 			}
 			device.LastUsedAt = &now
-			return s.writeQuickUnlockStore(store)
+			return s.writeQuickUnlockStore(lockCtx, store)
 		}
 		return errors.New("quick unlock device not found")
 	})
 }
 
 func (s *Server) revokeQuickUnlockDevice(deviceID string) error {
-	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func() error {
-		store := s.readQuickUnlockStore()
+	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
+		store := s.readQuickUnlockStore(lockCtx)
 		now := time.Now()
 		found := false
 		for index := range store.Devices {
@@ -205,7 +205,7 @@ func (s *Server) revokeQuickUnlockDevice(deviceID string) error {
 		if !found {
 			return errors.New("quick unlock device not found")
 		}
-		return s.writeQuickUnlockStore(store)
+		return s.writeQuickUnlockStore(lockCtx, store)
 	})
 }
 
