@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/idtoken"
@@ -843,7 +844,7 @@ func parseGmailMessage(raw []byte, internalDate int64) (gmailMessageEnvelope, er
 	if err != nil {
 		return gmailMessageEnvelope{}, err
 	}
-	decoder := &mime.WordDecoder{}
+	decoder := gmailMIMEWordDecoder()
 	subject, _ := decoder.DecodeHeader(message.Header.Get("Subject"))
 	sender := canonicalEmailAddress(message.Header.Get("From"))
 	receivedAt := ""
@@ -857,6 +858,17 @@ func parseGmailMessage(raw []byte, internalDate int64) (gmailMessageEnvelope, er
 		return gmailMessageEnvelope{}, err
 	}
 	return gmailMessageEnvelope{Sender: sender, Subject: strings.TrimSpace(subject), ReceivedAt: receivedAt, Authenticated: gmailDMARCPassed(message.Header), Attachments: attachments}, nil
+}
+
+func gmailMIMEWordDecoder() *mime.WordDecoder {
+	return &mime.WordDecoder{CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+		switch strings.ToLower(strings.TrimSpace(charset)) {
+		case "gb18030", "gbk", "gb2312":
+			return simplifiedchinese.GB18030.NewDecoder().Reader(input), nil
+		default:
+			return nil, fmt.Errorf("unsupported charset %q", charset)
+		}
+	}}
 }
 
 func gmailDMARCPassed(header mail.Header) bool {

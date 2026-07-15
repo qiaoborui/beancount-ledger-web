@@ -337,6 +337,40 @@ func TestParseGmailMessageAttachments(t *testing.T) {
 	}
 }
 
+func TestParseGmailMessageDecodesGB18030AttachmentFilename(t *testing.T) {
+	attachment := base64.StdEncoding.EncodeToString([]byte("date,amount\n2026-07-01,12.34\n"))
+	encodedFilename := "=?GB18030?Q?=D6=A7=B8=B6=B1=A6=BD=BB=D2=D7=C3=F7=CF=B8=2Ecsv?="
+	raw := strings.Join([]string{
+		"From: Alipay <service@mail.alipay.com>",
+		"Subject: =?GB18030?Q?=D6=A7=B8=B6=B1=A6=CC=E1=D0=D1?=",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=mail.alipay.com",
+		"Content-Type: multipart/mixed; boundary=alipay-boundary",
+		"",
+		"--alipay-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"statement attached",
+		"--alipay-boundary",
+		"Content-Type: text/csv; name=\"" + encodedFilename + "\"",
+		"Content-Disposition: attachment; filename=\"" + encodedFilename + "\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		attachment,
+		"--alipay-boundary--",
+		"",
+	}, "\r\n")
+	message, err := parseGmailMessage([]byte(raw), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Subject != "支付宝提醒" {
+		t.Fatalf("subject = %q", message.Subject)
+	}
+	if len(message.Attachments) != 1 || message.Attachments[0].Filename != "支付宝交易明细.csv" {
+		t.Fatalf("unexpected attachments: %#v", message.Attachments)
+	}
+}
+
 func TestGmailDMARCRequiresGoogleAuthenticationResult(t *testing.T) {
 	header := mail.Header{"Authentication-Results": {"attacker.example; dmarc=pass header.from=example.com"}}
 	if gmailDMARCPassed(header) {
