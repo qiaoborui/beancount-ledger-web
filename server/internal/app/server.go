@@ -17,7 +17,7 @@ import (
 type Server struct {
 	cfg                 Config
 	runtimeStore        RuntimeStore
-	indexStore          *LedgerIndexStore
+	indexStore          LedgerIndexPort
 	indexStoreErr       error
 	cache               *LedgerCache
 	importers           *BillImporterRegistry
