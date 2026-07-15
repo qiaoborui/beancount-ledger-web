@@ -20,6 +20,7 @@ type Server struct {
 	indexStore       *LedgerIndexStore
 	indexStoreErr    error
 	cache            *LedgerCache
+	importers        *BillImporterRegistry
 	writer           *LedgerWriter
 	accountService   *AccountService
 	queryPort        LedgerQueryPort
