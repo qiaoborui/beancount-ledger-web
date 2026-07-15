@@ -38,18 +38,40 @@ type pushStore struct {
 	Subscriptions []StoredPushSubscription `json:"subscriptions"`
 }
 
-type pushSendResult struct {
+// NotificationDeliveryResult captures delivery work across notification channels.
+type NotificationDeliveryResult struct {
 	Attempted int `json:"attempted"`
 	Sent      int `json:"sent"`
 	Failed    int `json:"failed"`
 	Removed   int `json:"removed"`
 }
 
+type webPushNotificationChannelFactory struct{}
+
+func (webPushNotificationChannelFactory) ID() string { return "web-push" }
+
+func (webPushNotificationChannelFactory) NewNotificationChannel(store RuntimeStore) (NotificationChannel, error) {
+	if store == nil {
+		return nil, errors.New("runtime store is required")
+	}
+	return &webPushNotificationChannel{runtimeStore: store}, nil
+}
+
+type webPushNotificationChannel struct {
+	runtimeStore RuntimeStore
+}
+
+func (c *webPushNotificationChannel) ID() string { return "web-push" }
+
 func (s *Server) pushStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	store := s.readPushStore()
+	channel, ok := s.webPushChannel(c)
+	if !ok {
+		return
+	}
+	store := channel.readPushStore()
 	publicKey := publicVapidKey()
 	c.JSON(http.StatusOK, gin.H{
 		"publicKey":  publicKey,
@@ -62,6 +84,10 @@ func (s *Server) pushSave(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	channel, ok := s.webPushChannel(c)
+	if !ok {
+		return
+	}
 	var input struct {
 		Subscription PushSubscription `json:"subscription"`
 	}
@@ -72,7 +98,7 @@ func (s *Server) pushSave(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid push subscription"})
 		return
 	}
-	id, count, err := s.savePushSubscription(input.Subscription, c.GetHeader("User-Agent"))
+	id, count, err := channel.savePushSubscription(input.Subscription, c.GetHeader("User-Agent"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -84,13 +110,17 @@ func (s *Server) pushDelete(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
+	channel, ok := s.webPushChannel(c)
+	if !ok {
+		return
+	}
 	var input struct {
 		Endpoint string `json:"endpoint"`
 	}
 	if !bindJSON(c, &input) {
 		return
 	}
-	removed, count, err := s.removePushSubscription(input.Endpoint)
+	removed, count, err := channel.removePushSubscription(input.Endpoint)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -102,11 +132,15 @@ func (s *Server) pushTest(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	result, err := s.sendWebPushToAll(map[string]string{
-		"title": "我的账本",
-		"body":  "Web Push 测试通知已发送。",
-		"url":   "/",
-		"tag":   "web-push-test",
+	service, ok := s.notificationsService(c)
+	if !ok {
+		return
+	}
+	result, err := service.Publish(c.Request.Context(), NotificationMessage{
+		Title: "我的账本",
+		Body:  "Web Push 测试通知已发送。",
+		URL:   "/",
+		Tag:   "web-push-test",
 	})
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -117,6 +151,10 @@ func (s *Server) pushTest(c *gin.Context) {
 
 func (s *Server) pushNotify(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	service, ok := s.notificationsService(c)
+	if !ok {
 		return
 	}
 	var input struct {
@@ -140,12 +178,33 @@ func (s *Server) pushNotify(c *gin.Context) {
 	if strings.TrimSpace(input.Tag) == "" {
 		input.Tag = "ledger-notification"
 	}
-	result, err := s.sendWebPushToAll(map[string]string{"title": input.Title, "body": input.Body, "url": input.URL, "tag": input.Tag})
+	result, err := service.Publish(c.Request.Context(), NotificationMessage{Title: input.Title, Body: input.Body, URL: input.URL, Tag: input.Tag})
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "attempted": result.Attempted, "sent": result.Sent, "failed": result.Failed, "removed": result.Removed})
+}
+
+func (s *Server) webPushChannel(c *gin.Context) (*webPushNotificationChannel, bool) {
+	service, ok := s.notificationsService(c)
+	if !ok {
+		return nil, false
+	}
+	channel, ok := service.WebPushChannel()
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "web push channel is disabled"})
+		return nil, false
+	}
+	return channel, true
+}
+
+func (s *Server) notificationsService(c *gin.Context) (*NotificationService, bool) {
+	if s.notificationService != nil {
+		return s.notificationService, true
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "notifications module is disabled"})
+	return nil, false
 }
 
 func publicVapidKey() string {
@@ -155,9 +214,9 @@ func publicVapidKey() string {
 	return strings.TrimSpace(os.Getenv("WEB_PUSH_VAPID_PUBLIC_KEY"))
 }
 
-func (s *Server) readPushStore() pushStore {
+func (c *webPushNotificationChannel) readPushStore() pushStore {
 	var store pushStore
-	ok, err := s.runtime().GetJSON(context.Background(), "push", "subscriptions", &store)
+	ok, err := c.runtimeStore.GetJSON(context.Background(), "push", "subscriptions", &store)
 	if err != nil || !ok {
 		return pushStore{Version: 1, Subscriptions: []StoredPushSubscription{}}
 	}
@@ -170,18 +229,18 @@ func (s *Server) readPushStore() pushStore {
 	return store
 }
 
-func (s *Server) writePushStore(store pushStore) error {
-	return s.runtime().PutJSON(context.Background(), "push", "subscriptions", store)
+func (c *webPushNotificationChannel) writePushStore(store pushStore) error {
+	return c.runtimeStore.PutJSON(context.Background(), "push", "subscriptions", store)
 }
 
-func (s *Server) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
+func (c *webPushNotificationChannel) savePushSubscription(subscription PushSubscription, userAgent string) (string, int, error) {
 	id := base64.RawURLEncoding.EncodeToString([]byte(subscription.Endpoint))
 	if len(id) > 48 {
 		id = id[:48]
 	}
 	count := 0
-	err := s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
-		store := s.readPushStore()
+	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
+		store := c.readPushStore()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		found := false
 		for i := range store.Subscriptions {
@@ -197,16 +256,16 @@ func (s *Server) savePushSubscription(subscription PushSubscription, userAgent s
 			store.Subscriptions = append(store.Subscriptions, StoredPushSubscription{ID: id, Subscription: subscription, UserAgent: userAgent, CreatedAt: now, UpdatedAt: now})
 		}
 		count = len(store.Subscriptions)
-		return s.writePushStore(store)
+		return c.writePushStore(store)
 	})
 	return id, count, err
 }
 
-func (s *Server) removePushSubscription(endpoint string) (int, int, error) {
+func (c *webPushNotificationChannel) removePushSubscription(endpoint string) (int, int, error) {
 	removed := 0
 	count := 0
-	err := s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
-		store := s.readPushStore()
+	err := c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
+		store := c.readPushStore()
 		kept := store.Subscriptions[:0]
 		for _, item := range store.Subscriptions {
 			if item.Subscription.Endpoint == endpoint {
@@ -218,27 +277,30 @@ func (s *Server) removePushSubscription(endpoint string) (int, int, error) {
 		store.Subscriptions = kept
 		count = len(store.Subscriptions)
 		if removed > 0 {
-			return s.writePushStore(store)
+			return c.writePushStore(store)
 		}
 		return nil
 	})
 	return removed, count, err
 }
 
-func (s *Server) sendWebPushToAll(payload map[string]string) (pushSendResult, error) {
+func (c *webPushNotificationChannel) Send(ctx context.Context, message NotificationMessage) (NotificationDeliveryResult, error) {
 	publicKey := publicVapidKey()
 	privateKey := strings.TrimSpace(os.Getenv("WEB_PUSH_VAPID_PRIVATE_KEY"))
 	if publicKey == "" || privateKey == "" {
-		return pushSendResult{}, errors.New("WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_VAPID_PRIVATE_KEY are required")
+		return NotificationDeliveryResult{}, errors.New("WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_VAPID_PRIVATE_KEY are required")
 	}
-	store := s.readPushStore()
-	data, err := json.Marshal(payload)
+	store := c.readPushStore()
+	data, err := json.Marshal(map[string]string{"title": message.Title, "body": message.Body, "url": message.URL, "tag": message.Tag})
 	if err != nil {
-		return pushSendResult{}, err
+		return NotificationDeliveryResult{}, err
 	}
-	result := pushSendResult{Attempted: len(store.Subscriptions)}
+	result := NotificationDeliveryResult{Attempted: len(store.Subscriptions)}
 	dead := map[string]bool{}
 	for _, item := range store.Subscriptions {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		resp, err := webpush.SendNotification(data, &webpush.Subscription{
 			Endpoint: item.Subscription.Endpoint,
 			Keys: webpush.Keys{
@@ -264,8 +326,8 @@ func (s *Server) sendWebPushToAll(payload map[string]string) (pushSendResult, er
 		}
 	}
 	if len(dead) > 0 {
-		err = s.runtime().WithLock(context.Background(), "push-subscriptions", func() error {
-			latest := s.readPushStore()
+		err = c.runtimeStore.WithLock(context.Background(), "push-subscriptions", func() error {
+			latest := c.readPushStore()
 			kept := latest.Subscriptions[:0]
 			for _, item := range latest.Subscriptions {
 				if dead[item.Subscription.Endpoint] {
@@ -275,7 +337,7 @@ func (s *Server) sendWebPushToAll(payload map[string]string) (pushSendResult, er
 				kept = append(kept, item)
 			}
 			latest.Subscriptions = kept
-			return s.writePushStore(latest)
+			return c.writePushStore(latest)
 		})
 		if err != nil {
 			return result, err

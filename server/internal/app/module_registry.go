@@ -26,17 +26,42 @@ type ModuleDependencies interface {
 	RequiresModules() []string
 }
 
+// NotificationMessage is delivered to each configured notification channel.
+type NotificationMessage struct {
+	Title string
+	Body  string
+	URL   string
+	Tag   string
+}
+
+// NotificationChannel sends notification messages through one delivery provider.
+type NotificationChannel interface {
+	ID() string
+	Send(context.Context, NotificationMessage) (NotificationDeliveryResult, error)
+}
+
+type notificationChannelFactory interface {
+	ID() string
+	NewNotificationChannel(RuntimeStore) (NotificationChannel, error)
+}
+
+type notificationServiceFactory func(NotificationServiceDependencies, *NotificationChannelRegistry) (*NotificationService, error)
+
 // ModuleRegistry owns application extension points and module lifecycle order.
 type ModuleRegistry struct {
-	modules    map[string]Module
-	importers  *BillImporterRegistry
-	lifecycles []ModuleLifecycle
+	modules             map[string]Module
+	importers           *BillImporterRegistry
+	lifecycles          []ModuleLifecycle
+	channelFactories    map[string]notificationChannelFactory
+	notificationFactory notificationServiceFactory
+	notificationService *NotificationService
 }
 
 func NewModuleRegistry(modules ...Module) (*ModuleRegistry, error) {
 	registry := &ModuleRegistry{
-		modules:   make(map[string]Module, len(modules)),
-		importers: newBillImporterRegistry(),
+		modules:          make(map[string]Module, len(modules)),
+		importers:        newBillImporterRegistry(),
+		channelFactories: make(map[string]notificationChannelFactory),
 	}
 	for _, module := range modules {
 		if err := registry.Register(module); err != nil {
@@ -101,6 +126,63 @@ func (r *ModuleRegistry) Importers() *BillImporterRegistry {
 
 func (r *ModuleRegistry) RegisterImporter(importer billImporter) error {
 	return r.importers.Register(importer)
+}
+
+func (r *ModuleRegistry) RegisterNotificationChannel(factory notificationChannelFactory) error {
+	if factory == nil {
+		return errors.New("notification channel factory is required")
+	}
+	id := strings.TrimSpace(factory.ID())
+	if id == "" {
+		return errors.New("notification channel ID is required")
+	}
+	if _, exists := r.channelFactories[id]; exists {
+		return fmt.Errorf("notification channel %q is already registered", id)
+	}
+	r.channelFactories[id] = factory
+	return nil
+}
+
+func (r *ModuleRegistry) RegisterNotificationService(factory notificationServiceFactory) error {
+	if factory == nil {
+		return errors.New("notification service factory is required")
+	}
+	if r.notificationFactory != nil {
+		return errors.New("notification service is already registered")
+	}
+	r.notificationFactory = factory
+	return nil
+}
+
+func (r *ModuleRegistry) BuildNotificationService(dependencies NotificationServiceDependencies) (*NotificationService, error) {
+	if r.notificationFactory == nil {
+		return nil, nil
+	}
+	if r.notificationService != nil {
+		return r.notificationService, nil
+	}
+	channels := newNotificationChannelRegistry()
+	ids := make([]string, 0, len(r.channelFactories))
+	for id := range r.channelFactories {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		channel, err := r.channelFactories[id].NewNotificationChannel(dependencies.RuntimeStore)
+		if err != nil {
+			return nil, fmt.Errorf("build notification channel %q: %w", id, err)
+		}
+		if err := channels.Register(channel); err != nil {
+			return nil, err
+		}
+	}
+	service, err := r.notificationFactory(dependencies, channels)
+	if err != nil {
+		return nil, err
+	}
+	r.notificationService = service
+	r.lifecycles = append(r.lifecycles, service)
+	return service, nil
 }
 
 // BillImporterRegistry is the importer extension point used by import flows.
@@ -209,8 +291,26 @@ func (importerModule) Register(registry *ModuleRegistry) error {
 	return nil
 }
 
+type webPushModule struct{}
+
+func (webPushModule) Name() string { return "web-push" }
+
+func (webPushModule) Register(registry *ModuleRegistry) error {
+	return registry.RegisterNotificationChannel(webPushNotificationChannelFactory{})
+}
+
+type notificationsModule struct{}
+
+func (notificationsModule) Name() string { return "notifications" }
+
+func (notificationsModule) RequiresModules() []string { return []string{"web-push"} }
+
+func (notificationsModule) Register(registry *ModuleRegistry) error {
+	return registry.RegisterNotificationService(newNotificationService)
+}
+
 func builtinModules() []Module {
-	return []Module{importerModule{}}
+	return []Module{importerModule{}, webPushModule{}, notificationsModule{}}
 }
 
 func enabledBuiltinModules(enabled []string) ([]Module, error) {

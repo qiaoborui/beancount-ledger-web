@@ -19,19 +19,20 @@ type Application struct {
 }
 
 type applicationDependencies struct {
-	runtimeStore     RuntimeStore
-	indexStore       *LedgerIndexStore
-	indexStoreErr    error
-	cache            *LedgerCache
-	modules          *ModuleRegistry
-	writer           *LedgerWriter
-	accountService   *AccountService
-	queryPort        LedgerQueryPort
-	snapshotPort     LedgerSnapshotPort
-	reconcileService *ReconciliationService
-	txService        *TransactionService
-	limiter          RateLimiter
-	closers          []io.Closer
+	runtimeStore        RuntimeStore
+	indexStore          *LedgerIndexStore
+	indexStoreErr       error
+	cache               *LedgerCache
+	modules             *ModuleRegistry
+	notificationService *NotificationService
+	writer              *LedgerWriter
+	accountService      *AccountService
+	queryPort           LedgerQueryPort
+	snapshotPort        LedgerSnapshotPort
+	reconcileService    *ReconciliationService
+	txService           *TransactionService
+	limiter             RateLimiter
+	closers             []io.Closer
 }
 
 func NewApplication(cfg Config) (*Application, error) {
@@ -40,19 +41,20 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, err
 	}
 	server := &Server{
-		cfg:              cfg,
-		runtimeStore:     dependencies.runtimeStore,
-		indexStore:       dependencies.indexStore,
-		indexStoreErr:    dependencies.indexStoreErr,
-		cache:            dependencies.cache,
-		importers:        dependencies.modules.Importers(),
-		writer:           dependencies.writer,
-		accountService:   dependencies.accountService,
-		queryPort:        dependencies.queryPort,
-		snapshotPort:     dependencies.snapshotPort,
-		reconcileService: dependencies.reconcileService,
-		txService:        dependencies.txService,
-		limiter:          dependencies.limiter,
+		cfg:                 cfg,
+		runtimeStore:        dependencies.runtimeStore,
+		indexStore:          dependencies.indexStore,
+		indexStoreErr:       dependencies.indexStoreErr,
+		cache:               dependencies.cache,
+		importers:           dependencies.modules.Importers(),
+		notificationService: dependencies.notificationService,
+		writer:              dependencies.writer,
+		accountService:      dependencies.accountService,
+		queryPort:           dependencies.queryPort,
+		snapshotPort:        dependencies.snapshotPort,
+		reconcileService:    dependencies.reconcileService,
+		txService:           dependencies.txService,
+		limiter:             dependencies.limiter,
 	}
 	return newApplication(newRouter(cfg, server), dependencies.closers), nil
 }
@@ -121,6 +123,14 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	dependencies.accountService = NewAccountServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.reconcileService = NewReconciliationServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.txService = NewTransactionServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
+	dependencies.notificationService, err = modules.BuildNotificationService(NotificationServiceDependencies{
+		Config:       cfg,
+		RuntimeStore: dependencies.runtimeStore,
+		SnapshotPort: dependencies.snapshotPort,
+	})
+	if err != nil {
+		return fail(err)
+	}
 	if err := modules.Start(context.Background()); err != nil {
 		return fail(err)
 	}

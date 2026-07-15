@@ -61,7 +61,7 @@ func TestEnabledBuiltinModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := enabledBuiltinModules([]string{"importers"})
+	selected, err := enabledBuiltinModules(moduleNames(all))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +73,13 @@ func TestEnabledBuiltinModules(t *testing.T) {
 	}
 	if _, err := enabledBuiltinModules([]string{"importers", "importers"}); err == nil {
 		t.Fatal("duplicate module should fail")
+	}
+	notifications, err := enabledBuiltinModules([]string{"notifications"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := moduleNames(notifications), []string{"web-push", "notifications"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notification modules = %#v, want %#v", got, want)
 	}
 }
 
@@ -96,6 +103,32 @@ func TestSelectModulesRejectsUnknownAndCyclicDependencies(t *testing.T) {
 	second := testModule{name: "second", requires: []string{"first"}}
 	if _, err := selectModules([]Module{first, second}, []string{"first"}); err == nil {
 		t.Fatal("cyclic dependency should fail")
+	}
+}
+
+func TestModuleRegistryBuildsNotificationServiceOnce(t *testing.T) {
+	registry, err := NewModuleRegistry(builtinModules()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := NotificationServiceDependencies{
+		Config:       Config{NotificationRefreshInterval: "off"},
+		RuntimeStore: newFilesystemRuntimeStore(t.TempDir()),
+		SnapshotPort: &failingNotificationSnapshotPort{},
+	}
+	first, err := registry.BuildNotificationService(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.BuildNotificationService(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil || first != second {
+		t.Fatal("notification service should build once")
+	}
+	if _, ok := first.WebPushChannel(); !ok {
+		t.Fatal("notification service should include the web push channel")
 	}
 }
 

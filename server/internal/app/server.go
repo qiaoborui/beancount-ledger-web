@@ -15,19 +15,20 @@ import (
 )
 
 type Server struct {
-	cfg              Config
-	runtimeStore     RuntimeStore
-	indexStore       *LedgerIndexStore
-	indexStoreErr    error
-	cache            *LedgerCache
-	importers        *BillImporterRegistry
-	writer           *LedgerWriter
-	accountService   *AccountService
-	queryPort        LedgerQueryPort
-	snapshotPort     LedgerSnapshotPort
-	reconcileService *ReconciliationService
-	txService        *TransactionService
-	limiter          RateLimiter
+	cfg                 Config
+	runtimeStore        RuntimeStore
+	indexStore          *LedgerIndexStore
+	indexStoreErr       error
+	cache               *LedgerCache
+	importers           *BillImporterRegistry
+	notificationService *NotificationService
+	writer              *LedgerWriter
+	accountService      *AccountService
+	queryPort           LedgerQueryPort
+	snapshotPort        LedgerSnapshotPort
+	reconcileService    *ReconciliationService
+	txService           *TransactionService
+	limiter             RateLimiter
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {

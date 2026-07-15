@@ -192,7 +192,8 @@ Important variables:
 - `PUBLIC_ORIGIN` / `WEBAUTHN_PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin, allowed passkey origins, and passkey RP ID. Keep `WEBAUTHN_RP_ID` on the original registration domain to preserve existing passkeys after a domain move.
 - `BEAN_CHECK_BIN` — optional path to `bean-check` for index worker validation. It is not needed on API hosts.
 - `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
-- `LEDGER_ENABLED_MODULES` — optional comma-separated allowlist for statically linked modules. Leave it empty to enable all built-in modules; current built-in name: `importers`.
+- `LEDGER_ENABLED_MODULES` — optional comma-separated allowlist for statically linked modules. Leave it empty to enable all built-in modules: `importers`, `web-push`, and `notifications`.
+- `LEDGER_NOTIFICATION_REFRESH_INTERVAL` — optional periodic notification refresh interval such as `15m`; use `off` (the default) to keep notification refresh request-driven.
 - `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`, `RUNTIME_DIR`, `LEDGER_INDEX_INTERVAL_SECONDS`, and `LEDGER_GIT_SCHEDULER` — removed from production runtime configuration.
 
 ### Postgres ledger read model
