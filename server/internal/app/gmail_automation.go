@@ -590,7 +590,7 @@ func (s *Server) syncGmail(ctx context.Context, notifiedHistoryID uint64) error 
 
 func (s *Server) syncGmailWithAPI(ctx context.Context, api gmailAPI, connection gmailConnection, notifiedHistoryID uint64) error {
 	messageIDs, latestHistoryID, err := api.History(ctx, connection.HistoryID, connection.LabelID)
-	if isGoogleNotFound(err) {
+	if isGoogleNotFound(err) || (err == nil && len(messageIDs) == 0) {
 		messageIDs, latestHistoryID, err = api.RecentMessages(ctx, connection.LabelID, s.cfg.GmailSyncLookbackDays)
 	}
 	if err != nil {

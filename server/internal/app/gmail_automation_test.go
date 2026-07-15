@@ -20,6 +20,7 @@ import (
 
 type fakeGmailAPI struct {
 	messageIDs []string
+	recentIDs  []string
 	messages   map[string]*gmail.Message
 	rawCalls   []string
 }
@@ -33,7 +34,7 @@ func (f *fakeGmailAPI) History(context.Context, uint64, string) ([]string, uint6
 	return append([]string(nil), f.messageIDs...), 99, nil
 }
 func (f *fakeGmailAPI) RecentMessages(context.Context, string, int) ([]string, uint64, error) {
-	return nil, 99, nil
+	return append([]string(nil), f.recentIDs...), 99, nil
 }
 func (f *fakeGmailAPI) RawMessage(_ context.Context, id string) (*gmail.Message, error) {
 	f.rawCalls = append(f.rawCalls, id)
@@ -245,6 +246,44 @@ func TestGmailSyncRecordsUnsupportedMessage(t *testing.T) {
 	item := pending.Items[0]
 	if item.Status != "failed" || item.Sender != "bill@example.com" || !strings.Contains(item.Error, "没有可识别") {
 		t.Fatalf("item=%#v", item)
+	}
+}
+
+func TestGmailSyncScansRecentWhenHistoryIsEmpty(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{"bill@example.com"}
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{Version: 1, Email: "owner@example.com", EncryptedRefreshToken: "present", LabelID: "label-1", HistoryID: 10}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: Bill <bill@example.com>",
+		"To: owner@example.com",
+		"Subject: Existing statement",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=example.com",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"already labeled before the watch started",
+	}, "\r\n")
+	api := &fakeGmailAPI{
+		recentIDs: []string{"recent"},
+		messages: map[string]*gmail.Message{
+			"recent": {Id: "recent", LabelIds: []string{"label-1"}, Raw: base64.RawURLEncoding.EncodeToString([]byte(raw))},
+		},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(api.rawCalls, ",") != "recent" {
+		t.Fatalf("raw calls=%v", api.rawCalls)
+	}
+	pending, err := server.readGmailPending(context.Background())
+	if err != nil || len(pending.Items) != 1 {
+		t.Fatalf("pending=%#v err=%v", pending.Items, err)
+	}
+	if pending.Items[0].Status != "failed" || !strings.Contains(pending.Items[0].Error, "没有可识别") {
+		t.Fatalf("item=%#v", pending.Items[0])
 	}
 }
 
