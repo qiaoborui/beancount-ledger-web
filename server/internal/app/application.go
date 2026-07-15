@@ -20,7 +20,7 @@ type Application struct {
 
 type applicationDependencies struct {
 	runtimeStore        RuntimeStore
-	indexStore          *LedgerIndexStore
+	indexStore          LedgerIndexPort
 	indexStoreErr       error
 	cache               *LedgerCache
 	modules             *ModuleRegistry
@@ -73,38 +73,15 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		return nil, err
 	}
 
-	if cfg.DatabaseURL != "" {
-		db, err := openPostgres(cfg.DatabaseURL)
-		if err != nil {
-			return nil, err
-		}
-		dependencies.closers = append(dependencies.closers, db)
-
-		dependencies.runtimeStore, err = NewRuntimeStoreWithDB(db)
-		if err != nil {
-			return fail(err)
-		}
-		if ledgerReadModelEnabled(cfg) {
-			dependencies.indexStore, dependencies.indexStoreErr = NewLedgerIndexStoreWithDB(db, cfg)
-		}
-		dependencies.limiter, err = NewPostgresRateLimiter(db)
-		if err != nil {
-			return fail(err)
-		}
-	} else {
-		var err error
-		dependencies.runtimeStore, err = NewRuntimeStore(cfg)
-		if err != nil {
-			return nil, err
-		}
-		if ledgerReadModelEnabled(cfg) {
-			dependencies.indexStore, dependencies.indexStoreErr = NewLedgerIndexStore(cfg)
-			if dependencies.indexStore != nil {
-				dependencies.closers = append(dependencies.closers, dependencies.indexStore)
-			}
-		}
-		dependencies.limiter = NewRateLimiter()
+	storageAdapters, err := openApplicationStorageAdapters(cfg)
+	if err != nil {
+		return nil, err
 	}
+	dependencies.runtimeStore = storageAdapters.runtimeStore
+	dependencies.indexStore = storageAdapters.indexStore
+	dependencies.indexStoreErr = storageAdapters.indexStoreErr
+	dependencies.limiter = storageAdapters.limiter
+	dependencies.closers = append(dependencies.closers, storageAdapters.closers...)
 
 	dependencies.cache = NewLedgerCache(cfg)
 	readService := NewLedgerReadServiceWithIndex(dependencies.cache, dependencies.indexStore, dependencies.indexStoreErr, cfg.ReadModelStrict)

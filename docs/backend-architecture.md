@@ -59,6 +59,12 @@ service implementation and interface expose no Gin response types.
 `LedgerQueryPort` is the transport-facing application read boundary.
 `LedgerSnapshotPort` isolates legacy consumers that still require raw ledger
 snapshots, so typed query consumers do not inherit snapshot coupling.
+`LedgerIndexPort` isolates indexed revision, snapshot, transaction, and balance
+reads; `LedgerIndexStore` is the Postgres adapter selected only by the
+composition root.
+`storage_adapters.go` owns runtime-store, read-model, rate-limiter, and database
+adapter selection with one explicit close list. `application.go` consumes those
+ports and retains service wiring.
 
 Statically linked extensions implement `Module` and register capabilities with
 `ModuleRegistry` during application composition. Modules with background

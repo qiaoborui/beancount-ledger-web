@@ -10,7 +10,7 @@ import (
 
 type LedgerReadService struct {
 	cache      *LedgerCache
-	indexStore *LedgerIndexStore
+	indexStore LedgerIndexPort
 	indexErr   error
 	strict     bool
 
@@ -26,7 +26,7 @@ func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
 	return &LedgerReadService{cache: cache}
 }
 
-func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore *LedgerIndexStore, indexErr error, strict bool) *LedgerReadService {
+func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore LedgerIndexPort, indexErr error, strict bool) *LedgerReadService {
 	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict}
 }
 
