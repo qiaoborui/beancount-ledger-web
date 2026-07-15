@@ -50,6 +50,7 @@ type notificationServiceFactory func(NotificationServiceDependencies, *Notificat
 // ModuleRegistry owns application extension points and module lifecycle order.
 type ModuleRegistry struct {
 	modules             map[string]Module
+	ordered             []string
 	importers           *BillImporterRegistry
 	lifecycles          []ModuleLifecycle
 	channelFactories    map[string]notificationChannelFactory
@@ -86,6 +87,7 @@ func (r *ModuleRegistry) Register(module Module) error {
 		return fmt.Errorf("register module %q: %w", name, err)
 	}
 	r.modules[name] = module
+	r.ordered = append(r.ordered, name)
 	if lifecycle, ok := module.(ModuleLifecycle); ok {
 		r.lifecycles = append(r.lifecycles, lifecycle)
 	}
@@ -122,6 +124,14 @@ func closeModuleLifecycles(lifecycles []ModuleLifecycle) error {
 
 func (r *ModuleRegistry) Importers() *BillImporterRegistry {
 	return r.importers
+}
+
+// Names returns modules in their resolved startup order.
+func (r *ModuleRegistry) Names() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.ordered...)
 }
 
 func (r *ModuleRegistry) RegisterImporter(importer billImporter) error {

@@ -21,6 +21,7 @@ type Server struct {
 	indexStoreErr       error
 	cache               *LedgerCache
 	importers           *BillImporterRegistry
+	moduleNames         []string
 	notificationService *NotificationService
 	writer              *LedgerWriter
 	accountService      *AccountService
@@ -142,6 +143,9 @@ func (s *Server) health(c *gin.Context) {
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
 		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version"},
+	}
+	if len(s.moduleNames) > 0 {
+		identity["modules"] = append([]string(nil), s.moduleNames...)
 	}
 	if s.indexStoreErr != nil {
 		body := gin.H{

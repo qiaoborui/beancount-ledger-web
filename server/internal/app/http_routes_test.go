@@ -430,6 +430,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		APIVersion   int      `json:"apiVersion"`
 		ClusterID    string   `json:"clusterId"`
 		Capabilities []string `json:"capabilities"`
+		Modules      []string `json:"modules"`
 	}
 	if err := json.Unmarshal(health.Body.Bytes(), &healthBody); err != nil {
 		t.Fatal(err)
@@ -437,7 +438,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 	if !healthBody.OK {
 		t.Fatalf("health should be ok: %#v", healthBody)
 	}
-	if healthBody.APIVersion != 1 || healthBody.ClusterID == "" || len(healthBody.Capabilities) == 0 {
+	if healthBody.APIVersion != 1 || healthBody.ClusterID == "" || len(healthBody.Capabilities) == 0 || len(healthBody.Modules) == 0 {
 		t.Fatalf("health identity missing: %#v", healthBody)
 	}
 

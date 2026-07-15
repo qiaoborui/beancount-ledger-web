@@ -24,6 +24,7 @@ type applicationDependencies struct {
 	indexStoreErr       error
 	cache               *LedgerCache
 	modules             *ModuleRegistry
+	moduleNames         []string
 	notificationService *NotificationService
 	writer              *LedgerWriter
 	accountService      *AccountService
@@ -47,6 +48,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		indexStoreErr:       dependencies.indexStoreErr,
 		cache:               dependencies.cache,
 		importers:           dependencies.modules.Importers(),
+		moduleNames:         dependencies.moduleNames,
 		notificationService: dependencies.notificationService,
 		writer:              dependencies.writer,
 		accountService:      dependencies.accountService,
@@ -112,6 +114,7 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		return fail(err)
 	}
 	dependencies.modules = modules
+	dependencies.moduleNames = modules.Names()
 	dependencies.closers = append(dependencies.closers, modules)
 	return dependencies, nil
 }
