@@ -21,6 +21,11 @@ type ModuleLifecycle interface {
 	Close() error
 }
 
+// ModuleDependencies is optional for modules that require other modules.
+type ModuleDependencies interface {
+	RequiresModules() []string
+}
+
 // ModuleRegistry owns application extension points and module lifecycle order.
 type ModuleRegistry struct {
 	modules    map[string]Module
@@ -209,13 +214,23 @@ func builtinModules() []Module {
 }
 
 func enabledBuiltinModules(enabled []string) ([]Module, error) {
-	available := builtinModules()
-	if len(enabled) == 0 {
-		return available, nil
-	}
+	return selectModules(builtinModules(), enabled)
+}
+
+func selectModules(available []Module, enabled []string) ([]Module, error) {
 	byName := make(map[string]Module, len(available))
 	for _, module := range available {
-		byName[module.Name()] = module
+		name := strings.TrimSpace(module.Name())
+		if name == "" {
+			return nil, errors.New("available module name is required")
+		}
+		if _, exists := byName[name]; exists {
+			return nil, fmt.Errorf("available module %q is configured more than once", name)
+		}
+		byName[name] = module
+	}
+	if len(enabled) == 0 {
+		enabled = moduleNames(available)
 	}
 	selected := make([]Module, 0, len(enabled))
 	seen := make(map[string]bool, len(enabled))
@@ -223,12 +238,39 @@ func enabledBuiltinModules(enabled []string) ([]Module, error) {
 		if seen[name] {
 			return nil, fmt.Errorf("module %q is configured more than once", name)
 		}
+		seen[name] = true
+	}
+	visiting := make(map[string]bool, len(byName))
+	visited := make(map[string]bool, len(byName))
+	var visit func(string) error
+	visit = func(name string) error {
+		if visited[name] {
+			return nil
+		}
+		if visiting[name] {
+			return fmt.Errorf("module dependency cycle includes %q", name)
+		}
 		module, ok := byName[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown enabled module %q; available modules: %s", name, strings.Join(moduleNames(available), ", "))
+			return fmt.Errorf("unknown enabled module %q; available modules: %s", name, strings.Join(moduleNames(available), ", "))
 		}
-		seen[name] = true
+		visiting[name] = true
+		if dependencies, ok := module.(ModuleDependencies); ok {
+			for _, dependency := range dependencies.RequiresModules() {
+				if err := visit(strings.TrimSpace(dependency)); err != nil {
+					return err
+				}
+			}
+		}
+		visiting[name] = false
+		visited[name] = true
 		selected = append(selected, module)
+		return nil
+	}
+	for _, name := range enabled {
+		if err := visit(name); err != nil {
+			return nil, err
+		}
 	}
 	return selected, nil
 }

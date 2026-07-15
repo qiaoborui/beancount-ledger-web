@@ -68,7 +68,8 @@ the built-in importer module registers `billImporter` implementations with the
 application-local `BillImporterRegistry`.
 `LEDGER_ENABLED_MODULES` accepts a comma-separated allowlist of statically
 linked module names. An empty value enables every built-in module; an unknown
-or duplicate name stops application startup.
+or duplicate name stops application startup. Modules may declare dependencies;
+the registry resolves dependencies before dependents and rejects cycles.
 
 ## Domain and infrastructure files
 

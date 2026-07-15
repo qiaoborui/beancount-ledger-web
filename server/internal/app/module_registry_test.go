@@ -9,12 +9,15 @@ import (
 
 type testModule struct {
 	name     string
+	requires []string
 	register func(*ModuleRegistry) error
 	start    func(context.Context) error
 	close    func() error
 }
 
 func (m testModule) Name() string { return m.name }
+
+func (m testModule) RequiresModules() []string { return append([]string(nil), m.requires...) }
 
 func (m testModule) Register(registry *ModuleRegistry) error {
 	if m.register != nil {
@@ -70,6 +73,29 @@ func TestEnabledBuiltinModules(t *testing.T) {
 	}
 	if _, err := enabledBuiltinModules([]string{"importers", "importers"}); err == nil {
 		t.Fatal("duplicate module should fail")
+	}
+}
+
+func TestSelectModulesResolvesDependenciesBeforeDependents(t *testing.T) {
+	storage := testModule{name: "storage"}
+	notifications := testModule{name: "notifications", requires: []string{"storage"}}
+	selected, err := selectModules([]Module{notifications, storage}, []string{"notifications"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := moduleNames(selected), []string{"storage", "notifications"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected modules = %#v, want %#v", got, want)
+	}
+}
+
+func TestSelectModulesRejectsUnknownAndCyclicDependencies(t *testing.T) {
+	if _, err := selectModules([]Module{testModule{name: "notifications", requires: []string{"storage"}}}, []string{"notifications"}); err == nil {
+		t.Fatal("unknown dependency should fail")
+	}
+	first := testModule{name: "first", requires: []string{"second"}}
+	second := testModule{name: "second", requires: []string{"first"}}
+	if _, err := selectModules([]Module{first, second}, []string{"first"}); err == nil {
+		t.Fatal("cyclic dependency should fail")
 	}
 }
 
