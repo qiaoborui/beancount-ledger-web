@@ -26,6 +26,7 @@ type Config struct {
 	DatabaseURL             string
 	LedgerReadModel         string
 	ReadModelStrict         bool
+	EnabledModules          []string
 }
 
 func LoadConfig() Config {
@@ -59,6 +60,7 @@ func LoadConfig() Config {
 		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LedgerReadModel:         ledgerReadModel,
 		ReadModelStrict:         envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
+		EnabledModules:          parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 	}
 }
 
@@ -97,10 +99,25 @@ func loadBaseConfig() Config {
 		LedgerGitHubToken:       strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
 		LedgerGitHubAPIURL:      strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
 		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		EnabledModules:          parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 	}
 }
 
+func parseEnabledModules(raw string) []string {
+	parts := strings.Split(raw, ",")
+	modules := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := strings.TrimSpace(part); name != "" {
+			modules = append(modules, name)
+		}
+	}
+	return modules
+}
+
 func ValidateWebConfig(cfg Config) error {
+	if _, err := enabledBuiltinModules(cfg.EnabledModules); err != nil {
+		return err
+	}
 	if cfg.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
@@ -136,6 +153,9 @@ func ValidateIndexerConfig(cfg Config) error {
 }
 
 func ValidateConfig(cfg Config) error {
+	if _, err := enabledBuiltinModules(cfg.EnabledModules); err != nil {
+		return err
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.LedgerStorage)) {
 	case "", "filesystem", "file", "github_api":
 	case "remote_git", "git":

@@ -28,6 +28,16 @@ func TestLoadConfigReadsLedgerClusterID(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsEnabledModules(t *testing.T) {
+	t.Setenv("LEDGER_ENABLED_MODULES", " importers , ")
+
+	cfg := LoadConfig()
+
+	if got := strings.Join(cfg.EnabledModules, ","); got != "importers" {
+		t.Fatalf("EnabledModules=%q, want importers", got)
+	}
+}
+
 func TestLedgerClusterIDFallsBackToGitHubRepository(t *testing.T) {
 	cfg := Config{LedgerGitHubOwner: "Example", LedgerGitHubRepo: "Ledger", LedgerGitBranch: "preview"}
 
@@ -63,11 +73,20 @@ func TestValidateConfigRejectsRemoteGit(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRejectsUnknownEnabledModule(t *testing.T) {
+	cfg := Config{LedgerStorage: "filesystem", EnabledModules: []string{"missing"}}
+
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("expected unknown module to be rejected")
+	}
+}
+
 func TestLoadConfigGitHubAlias(t *testing.T) {
 	t.Setenv("LEDGER_STORAGE", "github")
 	t.Setenv("LEDGER_GITHUB_OWNER", "example")
 	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
 	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
+	t.Setenv("LEDGER_ENABLED_MODULES", "importers")
 
 	cfg := LoadConfig()
 
@@ -96,6 +115,7 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	t.Setenv("LEDGER_GITHUB_OWNER", "example")
 	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
 	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
+	t.Setenv("LEDGER_ENABLED_MODULES", "importers")
 
 	cfg := LoadWebConfig()
 
@@ -104,6 +124,9 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	}
 	if cfg.LedgerRoot != "" || cfg.RuntimeDir != "" {
 		t.Fatalf("web config should not use local ledger/runtime paths: %#v", cfg)
+	}
+	if got := strings.Join(cfg.EnabledModules, ","); got != "importers" {
+		t.Fatalf("EnabledModules=%q, want importers", got)
 	}
 	if err := ValidateWebConfig(cfg); err != nil {
 		t.Fatal(err)
