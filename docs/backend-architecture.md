@@ -66,6 +66,13 @@ resources may implement `ModuleLifecycle`; startup follows registration order
 and shutdown runs in reverse order. Importers are the first extension point:
 the built-in importer module registers `billImporter` implementations with the
 application-local `BillImporterRegistry`.
+The `web-push` module contributes a notification channel factory and the
+`notifications` module depends on it to build the notification service after
+runtime storage and the ledger snapshot port are available. That service owns
+notification state, channel fan-out, and an optional periodic refresh worker;
+its lifecycle closes before the backing stores. Set
+`LEDGER_NOTIFICATION_REFRESH_INTERVAL` to a positive Go duration to run the
+worker, or leave it at `off` for request-driven refreshes.
 `LEDGER_ENABLED_MODULES` accepts a comma-separated allowlist of statically
 linked module names. An empty value enables every built-in module; an unknown
 or duplicate name stops application startup. Modules may declare dependencies;

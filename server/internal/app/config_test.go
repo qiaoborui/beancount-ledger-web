@@ -38,6 +38,14 @@ func TestLoadConfigReadsEnabledModules(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsNotificationRefreshInterval(t *testing.T) {
+	t.Setenv("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "15m")
+
+	if got := LoadConfig().NotificationRefreshInterval; got != "15m" {
+		t.Fatalf("NotificationRefreshInterval=%q, want 15m", got)
+	}
+}
+
 func TestLedgerClusterIDFallsBackToGitHubRepository(t *testing.T) {
 	cfg := Config{LedgerGitHubOwner: "Example", LedgerGitHubRepo: "Ledger", LedgerGitBranch: "preview"}
 
@@ -78,6 +86,14 @@ func TestValidateConfigRejectsUnknownEnabledModule(t *testing.T) {
 
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatal("expected unknown module to be rejected")
+	}
+}
+
+func TestValidateConfigRejectsInvalidNotificationRefreshInterval(t *testing.T) {
+	cfg := Config{LedgerStorage: "filesystem", NotificationRefreshInterval: "later"}
+
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("expected invalid notification refresh interval to be rejected")
 	}
 }
 

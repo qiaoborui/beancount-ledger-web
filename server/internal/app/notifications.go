@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,43 +50,262 @@ type notificationStore struct {
 	Notifications []StoredNotification `json:"notifications"`
 }
 
+type NotificationServiceDependencies struct {
+	Config       Config
+	RuntimeStore RuntimeStore
+	SnapshotPort LedgerSnapshotPort
+}
+
+// NotificationChannelRegistry owns the configured delivery channels.
+type NotificationChannelRegistry struct {
+	byID    map[string]NotificationChannel
+	ordered []NotificationChannel
+}
+
+func newNotificationChannelRegistry() *NotificationChannelRegistry {
+	return &NotificationChannelRegistry{byID: map[string]NotificationChannel{}}
+}
+
+func (r *NotificationChannelRegistry) Register(channel NotificationChannel) error {
+	if channel == nil {
+		return errors.New("notification channel is required")
+	}
+	id := strings.TrimSpace(channel.ID())
+	if id == "" {
+		return errors.New("notification channel ID is required")
+	}
+	if _, exists := r.byID[id]; exists {
+		return errors.New("notification channel is already registered: " + id)
+	}
+	r.byID[id] = channel
+	r.ordered = append(r.ordered, channel)
+	return nil
+}
+
+func (r *NotificationChannelRegistry) Lookup(id string) (NotificationChannel, bool) {
+	channel, ok := r.byID[id]
+	return channel, ok
+}
+
+func (r *NotificationChannelRegistry) Publish(ctx context.Context, message NotificationMessage) (NotificationDeliveryResult, error) {
+	result := NotificationDeliveryResult{}
+	errs := make([]error, 0, len(r.ordered))
+	for _, channel := range r.ordered {
+		current, err := channel.Send(ctx, message)
+		result.Attempted += current.Attempted
+		result.Sent += current.Sent
+		result.Failed += current.Failed
+		result.Removed += current.Removed
+		if err != nil {
+			errs = append(errs, fmt.Errorf("send notification through %q: %w", channel.ID(), err))
+		}
+	}
+	return result, errors.Join(errs...)
+}
+
+// NotificationService owns notification state, delivery, and optional refresh scheduling.
+type NotificationService struct {
+	cfg          Config
+	runtimeStore RuntimeStore
+	snapshotPort LedgerSnapshotPort
+	channels     *NotificationChannelRegistry
+	interval     time.Duration
+
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func newNotificationService(dependencies NotificationServiceDependencies, channels *NotificationChannelRegistry) (*NotificationService, error) {
+	if dependencies.RuntimeStore == nil {
+		return nil, errors.New("notification runtime store is required")
+	}
+	if dependencies.SnapshotPort == nil {
+		return nil, errors.New("notification snapshot port is required")
+	}
+	interval, err := notificationRefreshInterval(dependencies.Config.NotificationRefreshInterval)
+	if err != nil {
+		return nil, err
+	}
+	if channels == nil {
+		return nil, errors.New("notification channels are required")
+	}
+	return &NotificationService{
+		cfg:          dependencies.Config,
+		runtimeStore: dependencies.RuntimeStore,
+		snapshotPort: dependencies.SnapshotPort,
+		channels:     channels,
+		interval:     interval,
+	}, nil
+}
+
+func (s *NotificationService) Start(ctx context.Context) error {
+	if s.interval == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancel != nil {
+		return nil
+	}
+	loopContext, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
+	s.done = make(chan struct{})
+	go func() {
+		defer close(s.done)
+		ticker := time.NewTicker(s.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-loopContext.Done():
+				return
+			case <-ticker.C:
+				_ = s.RefreshCurrent(loopContext)
+			}
+		}
+	}()
+	return nil
+}
+
+func (s *NotificationService) Close() error {
+	s.mu.Lock()
+	cancel, done := s.cancel, s.done
+	s.cancel = nil
+	s.done = nil
+	s.mu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	<-done
+	return nil
+}
+
+func (s *NotificationService) WebPushChannel() (*webPushNotificationChannel, bool) {
+	channel, ok := s.channels.Lookup("web-push")
+	if !ok {
+		return nil, false
+	}
+	webPush, ok := channel.(*webPushNotificationChannel)
+	return webPush, ok
+}
+
+func (s *NotificationService) Publish(ctx context.Context, message NotificationMessage) (NotificationDeliveryResult, error) {
+	return s.channels.Publish(ctx, message)
+}
+
+func (s *NotificationService) Insights(ctx context.Context, month string) ([]Insight, error) {
+	snapshot, err := s.snapshotPort.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.detectInsights(month, snapshot), nil
+}
+
+func (s *NotificationService) Notifications(ctx context.Context, start, end string) ([]StoredNotification, error) {
+	snapshot, err := s.snapshotPort.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all := []StoredNotification{}
+	for _, month := range monthsInRange(start, end) {
+		notifications, err := s.refreshMonth(month, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, notifications...)
+	}
+	return all, nil
+}
+
+func (s *NotificationService) RefreshCurrent(ctx context.Context) error {
+	snapshot, err := s.snapshotPort.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = s.refreshMonth(time.Now().Format("2006-01"), snapshot)
+	return err
+}
+
+func (s *NotificationService) refreshMonth(month string, snapshot *LedgerSnapshot) ([]StoredNotification, error) {
+	return s.mergeInsightsIntoNotifications(month, s.detectInsights(month, snapshot))
+}
+
+func (s *NotificationService) UpdateStatus(ids []string, status string) ([]StoredNotification, error) {
+	updated := []StoredNotification{}
+	err := s.runtimeStore.WithLock(context.Background(), "notifications", func() error {
+		store := s.readStore()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		idSet := map[string]bool{}
+		for _, id := range ids {
+			idSet[id] = true
+		}
+		for i := range store.Notifications {
+			notification := &store.Notifications[i]
+			if !idSet[notification.ID] {
+				continue
+			}
+			notification.Status = status
+			notification.UpdatedAt = now
+			switch status {
+			case "read":
+				notification.ReadAt = &now
+			case "unread":
+				notification.ReadAt = nil
+				notification.DismissedAt = nil
+				notification.ResolvedAt = nil
+			case "dismissed":
+				notification.DismissedAt = &now
+			case "resolved":
+				notification.ResolvedAt = &now
+			}
+			updated = append(updated, *notification)
+		}
+		return s.writeStore(store)
+	})
+	return updated, err
+}
+
 func (s *Server) insights(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	snapshot, err := s.ledgerSnapshot(c.Request.Context())
+	service, ok := s.notificationsService(c)
+	if !ok {
+		return
+	}
+	month := c.DefaultQuery("month", time.Now().Format("2006-01"))
+	insights, err := service.Insights(c.Request.Context(), month)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	month := c.DefaultQuery("month", time.Now().Format("2006-01"))
-	c.JSON(http.StatusOK, gin.H{"month": month, "insights": s.detectInsights(month, snapshot)})
+	c.JSON(http.StatusOK, gin.H{"month": month, "insights": insights})
 }
 
 func (s *Server) notifications(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	snapshot, err := s.ledgerSnapshot(c.Request.Context())
+	service, ok := s.notificationsService(c)
+	if !ok {
+		return
+	}
+	start, end := parseTimeParams(c)
+	notifications, err := service.Notifications(c.Request.Context(), start, end)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	start, end := parseTimeParams(c)
-	all := []StoredNotification{}
-	for _, month := range monthsInRange(start, end) {
-		notifications, err := s.mergeInsightsIntoNotifications(month, s.detectInsights(month, snapshot))
-		if err != nil {
-			errorJSON(c, http.StatusBadRequest, err)
-			return
-		}
-		all = append(all, notifications...)
-	}
-	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "notifications": all})
+	c.JSON(http.StatusOK, gin.H{"start": start, "end": end, "notifications": notifications})
 }
 
 func (s *Server) updateNotifications(c *gin.Context) {
 	if !requireAuth(c) {
+		return
+	}
+	service, ok := s.notificationsService(c)
+	if !ok {
 		return
 	}
 	var input struct {
@@ -97,7 +319,7 @@ func (s *Server) updateNotifications(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid notification update"})
 		return
 	}
-	notifications, err := s.updateNotificationStatus(input.IDs, input.Status)
+	notifications, err := service.UpdateStatus(input.IDs, input.Status)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -105,7 +327,7 @@ func (s *Server) updateNotifications(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "notifications": notifications})
 }
 
-func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insight {
+func (s *NotificationService) detectInsights(month string, snapshot *LedgerSnapshot) []Insight {
 	start, end := month+"-01", monthEnd(month)
 	current := []Transaction{}
 	for _, txn := range snapshot.Transactions {
@@ -187,11 +409,11 @@ func (s *Server) detectInsights(month string, snapshot *LedgerSnapshot) []Insigh
 	return insights
 }
 
-func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight) ([]StoredNotification, error) {
+func (s *NotificationService) mergeInsightsIntoNotifications(month string, insights []Insight) ([]StoredNotification, error) {
 	created := []StoredNotification{}
 	var notifications []StoredNotification
-	err := s.runtime().WithLock(context.Background(), "notifications", func() error {
-		store := s.readNotificationStore()
+	err := s.runtimeStore.WithLock(context.Background(), "notifications", func() error {
+		store := s.readStore()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		currentIDs := map[string]bool{}
 		for _, insight := range insights {
@@ -236,7 +458,7 @@ func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight
 				notification.UpdatedAt = now
 			}
 		}
-		if err := s.writeNotificationStore(store); err != nil {
+		if err := s.writeStore(store); err != nil {
 			return err
 		}
 		notifications = s.notificationsForMonth(store.Notifications, month)
@@ -251,49 +473,14 @@ func (s *Server) mergeInsightsIntoNotifications(month string, insights []Insight
 		if len(created) > 1 {
 			title = "我的账本：" + formatInt(len(created)) + " 条新提醒"
 		}
-		_, _ = s.sendWebPushToAll(map[string]string{"title": title, "body": created[0].Detail, "url": "/", "tag": "ledger-notifications-" + month})
+		_, _ = s.Publish(context.Background(), NotificationMessage{Title: title, Body: created[0].Detail, URL: "/", Tag: "ledger-notifications-" + month})
 	}
 	return notifications, nil
 }
 
-func (s *Server) updateNotificationStatus(ids []string, status string) ([]StoredNotification, error) {
-	updated := []StoredNotification{}
-	err := s.runtime().WithLock(context.Background(), "notifications", func() error {
-		store := s.readNotificationStore()
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		idSet := map[string]bool{}
-		for _, id := range ids {
-			idSet[id] = true
-		}
-		for i := range store.Notifications {
-			notification := &store.Notifications[i]
-			if !idSet[notification.ID] {
-				continue
-			}
-			notification.Status = status
-			notification.UpdatedAt = now
-			switch status {
-			case "read":
-				notification.ReadAt = &now
-			case "unread":
-				notification.ReadAt = nil
-				notification.DismissedAt = nil
-				notification.ResolvedAt = nil
-			case "dismissed":
-				notification.DismissedAt = &now
-			case "resolved":
-				notification.ResolvedAt = &now
-			}
-			updated = append(updated, *notification)
-		}
-		return s.writeNotificationStore(store)
-	})
-	return updated, err
-}
-
-func (s *Server) readNotificationStore() notificationStore {
+func (s *NotificationService) readStore() notificationStore {
 	var store notificationStore
-	ok, err := s.runtime().GetJSON(context.Background(), "notifications", "store", &store)
+	ok, err := s.runtimeStore.GetJSON(context.Background(), "notifications", "store", &store)
 	if err != nil || !ok {
 		return notificationStore{Version: 1, Notifications: []StoredNotification{}}
 	}
@@ -306,11 +493,11 @@ func (s *Server) readNotificationStore() notificationStore {
 	return store
 }
 
-func (s *Server) writeNotificationStore(store notificationStore) error {
-	return s.runtime().PutJSON(context.Background(), "notifications", "store", store)
+func (s *NotificationService) writeStore(store notificationStore) error {
+	return s.runtimeStore.PutJSON(context.Background(), "notifications", "store", store)
 }
 
-func (s *Server) notificationsForMonth(notifications []StoredNotification, month string) []StoredNotification {
+func (s *NotificationService) notificationsForMonth(notifications []StoredNotification, month string) []StoredNotification {
 	rows := []StoredNotification{}
 	for _, notification := range notifications {
 		if notification.Month == month {
@@ -352,7 +539,7 @@ func txnExpense(txn Transaction, prefix string, prices []Price) int {
 	return total
 }
 
-func (s *Server) sourceID(source TransactionSource) string {
+func (s *NotificationService) sourceID(source TransactionSource) string {
 	if rel, err := filepath.Rel(s.cfg.LedgerRoot, source.File); err == nil {
 		return rel + ":" + formatInt(source.Line)
 	}
