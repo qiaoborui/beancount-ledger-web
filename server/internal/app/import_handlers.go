@@ -43,7 +43,7 @@ func (s *Server) importsProviders(c *gin.Context) {
 	if !requireAuth(c) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"providers": importProviderOptions()})
+	c.JSON(http.StatusOK, gin.H{"providers": s.importerRegistry().Options()})
 }
 
 func (s *Server) importsDocuments(c *gin.Context) {

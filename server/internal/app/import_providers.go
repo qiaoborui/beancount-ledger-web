@@ -3,9 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -356,11 +354,13 @@ var billImporters = []billImporter{
 	},
 }
 
+var defaultBillImporterRegistry = defaultBillImporters()
+
 var importProviderConfigs = buildImportProviderConfigs()
 
 func buildImportProviderConfigs() map[string]importProviderConfig {
-	configs := make(map[string]importProviderConfig, len(billImporters))
-	for _, importer := range billImporters {
+	configs := make(map[string]importProviderConfig, len(defaultBillImporterRegistry.ordered))
+	for _, importer := range defaultBillImporterRegistry.ordered {
 		configs[importer.ProviderID()] = importer.ProviderConfig()
 	}
 	return configs
@@ -376,61 +376,19 @@ type importProviderOption struct {
 }
 
 func importProviderOptions() []importProviderOption {
-	ordered := append([]billImporter{}, billImporters...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		return ordered[i].DisplayOrder() < ordered[j].DisplayOrder()
-	})
-	options := make([]importProviderOption, 0, len(ordered))
-	for _, importer := range ordered {
-		cfg := importer.ProviderConfig()
-		options = append(options, importProviderOption{
-			ID:         importer.ProviderID(),
-			Label:      cfg.Label,
-			Detail:     cfg.Detail,
-			Extensions: append([]string{}, cfg.Extensions...),
-			Accept:     strings.Join(cfg.Extensions, " / "),
-			Engine:     importer.ImportEngine().ID(),
-		})
-	}
-	return options
+	return defaultBillImporterRegistry.Options()
 }
 
 func importProvider(provider string) (billImporter, bool) {
-	for _, importer := range billImporters {
-		if importer.ProviderID() == provider {
-			return importer, true
-		}
-	}
-	return nil, false
+	return defaultBillImporterRegistry.Lookup(provider)
 }
 
 func importProviderIDs() []string {
-	ids := make([]string, 0, len(billImporters))
-	for _, importer := range billImporters {
-		ids = append(ids, importer.ProviderID())
-	}
-	return ids
+	return defaultBillImporterRegistry.IDs()
 }
 
 func detectImportProvider(filename string, content []byte, override string) (providerDetection, error) {
-	ext := strings.ToLower(filepath.Ext(filename))
-	if override != "" {
-		if importer, ok := importProvider(override); ok {
-			return providerDetection{Provider: importer.ProviderID(), Reason: "手动指定", Confidence: "high"}, nil
-		}
-		return providerDetection{}, fmt.Errorf("provider must be %s", strings.Join(importProviderIDs(), ", "))
-	}
-
-	sample := string(content)
-	if len(content) > 32768 {
-		sample = string(content[:32768])
-	}
-	for _, importer := range billImporters {
-		if detection, ok := importer.Detect(filename, sample, ext); ok {
-			return detection, nil
-		}
-	}
-	return providerDetection{}, errorsUnsupportedBillType()
+	return defaultBillImporterRegistry.Detect(filename, content, override)
 }
 
 func errorsUnsupportedBillType() error {

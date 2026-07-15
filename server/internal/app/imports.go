@@ -432,7 +432,7 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	outputFile := importOutputPath(s.cfg, summary.DateStart, summary.DateEnd, provider, importID[:min(len(importID), 6)])
 	documentFile := importDocumentPath(s.cfg, summary.DateStart, summary.DateEnd, provider, meta.OriginalFilename, importID[:min(len(importID), 6)])
 	monthFile := transactionFileForDate(s.cfg, summary.DateStart)
-	documentAccount := providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
+	documentAccount := s.providerDocumentAccount(provider, accountSet, fallbackDocumentAccount)
 	sourceDocumentFile := meta.InputFile
 	if meta.DocumentFile != "" {
 		sourceDocumentFile = meta.DocumentFile
@@ -581,11 +581,14 @@ func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *m
 	if err != nil {
 		return importMeta{}, err
 	}
-	detection, err := detectBillProvider(originalName, content, providerOverride)
+	detection, err := s.importerRegistry().Detect(originalName, content, providerOverride)
 	if err != nil {
 		return importMeta{}, err
 	}
-	cfg := importProviderConfigs[detection.Provider]
+	cfg, ok := s.importerRegistry().Config(detection.Provider)
+	if !ok {
+		return importMeta{}, fmt.Errorf("provider must be %s", strings.Join(s.importerRegistry().IDs(), ", "))
+	}
 	if !stringIn(ext, cfg.Extensions) {
 		return importMeta{}, fmt.Errorf("%s账单文件类型不正确，应为 %s", cfg.Label, strings.Join(cfg.Extensions, "/"))
 	}
@@ -637,9 +640,9 @@ func (s *Server) saveImportUpload(ctx context.Context, header, originalHeader *m
 }
 
 func (s *Server) ensureImportRequirements(provider string) (billImporter, error) {
-	importer, ok := importProvider(provider)
+	importer, ok := s.importerRegistry().Lookup(provider)
 	if !ok {
-		return nil, fmt.Errorf("provider must be %s", strings.Join(importProviderIDs(), ", "))
+		return nil, fmt.Errorf("provider must be %s", strings.Join(s.importerRegistry().IDs(), ", "))
 	}
 	cfg := importer.ProviderConfig()
 	if githubAPIEnabled(s.cfg) {
@@ -923,7 +926,7 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 			written.DocumentFile = documentFile
 			documentLine = documentDirective(end, documentAccount, outputFile, documentFile) + "\n\n"
 		}
-		header := fmt.Sprintf("; %s import: %s .. %s\n", importProviderTitle(provider), start, end)
+		header := fmt.Sprintf("; %s import: %s .. %s\n", s.importProviderTitle(provider), start, end)
 		if err := tx.WriteFile(outputFile, []byte(header+documentLine+strings.TrimRight(beanText, "\n")+"\n"), 0o644); err != nil {
 			return err
 		}

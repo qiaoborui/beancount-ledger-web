@@ -23,6 +23,7 @@ type applicationDependencies struct {
 	indexStore       *LedgerIndexStore
 	indexStoreErr    error
 	cache            *LedgerCache
+	modules          *ModuleRegistry
 	writer           *LedgerWriter
 	accountService   *AccountService
 	queryPort        LedgerQueryPort
@@ -44,6 +45,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		indexStore:       dependencies.indexStore,
 		indexStoreErr:    dependencies.indexStoreErr,
 		cache:            dependencies.cache,
+		importers:        dependencies.modules.Importers(),
 		writer:           dependencies.writer,
 		accountService:   dependencies.accountService,
 		queryPort:        dependencies.queryPort,
@@ -59,6 +61,10 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	dependencies := &applicationDependencies{}
 	fail := func(err error) (*applicationDependencies, error) {
 		return nil, errors.Join(err, closeResources(dependencies.closers))
+	}
+	modules, err := NewModuleRegistry(builtinModules()...)
+	if err != nil {
+		return nil, err
 	}
 
 	if cfg.DatabaseURL != "" {
@@ -111,6 +117,11 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	dependencies.accountService = NewAccountServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.reconcileService = NewReconciliationServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.txService = NewTransactionServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
+	if err := modules.Start(context.Background()); err != nil {
+		return fail(err)
+	}
+	dependencies.modules = modules
+	dependencies.closers = append(dependencies.closers, modules)
 	return dependencies, nil
 }
 

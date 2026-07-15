@@ -60,6 +60,13 @@ service implementation and interface expose no Gin response types.
 `LedgerSnapshotPort` isolates legacy consumers that still require raw ledger
 snapshots, so typed query consumers do not inherit snapshot coupling.
 
+Statically linked extensions implement `Module` and register capabilities with
+`ModuleRegistry` during application composition. Modules with background
+resources may implement `ModuleLifecycle`; startup follows registration order
+and shutdown runs in reverse order. Importers are the first extension point:
+the built-in importer module registers `billImporter` implementations with the
+application-local `BillImporterRegistry`.
+
 ## Domain and infrastructure files
 
 - `server/internal/ledger` owns infrastructure-free ledger value types. The

@@ -394,6 +394,13 @@ func providerDocumentAccount(provider string, accounts map[string]bool, fallback
 	return fallback
 }
 
+func (s *Server) providerDocumentAccount(provider string, accounts map[string]bool, fallback string) string {
+	if importer, ok := s.importerRegistry().Lookup(provider); ok {
+		return importer.DocumentAccount(accounts, fallback)
+	}
+	return fallback
+}
+
 func includeLineRelative(baseFile, includedFile string) string {
 	rel, _ := filepath.Rel(filepath.Dir(baseFile), includedFile)
 	return `include "` + filepath.ToSlash(rel) + `"`
@@ -519,6 +526,13 @@ func safeSuffix(value string) string {
 
 func importProviderTitle(provider string) string {
 	if importer, ok := importProvider(provider); ok {
+		return importer.ProviderTitle()
+	}
+	return provider
+}
+
+func (s *Server) importProviderTitle(provider string) string {
+	if importer, ok := s.importerRegistry().Lookup(provider); ok {
 		return importer.ProviderTitle()
 	}
 	return provider
