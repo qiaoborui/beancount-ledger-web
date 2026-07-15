@@ -692,10 +692,16 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 	if err != nil {
 		return err
 	}
-	if !envelope.Authenticated || !gmailSenderAllowed(envelope.Sender, s.cfg.GmailAllowedSenders) {
-		return nil
+	if !envelope.Authenticated {
+		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "auth", "邮件未通过 Gmail DMARC 验证")
+	}
+	if !gmailSenderAllowed(envelope.Sender, s.cfg.GmailAllowedSenders) {
+		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "sender", "发件人不在 Gmail 自动账单 allowlist: "+envelope.Sender)
 	}
 	candidates := s.gmailImportCandidates(ctx, envelope.Attachments, raw, messageID)
+	if len(candidates) == 0 {
+		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "unsupported", "邮件没有可识别的账单附件: "+gmailAttachmentSummary(envelope.Attachments))
+	}
 	ready := 0
 	for _, candidate := range candidates {
 		sourceKey := messageID + ":" + sha256Hex(candidate.Upload.Content)
@@ -734,6 +740,17 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		_, _ = s.notificationService.Publish(ctx, NotificationMessage{Title: "收到新账单", Body: fmt.Sprintf("%s：%d 份账单等待 Review", valueOr(envelope.Subject, envelope.Sender), ready), URL: "/import", Tag: "gmail-import-" + messageID})
 	}
 	return nil
+}
+
+func (s *Server) recordGmailEnvelopeFailure(ctx context.Context, messageID string, raw []byte, envelope gmailMessageEnvelope, reason, message string) error {
+	sourceKey := messageID + ":message-" + reason
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	item := GmailPendingImport{ID: randomID(), SourceKey: sourceKey, MessageID: messageID, Sender: envelope.Sender, Subject: envelope.Subject, ReceivedAt: envelope.ReceivedAt, Filename: "gmail-" + safeSuffix(messageID) + ".eml", Status: "failed", Error: message, CreatedAt: now, UpdatedAt: now, StoredBytes: int64(len(raw))}
+	reserved, err := s.reserveGmailPending(ctx, item)
+	if err != nil || !reserved {
+		return err
+	}
+	return s.finalizeGmailPending(ctx, item)
 }
 
 func (s *Server) recordGmailMessageFailure(ctx context.Context, messageID string, processErr error) error {
@@ -784,6 +801,18 @@ func (s *Server) gmailImportCandidates(ctx context.Context, attachments []import
 		}
 	}
 	return candidates
+}
+
+func gmailAttachmentSummary(attachments []importUpload) string {
+	if len(attachments) == 0 {
+		return "无附件"
+	}
+	names := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		names = append(names, attachment.Filename)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func (s *Server) importFilenameSupported(filename string) bool {

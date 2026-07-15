@@ -212,6 +212,42 @@ func TestGmailSyncRecordsPoisonMessageAndContinues(t *testing.T) {
 	}
 }
 
+func TestGmailSyncRecordsUnsupportedMessage(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{"bill@example.com"}
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{Version: 1, Email: "owner@example.com", EncryptedRefreshToken: "present", LabelID: "label-1", HistoryID: 10}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: Bill <bill@example.com>",
+		"To: owner@example.com",
+		"Subject: Monthly statement",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=example.com",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"no attachment here",
+	}, "\r\n")
+	api := &fakeGmailAPI{
+		messageIDs: []string{"unsupported"},
+		messages: map[string]*gmail.Message{
+			"unsupported": {Id: "unsupported", LabelIds: []string{"label-1"}, Raw: base64.RawURLEncoding.EncodeToString([]byte(raw))},
+		},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := server.readGmailPending(context.Background())
+	if err != nil || len(pending.Items) != 1 {
+		t.Fatalf("pending=%#v err=%v", pending.Items, err)
+	}
+	item := pending.Items[0]
+	if item.Status != "failed" || item.Sender != "bill@example.com" || !strings.Contains(item.Error, "没有可识别") {
+		t.Fatalf("item=%#v", item)
+	}
+}
+
 func TestRecoverStaleProcessingImport(t *testing.T) {
 	cfg := testLedger(t)
 	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}

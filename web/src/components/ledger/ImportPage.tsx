@@ -527,6 +527,23 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     }
   }
 
+  async function disconnectGmail() {
+    if (typeof window !== "undefined" && !window.confirm("断开 Gmail 自动账单连接？")) return;
+    setGmailLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/integrations/gmail", { method: "DELETE" }, { kind: "write" });
+      const data = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "断开 Gmail 失败");
+      setPendingImports([]);
+      await loadGmailAutomation();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGmailLoading(false);
+    }
+  }
+
   async function openPendingImport(item: GmailPendingImport) {
     if (item.status !== "ready") return;
     setGmailLoading(true);
@@ -627,9 +644,14 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
             </div>
             <div className="flex flex-wrap gap-2">
               {gmailStatus?.connected ? (
-                <Button variant="outline" onClick={() => void syncGmail()} disabled={gmailLoading}>
-                  {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}立即同步
-                </Button>
+                <>
+                  <Button variant="outline" onClick={() => void syncGmail()} disabled={gmailLoading}>
+                    {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}立即同步
+                  </Button>
+                  <Button variant="outline" onClick={() => void disconnectGmail()} disabled={gmailLoading}>
+                    <Trash2 className="h-4 w-4" />断开
+                  </Button>
+                </>
               ) : (
                 <Button onClick={() => void connectGmail()} disabled={gmailLoading || !gmailStatus?.configured}>
                   {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}连接 Gmail
