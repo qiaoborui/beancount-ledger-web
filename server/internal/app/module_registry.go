@@ -208,6 +208,39 @@ func builtinModules() []Module {
 	return []Module{importerModule{}}
 }
 
+func enabledBuiltinModules(enabled []string) ([]Module, error) {
+	available := builtinModules()
+	if len(enabled) == 0 {
+		return available, nil
+	}
+	byName := make(map[string]Module, len(available))
+	for _, module := range available {
+		byName[module.Name()] = module
+	}
+	selected := make([]Module, 0, len(enabled))
+	seen := make(map[string]bool, len(enabled))
+	for _, name := range enabled {
+		if seen[name] {
+			return nil, fmt.Errorf("module %q is configured more than once", name)
+		}
+		module, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown enabled module %q; available modules: %s", name, strings.Join(moduleNames(available), ", "))
+		}
+		seen[name] = true
+		selected = append(selected, module)
+	}
+	return selected, nil
+}
+
+func moduleNames(modules []Module) []string {
+	names := make([]string, 0, len(modules))
+	for _, module := range modules {
+		names = append(names, module.Name())
+	}
+	return names
+}
+
 func defaultBillImporters() *BillImporterRegistry {
 	return newBillImporterRegistry(billImporters...)
 }

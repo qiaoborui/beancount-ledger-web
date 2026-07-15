@@ -53,6 +53,26 @@ func TestBuiltinModulesRegisterAllImporters(t *testing.T) {
 	}
 }
 
+func TestEnabledBuiltinModules(t *testing.T) {
+	all, err := enabledBuiltinModules(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := enabledBuiltinModules([]string{"importers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(moduleNames(all), moduleNames(selected)) {
+		t.Fatalf("selected modules = %#v, want %#v", moduleNames(selected), moduleNames(all))
+	}
+	if _, err := enabledBuiltinModules([]string{"missing"}); err == nil {
+		t.Fatal("unknown module should fail")
+	}
+	if _, err := enabledBuiltinModules([]string{"importers", "importers"}); err == nil {
+		t.Fatal("duplicate module should fail")
+	}
+}
+
 func TestModuleRegistryRejectsDuplicateNamesAndImporterIDs(t *testing.T) {
 	first := testModule{name: "first"}
 	registry, err := NewModuleRegistry(first)

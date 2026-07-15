@@ -66,6 +66,9 @@ resources may implement `ModuleLifecycle`; startup follows registration order
 and shutdown runs in reverse order. Importers are the first extension point:
 the built-in importer module registers `billImporter` implementations with the
 application-local `BillImporterRegistry`.
+`LEDGER_ENABLED_MODULES` accepts a comma-separated allowlist of statically
+linked module names. An empty value enables every built-in module; an unknown
+or duplicate name stops application startup.
 
 ## Domain and infrastructure files
 

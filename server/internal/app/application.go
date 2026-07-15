@@ -62,7 +62,11 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	fail := func(err error) (*applicationDependencies, error) {
 		return nil, errors.Join(err, closeResources(dependencies.closers))
 	}
-	modules, err := NewModuleRegistry(builtinModules()...)
+	selectedModules, err := enabledBuiltinModules(cfg.EnabledModules)
+	if err != nil {
+		return nil, err
+	}
+	modules, err := NewModuleRegistry(selectedModules...)
 	if err != nil {
 		return nil, err
 	}
