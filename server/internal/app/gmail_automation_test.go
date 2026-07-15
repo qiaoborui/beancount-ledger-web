@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +286,112 @@ func TestGmailSyncScansRecentWhenHistoryIsEmpty(t *testing.T) {
 	}
 	if pending.Items[0].Status != "failed" || !strings.Contains(pending.Items[0].Error, "没有可识别") {
 		t.Fatalf("item=%#v", pending.Items[0])
+	}
+}
+
+func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{"service@mail.alipay.com"}
+	cfg.GmailSyncLookbackDays = 7
+	writeAlipayImportRequirements(t, cfg)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("PYTHON_BIN", fakeDedupPython(t))
+	dependencies, err := buildApplicationDependencies(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := closeResources(dependencies.closers); err != nil {
+			t.Error(err)
+		}
+	})
+	server := &Server{
+		cfg:                 cfg,
+		runtimeStore:        dependencies.runtimeStore,
+		indexStore:          dependencies.indexStore,
+		indexStoreErr:       dependencies.indexStoreErr,
+		cache:               dependencies.cache,
+		importers:           dependencies.modules.Importers(),
+		moduleNames:         dependencies.moduleNames,
+		notificationService: dependencies.notificationService,
+		writer:              dependencies.writer,
+		accountService:      dependencies.accountService,
+		queryPort:           dependencies.queryPort,
+		snapshotPort:        dependencies.snapshotPort,
+		reconcileService:    dependencies.reconcileService,
+		txService:           dependencies.txService,
+		limiter:             dependencies.limiter,
+	}
+	connection := gmailConnection{Version: 1, Email: "owner@example.com", EncryptedRefreshToken: "present", LabelID: "label-1", HistoryID: 10}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	encodedFilename := "=?GB18030?Q?=D6=A7=B8=B6=B1=A6=BD=BB=D2=D7=C3=F7=CF=B8=2Ecsv?="
+	attachment := base64.StdEncoding.EncodeToString(alipayCSVFixture())
+	raw := strings.Join([]string{
+		"From: =?gbk?b?1qe4trgmzohq0q==?= <service@mail.alipay.com>",
+		"To: owner@example.com",
+		"Subject: =?GB18030?Q?=D6=A7=B8=B6=B1=A6=BD=BB=D2=D7=C3=F7=CF=B8?=",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=mail.alipay.com",
+		"Content-Type: multipart/mixed; boundary=alipay-boundary",
+		"",
+		"--alipay-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"statement attached",
+		"--alipay-boundary",
+		"Content-Type: text/csv; name=\"" + encodedFilename + "\"",
+		"Content-Disposition: attachment; filename=\"" + encodedFilename + "\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		attachment,
+		"--alipay-boundary--",
+		"",
+	}, "\r\n")
+	api := &fakeGmailAPI{
+		recentIDs: []string{"alipay"},
+		messages: map[string]*gmail.Message{
+			"alipay": {
+				Id:           "alipay",
+				ThreadId:     "thread-1",
+				LabelIds:     []string{"label-1"},
+				InternalDate: time.Date(2026, 7, 13, 12, 34, 56, 0, time.UTC).UnixMilli(),
+				Raw:          base64.RawURLEncoding.EncodeToString([]byte(raw)),
+			},
+		},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(api.rawCalls, ",") != "alipay" {
+		t.Fatalf("raw calls=%v", api.rawCalls)
+	}
+	pending, err := server.readGmailPending(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.Items) != 1 {
+		t.Fatalf("pending=%#v", pending.Items)
+	}
+	item := pending.Items[0]
+	if item.Status != "ready" || item.Sender != "service@mail.alipay.com" || item.Filename != "支付宝交易明细.csv" {
+		t.Fatalf("item=%#v", item)
+	}
+	if item.Provider != "alipay" || item.CandidateCount != 1 || item.ImportID == "" {
+		t.Fatalf("item=%#v", item)
+	}
+	var preview map[string]any
+	ok, err := server.runtime().GetJSON(context.Background(), "imports", importFileKey(item.ImportID, "preview"), &preview)
+	if err != nil || !ok {
+		t.Fatalf("preview ok=%v err=%v", ok, err)
+	}
+	if preview["provider"] != "alipay" || anyInt(preview["candidateCount"]) != 1 {
+		t.Fatalf("preview=%#v", preview)
 	}
 }
 
