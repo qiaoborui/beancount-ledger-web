@@ -945,6 +945,13 @@ func readMIMEBody(encoding string, body io.Reader) ([]byte, error) {
 func canonicalEmailAddress(value string) string {
 	address, err := mail.ParseAddress(value)
 	if err != nil {
+		start := strings.LastIndex(value, "<")
+		end := strings.LastIndex(value, ">")
+		if start >= 0 && end > start {
+			if address, fallbackErr := mail.ParseAddress(strings.TrimSpace(value[start+1 : end])); fallbackErr == nil {
+				return strings.ToLower(strings.TrimSpace(address.Address))
+			}
+		}
 		return strings.ToLower(strings.TrimSpace(value))
 	}
 	return strings.ToLower(strings.TrimSpace(address.Address))

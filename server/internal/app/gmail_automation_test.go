@@ -377,6 +377,13 @@ func TestGmailSenderAllowedUsesExactAddress(t *testing.T) {
 	}
 }
 
+func TestCanonicalEmailAddressExtractsAddressFromEncodedDisplayName(t *testing.T) {
+	from := "=?gbk?b?1qe4trgmzohq0q==?= <service@mail.alipay.com>"
+	if got := canonicalEmailAddress(from); got != "service@mail.alipay.com" {
+		t.Fatalf("canonical email = %q", got)
+	}
+}
+
 func TestPruneGmailPendingKeepsUnreviewedItems(t *testing.T) {
 	items := []GmailPendingImport{
 		{ID: "old-committed", Status: "committed"},
