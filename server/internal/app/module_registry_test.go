@@ -56,6 +56,20 @@ func TestBuiltinModulesRegisterAllImporters(t *testing.T) {
 	}
 }
 
+func TestModuleRegistryNamesFollowResolvedOrder(t *testing.T) {
+	modules, err := enabledBuiltinModules([]string{"notifications", "importers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewModuleRegistry(modules...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := registry.Names(), []string{"web-push", "notifications", "importers"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("module names = %#v, want %#v", got, want)
+	}
+}
+
 func TestEnabledBuiltinModules(t *testing.T) {
 	all, err := enabledBuiltinModules(nil)
 	if err != nil {

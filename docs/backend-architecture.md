@@ -65,6 +65,8 @@ composition root.
 `storage_adapters.go` owns runtime-store, read-model, rate-limiter, and database
 adapter selection with one explicit close list. `application.go` consumes those
 ports and retains service wiring.
+`GET /api/health` reports the resolved module order together with read-model and
+runtime-adapter status, so deployment checks can confirm the active composition.
 
 Statically linked extensions implement `Module` and register capabilities with
 `ModuleRegistry` during application composition. Modules with background

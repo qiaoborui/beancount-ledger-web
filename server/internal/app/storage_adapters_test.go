@@ -2,12 +2,23 @@ package app
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
 type testLedgerIndexPort struct {
 	revision LedgerIndexRevision
 	snapshot *LedgerSnapshot
+}
+
+func TestLedgerReadServiceKeepsIndexDependencyAsPort(t *testing.T) {
+	field, ok := reflect.TypeOf(LedgerReadService{}).FieldByName("indexStore")
+	if !ok {
+		t.Fatal("LedgerReadService indexStore field is missing")
+	}
+	if want := reflect.TypeOf((*LedgerIndexPort)(nil)).Elem(); field.Type != want {
+		t.Fatalf("indexStore type = %v, want %v", field.Type, want)
+	}
 }
 
 func (p testLedgerIndexPort) ActiveRevision(context.Context) (LedgerIndexRevision, bool, error) {
