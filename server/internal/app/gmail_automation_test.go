@@ -115,6 +115,20 @@ func TestDecodeGmailPush(t *testing.T) {
 	}
 }
 
+func TestDecodeGmailPushAcceptsBase64URLData(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"emailAddress":"a😀@example.com","historyId":"12345"}`))
+	if !strings.Contains(payload, "-") && !strings.Contains(payload, "_") {
+		t.Fatalf("payload does not exercise URL-safe base64 alphabet: %s", payload)
+	}
+	data, messageID, err := decodeGmailPush([]byte(`{"message":{"data":"` + payload + `","messageId":"pubsub-1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.EmailAddress != "a😀@example.com" || data.HistoryID != "12345" || messageID != "pubsub-1" {
+		t.Fatalf("unexpected push data: %#v", data)
+	}
+}
+
 func TestGmailPushEventQueueDeduplicatesAndRetries(t *testing.T) {
 	cfg := testLedger(t)
 	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
@@ -167,6 +181,31 @@ func TestGmailPubSubAcknowledgesAfterDurableEnqueue(t *testing.T) {
 	}
 	store, err := server.readGmailPushEvents(context.Background())
 	if err != nil || len(store.Items) != 1 || store.Items[0].ID != "push-1" || store.Items[0].Status != "queued" {
+		t.Fatalf("events=%#v err=%v", store.Items, err)
+	}
+}
+
+func TestGmailPubSubAcknowledgesMalformedPayloadAfterAuth(t *testing.T) {
+	original := validateGmailIDToken
+	t.Cleanup(func() { validateGmailIDToken = original })
+	validateGmailIDToken = func(context.Context, string, string) (*idtoken.Payload, error) {
+		return &idtoken.Payload{Claims: map[string]any{"email": "push@example.com", "email_verified": true}}, nil
+	}
+	cfg := testLedger(t)
+	cfg.GmailClientID = "configured"
+	cfg.GmailPubSubAudience = "https://ledger.example/api/integrations/gmail/pubsub"
+	cfg.GmailPubSubServiceAccount = "push@example.com"
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	router := newRouter(cfg, server)
+	request := httptest.NewRequest(http.MethodPost, "/api/integrations/gmail/pubsub", strings.NewReader(`{"message":{"data":"%%%","messageId":"push-1"}}`))
+	request.Header.Set("Authorization", "Bearer signed")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	store, err := server.readGmailPushEvents(context.Background())
+	if err != nil || len(store.Items) != 0 {
 		t.Fatalf("events=%#v err=%v", store.Items, err)
 	}
 }

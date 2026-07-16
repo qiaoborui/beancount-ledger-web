@@ -402,10 +402,7 @@ func decodeGmailPush(body []byte) (gmailPushData, string, error) {
 	if envelope.Message.Data == "" || strings.TrimSpace(envelope.Message.MessageID) == "" {
 		return gmailPushData{}, "", errors.New("Pub/Sub message data and messageId are required")
 	}
-	raw, err := base64.RawStdEncoding.DecodeString(envelope.Message.Data)
-	if err != nil {
-		raw, err = base64.StdEncoding.DecodeString(envelope.Message.Data)
-	}
+	raw, err := decodeGmailPushData(envelope.Message.Data)
 	if err != nil {
 		return gmailPushData{}, "", err
 	}
@@ -417,6 +414,19 @@ func decodeGmailPush(body []byte) (gmailPushData, string, error) {
 		return gmailPushData{}, "", errors.New("Gmail push payload is incomplete")
 	}
 	return data, strings.TrimSpace(envelope.Message.MessageID), nil
+}
+
+func decodeGmailPushData(value string) ([]byte, error) {
+	if raw, err := base64.RawURLEncoding.DecodeString(value); err == nil {
+		return raw, nil
+	}
+	if raw, err := base64.URLEncoding.DecodeString(value); err == nil {
+		return raw, nil
+	}
+	if raw, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		return raw, nil
+	}
+	return base64.StdEncoding.DecodeString(value)
 }
 
 func (s *Server) enqueueGmailPushEvent(ctx context.Context, messageID string, data gmailPushData) error {

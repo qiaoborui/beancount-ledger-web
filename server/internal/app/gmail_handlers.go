@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -202,7 +203,8 @@ func (s *Server) gmailPubSub(c *gin.Context) {
 	}
 	data, messageID, err := decodeGmailPush(body)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		log.Printf("gmail pubsub payload ignored: %v", err)
+		c.Status(http.StatusNoContent)
 		return
 	}
 	connection, connected, err := s.gmailConnection(c.Request.Context())
