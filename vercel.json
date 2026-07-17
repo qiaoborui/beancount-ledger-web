@@ -16,8 +16,5 @@
     { "source": "/.well-known/webauthn", "destination": { "service": "backend" } },
     { "source": "/api/(.*)", "destination": { "service": "backend" } },
     { "source": "/(.*)", "destination": { "service": "frontend" } }
-  ],
-  "crons": [
-    { "path": "/api/integrations/gmail/renew", "schedule": "17 3 * * *" }
   ]
 }
