@@ -48,6 +48,7 @@ const (
 )
 
 var validateGmailIDToken = idtoken.Validate
+var extractGmailImportZIP = extractImportZIP
 var errGmailSyncBusy = errors.New("Gmail 同步正在运行")
 
 type gmailConnection struct {
@@ -632,7 +633,7 @@ func (s *Server) syncGmail(ctx context.Context, notifiedHistoryID uint64) error 
 
 func (s *Server) syncGmailWithAPI(ctx context.Context, api gmailAPI, connection gmailConnection, notifiedHistoryID uint64) error {
 	messageIDs, latestHistoryID, err := api.History(ctx, connection.HistoryID, connection.LabelID)
-	if isGoogleNotFound(err) || (err == nil && len(messageIDs) == 0) {
+	if isGoogleNotFound(err) || (err == nil && len(messageIDs) == 0 && connection.LastSyncAt == "") {
 		messageIDs, latestHistoryID, err = api.RecentMessages(ctx, connection.LabelID, s.cfg.GmailSyncLookbackDays)
 	}
 	if err != nil {
@@ -740,8 +741,15 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 	if !gmailSenderAllowed(envelope.Sender, s.cfg.GmailAllowedSenders) {
 		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "sender", "发件人不在 Gmail 自动账单 allowlist: "+envelope.Sender)
 	}
-	candidates := s.gmailImportCandidates(ctx, envelope, raw, messageID)
+	existingSourceKeys, err := s.gmailPendingSourceKeys(ctx)
+	if err != nil {
+		return err
+	}
+	candidates, duplicateSkipped := s.gmailImportCandidates(ctx, envelope, raw, messageID, existingSourceKeys)
 	if len(candidates) == 0 {
+		if duplicateSkipped {
+			return nil
+		}
 		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "unsupported", "邮件没有可识别的账单附件: "+gmailAttachmentSummary(envelope.Attachments))
 	}
 	ready := 0
@@ -814,14 +822,20 @@ func decodeGmailRaw(value string) ([]byte, error) {
 	return raw, err
 }
 
-func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessageEnvelope, raw []byte, messageID string) []gmailImportCandidate {
+func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessageEnvelope, raw []byte, messageID string, existingSourceKeys map[string]struct{}) ([]gmailImportCandidate, bool) {
 	candidates := make([]gmailImportCandidate, 0, len(envelope.Attachments)+1)
 	usable := 0
+	duplicateSkipped := false
 	for _, attachment := range envelope.Attachments {
+		sourceKey := messageID + ":" + sha256Hex(attachment.Content)
+		if _, exists := existingSourceKeys[sourceKey]; exists {
+			duplicateSkipped = true
+			continue
+		}
 		ext := strings.ToLower(filepath.Ext(attachment.Filename))
 		if ext == ".zip" {
 			zipContext, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.GmailZipTimeoutSeconds)*time.Second)
-			extracted, _, err := extractImportZIP(zipContext, attachment.Content, s.cfg.GmailZipPasswords)
+			extracted, _, err := extractGmailImportZIP(zipContext, attachment.Content, s.cfg.GmailZipPasswords)
 			cancel()
 			if err != nil {
 				candidates = append(candidates, gmailImportCandidate{Upload: attachment, Error: err})
@@ -836,13 +850,13 @@ func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessag
 			usable++
 		}
 	}
-	if usable == 0 {
+	if usable == 0 && !duplicateSkipped {
 		filename := "gmail-" + safeSuffix(messageID) + ".eml"
 		if _, err := s.importerRegistry().Detect(filename, raw, ""); err == nil {
 			candidates = append(candidates, gmailImportCandidate{Upload: importUpload{Filename: filename, Content: raw}})
 		}
 	}
-	return candidates
+	return candidates, duplicateSkipped
 }
 
 func gmailAttachmentProviderOverride(sender, filename string) string {
@@ -1052,6 +1066,20 @@ func (s *Server) readGmailPending(ctx context.Context) (gmailPendingStore, error
 func (s *Server) writeGmailPending(ctx context.Context, store gmailPendingStore) error {
 	store.Version = 1
 	return s.runtime().PutJSON(ctx, "gmail", gmailPendingKey, store)
+}
+
+func (s *Server) gmailPendingSourceKeys(ctx context.Context) (map[string]struct{}, error) {
+	store, err := s.readGmailPending(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make(map[string]struct{}, len(store.Items))
+	for _, item := range store.Items {
+		if item.SourceKey != "" {
+			keys[item.SourceKey] = struct{}{}
+		}
+	}
+	return keys, nil
 }
 
 func (s *Server) gmailPendingSnapshot(ctx context.Context) (gmailPendingStore, error) {

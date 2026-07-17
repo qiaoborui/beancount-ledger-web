@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"net/http"
@@ -21,10 +22,12 @@ import (
 )
 
 type fakeGmailAPI struct {
-	messageIDs []string
-	recentIDs  []string
-	messages   map[string]*gmail.Message
-	rawCalls   []string
+	messageIDs  []string
+	recentIDs   []string
+	messages    map[string]*gmail.Message
+	rawCalls    []string
+	recentCalls int
+	historyErr  error
 }
 
 func (f *fakeGmailAPI) Profile(context.Context) (*gmail.Profile, error) { return &gmail.Profile{}, nil }
@@ -33,9 +36,10 @@ func (f *fakeGmailAPI) Watch(context.Context, string, string) (*gmail.WatchRespo
 	return &gmail.WatchResponse{}, nil
 }
 func (f *fakeGmailAPI) History(context.Context, uint64, string) ([]string, uint64, error) {
-	return append([]string(nil), f.messageIDs...), 99, nil
+	return append([]string(nil), f.messageIDs...), 99, f.historyErr
 }
 func (f *fakeGmailAPI) RecentMessages(context.Context, string, int) ([]string, uint64, error) {
+	f.recentCalls++
 	return append([]string(nil), f.recentIDs...), 99, nil
 }
 func (f *fakeGmailAPI) RawMessage(_ context.Context, id string) (*gmail.Message, error) {
@@ -367,12 +371,123 @@ func TestGmailSyncScansRecentWhenHistoryIsEmpty(t *testing.T) {
 	if strings.Join(api.rawCalls, ",") != "recent" {
 		t.Fatalf("raw calls=%v", api.rawCalls)
 	}
+	if api.recentCalls != 1 {
+		t.Fatalf("recent calls=%d", api.recentCalls)
+	}
 	pending, err := server.readGmailPending(context.Background())
 	if err != nil || len(pending.Items) != 1 {
 		t.Fatalf("pending=%#v err=%v", pending.Items, err)
 	}
 	if pending.Items[0].Status != "failed" || !strings.Contains(pending.Items[0].Error, "没有可识别") {
 		t.Fatalf("item=%#v", pending.Items[0])
+	}
+}
+
+func TestGmailSyncDoesNotRescanRecentMessagesAfterInitialSync(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{
+		Version:    1,
+		Email:      "owner@example.com",
+		LabelID:    "label-1",
+		HistoryID:  10,
+		LastSyncAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeGmailAPI{
+		recentIDs: []string{"already-processed"},
+		messages:  map[string]*gmail.Message{"already-processed": {Id: "already-processed"}},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	if api.recentCalls != 0 || len(api.rawCalls) != 0 {
+		t.Fatalf("recent calls=%d raw calls=%v", api.recentCalls, api.rawCalls)
+	}
+}
+
+func TestGmailSyncScansRecentMessagesWhenHistoryExpired(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{
+		Version:    1,
+		Email:      "owner@example.com",
+		LabelID:    "label-1",
+		HistoryID:  10,
+		LastSyncAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeGmailAPI{
+		historyErr: &googleapi.Error{Code: http.StatusNotFound},
+		recentIDs:  []string{"recovered"},
+		messages:   map[string]*gmail.Message{"recovered": {Id: "recovered"}},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	if api.recentCalls != 1 || strings.Join(api.rawCalls, ",") != "recovered" {
+		t.Fatalf("recent calls=%d raw calls=%v", api.recentCalls, api.rawCalls)
+	}
+}
+
+func TestGmailSyncSkipsDuplicateZIPBeforePasswordSearch(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{"bill@example.com"}
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	zipContent := []byte("already-processed-zip")
+	messageID := "duplicate-zip"
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := server.writeGmailPending(context.Background(), gmailPendingStore{Version: 1, Items: []GmailPendingImport{{
+		ID:        "dismissed-1",
+		SourceKey: messageID + ":" + sha256Hex(zipContent),
+		MessageID: messageID,
+		Filename:  "statement.zip",
+		Status:    "dismissed",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	originalExtract := extractGmailImportZIP
+	extractCalled := false
+	extractGmailImportZIP = func(context.Context, []byte, []string) (importUpload, string, error) {
+		extractCalled = true
+		return importUpload{}, "", errors.New("password search should not run")
+	}
+	t.Cleanup(func() { extractGmailImportZIP = originalExtract })
+
+	raw := strings.Join([]string{
+		"From: Bill <bill@example.com>",
+		"To: owner@example.com",
+		"Subject: Existing ZIP statement",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=example.com",
+		"Content-Type: multipart/mixed; boundary=zip-boundary",
+		"",
+		"--zip-boundary",
+		"Content-Type: application/zip; name=\"statement.zip\"",
+		"Content-Disposition: attachment; filename=\"statement.zip\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		base64.StdEncoding.EncodeToString(zipContent),
+		"--zip-boundary--",
+		"",
+	}, "\r\n")
+	api := &fakeGmailAPI{messages: map[string]*gmail.Message{
+		messageID: {Id: messageID, LabelIds: []string{"label-1"}, Raw: base64.RawURLEncoding.EncodeToString([]byte(raw))},
+	}}
+	if err := server.processGmailMessage(context.Background(), api, messageID, "label-1"); err != nil {
+		t.Fatal(err)
+	}
+	if extractCalled {
+		t.Fatal("duplicate ZIP reached password search")
+	}
+	pending, err := server.readGmailPending(context.Background())
+	if err != nil || len(pending.Items) != 1 || pending.Items[0].Status != "dismissed" {
+		t.Fatalf("pending=%#v err=%v", pending.Items, err)
 	}
 }
 
