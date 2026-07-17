@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
-import { ApiResponseError, fetchJson, readJson } from "@/lib/clientFetch";
-import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey, apiFetch } from "@/lib/apiEndpoints";
+import { ApiResponseError, fetchJson } from "@/lib/clientFetch";
+import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
@@ -153,6 +153,11 @@ export function latestImportDocumentsByProvider(documents: ImportDocument[]) {
   return latest;
 }
 
+export function importActionFeedback(error: unknown) {
+  if (error instanceof ApiResponseError && error.status === 423) return "敏感数据已锁定，请先解锁后重试";
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function reviewableGmailPendingImports(items: GmailPendingImport[]) {
   return items.filter((item) => item.status === "ready" || item.status === "failed");
 }
@@ -239,7 +244,7 @@ export function createImportPreviewForm(providerOverride: ProviderOverride, file
   return form;
 }
 
-export function ImportPage({ onImported }: { onImported?: () => void }) {
+export function ImportPage({ onImported, showToast }: { onImported?: () => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const reviewDetailRef = useRef<HTMLElement | null>(null);
   const draftHydratedRef = useRef(false);
@@ -254,7 +259,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const [resultOpen, setResultOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
-  const [error, setError] = useState("");
   const [providerOpen, setProviderOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
@@ -289,6 +293,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const latestImportsByProvider = useMemo(() => latestImportDocumentsByProvider(importDocuments), [importDocuments]);
   const reviewablePendingImports = useMemo(() => reviewableGmailPendingImports(pendingImports), [pendingImports]);
   const isZipUpload = file?.name.toLowerCase().endsWith(".zip") === true;
+
+  function reportActionError(error: unknown) {
+    showToast("error", importActionFeedback(error));
+  }
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -369,7 +377,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setResultOpen(false);
     setReviewOpen(false);
     setDraftSavedAt(null);
-    setError("");
     setActivePendingId("");
     writeImportDraft(null);
   }
@@ -386,7 +393,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setReviewOpen(false);
     setRawOpen(false);
     setDraftSavedAt(null);
-    setError("");
     setDiscardDialogOpen(false);
     setActivePendingId("");
     writeImportDraft(null);
@@ -394,11 +400,10 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   async function generatePreview() {
     if (!file) {
-      setError("请先选择账单文件");
+      showToast("error", "请先选择账单文件");
       return;
     }
     setLoading(true);
-    setError("");
     setPreview(null);
     setEntries([]);
     setSelectedEntryId("");
@@ -407,16 +412,14 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     try {
       const form = createImportPreviewForm(providerOverride, file, alipayFundRounding, archivePassword);
       setArchivePassword("");
-      const res = await apiFetch("/api/ledger/imports/preview", { method: "POST", body: form }, { kind: "write" });
-      const data = await readJson<ImportPreview>(res);
-      if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
+      const data = await fetchJson<ImportPreview>("/api/ledger/imports/preview", { method: "POST", body: form }, undefined, { kind: "write" });
       setPreview(data);
       setEntries(data.entries);
       setSelectedEntryId(data.entries[0]?.id ?? "");
       setDraftSavedAt(Date.now());
       setReviewOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setLoading(false);
     }
@@ -425,17 +428,14 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   async function commitImport() {
     if (!preview) return;
     setCommitting(true);
-    setError("");
     setCommitResult(null);
     setResultOpen(false);
     try {
-      const res = await apiFetch("/api/ledger/imports/commit", {
+      const data = await fetchJson<CommitResult>("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
-      }, { kind: "write" });
-      const data = await readJson<CommitResult>(res);
-      if (!res.ok || data.error) throw new Error(data.error || "写入失败");
+      }, undefined, { kind: "write" });
       setCommitResult(data);
       setResultOpen(true);
       setReviewOpen(true);
@@ -445,7 +445,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       void loadGmailAutomation();
       onImported?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setCommitting(false);
     }
@@ -477,20 +477,21 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     }
   }
 
-  async function loadImportDocuments() {
+  async function loadImportDocuments(notifyOnError = false) {
     setDocumentsLoading(true);
     setDocumentsError("");
     try {
       const data = await fetchJson<{ documents: ImportDocument[] }>("/api/ledger/imports/documents", undefined, { documents: [] }, { kind: "auth" });
       setImportDocuments(data.documents ?? []);
     } catch (err) {
-      setDocumentsError(err instanceof Error ? err.message : String(err));
+      if (notifyOnError) reportActionError(err);
+      else setDocumentsError(importActionFeedback(err));
     } finally {
       setDocumentsLoading(false);
     }
   }
 
-  async function loadGmailAutomation() {
+  async function loadGmailAutomation(notifyOnError = false): Promise<boolean> {
     try {
       const status = await fetchJson<GmailImportStatus>("/api/integrations/gmail/status", undefined, { configured: false, connected: false }, { kind: "auth" });
       setGmailStatus(status);
@@ -500,39 +501,36 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       } catch (err) {
         if (err instanceof ApiResponseError && err.status === 423) {
           setPendingImports([]);
-          return;
+          return true;
         }
         throw err;
       }
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (notifyOnError) reportActionError(err);
+      return false;
     }
   }
 
   async function connectGmail() {
     setGmailLoading(true);
-    setError("");
     try {
-      const res = await apiFetch("/api/integrations/gmail/connect", { method: "POST" }, { kind: "write" });
-      const data = await readJson<{ url?: string; error?: string }>(res);
-      if (!res.ok || !data.url) throw new Error(data.error || "无法开始 Gmail 授权");
+      const data = await fetchJson<{ url?: string }>("/api/integrations/gmail/connect", { method: "POST" }, undefined, { kind: "write" });
+      if (!data.url) throw new Error("无法开始 Gmail 授权");
       window.location.assign(data.url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
       setGmailLoading(false);
     }
   }
 
   async function syncGmail() {
     setGmailLoading(true);
-    setError("");
     try {
-      const res = await apiFetch("/api/integrations/gmail/sync", { method: "POST" }, { kind: "write" });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error || "Gmail 同步失败");
-      await loadGmailAutomation();
+      await fetchJson<{ ok?: boolean }>("/api/integrations/gmail/sync", { method: "POST" }, undefined, { kind: "write" });
+      if (await loadGmailAutomation(true)) showToast("success", "Gmail 账单同步完成");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setGmailLoading(false);
     }
@@ -541,15 +539,12 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   async function disconnectGmail() {
     if (typeof window !== "undefined" && !window.confirm("断开 Gmail 自动账单连接？")) return;
     setGmailLoading(true);
-    setError("");
     try {
-      const res = await apiFetch("/api/integrations/gmail", { method: "DELETE" }, { kind: "write" });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error || "断开 Gmail 失败");
+      await fetchJson<{ ok?: boolean }>("/api/integrations/gmail", { method: "DELETE" }, undefined, { kind: "write" });
       setPendingImports([]);
-      await loadGmailAutomation();
+      if (await loadGmailAutomation(true)) showToast("success", "Gmail 自动账单连接已断开");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setGmailLoading(false);
     }
@@ -558,11 +553,9 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   async function openPendingImport(item: GmailPendingImport) {
     if (item.status !== "ready") return;
     setGmailLoading(true);
-    setError("");
     try {
-      const res = await apiFetch(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, { kind: "auth" });
-      const data = await readJson<{ item?: GmailPendingImport; preview?: ImportPreview; error?: string }>(res);
-      if (!res.ok || !data.preview?.importId) throw new Error(data.error || "自动账单预览不存在");
+      const data = await fetchJson<{ item?: GmailPendingImport; preview?: ImportPreview }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, undefined, { kind: "auth" });
+      if (!data.preview?.importId) throw new Error("自动账单预览不存在");
       setFile(null);
       setPreview(data.preview);
       setEntries(data.preview.entries);
@@ -573,7 +566,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
       setActivePendingId(item.id);
       setReviewOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setGmailLoading(false);
     }
@@ -581,14 +574,11 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   async function dismissPendingImport(item: GmailPendingImport) {
     setGmailLoading(true);
-    setError("");
     try {
-      const res = await apiFetch(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, { method: "DELETE" }, { kind: "write" });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error || "忽略自动账单失败");
-      await loadGmailAutomation();
+      await fetchJson<{ ok?: boolean }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, { method: "DELETE" }, undefined, { kind: "write" });
+      if (await loadGmailAutomation(true)) showToast("success", "已忽略这份自动账单");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportActionError(err);
     } finally {
       setGmailLoading(false);
     }
@@ -817,7 +807,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               latestByProvider={latestImportsByProvider}
               loading={documentsLoading}
               providerChoices={providerChoices}
-              onRefresh={() => void loadImportDocuments()}
+              onRefresh={() => void loadImportDocuments(true)}
             />
 
             <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
@@ -855,13 +845,6 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
           </div>
         </CardContent>
       </Card>
-
-      {error ? (
-        <Alert variant="destructive" className="flex items-start gap-2">
-          <AlertTriangle className="mt-1 h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </Alert>
-      ) : null}
 
       {preview ? (
         <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
@@ -1134,7 +1117,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
         </MobileSheet>
       ) : null}
 
-      <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments()} />
+      <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments(true)} />
 
       <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
         <AlertDialogContent>

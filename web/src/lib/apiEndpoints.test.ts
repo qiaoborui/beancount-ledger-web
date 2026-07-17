@@ -212,6 +212,19 @@ describe("api endpoint settings", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/ledger/append");
   });
 
+  it("announces a locked sensitive-data response from mutating actions", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "Sensitive data is locked" }), { status: 423 }));
+    installMockWindow(fetchMock);
+    writeApiEndpointSettings(endpointSettings());
+    installApiEndpointFetchInterceptor();
+
+    const response = await window.fetch("/api/integrations/gmail/sync", { method: "POST" });
+
+    expect(response.status).toBe(423);
+    const eventTypes = (window.dispatchEvent as ReturnType<typeof vi.fn>).mock.calls.map(([event]) => event.type);
+    expect(eventTypes).toContain("ledger-sensitive-data-locked");
+  });
+
   it("does not fall back authentication state requests to another backend", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("backend unavailable"));
     installMockWindow(fetchMock);
