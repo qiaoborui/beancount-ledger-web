@@ -378,18 +378,22 @@ func (s *Server) renewGmailWatch(ctx context.Context) (gmailConnection, error) {
 }
 
 func validateGmailPubSubToken(ctx context.Context, authorization string, cfg Config) error {
+	return validateGoogleServiceAccountToken(ctx, authorization, cfg.GmailPubSubAudience, cfg.GmailPubSubServiceAccount, "Pub/Sub")
+}
+
+func validateGoogleServiceAccountToken(ctx context.Context, authorization, audience, serviceAccount, purpose string) error {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(authorization, prefix) {
-		return errors.New("Pub/Sub Authorization header is required")
+		return fmt.Errorf("%s Authorization header is required", purpose)
 	}
-	payload, err := validateGmailIDToken(ctx, strings.TrimSpace(strings.TrimPrefix(authorization, prefix)), cfg.GmailPubSubAudience)
+	payload, err := validateGmailIDToken(ctx, strings.TrimSpace(strings.TrimPrefix(authorization, prefix)), audience)
 	if err != nil {
-		return fmt.Errorf("validate Pub/Sub token: %w", err)
+		return fmt.Errorf("validate %s token: %w", purpose, err)
 	}
 	email, _ := payload.Claims["email"].(string)
 	verified, _ := payload.Claims["email_verified"].(bool)
-	if !verified || !strings.EqualFold(email, cfg.GmailPubSubServiceAccount) {
-		return errors.New("Pub/Sub service account does not match")
+	if !verified || !strings.EqualFold(email, serviceAccount) {
+		return fmt.Errorf("%s service account does not match", purpose)
 	}
 	return nil
 }

@@ -1,0 +1,322 @@
+name: Deploy Google Cloud
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".dockerignore"
+      - ".github/workflows/deploy-google-cloud.yml"
+      - "docker/Dockerfile"
+      - "server/**"
+      - "web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-cloud-production
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'asia-southeast1' }}
+  ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'beancount-ledger-web' }}
+  CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE || 'beancount-ledger-web' }}
+
+jobs:
+  deploy:
+    name: Verify and deploy Cloud Run
+    if: >-
+      ${{ vars.GCP_PROJECT_ID != '' &&
+          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+          vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' &&
+          vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    environment: google-cloud-production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      LEDGER_GITHUB_OWNER: ${{ vars.LEDGER_GITHUB_OWNER }}
+      LEDGER_GITHUB_REPO: ${{ vars.LEDGER_GITHUB_REPO }}
+      LEDGER_GIT_BRANCH: ${{ vars.LEDGER_GIT_BRANCH || 'main' }}
+      PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+      WEBAUTHN_RP_ID: ${{ vars.WEBAUTHN_RP_ID }}
+      WEBAUTHN_PUBLIC_ORIGIN: ${{ vars.WEBAUTHN_PUBLIC_ORIGIN || vars.PUBLIC_ORIGIN }}
+      CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
+      CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 8.11.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Verify backend
+        working-directory: server
+        run: |
+          go test ./...
+          go build ./cmd/ledger-web
+
+      - name: Verify frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Resolve image name
+        id: image
+        run: |
+          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}/${CLOUD_RUN_SERVICE}"
+          echo "name=${image}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push standalone image
+        id: build-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: standalone
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha,scope=cloud-run-standalone
+          cache-to: type=gha,scope=cloud-run-standalone,mode=max
+
+      - name: Deploy Cloud Run service
+        id: deploy-candidate
+        run: |
+          required_values=(
+            GCP_PROJECT_ID
+            GCP_REGION
+            CLOUD_RUN_SERVICE
+            GCP_RUNTIME_SERVICE_ACCOUNT
+            LEDGER_GITHUB_OWNER
+            LEDGER_GITHUB_REPO
+            PUBLIC_ORIGIN
+            WEBAUTHN_RP_ID
+            CLOUD_RUN_SECRET_MAPPINGS
+          )
+          for name in "${required_values[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::${name} is required"
+              exit 1
+            fi
+          done
+
+          for name in AUTH_SECRET APP_PASSWORD DATABASE_URL LEDGER_GITHUB_TOKEN; do
+            if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
+              echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
+              exit 1
+            fi
+          done
+
+          if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
+            echo "::error::PUBLIC_ORIGIN must use HTTPS"
+            exit 1
+          fi
+
+          env_vars="^|^LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER}|LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO}|LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH}|PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off"
+          if [[ -n "${CLOUD_RUN_EXTRA_ENV_VARS}" ]]; then
+            env_vars="${env_vars}|${CLOUD_RUN_EXTRA_ENV_VARS}"
+          fi
+
+          previous_traffic=""
+          service_existed=false
+          existing_service="$(gcloud run services list --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --filter="metadata.name=${CLOUD_RUN_SERVICE}" --format='value(metadata.name)')"
+          if [[ "${existing_service}" == "${CLOUD_RUN_SERVICE}" ]]; then
+            service_existed=true
+            service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+            previous_traffic="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
+          elif [[ -n "${existing_service}" ]]; then
+            echo "::error::Cloud Run service lookup returned an unexpected result"
+            exit 1
+          fi
+
+          revision_tag="candidate-${GITHUB_SHA::12}"
+          candidate_image="${{ steps.image.outputs.name }}@${{ steps.build-image.outputs.digest }}"
+          echo "previous_traffic=${previous_traffic}" >> "$GITHUB_OUTPUT"
+          echo "revision_tag=${revision_tag}" >> "$GITHUB_OUTPUT"
+          echo "service_existed=${service_existed}" >> "$GITHUB_OUTPUT"
+          echo "candidate_image=${candidate_image}" >> "$GITHUB_OUTPUT"
+
+          gcloud run deploy "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${candidate_image}" \
+            --service-account="${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --execution-environment=gen2 \
+            --allow-unauthenticated \
+            --ingress=all \
+            --port=3000 \
+            --cpu=1 \
+            --memory=512Mi \
+            --cpu-throttling \
+            --concurrency=8 \
+            --min-instances=0 \
+            --max-instances=2 \
+            --timeout=900s \
+            --no-traffic \
+            --tag="${revision_tag}" \
+            --set-env-vars="${env_vars}" \
+            --set-secrets="${CLOUD_RUN_SECRET_MAPPINGS}" \
+            --quiet
+
+      - name: Verify candidate and promote traffic
+        id: verify-promote
+        env:
+          REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
+        run: |
+          candidate_url=""
+          candidate_revision=""
+          for attempt in {1..12}; do
+            service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+            candidate_url="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .url' <<<"${service_json}")"
+            candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+            if [[ -n "${candidate_url}" && "${candidate_url}" != "null" && -n "${candidate_revision}" && "${candidate_revision}" != "null" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "${candidate_url}" || "${candidate_url}" == "null" || -z "${candidate_revision}" || "${candidate_revision}" == "null" ]]; then
+            echo "::error::candidate revision URL was not published"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/api/health"
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/" >/dev/null
+
+          gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --to-revisions="${candidate_revision}=100" \
+            --quiet
+
+          service_url="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/api/health"
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/" >/dev/null
+          echo "Cloud Run: ${service_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore failed promotion
+        if: ${{ always() && steps.deploy-candidate.outputs.revision_tag != '' }}
+        env:
+          CANDIDATE_IMAGE: ${{ steps.deploy-candidate.outputs.candidate_image }}
+          PREVIOUS_TRAFFIC: ${{ steps.deploy-candidate.outputs.previous_traffic }}
+          REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
+          SERVICE_EXISTED: ${{ steps.deploy-candidate.outputs.service_existed }}
+          PROMOTION_OUTCOME: ${{ steps.verify-promote.outcome }}
+        run: |
+          cleanup_failed=false
+          restored_traffic=""
+
+          if [[ "${PROMOTION_OUTCOME}" != "success" && "${SERVICE_EXISTED}" == "false" ]]; then
+            existing_service="$(gcloud run services list --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --filter="metadata.name=${CLOUD_RUN_SERVICE}" --format='value(metadata.name)')"
+            if [[ -z "${existing_service}" ]]; then
+              :
+            elif [[ "${existing_service}" == "${CLOUD_RUN_SERVICE}" ]]; then
+              service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+              candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+              if [[ -z "${candidate_revision}" || "${candidate_revision}" == "null" ]]; then
+                echo "::error::cannot prove ownership of the unsuccessful first Cloud Run deployment"
+                cleanup_failed=true
+              else
+                revision_image="$(gcloud run revisions describe "${candidate_revision}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(spec.containers[0].image)')"
+                if [[ "${revision_image}" != "${CANDIDATE_IMAGE}" ]]; then
+                  echo "::error::unsuccessful first deployment image does not match the candidate digest"
+                  cleanup_failed=true
+                elif gcloud run services delete "${CLOUD_RUN_SERVICE}" \
+                  --project="${GCP_PROJECT_ID}" \
+                  --region="${GCP_REGION}" \
+                  --quiet; then
+                  :
+                else
+                  echo "::error::failed to remove the unsuccessful first Cloud Run deployment"
+                  cleanup_failed=true
+                fi
+              fi
+            else
+              echo "::error::Cloud Run service lookup returned an unexpected result during cleanup"
+              cleanup_failed=true
+            fi
+          elif [[ "${PROMOTION_OUTCOME}" != "success" && -n "${PREVIOUS_TRAFFIC}" ]]; then
+            if ! gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
+              --project="${GCP_PROJECT_ID}" \
+              --region="${GCP_REGION}" \
+              --to-revisions="${PREVIOUS_TRAFFIC}" \
+              --quiet; then
+              echo "::error::failed to restore previous Cloud Run traffic"
+              cleanup_failed=true
+            else
+              if ! service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"; then
+                echo "::error::failed to read Cloud Run traffic after restoration"
+                cleanup_failed=true
+              else
+                restored_traffic="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
+              fi
+              if [[ "${cleanup_failed}" == "false" && "${restored_traffic}" != "${PREVIOUS_TRAFFIC}" ]]; then
+                echo "::error::Cloud Run traffic restoration did not match the previous split"
+                cleanup_failed=true
+              fi
+            fi
+          fi
+
+          if [[ "${cleanup_failed}" == "true" ]]; then
+            exit 1
+          fi
+
+      - name: Remove candidate traffic tag
+        if: ${{ always() && steps.deploy-candidate.outputs.revision_tag != '' }}
+        env:
+          REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
+        run: |
+          existing_service="$(gcloud run services list --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --filter="metadata.name=${CLOUD_RUN_SERVICE}" --format='value(metadata.name)')"
+          if [[ -z "${existing_service}" ]]; then
+            exit 0
+          fi
+          if [[ "${existing_service}" != "${CLOUD_RUN_SERVICE}" ]]; then
+            echo "::error::Cloud Run service lookup returned an unexpected result during tag cleanup"
+            exit 1
+          fi
+
+          service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          tag_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+          if [[ -z "${tag_revision}" || "${tag_revision}" == "null" ]]; then
+            exit 0
+          fi
+
+          gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --remove-tags="${REVISION_TAG}" \
+            --quiet

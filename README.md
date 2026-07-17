@@ -31,7 +31,7 @@ This project is designed for a **two-repository setup**:
 graph LR
     A[Public app repo] --> B[Go API + Vite Web App]
     B -->|self-hosted: LEDGER_ROOT| C[Private Beancount ledger repo]
-    B -->|Vercel: GitHub API| C
+    B -->|hosted API: GitHub API| C
     B -->|Postgres| D[Runtime state and read model]
     D --> E[passkeys]
     D --> F[notifications]
@@ -72,7 +72,19 @@ separately scheduled `ledger-indexer` job. The private ledger GitHub repository
 remains the source of truth; Postgres stores the ledger read model and all
 application runtime state.
 
-Vercel remains useful for pull-request previews or hosted deployments. Connect
+Google Cloud is the recommended hosted deployment. One Cloud Run service runs
+the standalone image, serving the Vite frontend and Go API on the same origin.
+Artifact Registry stores the image, Secret Manager supplies sensitive
+environment variables, and Cloud Scheduler runs Gmail event drain and Watch
+renewal jobs. The GitHub Actions workflow uses Workload Identity Federation and
+activates after the required repository variables are configured.
+
+See [docs/google-cloud-run.md](docs/google-cloud-run.md) for one-time project
+setup, IAM roles, Secret Manager mappings, deployment variables, validation,
+domain cutover, and rollback.
+
+Vercel remains available as a pull-request preview and migration rollback
+target. Connect
 the GitHub repository with the root `vercel.json`; the project defines two
 Vercel Services in one deployment: the Vite frontend under `web/` and the Go
 backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
@@ -198,10 +210,11 @@ Important variables:
 - `GMAIL_PUBSUB_TOPIC` / `GMAIL_PUBSUB_AUDIENCE` / `GMAIL_PUBSUB_SERVICE_ACCOUNT` — authenticated Gmail Watch delivery to the Go API.
 - `GMAIL_LABEL` / `GMAIL_ALLOWED_SENDERS` — Label-scoped mailbox watch plus an exact sender allowlist enforced again by the backend.
 - `GMAIL_TOKEN_ENCRYPTION_KEY` — base64-encoded 32-byte key used to encrypt the stored Gmail refresh token.
-- `CRON_SECRET` — protects the Cloud Scheduler Gmail event drain and daily Vercel Gmail Watch renewal requests.
+- `CRON_OIDC_AUDIENCE` / `CRON_OIDC_SERVICE_ACCOUNT` — authenticate Cloud Scheduler Gmail event drain and Watch renewal requests.
+- `CRON_SECRET` — transition fallback for Vercel Cron and existing secret-header Scheduler jobs.
 - `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`, `RUNTIME_DIR`, `LEDGER_INDEX_INTERVAL_SECONDS`, and `LEDGER_GIT_SCHEDULER` — removed from production runtime configuration.
 
-See [docs/gmail-import-automation.md](docs/gmail-import-automation.md) for the Gmail filter, OAuth, Pub/Sub, and Vercel setup. The same import endpoint also accepts plain or six-digit ZipCrypto ZIP uploads and archives the original ZIP beside the committed import.
+See [docs/gmail-import-automation.md](docs/gmail-import-automation.md) for the Gmail filter, OAuth, Pub/Sub, Cloud Scheduler, and hosted deployment setup. The same import endpoint also accepts plain or six-digit ZipCrypto ZIP uploads and archives the original ZIP beside the committed import.
 
 ### Postgres ledger read model
 

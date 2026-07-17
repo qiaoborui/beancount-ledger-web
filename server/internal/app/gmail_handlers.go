@@ -308,7 +308,7 @@ func pendingStatusRank(status string) int {
 }
 
 func (s *Server) requireCronOrAuth(c *gin.Context) bool {
-	if s.cronSecretMatches(c) {
+	if s.cronCredentialMatches(c) {
 		return true
 	}
 	return requireSensitive(c)
@@ -347,22 +347,30 @@ func (s *Server) gmailDrain(c *gin.Context) {
 }
 
 func (s *Server) requireCronOrSensitive(c *gin.Context) bool {
-	if s.cronSecretMatches(c) {
+	if s.cronCredentialMatches(c) {
 		return true
 	}
 	return requireSensitive(c)
 }
 
-func (s *Server) cronSecretMatches(c *gin.Context) bool {
-	if s.cfg.CronSecret == "" {
-		return false
-	}
-	for _, provided := range []string{strings.TrimSpace(c.GetHeader("X-Cron-Secret")), strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))} {
-		if len(provided) == len(s.cfg.CronSecret) && subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.CronSecret)) == 1 {
-			return true
+func (s *Server) cronCredentialMatches(c *gin.Context) bool {
+	if s.cfg.CronSecret != "" {
+		for _, provided := range []string{strings.TrimSpace(c.GetHeader("X-Cron-Secret")), strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))} {
+			if len(provided) == len(s.cfg.CronSecret) && subtle.ConstantTimeCompare([]byte(provided), []byte(s.cfg.CronSecret)) == 1 {
+				return true
+			}
 		}
 	}
-	return false
+	if s.cfg.CronOIDCAudience == "" || s.cfg.CronOIDCServiceAccount == "" {
+		return false
+	}
+	return validateGoogleServiceAccountToken(
+		c.Request.Context(),
+		c.GetHeader("Authorization"),
+		s.cfg.CronOIDCAudience,
+		s.cfg.CronOIDCServiceAccount,
+		"Cloud Scheduler",
+	) == nil
 }
 
 func revokeGoogleToken(ctx context.Context, token string) error {

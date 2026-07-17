@@ -45,6 +45,8 @@ type Config struct {
 	GmailZipPasswords           []string
 	GmailZipTimeoutSeconds      int
 	CronSecret                  string
+	CronOIDCAudience            string
+	CronOIDCServiceAccount      string
 }
 
 func LoadConfig() Config {
@@ -93,6 +95,8 @@ func LoadConfig() Config {
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
+		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
+		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
 	}
 }
 
@@ -146,6 +150,8 @@ func loadBaseConfig() Config {
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
+		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
+		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
 	}
 }
 
@@ -285,7 +291,6 @@ func validateGmailAutomationConfig(cfg Config) error {
 		"GMAIL_PUBSUB_AUDIENCE":        cfg.GmailPubSubAudience,
 		"GMAIL_PUBSUB_SERVICE_ACCOUNT": cfg.GmailPubSubServiceAccount,
 		"GMAIL_TOKEN_ENCRYPTION_KEY":   cfg.GmailTokenEncryptionKey,
-		"CRON_SECRET":                  cfg.CronSecret,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -294,6 +299,18 @@ func validateGmailAutomationConfig(cfg Config) error {
 	}
 	if len(cfg.GmailAllowedSenders) == 0 {
 		return errors.New("GMAIL_ALLOWED_SENDERS is required when Gmail automation is configured")
+	}
+	cronSecretConfigured := strings.TrimSpace(cfg.CronSecret) != ""
+	cronOIDCAudienceConfigured := strings.TrimSpace(cfg.CronOIDCAudience) != ""
+	cronOIDCServiceAccountConfigured := strings.TrimSpace(cfg.CronOIDCServiceAccount) != ""
+	if cronOIDCAudienceConfigured != cronOIDCServiceAccountConfigured {
+		return errors.New("CRON_OIDC_AUDIENCE and CRON_OIDC_SERVICE_ACCOUNT must be configured together")
+	}
+	if !cronSecretConfigured && !cronOIDCAudienceConfigured {
+		return errors.New("CRON_SECRET or Cloud Scheduler OIDC configuration is required when Gmail automation is configured")
+	}
+	if cronOIDCAudienceConfigured && !strings.HasPrefix(cfg.CronOIDCAudience, "https://") {
+		return errors.New("CRON_OIDC_AUDIENCE must use HTTPS")
 	}
 	if !strings.HasPrefix(cfg.GmailPubSubTopic, "projects/") || !strings.Contains(cfg.GmailPubSubTopic, "/topics/") {
 		return errors.New("GMAIL_PUBSUB_TOPIC must use projects/<project>/topics/<topic>")
