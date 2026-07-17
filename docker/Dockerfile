@@ -8,6 +8,7 @@ RUN go mod download
 COPY server/ ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/zip-worker ./cmd/zip-worker
 
 # ── API runtime ──
 FROM alpine:3.22 AS server
@@ -25,6 +26,20 @@ USER ledger
 
 EXPOSE 3000
 CMD ["/app/ledger-web"]
+
+# ── Private ZIP password worker ──
+FROM alpine:3.22 AS zip-worker
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates \
+  && addgroup -S ledger \
+  && adduser -S -G ledger ledger
+
+COPY --from=go-builder /app/zip-worker /app/zip-worker
+USER ledger
+
+EXPOSE 8080
+CMD ["/app/zip-worker"]
 
 # ── One-shot ledger indexer ──
 FROM debian:bookworm-slim AS indexer

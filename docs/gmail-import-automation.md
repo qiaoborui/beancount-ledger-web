@@ -91,13 +91,15 @@ GMAIL_TOKEN_ENCRYPTION_KEY=
 GMAIL_SYNC_LOOKBACK_DAYS=30
 GMAIL_ZIP_PASSWORDS=
 GMAIL_ZIP_TIMEOUT_SECONDS=20
+ZIP_WORKER_URL=
+ZIP_WORKER_AUDIENCE=
 CRON_OIDC_AUDIENCE=https://YOUR_LEDGER_HOST
 CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@PROJECT_ID.iam.gserviceaccount.com
 # Transition fallback for Vercel Cron and existing secret-header jobs.
 CRON_SECRET=
 ```
 
-Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS` accepts comma-separated known passwords and tries them before automatic search. Automatic search tries six-digit numeric passwords first, then six-character combinations of digits and uppercase letters within `GMAIL_ZIP_TIMEOUT_SECONDS`. The built-in fast path supports unencrypted ZIP and classic ZipCrypto entries using stored or deflate compression. AES-encrypted, ZIP64, multi-disk, oversized, and deeply nested archives are rejected with a visible pending-import error.
+Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS` accepts comma-separated known passwords and tries them before automatic search. Automatic search tries six-digit numeric passwords in the main application, then sends the archive to the IAM-protected ZIP Worker for six-character uppercase-alphanumeric search when `ZIP_WORKER_URL` is configured. `ZIP_WORKER_AUDIENCE` defaults to the worker URL. The main application verifies the returned password against the archive before extraction. Local and non-Cloud Run environments retain the in-process uppercase-alphanumeric fallback. The built-in fast path supports unencrypted ZIP and classic ZipCrypto entries using stored or deflate compression. AES-encrypted, ZIP64, multi-disk, oversized, and deeply nested archives are rejected with a visible pending-import error.
 
 ## Connect and verify
 

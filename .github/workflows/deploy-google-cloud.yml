@@ -24,6 +24,7 @@ env:
   GCP_REGION: ${{ vars.GCP_REGION || 'asia-southeast1' }}
   ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'beancount-ledger-web' }}
   CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE || 'beancount-ledger-web' }}
+  ZIP_WORKER_SERVICE: ${{ vars.GCP_ZIP_WORKER_SERVICE || 'beancount-ledger-zip-worker' }}
 
 jobs:
   deploy:
@@ -32,7 +33,8 @@ jobs:
       ${{ vars.GCP_PROJECT_ID != '' &&
           vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
           vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' &&
-          vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' }}
+          vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' &&
+          vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT != '' }}
     runs-on: ubuntu-latest
     environment: google-cloud-production
     permissions:
@@ -60,7 +62,7 @@ jobs:
         working-directory: server
         run: |
           go test ./...
-          go build ./cmd/ledger-web
+          go build ./cmd/...
 
       - name: Verify frontend
         working-directory: web
@@ -86,8 +88,9 @@ jobs:
       - name: Resolve image name
         id: image
         run: |
-          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}/${CLOUD_RUN_SERVICE}"
-          echo "name=${image}" >> "$GITHUB_OUTPUT"
+          base="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+          echo "name=${base}/${CLOUD_RUN_SERVICE}" >> "$GITHUB_OUTPUT"
+          echo "zip_worker_name=${base}/${ZIP_WORKER_SERVICE}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push standalone image
         id: build-image
@@ -104,6 +107,81 @@ jobs:
           cache-from: type=gha,scope=cloud-run-standalone
           cache-to: type=gha,scope=cloud-run-standalone,mode=max
 
+      - name: Build and push ZIP worker image
+        id: build-zip-worker-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: zip-worker
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.zip_worker_name }}:${{ github.sha }}
+            ${{ steps.image.outputs.zip_worker_name }}:latest
+          cache-from: type=gha,scope=cloud-run-zip-worker
+          cache-to: type=gha,scope=cloud-run-zip-worker,mode=max
+
+      - name: Deploy private ZIP worker
+        id: deploy-zip-worker
+        env:
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          GCP_ZIP_WORKER_SERVICE_ACCOUNT: ${{ vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT }}
+        run: |
+          worker_image="${{ steps.image.outputs.zip_worker_name }}@${{ steps.build-zip-worker-image.outputs.digest }}"
+          gcloud run deploy "${ZIP_WORKER_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${worker_image}" \
+            --service-account="${GCP_ZIP_WORKER_SERVICE_ACCOUNT}" \
+            --execution-environment=gen2 \
+            --no-allow-unauthenticated \
+            --ingress=all \
+            --port=8080 \
+            --cpu=8 \
+            --memory=4Gi \
+            --cpu-throttling \
+            --concurrency=1 \
+            --min-instances=0 \
+            --max-instances=1 \
+            --timeout=900s \
+            --set-env-vars=ZIP_WORKERS=8 \
+            --quiet
+
+          policy_file="$(mktemp)"
+          jq -n \
+            --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            '{bindings: [{role: "roles/run.invoker", members: [$member]}]}' \
+            > "${policy_file}"
+          gcloud run services set-iam-policy "${ZIP_WORKER_SERVICE}" "${policy_file}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --quiet
+          rm -f "${policy_file}"
+
+          expected_invokers="$(jq -cn --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" '[$member]')"
+          actual_invokers="$(gcloud run services get-iam-policy "${ZIP_WORKER_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json \
+            | jq -c '[.bindings[]? | select(.role == "roles/run.invoker") | .members[]?] | sort')"
+          if [[ "${actual_invokers}" != "${expected_invokers}" ]]; then
+            echo "::error::ZIP worker invoker policy is broader than the runtime service account"
+            exit 1
+          fi
+
+          worker_url="$(gcloud run services describe "${ZIP_WORKER_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          if [[ "${worker_url}" != https://* ]]; then
+            echo "::error::ZIP worker URL was not published"
+            exit 1
+          fi
+          worker_token="$(gcloud auth print-identity-token --audiences="${worker_url}")"
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 \
+            --header "Authorization: Bearer ${worker_token}" \
+            "${worker_url}/health"
+          echo "url=${worker_url}" >> "$GITHUB_OUTPUT"
+          echo "ZIP Worker: ${worker_url}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy Cloud Run service
         id: deploy-candidate
         env:
@@ -116,6 +194,7 @@ jobs:
           WEBAUTHN_PUBLIC_ORIGIN: ${{ vars.WEBAUTHN_PUBLIC_ORIGIN || vars.PUBLIC_ORIGIN }}
           CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+          ZIP_WORKER_URL: ${{ steps.deploy-zip-worker.outputs.url }}
         run: |
           required_values=(
             GCP_PROJECT_ID
@@ -127,6 +206,7 @@ jobs:
             PUBLIC_ORIGIN
             WEBAUTHN_RP_ID
             CLOUD_RUN_SECRET_MAPPINGS
+            ZIP_WORKER_URL
           )
           for name in "${required_values[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -147,7 +227,14 @@ jobs:
             exit 1
           fi
 
-          env_vars="^|^LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER}|LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO}|LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH}|PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off"
+          for name in ZIP_WORKER_URL ZIP_WORKER_AUDIENCE; do
+            if [[ "|${CLOUD_RUN_EXTRA_ENV_VARS}|" == *"|${name}="* ]]; then
+              echo "::error::${name} is managed by the deployment workflow"
+              exit 1
+            fi
+          done
+
+          env_vars="^|^LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER}|LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO}|LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH}|PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}"
           if [[ -n "${CLOUD_RUN_EXTRA_ENV_VARS}" ]]; then
             env_vars="${env_vars}|${CLOUD_RUN_EXTRA_ENV_VARS}"
           fi

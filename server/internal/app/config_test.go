@@ -46,6 +46,24 @@ func TestLoadConfigReadsNotificationRefreshInterval(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsZIPWorker(t *testing.T) {
+	t.Setenv("ZIP_WORKER_URL", "https://zip-worker.example")
+
+	cfg := LoadConfig()
+
+	if cfg.ZIPWorkerURL != "https://zip-worker.example" || cfg.ZIPWorkerAudience != cfg.ZIPWorkerURL {
+		t.Fatalf("worker URL=%q audience=%q", cfg.ZIPWorkerURL, cfg.ZIPWorkerAudience)
+	}
+}
+
+func TestValidateConfigRejectsInsecureZIPWorkerURL(t *testing.T) {
+	cfg := Config{LedgerStorage: "filesystem", ZIPWorkerURL: "http://zip-worker.example", ZIPWorkerAudience: "http://zip-worker.example"}
+
+	if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestLedgerClusterIDFallsBackToGitHubRepository(t *testing.T) {
 	cfg := Config{LedgerGitHubOwner: "Example", LedgerGitHubRepo: "Ledger", LedgerGitBranch: "preview"}
 

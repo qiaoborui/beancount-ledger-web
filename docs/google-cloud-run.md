@@ -7,6 +7,7 @@ SSE requests.
 
 ```text
 Browser -> Cloud Run standalone image -> Postgres / GitHub API / Gmail / AI
+                                   \-> private ZIP Worker (8 vCPU, scale to zero)
 Cloud Scheduler -> Cloud Run Gmail drain and Watch renewal endpoints
 Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
 ```
@@ -37,7 +38,9 @@ export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(
 export REGION=asia-southeast1
 export ARTIFACT_REPOSITORY=beancount-ledger-web
 export CLOUD_RUN_SERVICE=beancount-ledger-web
+export ZIP_WORKER_SERVICE=beancount-ledger-zip-worker
 export RUNTIME_SERVICE_ACCOUNT=ledger-web-runtime
+export ZIP_WORKER_SERVICE_ACCOUNT=ledger-zip-worker
 export DEPLOY_SERVICE_ACCOUNT=ledger-web-deploy
 export SCHEDULER_SERVICE_ACCOUNT=ledger-web-scheduler
 export WORKLOAD_IDENTITY_POOL=github
@@ -65,6 +68,10 @@ gcloud artifacts repositories create "$ARTIFACT_REPOSITORY" \
 gcloud iam service-accounts create "$RUNTIME_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --display-name "Beancount Ledger Web runtime"
+
+gcloud iam service-accounts create "$ZIP_WORKER_SERVICE_ACCOUNT" \
+  --project "$PROJECT_ID" \
+  --display-name "Beancount Ledger ZIP worker"
 
 gcloud iam service-accounts create "$DEPLOY_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
@@ -94,6 +101,12 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 
 gcloud iam service-accounts add-iam-policy-binding \
   "${RUNTIME_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --project "$PROJECT_ID" \
+  --member "serviceAccount:${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role roles/iam.serviceAccountUser
+
+gcloud iam service-accounts add-iam-policy-binding \
+  "${ZIP_WORKER_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --project "$PROJECT_ID" \
   --member "serviceAccount:${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role roles/iam.serviceAccountUser
@@ -195,9 +208,11 @@ level so the workflow can evaluate its configuration gate:
 | `GCP_REGION` | Region such as `asia-southeast1` |
 | `GCP_ARTIFACT_REPOSITORY` | Artifact Registry repository |
 | `GCP_CLOUD_RUN_SERVICE` | Cloud Run service name |
+| `GCP_ZIP_WORKER_SERVICE` | Private ZIP worker service name, normally `beancount-ledger-zip-worker` |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
 | `GCP_RUNTIME_SERVICE_ACCOUNT` | Runtime service-account email |
+| `GCP_ZIP_WORKER_SERVICE_ACCOUNT` | Dedicated ZIP worker service-account email with no ledger or secret access |
 | `LEDGER_GITHUB_OWNER` | Private ledger repository owner |
 | `LEDGER_GITHUB_REPO` | Private ledger repository name |
 | `LEDGER_GIT_BRANCH` | Ledger branch, normally `main` |
@@ -217,12 +232,20 @@ LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com
 ## First deployment
 
 Merge the deployment change, configure the repository values, then run `Deploy
-Google Cloud` from `main`. The workflow deploys with request-based CPU, zero
-minimum instances, two maximum instances, concurrency eight, a 15-minute
-request timeout, and 512 MiB memory. Each revision starts with zero production
-traffic behind a unique tag. The workflow verifies the tagged URL, promotes the
-revision, verifies the service URL, and restores the previous traffic split
-when post-promotion health checks fail.
+Google Cloud` from `main`. The workflow first deploys an IAM-protected ZIP
+Worker with 8 vCPU, 4 GiB memory, concurrency one, zero minimum instances, one
+maximum instance, and a 15-minute request timeout. It sets the main runtime
+service account as the Worker's only explicit `roles/run.invoker` member and
+injects the worker URL and audience into the main service. The worker keeps
+archives in memory, accepts at most 10 MB, and returns only the discovered
+password.
+
+The main service keeps request-based 1 vCPU, zero minimum instances, two maximum
+instances, concurrency eight, a 15-minute request timeout, and 512 MiB memory.
+Each main-service revision starts with zero production traffic behind a unique
+tag. The workflow verifies the tagged URL, promotes the revision, verifies the
+service URL, and restores the previous traffic split when post-promotion health
+checks fail.
 
 Verify the generated `run.app` URL:
 
@@ -233,6 +256,7 @@ Verify the generated `run.app` URL:
 5. A preview-ledger write creates a GitHub commit and appears after indexing.
 6. AI chat streams SSE events through the same Cloud Run origin.
 7. Import preview upload and pending-import retrieval succeed.
+8. An encrypted ZIP with an uppercase letter reaches the private worker and returns a verified password.
 
 Passkey verification follows after the production domain is mapped because the
 RP ID remains the existing domain.

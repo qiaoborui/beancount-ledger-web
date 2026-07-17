@@ -48,7 +48,9 @@ const (
 )
 
 var validateGmailIDToken = idtoken.Validate
-var extractGmailImportZIP = extractImportZIP
+var extractGmailImportZIP = func(server *Server, ctx context.Context, archive []byte, passwordCandidates []string) (importUpload, string, error) {
+	return server.extractImportZIP(ctx, archive, passwordCandidates)
+}
 var errGmailSyncBusy = errors.New("Gmail 同步正在运行")
 
 type gmailConnection struct {
@@ -835,7 +837,7 @@ func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessag
 		ext := strings.ToLower(filepath.Ext(attachment.Filename))
 		if ext == ".zip" {
 			zipContext, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.GmailZipTimeoutSeconds)*time.Second)
-			extracted, _, err := extractGmailImportZIP(zipContext, attachment.Content, s.cfg.GmailZipPasswords)
+			extracted, _, err := extractGmailImportZIP(s, zipContext, attachment.Content, s.cfg.GmailZipPasswords)
 			cancel()
 			if err != nil {
 				candidates = append(candidates, gmailImportCandidate{Upload: attachment, Error: err})

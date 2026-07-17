@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,12 +45,15 @@ type Config struct {
 	GmailSyncLookbackDays       int
 	GmailZipPasswords           []string
 	GmailZipTimeoutSeconds      int
+	ZIPWorkerURL                string
+	ZIPWorkerAudience           string
 	CronSecret                  string
 	CronOIDCAudience            string
 	CronOIDCServiceAccount      string
 }
 
 func LoadConfig() Config {
+	zipWorkerURL, zipWorkerAudience := loadZIPWorkerConfig()
 	storage := strings.ToLower(env("LEDGER_STORAGE", "filesystem"))
 	if storage == "github" {
 		storage = "github_api"
@@ -94,6 +98,8 @@ func LoadConfig() Config {
 		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		ZIPWorkerURL:                zipWorkerURL,
+		ZIPWorkerAudience:           zipWorkerAudience,
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
@@ -121,6 +127,7 @@ func LoadIndexerConfig() Config {
 }
 
 func loadBaseConfig() Config {
+	zipWorkerURL, zipWorkerAudience := loadZIPWorkerConfig()
 	return Config{
 		AppRoot:                     "",
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
@@ -149,6 +156,8 @@ func loadBaseConfig() Config {
 		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		ZIPWorkerURL:                zipWorkerURL,
+		ZIPWorkerAudience:           zipWorkerAudience,
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
@@ -161,6 +170,15 @@ func parseCSVLower(raw string) []string {
 		values[index] = strings.ToLower(values[index])
 	}
 	return values
+}
+
+func loadZIPWorkerConfig() (string, string) {
+	workerURL := strings.TrimSpace(os.Getenv("ZIP_WORKER_URL"))
+	audience := strings.TrimSpace(os.Getenv("ZIP_WORKER_AUDIENCE"))
+	if audience == "" {
+		audience = workerURL
+	}
+	return workerURL, audience
 }
 
 func parseCSV(raw string) []string {
@@ -202,6 +220,9 @@ func ValidateWebConfig(cfg Config) error {
 		return err
 	}
 	if _, err := notificationRefreshInterval(cfg.NotificationRefreshInterval); err != nil {
+		return err
+	}
+	if err := validateZIPWorkerConfig(cfg); err != nil {
 		return err
 	}
 	if err := validateGmailAutomationConfig(cfg); err != nil {
@@ -248,6 +269,9 @@ func ValidateConfig(cfg Config) error {
 	if _, err := notificationRefreshInterval(cfg.NotificationRefreshInterval); err != nil {
 		return err
 	}
+	if err := validateZIPWorkerConfig(cfg); err != nil {
+		return err
+	}
 	if err := validateGmailAutomationConfig(cfg); err != nil {
 		return err
 	}
@@ -277,6 +301,26 @@ func ValidateConfig(cfg Config) error {
 
 func gmailAutomationConfigured(cfg Config) bool {
 	return cfg.GmailClientID != "" || cfg.GmailClientSecret != "" || cfg.GmailOAuthRedirectURL != "" || cfg.GmailPubSubTopic != "" || cfg.GmailPubSubAudience != "" || cfg.GmailPubSubServiceAccount != "" || cfg.GmailTokenEncryptionKey != "" || len(cfg.GmailAllowedSenders) > 0
+}
+
+func validateZIPWorkerConfig(cfg Config) error {
+	workerURL := strings.TrimSpace(cfg.ZIPWorkerURL)
+	audience := strings.TrimSpace(cfg.ZIPWorkerAudience)
+	if workerURL == "" && audience == "" {
+		return nil
+	}
+	if workerURL == "" || audience == "" {
+		return errors.New("ZIP_WORKER_URL and ZIP_WORKER_AUDIENCE must be configured together")
+	}
+	parsed, err := url.ParseRequestURI(workerURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return errors.New("ZIP_WORKER_URL must be an HTTPS URL")
+	}
+	audienceURL, err := url.ParseRequestURI(audience)
+	if err != nil || audienceURL.Scheme != "https" || audienceURL.Host == "" {
+		return errors.New("ZIP_WORKER_AUDIENCE must be an HTTPS URL")
+	}
+	return nil
 }
 
 func validateGmailAutomationConfig(cfg Config) error {
