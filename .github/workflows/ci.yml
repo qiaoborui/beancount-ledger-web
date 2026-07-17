@@ -26,6 +26,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify deployment workflow guards
+        run: bash .github/scripts/verify-deploy-google-cloud.sh
+
       - name: Detect changed components
         id: changes
         run: |
