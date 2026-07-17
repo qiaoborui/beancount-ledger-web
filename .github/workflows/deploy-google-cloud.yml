@@ -171,6 +171,11 @@ jobs:
           echo "service_existed=${service_existed}" >> "$GITHUB_OUTPUT"
           echo "candidate_image=${candidate_image}" >> "$GITHUB_OUTPUT"
 
+          traffic_args=(--tag="${revision_tag}")
+          if [[ "${service_existed}" == "true" ]]; then
+            traffic_args+=(--no-traffic)
+          fi
+
           gcloud run deploy "${CLOUD_RUN_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
@@ -187,8 +192,7 @@ jobs:
             --min-instances=0 \
             --max-instances=2 \
             --timeout=900s \
-            --no-traffic \
-            --tag="${revision_tag}" \
+            "${traffic_args[@]}" \
             --set-env-vars="${env_vars}" \
             --set-secrets="${CLOUD_RUN_SECRET_MAPPINGS}" \
             --quiet
