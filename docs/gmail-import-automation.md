@@ -10,16 +10,20 @@ Gmail sender filter
   -> Gmail users.watch
   -> Cloud Pub/Sub authenticated push
   -> POST /api/integrations/gmail/pubsub
-  -> durable Postgres event inbox (immediate 204 acknowledgement)
-  -> POST /api/integrations/gmail/drain
+  -> durable Postgres event inbox
+  -> immediate queue drain in the Pub/Sub request
   -> Gmail history.list + messages.get(format=raw)
   -> EML / CSV / XLSX / PDF / ZIP parsing
   -> Postgres pending import
   -> /import Review
   -> existing import commit
+
+Cloud Scheduler every 30 minutes
+  -> POST /api/integrations/gmail/drain
+  -> retry persisted transient failures
 ```
 
-The Cloud Run backend scales to zero between requests. Pub/Sub wakes it long enough to validate and persist each event. Google Cloud Scheduler wakes the drain endpoint once per minute and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work.
+The Cloud Run backend scales to zero during quiet periods. Pub/Sub wakes it to validate, persist, and immediately process each event. Google Cloud Scheduler wakes the drain endpoint every 30 minutes as a retry fallback and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work.
 
 ## Google Cloud setup
 
@@ -39,8 +43,8 @@ The Cloud Run backend scales to zero between requests. Pub/Sub wakes it long eno
    https://YOUR_LEDGER_HOST/api/integrations/gmail/pubsub
    ```
 
-7. Enable authenticated push. Select a dedicated service account, set the audience to the same Pub/Sub endpoint URL, and grant that service account permission to invoke the deployed backend when the platform requires it.
-8. Create a Cloud Scheduler HTTP job with schedule `* * * * *`, method `POST`, and URL:
+7. Enable authenticated push. Select a dedicated service account, set the audience to the same Pub/Sub endpoint URL, set the acknowledgement deadline to 60 seconds, and grant that service account permission to invoke the deployed backend when the platform requires it.
+8. Create a Cloud Scheduler HTTP job with schedule `*/30 * * * *`, method `POST`, and URL:
 
    ```text
    https://YOUR_LEDGER_HOST/api/integrations/gmail/drain

@@ -297,7 +297,7 @@ export SCHEDULER_EMAIL="${SCHEDULER_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gservicea
 gcloud scheduler jobs create http ledger-gmail-drain \
   --project "$PROJECT_ID" \
   --location "$REGION" \
-  --schedule "* * * * *" \
+  --schedule "*/30 * * * *" \
   --uri "${PUBLIC_ORIGIN}/api/integrations/gmail/drain" \
   --http-method POST \
   --oidc-service-account-email "$SCHEDULER_EMAIL" \

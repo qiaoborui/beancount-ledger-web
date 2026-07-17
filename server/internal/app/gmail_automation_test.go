@@ -178,7 +178,7 @@ func TestGmailPushEventQueueDeduplicatesAndRetries(t *testing.T) {
 	}
 }
 
-func TestGmailPubSubAcknowledgesAfterDurableEnqueue(t *testing.T) {
+func TestGmailPubSubAcknowledgesAfterImmediateDrainAttempt(t *testing.T) {
 	original := validateGmailIDToken
 	t.Cleanup(func() { validateGmailIDToken = original })
 	validateGmailIDToken = func(context.Context, string, string) (*idtoken.Payload, error) {
@@ -202,7 +202,7 @@ func TestGmailPubSubAcknowledgesAfterDurableEnqueue(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	store, err := server.readGmailPushEvents(context.Background())
-	if err != nil || len(store.Items) != 1 || store.Items[0].ID != "push-1" || store.Items[0].HistoryID != 123 || store.Items[0].Status != "queued" {
+	if err != nil || len(store.Items) != 1 || store.Items[0].ID != "push-1" || store.Items[0].HistoryID != 123 || store.Items[0].Attempts != 1 || store.Items[0].Status != "dead" || store.Items[0].LastError == "" {
 		t.Fatalf("events=%#v err=%v", store.Items, err)
 	}
 }

@@ -220,6 +220,9 @@ func (s *Server) gmailPubSub(c *gin.Context) {
 		errorJSON(c, http.StatusInternalServerError, err)
 		return
 	}
+	if _, err := s.drainGmailPushEvents(c.Request.Context(), 5); err != nil {
+		log.Printf("gmail pubsub immediate drain deferred: %v", err)
+	}
 	c.Status(http.StatusNoContent)
 }
 
