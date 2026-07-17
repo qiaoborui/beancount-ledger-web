@@ -158,7 +158,7 @@ jobs:
           if [[ "${existing_service}" == "${CLOUD_RUN_SERVICE}" ]]; then
             service_existed=true
             service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-            previous_traffic="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
+            previous_traffic="$(jq -r '[.status.traffic[]? | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
           elif [[ -n "${existing_service}" ]]; then
             echo "::error::Cloud Run service lookup returned an unexpected result"
             exit 1
@@ -206,8 +206,8 @@ jobs:
           candidate_revision=""
           for attempt in {1..12}; do
             service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-            candidate_url="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .url' <<<"${service_json}")"
-            candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+            candidate_url="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[]? | select(.tag == $tag) | .url' <<<"${service_json}")"
+            candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[]? | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
             if [[ -n "${candidate_url}" && "${candidate_url}" != "null" && -n "${candidate_revision}" && "${candidate_revision}" != "null" ]]; then
               break
             fi
@@ -250,7 +250,7 @@ jobs:
               :
             elif [[ "${existing_service}" == "${CLOUD_RUN_SERVICE}" ]]; then
               service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-              candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+              candidate_revision="$(jq -r --arg tag "${REVISION_TAG}" '([.status.traffic[]?, .spec.traffic[]?] | map(select(.tag == $tag and .revisionName != null) | .revisionName) | first) // empty' <<<"${service_json}")"
               if [[ -z "${candidate_revision}" || "${candidate_revision}" == "null" ]]; then
                 echo "::error::cannot prove ownership of the unsuccessful first Cloud Run deployment"
                 cleanup_failed=true
@@ -286,7 +286,7 @@ jobs:
                 echo "::error::failed to read Cloud Run traffic after restoration"
                 cleanup_failed=true
               else
-                restored_traffic="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
+                restored_traffic="$(jq -r '[.status.traffic[]? | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
               fi
               if [[ "${cleanup_failed}" == "false" && "${restored_traffic}" != "${PREVIOUS_TRAFFIC}" ]]; then
                 echo "::error::Cloud Run traffic restoration did not match the previous split"
@@ -314,7 +314,7 @@ jobs:
           fi
 
           service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-          tag_revision="$(jq -r --arg tag "${REVISION_TAG}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<<"${service_json}")"
+          tag_revision="$(jq -r --arg tag "${REVISION_TAG}" '([.status.traffic[]?, .spec.traffic[]?] | map(select(.tag == $tag and .revisionName != null) | .revisionName) | first) // empty' <<<"${service_json}")"
           if [[ -z "${tag_revision}" || "${tag_revision}" == "null" ]]; then
             exit 0
           fi
