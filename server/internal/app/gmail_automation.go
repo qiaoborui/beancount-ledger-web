@@ -43,6 +43,8 @@ const (
 	maxGmailPendingItems = 500
 	maxGmailPendingBytes = 100 * 1024 * 1024
 	maxGmailPushEvents   = 1000
+
+	cmbCreditGmailSender = "ccsvc@message.cmbchina.com"
 )
 
 var validateGmailIDToken = idtoken.Validate
@@ -161,8 +163,9 @@ type gmailMessageEnvelope struct {
 }
 
 type gmailImportCandidate struct {
-	Upload importUpload
-	Error  error
+	Upload           importUpload
+	ProviderOverride string
+	Error            error
 }
 
 type gmailAPI interface {
@@ -737,7 +740,7 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 	if !gmailSenderAllowed(envelope.Sender, s.cfg.GmailAllowedSenders) {
 		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "sender", "发件人不在 Gmail 自动账单 allowlist: "+envelope.Sender)
 	}
-	candidates := s.gmailImportCandidates(ctx, envelope.Attachments, raw, messageID)
+	candidates := s.gmailImportCandidates(ctx, envelope, raw, messageID)
 	if len(candidates) == 0 {
 		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "unsupported", "邮件没有可识别的账单附件: "+gmailAttachmentSummary(envelope.Attachments))
 	}
@@ -759,7 +762,7 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		}
 		preview, previewErr := ginH(nil), candidate.Error
 		if previewErr == nil {
-			preview, previewErr = s.createImportPreviewFromUploadsWithID(ctx, item.ImportID, "", false, candidate.Upload, original)
+			preview, previewErr = s.createImportPreviewFromUploadsWithID(ctx, item.ImportID, candidate.ProviderOverride, false, candidate.Upload, original)
 		}
 		if previewErr != nil {
 			item.Status = "failed"
@@ -811,10 +814,10 @@ func decodeGmailRaw(value string) ([]byte, error) {
 	return raw, err
 }
 
-func (s *Server) gmailImportCandidates(ctx context.Context, attachments []importUpload, raw []byte, messageID string) []gmailImportCandidate {
-	candidates := make([]gmailImportCandidate, 0, len(attachments)+1)
+func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessageEnvelope, raw []byte, messageID string) []gmailImportCandidate {
+	candidates := make([]gmailImportCandidate, 0, len(envelope.Attachments)+1)
 	usable := 0
-	for _, attachment := range attachments {
+	for _, attachment := range envelope.Attachments {
 		ext := strings.ToLower(filepath.Ext(attachment.Filename))
 		if ext == ".zip" {
 			zipContext, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.GmailZipTimeoutSeconds)*time.Second)
@@ -823,13 +826,13 @@ func (s *Server) gmailImportCandidates(ctx context.Context, attachments []import
 			if err != nil {
 				candidates = append(candidates, gmailImportCandidate{Upload: attachment, Error: err})
 			} else if s.importFilenameSupported(extracted.Filename) {
-				candidates = append(candidates, gmailImportCandidate{Upload: extracted})
+				candidates = append(candidates, gmailImportCandidate{Upload: extracted, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, extracted.Filename)})
 				usable++
 			}
 			continue
 		}
 		if s.importFilenameSupported(attachment.Filename) {
-			candidates = append(candidates, gmailImportCandidate{Upload: attachment})
+			candidates = append(candidates, gmailImportCandidate{Upload: attachment, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, attachment.Filename)})
 			usable++
 		}
 	}
@@ -840,6 +843,13 @@ func (s *Server) gmailImportCandidates(ctx context.Context, attachments []import
 		}
 	}
 	return candidates
+}
+
+func gmailAttachmentProviderOverride(sender, filename string) string {
+	if strings.EqualFold(strings.TrimSpace(sender), cmbCreditGmailSender) && strings.EqualFold(filepath.Ext(filename), ".pdf") {
+		return "cmb"
+	}
+	return ""
 }
 
 func gmailAttachmentSummary(attachments []importUpload) string {
@@ -978,7 +988,11 @@ func collectMIMEAttachments(header textproto.MIMEHeader, body io.Reader, decoder
 	if len(content) > maxImportFileBytes {
 		return errors.New("邮件附件超过 10MB")
 	}
-	*attachments = append(*attachments, importUpload{Filename: safeArchiveFilename(filename), Content: content})
+	filename = safeArchiveFilename(filename)
+	if filepath.Ext(filename) == "" && (strings.EqualFold(mediaType, "application/pdf") || bytes.HasPrefix(content, []byte("%PDF-"))) {
+		filename += ".pdf"
+	}
+	*attachments = append(*attachments, importUpload{Filename: filename, Content: content})
 	return nil
 }
 
