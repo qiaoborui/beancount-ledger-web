@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
+import { ApiResponseError } from "@/lib/clientFetch";
+import { importActionFeedback, importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -124,5 +125,21 @@ describe("Gmail pending imports", () => {
       { ...base, id: "dismissed", status: "dismissed" },
     ]);
     expect(visible.map((item) => item.id)).toEqual(["ready", "failed"]);
+  });
+});
+
+describe("import action feedback", () => {
+  it("routes locked action errors to a toast and the sensitive unlock flow", () => {
+    const error = new ApiResponseError(
+      "Sensitive data is locked",
+      new Response(JSON.stringify({ error: "Sensitive data is locked" }), { status: 423 }),
+      "write",
+    );
+
+    expect(importActionFeedback(error)).toBe("敏感数据已锁定，请先解锁后重试");
+  });
+
+  it("keeps other action errors in toast feedback", () => {
+    expect(importActionFeedback(new Error("Gmail 同步失败"))).toBe("Gmail 同步失败");
   });
 });

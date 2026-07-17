@@ -44,6 +44,7 @@ const storageKey = "ledger_api_endpoints:v2";
 const legacyStorageKey = "ledger_api_endpoints:v1";
 const endpointChangeEvent = "ledger-api-endpoints-change";
 const endpointHealthChangeEvent = "ledger-api-endpoint-health-change";
+const sensitiveDataLockedEvent = "ledger-sensitive-data-locked";
 const sameOriginEndpointId = "same-origin";
 const sessionAuthedKey = "ledger_authed";
 const knownAuthKey = "ledger_auth_known";
@@ -68,6 +69,7 @@ type LedgerWindow = Window & {
 export const sameOriginApiEndpoint: ApiEndpoint = { id: sameOriginEndpointId, url: "", enabled: true, label: "当前站点" };
 export const apiEndpointSettingsChangeEvent = endpointChangeEvent;
 export const apiEndpointHealthChangeEvent = endpointHealthChangeEvent;
+export const apiSensitiveDataLockedEvent = sensitiveDataLockedEvent;
 
 export function isSameOriginApiEndpoint(endpoint: ApiEndpoint) {
   return endpoint.id === sameOriginEndpointId || endpoint.url === "";
@@ -306,6 +308,9 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
     try {
       const response = await fetcher(url, attempt.init);
       responseEndpointIds.set(response, endpoint.id);
+      if (kind === "write" && response.status === 423 && typeof window !== "undefined") {
+        window.dispatchEvent(new Event(sensitiveDataLockedEvent));
+      }
       const latencyMs = Math.max(1, Math.round(performanceNow() - startedAt));
       if (kind === "read" && endpoint.id !== active.id && (response.status === 401 || response.status === 403)) {
         forgetKnownApiEndpointAuthentication(endpoint.id);
