@@ -454,7 +454,7 @@ func TestGmailSyncSkipsDuplicateZIPBeforePasswordSearch(t *testing.T) {
 	}
 	originalExtract := extractGmailImportZIP
 	extractCalled := false
-	extractGmailImportZIP = func(context.Context, []byte, []string) (importUpload, string, error) {
+	extractGmailImportZIP = func(*Server, context.Context, []byte, []string) (importUpload, string, error) {
 		extractCalled = true
 		return importUpload{}, "", errors.New("password search should not run")
 	}

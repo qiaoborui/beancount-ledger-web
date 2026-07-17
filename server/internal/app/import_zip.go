@@ -33,6 +33,9 @@ const (
 
 var importZipCRCTable = crc32.MakeTable(crc32.IEEE)
 var importZIPSearchSlot = make(chan struct{}, 1)
+var ErrZIPPasswordNotFound = errors.New("压缩包密码不在 6 位大写字母数字组合范围内")
+
+type zipUpperAlnumPasswordSearch func(context.Context, []byte) (string, error)
 
 type encryptedZipEntry struct {
 	name             []byte
@@ -51,6 +54,10 @@ type zipCryptoKeys struct {
 }
 
 func extractImportZIP(ctx context.Context, archive []byte, passwordCandidates []string) (importUpload, string, error) {
+	return extractImportZIPWithUpperAlnumSearch(ctx, archive, passwordCandidates, nil)
+}
+
+func extractImportZIPWithUpperAlnumSearch(ctx context.Context, archive []byte, passwordCandidates []string, upperAlnumSearch zipUpperAlnumPasswordSearch) (importUpload, string, error) {
 	if len(archive) > maxImportFileBytes {
 		return importUpload{}, "", errors.New("压缩包超过 10MB")
 	}
@@ -70,14 +77,54 @@ func extractImportZIP(ctx context.Context, archive []byte, passwordCandidates []
 		return importUpload{}, "", fmt.Errorf("压缩包密码搜索超时: %w", err)
 	}
 	defer releaseImportZIPSearch()
-	password, plain, found := searchImportZIPPasswords(ctx, entry, min(runtime.NumCPU(), zipSearchWorkerLimit))
+	workers := min(runtime.NumCPU(), zipSearchWorkerLimit)
+	password, plain, found := searchZipPasswords(ctx, entry, zipNumericAlphabet, false, workers)
+	if found {
+		return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return importUpload{}, "", fmt.Errorf("压缩包密码搜索超时: %w", err)
+	}
+	if upperAlnumSearch != nil {
+		password, err = upperAlnumSearch(ctx, archive)
+		if err != nil {
+			return importUpload{}, "", fmt.Errorf("ZIP Worker 密码搜索失败: %w", err)
+		}
+		plain, found = decryptZipEntryWithPassword(entry, []byte(password))
+		if !found {
+			return importUpload{}, "", errors.New("ZIP Worker 返回的密码未通过压缩包校验")
+		}
+		return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
+	}
+	password, plain, found = searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, true, workers)
 	if !found {
 		if err := ctx.Err(); err != nil {
 			return importUpload{}, "", fmt.Errorf("压缩包密码搜索超时: %w", err)
 		}
-		return importUpload{}, "", errors.New("压缩包密码不在 6 位纯数字或大写字母数字组合范围内")
+		return importUpload{}, "", ErrZIPPasswordNotFound
 	}
 	return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
+}
+
+func CrackUpperAlnumZIPPassword(ctx context.Context, archive []byte, workers int) (string, error) {
+	if len(archive) > maxImportFileBytes {
+		return "", errors.New("压缩包超过 10MB")
+	}
+	entry, err := loadEncryptedZipEntry(archive)
+	if err != nil {
+		return "", err
+	}
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	password, _, found := searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, true, workers)
+	if found {
+		return password, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "", ErrZIPPasswordNotFound
 }
 
 func acquireImportZIPSearch(ctx context.Context) error {
@@ -246,16 +293,6 @@ func searchNumericZipPasswords(ctx context.Context, entry *encryptedZipEntry, wo
 		value = value*10 + int(password[index]-'0')
 	}
 	return value, plain, true
-}
-
-func searchImportZIPPasswords(ctx context.Context, entry *encryptedZipEntry, workers int) (string, []byte, bool) {
-	if password, plain, found := searchZipPasswords(ctx, entry, zipNumericAlphabet, false, workers); found {
-		return password, plain, true
-	}
-	if ctx.Err() != nil {
-		return "", nil, false
-	}
-	return searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, true, workers)
 }
 
 func searchZipPasswords(ctx context.Context, entry *encryptedZipEntry, alphabet string, skipNumeric bool, workers int) (string, []byte, bool) {

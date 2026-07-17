@@ -125,7 +125,7 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 			timeoutSeconds = 20
 		}
 		zipContext, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-		extracted, _, err := extractImportZIP(zipContext, input.Content, passwordCandidates)
+		extracted, _, err := s.extractImportZIP(zipContext, input.Content, passwordCandidates)
 		cancel()
 		if err != nil {
 			return nil, err

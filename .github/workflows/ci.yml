@@ -83,7 +83,7 @@ jobs:
         run: go test ./...
       - name: Build
         working-directory: server
-        run: go build -o ../ledger-web ./cmd/ledger-web
+        run: go build ./cmd/...
 
   server-image:
     name: Server image
