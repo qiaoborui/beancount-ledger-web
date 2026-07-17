@@ -38,16 +38,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
-      LEDGER_GITHUB_OWNER: ${{ vars.LEDGER_GITHUB_OWNER }}
-      LEDGER_GITHUB_REPO: ${{ vars.LEDGER_GITHUB_REPO }}
-      LEDGER_GIT_BRANCH: ${{ vars.LEDGER_GIT_BRANCH || 'main' }}
-      PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
-      WEBAUTHN_RP_ID: ${{ vars.WEBAUTHN_RP_ID }}
-      WEBAUTHN_PUBLIC_ORIGIN: ${{ vars.WEBAUTHN_PUBLIC_ORIGIN || vars.PUBLIC_ORIGIN }}
-      CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
-      CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -116,6 +106,16 @@ jobs:
 
       - name: Deploy Cloud Run service
         id: deploy-candidate
+        env:
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          LEDGER_GITHUB_OWNER: ${{ vars.LEDGER_GITHUB_OWNER }}
+          LEDGER_GITHUB_REPO: ${{ vars.LEDGER_GITHUB_REPO }}
+          LEDGER_GIT_BRANCH: ${{ vars.LEDGER_GIT_BRANCH || 'main' }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          WEBAUTHN_RP_ID: ${{ vars.WEBAUTHN_RP_ID }}
+          WEBAUTHN_PUBLIC_ORIGIN: ${{ vars.WEBAUTHN_PUBLIC_ORIGIN || vars.PUBLIC_ORIGIN }}
+          CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
         run: |
           required_values=(
             GCP_PROJECT_ID
