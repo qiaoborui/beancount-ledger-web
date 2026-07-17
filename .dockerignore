@@ -3,6 +3,7 @@
 .agents
 .codegraph
 .vercel
+gha-creds-*.json
 **/.DS_Store
 **/.env
 **/.env.*

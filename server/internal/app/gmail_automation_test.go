@@ -79,6 +79,17 @@ func TestValidateGmailAutomationConfig(t *testing.T) {
 	if err := validateGmailAutomationConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
+	cfg.CronSecret = ""
+	cfg.CronOIDCAudience = "https://ledger.example"
+	cfg.CronOIDCServiceAccount = "ledger-scheduler@example.iam.gserviceaccount.com"
+	if err := validateGmailAutomationConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.CronOIDCServiceAccount = ""
+	if err := validateGmailAutomationConfig(cfg); err == nil || !strings.Contains(err.Error(), "configured together") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg.CronOIDCServiceAccount = "ledger-scheduler@example.iam.gserviceaccount.com"
 	cfg.GmailAllowedSenders = nil
 	if err := validateGmailAutomationConfig(cfg); err == nil || !strings.Contains(err.Error(), "GMAIL_ALLOWED_SENDERS") {
 		t.Fatalf("unexpected error: %v", err)
@@ -217,6 +228,32 @@ func TestGmailDrainAcceptsCloudSchedulerSecretHeader(t *testing.T) {
 	router := newRouter(cfg, server)
 	request := httptest.NewRequest(http.MethodPost, "/api/integrations/gmail/drain", nil)
 	request.Header.Set("X-Cron-Secret", "scheduler-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"processed":0`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestGmailDrainAcceptsCloudSchedulerOIDC(t *testing.T) {
+	original := validateGmailIDToken
+	t.Cleanup(func() { validateGmailIDToken = original })
+	validateGmailIDToken = func(_ context.Context, token, audience string) (*idtoken.Payload, error) {
+		if token != "scheduler-token" || audience != "https://ledger.example" {
+			return nil, fmt.Errorf("unexpected token input")
+		}
+		return &idtoken.Payload{Audience: audience, Claims: map[string]any{
+			"email":          "ledger-scheduler@example.iam.gserviceaccount.com",
+			"email_verified": true,
+		}}, nil
+	}
+	cfg := testLedger(t)
+	cfg.CronOIDCAudience = "https://ledger.example"
+	cfg.CronOIDCServiceAccount = "ledger-scheduler@example.iam.gserviceaccount.com"
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	router := newRouter(cfg, server)
+	request := httptest.NewRequest(http.MethodPost, "/api/integrations/gmail/drain", nil)
+	request.Header.Set("Authorization", "Bearer scheduler-token")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"processed":0`) {

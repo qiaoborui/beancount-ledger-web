@@ -11,7 +11,7 @@ Gmail sender filter
   -> Cloud Pub/Sub authenticated push
   -> POST /api/integrations/gmail/pubsub
   -> durable Postgres event inbox (immediate 204 acknowledgement)
-  -> GET /api/integrations/gmail/drain
+  -> POST /api/integrations/gmail/drain
   -> Gmail history.list + messages.get(format=raw)
   -> EML / CSV / XLSX / PDF / ZIP parsing
   -> Postgres pending import
@@ -19,7 +19,7 @@ Gmail sender filter
   -> existing import commit
 ```
 
-The Vercel backend can scale to zero between requests. Pub/Sub wakes it only long enough to validate and persist each event. Google Cloud Scheduler wakes the drain endpoint once per minute, and the daily Vercel Cron renews the seven-day Gmail Watch. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery do not lose work.
+The Cloud Run backend scales to zero between requests. Pub/Sub wakes it long enough to validate and persist each event. Google Cloud Scheduler wakes the drain endpoint once per minute and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work.
 
 ## Google Cloud setup
 
@@ -46,9 +46,21 @@ The Vercel backend can scale to zero between requests. Pub/Sub wakes it only lon
    https://YOUR_LEDGER_HOST/api/integrations/gmail/drain
    ```
 
-   Add the header `X-Cron-Secret: YOUR_CRON_SECRET`. This keeps minute-level processing available on Vercel plans whose built-in Cron only supports daily schedules.
+   Configure an OIDC token from a dedicated Scheduler service account. Set the
+   token audience to `https://YOUR_LEDGER_HOST`.
 
-The backend validates the Google-signed OIDC token, its audience, and the exact service-account email before reading the notification.
+9. Create a daily Cloud Scheduler HTTP job with schedule `17 3 * * *`, method
+   `POST`, and URL:
+
+   ```text
+   https://YOUR_LEDGER_HOST/api/integrations/gmail/renew
+   ```
+
+   Use the same Scheduler service account and OIDC audience. The job renews
+   Gmail Watch before its seven-day expiration.
+
+The backend validates Google-signed OIDC tokens, their audience, and the exact
+service-account email for Pub/Sub and Scheduler requests.
 
 ## Gmail filter
 
@@ -75,6 +87,9 @@ GMAIL_TOKEN_ENCRYPTION_KEY=
 GMAIL_SYNC_LOOKBACK_DAYS=30
 GMAIL_ZIP_PASSWORDS=
 GMAIL_ZIP_TIMEOUT_SECONDS=20
+CRON_OIDC_AUDIENCE=https://YOUR_LEDGER_HOST
+CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@PROJECT_ID.iam.gserviceaccount.com
+# Transition fallback for Vercel Cron and existing secret-header jobs.
 CRON_SECRET=
 ```
 
@@ -89,4 +104,7 @@ Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS
 5. Confirm a pending Review item appears and its Web Push notification links to `/import`.
 6. Review the generated entries and commit them through the normal import flow.
 
-The status endpoint is `GET /api/integrations/gmail/status`. Sensitive unlock protects connection changes, synchronization, pending financial previews, dismissal, and Gmail-backed commits. Cloud Scheduler calls `POST /api/integrations/gmail/drain` with `X-Cron-Secret`, while Vercel Cron calls `GET /api/integrations/gmail/renew` with `Authorization: Bearer $CRON_SECRET`. Disconnect revokes the Google refresh token before deleting the local encrypted credential.
+The status endpoint is `GET /api/integrations/gmail/status`. Sensitive unlock protects connection changes, synchronization, pending financial previews, dismissal, and Gmail-backed commits. Cloud Scheduler calls `POST /api/integrations/gmail/drain` and `POST /api/integrations/gmail/renew` with Google-signed OIDC tokens. Disconnect revokes the Google refresh token before deleting the local encrypted credential.
+
+See [google-cloud-run.md](google-cloud-run.md) for the Cloud Run, Secret
+Manager, Scheduler, domain, and rollback commands.

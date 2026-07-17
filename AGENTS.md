@@ -48,7 +48,9 @@ through `LEDGER_ROOT`.
   and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
 - `.github/workflows/ci.yml` runs selective backend and frontend checks.
-  preview environments.
+- `.github/workflows/deploy-google-cloud.yml` publishes the standalone API and
+  static web image to Cloud Run when the required repository variables are
+  configured.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
@@ -64,6 +66,10 @@ through `LEDGER_ROOT`.
   conflicts are reported, resolve them before handing the work back.
 - Pull requests trigger the Ubuntu server preview deployment workflow when the
   PR is not a draft.
+- Production Google Cloud deployment uses Workload Identity Federation,
+  Artifact Registry, Cloud Run, Secret Manager, and Cloud Scheduler. Keep
+  deployment configuration aligned with
+  `docs/google-cloud-run.md`.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.
 - Avoid starting the local dev server by default. Prefer static checks, tests,
