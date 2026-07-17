@@ -1,7 +1,23 @@
-export function Toast({ toast }: { toast: { kind: "info" | "success" | "error"; text: string } | null }) {
-  if (!toast) return null;
-  const dot = toast.kind === "error" ? "bg-[var(--danger)]" : toast.kind === "success" ? "bg-[var(--success)]" : "bg-brand";
-  return <div className="kami-float fixed right-4 z-50 flex max-w-sm items-start gap-2 rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-warm" style={{ top: `calc(5rem + env(safe-area-inset-top))` }}><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />{toast.text}</div>;
+import { CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import type { LedgerToast } from "./hooks/useToast";
+
+export function Toast({ toast, onClose }: { toast: LedgerToast; onClose: () => void }) {
+  if (!toast || typeof document === "undefined") return null;
+  const Icon = toast.kind === "error" ? TriangleAlert : toast.kind === "success" ? CircleCheck : Info;
+  const tone = toast.kind === "error" ? "text-[var(--danger)]" : toast.kind === "success" ? "text-[var(--success)]" : "text-brand";
+  return createPortal(
+    <div className="pointer-events-none fixed inset-x-0 z-[200] flex justify-center px-3 sm:justify-end sm:px-4" style={{ top: `calc(4.75rem + env(safe-area-inset-top))` }}>
+      <div key={toast.id} className="ledger-toast kami-float pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-warm" role={toast.kind === "error" ? "alert" : "status"} aria-live={toast.kind === "error" ? "assertive" : "polite"}>
+        <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} aria-hidden="true" />
+        <span className="min-w-0 flex-1 whitespace-pre-wrap leading-5">{toast.text}</span>
+        <button type="button" className="-my-1.5 -mr-2 grid h-10 w-10 shrink-0 place-items-center rounded-xl text-stone hover:bg-tag hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" onClick={onClose} aria-label="关闭提示">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 export function HiddenPanel({ text }: { text: string }) {
