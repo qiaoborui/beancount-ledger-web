@@ -105,6 +105,30 @@ type gmailPushData struct {
 	HistoryID    string `json:"historyId"`
 }
 
+func (data *gmailPushData) UnmarshalJSON(raw []byte) error {
+	var payload struct {
+		EmailAddress string          `json:"emailAddress"`
+		HistoryID    json.RawMessage `json:"historyId"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return err
+	}
+	data.EmailAddress = payload.EmailAddress
+	data.HistoryID = ""
+	if len(payload.HistoryID) == 0 || string(payload.HistoryID) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(payload.HistoryID, &data.HistoryID); err == nil {
+		return nil
+	}
+	var numericHistoryID json.Number
+	if err := json.Unmarshal(payload.HistoryID, &numericHistoryID); err != nil {
+		return fmt.Errorf("decode Gmail historyId: %w", err)
+	}
+	data.HistoryID = numericHistoryID.String()
+	return nil
+}
+
 type gmailPushEvent struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
