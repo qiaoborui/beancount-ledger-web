@@ -482,6 +482,118 @@ func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
 	}
 }
 
+func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{cmbCreditGmailSender}
+	cfg.GmailSyncLookbackDays = 7
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-credit-card-config.yaml"), "cmb: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("PYTHON_BIN", fakeDedupPython(t))
+	dependencies, err := buildApplicationDependencies(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := closeResources(dependencies.closers); err != nil {
+			t.Error(err)
+		}
+	})
+	cmbImporter := staticBillImporter{
+		id:              "cmb",
+		label:           "招商银行信用卡",
+		title:           "CMB Credit Card",
+		uiOrder:         30,
+		config:          importProviderConfig{Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf"}, Label: "招商银行信用卡"},
+		documentAccount: "Assets:Cash",
+		engine: nativeImportEngine("test-cmb-pdf", func(_ *Server, _ context.Context, _, outputFile string) error {
+			return os.WriteFile(outputFile, []byte(strings.Join([]string{
+				`2026-07-01 * "测试商户" "招商银行信用卡 PDF"`,
+				`  source: "cmb"`,
+				"  Expenses:Food 12.34 CNY",
+				"  Assets:Cash -12.34 CNY",
+				"",
+			}, "\n")), 0o600)
+		}),
+		prepare: func(_ *Server, input importFileInput) (preparedImportInput, error) {
+			return preparedImportInput{InputFile: input.InputFile, RawRowCount: 1, FilteredRowCount: 1}, nil
+		},
+	}
+	server := &Server{
+		cfg:                 cfg,
+		runtimeStore:        dependencies.runtimeStore,
+		indexStore:          dependencies.indexStore,
+		indexStoreErr:       dependencies.indexStoreErr,
+		cache:               dependencies.cache,
+		importers:           newBillImporterRegistry(cmbImporter),
+		moduleNames:         dependencies.moduleNames,
+		notificationService: dependencies.notificationService,
+		writer:              dependencies.writer,
+		accountService:      dependencies.accountService,
+		queryPort:           dependencies.queryPort,
+		snapshotPort:        dependencies.snapshotPort,
+		reconcileService:    dependencies.reconcileService,
+		txService:           dependencies.txService,
+		limiter:             dependencies.limiter,
+	}
+	connection := gmailConnection{Version: 1, Email: "owner@example.com", EncryptedRefreshToken: "present", LabelID: "label-1", HistoryID: 10}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	attachment := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7 synthetic statement"))
+	raw := strings.Join([]string{
+		"From: 招商银行信用卡 <ccsvc@message.cmbchina.com>",
+		"To: owner@example.com",
+		"Subject: 招商银行信用卡电子账单",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=message.cmbchina.com",
+		"Content-Type: multipart/mixed; boundary=cmb-boundary",
+		"",
+		"--cmb-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"statement attached",
+		"--cmb-boundary",
+		"Content-Type: application/pdf",
+		"Content-Disposition: attachment",
+		"Content-Transfer-Encoding: base64",
+		"",
+		attachment,
+		"--cmb-boundary--",
+		"",
+	}, "\r\n")
+	api := &fakeGmailAPI{
+		recentIDs: []string{"cmb"},
+		messages: map[string]*gmail.Message{
+			"cmb": {
+				Id:           "cmb",
+				ThreadId:     "thread-cmb",
+				LabelIds:     []string{"label-1"},
+				InternalDate: time.Date(2026, 7, 17, 12, 34, 56, 0, time.UTC).UnixMilli(),
+				Raw:          base64.RawURLEncoding.EncodeToString([]byte(raw)),
+			},
+		},
+	}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := server.readGmailPending(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.Items) != 1 {
+		t.Fatalf("pending=%#v", pending.Items)
+	}
+	item := pending.Items[0]
+	if item.Status != "ready" || item.Provider != "cmb" || item.Filename != "statement.pdf" || item.CandidateCount != 1 {
+		t.Fatalf("item=%#v", item)
+	}
+}
+
 func TestRecoverStaleProcessingImport(t *testing.T) {
 	cfg := testLedger(t)
 	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
@@ -529,6 +641,39 @@ func TestParseGmailMessageAttachments(t *testing.T) {
 	}
 	if len(message.Attachments) != 1 || message.Attachments[0].Filename != "statement.csv" || !bytes.Contains(message.Attachments[0].Content, []byte("12.34")) {
 		t.Fatalf("unexpected attachments: %#v", message.Attachments)
+	}
+}
+
+func TestParseGmailMessageInfersPDFAttachmentExtension(t *testing.T) {
+	attachment := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7 synthetic statement"))
+	raw := strings.Join([]string{
+		"From: 招商银行信用卡 <ccsvc@message.cmbchina.com>",
+		"Subject: 招商银行信用卡电子账单",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=message.cmbchina.com",
+		"Content-Type: multipart/mixed; boundary=cmb-boundary",
+		"",
+		"--cmb-boundary",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"statement attached",
+		"--cmb-boundary",
+		"Content-Type: application/pdf",
+		"Content-Disposition: attachment",
+		"Content-Transfer-Encoding: base64",
+		"",
+		attachment,
+		"--cmb-boundary--",
+		"",
+	}, "\r\n")
+	message, err := parseGmailMessage([]byte(raw), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(message.Attachments) != 1 || message.Attachments[0].Filename != "statement.pdf" {
+		t.Fatalf("unexpected attachments: %#v", message.Attachments)
+	}
+	if got := gmailAttachmentProviderOverride(message.Sender, message.Attachments[0].Filename); got != "cmb" {
+		t.Fatalf("provider override = %q", got)
 	}
 }
 

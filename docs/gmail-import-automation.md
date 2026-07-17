@@ -71,10 +71,10 @@ service-account email for Pub/Sub and Scheduler requests.
 Create the `Ledger/Bills` Label in Gmail. Add Gmail filters for the exact bank senders and optional subject terms, then apply this Label automatically. Example search:
 
 ```text
-from:(statement@example-bank.com OR bill@example-card.com) subject:(账单 OR statement)
+from:(service@mail.alipay.com OR service@vip.ccb.com OR ccsvc@message.cmbchina.com) subject:(账单 OR statement)
 ```
 
-Configure the same exact sender addresses in `GMAIL_ALLOWED_SENDERS`. Gmail Label filtering reduces mailbox notifications; the backend allowlist provides a second sender check before parsing files.
+This covers Alipay, China Construction Bank credit cards, and China Merchants Bank credit cards. CMB statements arrive as PDF attachments from `ccsvc@message.cmbchina.com`; the backend routes those PDFs through the existing CMB credit-card importer. Configure the same exact sender addresses in `GMAIL_ALLOWED_SENDERS`. Gmail Label filtering reduces mailbox notifications; the backend allowlist provides a second sender check before parsing files.
 
 ## Environment
 
@@ -86,7 +86,7 @@ GMAIL_PUBSUB_TOPIC=projects/PROJECT_ID/topics/ledger-gmail
 GMAIL_PUBSUB_AUDIENCE=https://YOUR_LEDGER_HOST/api/integrations/gmail/pubsub
 GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@PROJECT_ID.iam.gserviceaccount.com
 GMAIL_LABEL=Ledger/Bills
-GMAIL_ALLOWED_SENDERS=statement@example-bank.com,bill@example-card.com
+GMAIL_ALLOWED_SENDERS=service@mail.alipay.com,service@vip.ccb.com,ccsvc@message.cmbchina.com
 GMAIL_TOKEN_ENCRYPTION_KEY=
 GMAIL_SYNC_LOOKBACK_DAYS=30
 GMAIL_ZIP_PASSWORDS=
