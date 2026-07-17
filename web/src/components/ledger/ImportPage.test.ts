@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
+import { createImportPreviewForm, importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -23,6 +23,18 @@ function entry(patch: Partial<ImportEntryInput>): ImportEntryInput {
     ...patch,
   };
 }
+
+describe("manual ZIP import", () => {
+  it("sends the one-time password only with ZIP uploads", () => {
+    const zipForm = createImportPreviewForm("auto", new File(["zip"], "statement.zip"), false, " password with spaces ");
+    const csvForm = createImportPreviewForm("alipay", new File(["csv"], "statement.csv"), true, "unused");
+
+    expect(zipForm.get("archivePassword")).toBe(" password with spaces ");
+    expect(csvForm.get("archivePassword")).toBeNull();
+    expect(csvForm.get("provider")).toBe("alipay");
+    expect(csvForm.get("alipayFundRounding")).toBe("true");
+  });
+});
 
 describe("import flow display", () => {
   it("shows normal expenses from funding account to expense category", () => {

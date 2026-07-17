@@ -230,12 +230,22 @@ function writeImportDraft(draft: ImportDraft | null) {
   }
 }
 
+export function createImportPreviewForm(providerOverride: ProviderOverride, file: File, alipayFundRounding: boolean, archivePassword: string) {
+  const form = new FormData();
+  if (providerOverride !== "auto") form.set("provider", providerOverride);
+  form.set("file", file);
+  form.set("alipayFundRounding", String(alipayFundRounding));
+  if (file.name.toLowerCase().endsWith(".zip") && archivePassword !== "") form.set("archivePassword", archivePassword);
+  return form;
+}
+
 export function ImportPage({ onImported }: { onImported?: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const reviewDetailRef = useRef<HTMLElement | null>(null);
   const draftHydratedRef = useRef(false);
   const [providerOverride, setProviderOverride] = useState<ProviderOverride>("auto");
   const [file, setFile] = useState<File | null>(null);
+  const [archivePassword, setArchivePassword] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [alipayFundRounding, setAlipayFundRounding] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -278,6 +288,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
   const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
   const latestImportsByProvider = useMemo(() => latestImportDocumentsByProvider(importDocuments), [importDocuments]);
   const reviewablePendingImports = useMemo(() => reviewableGmailPendingImports(pendingImports), [pendingImports]);
+  const isZipUpload = file?.name.toLowerCase().endsWith(".zip") === true;
 
   useEffect(() => {
     const draft = readImportDraft();
@@ -350,6 +361,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function resetForFile(next: File | null) {
     setFile(next);
+    setArchivePassword("");
     setPreview(null);
     setEntries([]);
     setSelectedEntryId("");
@@ -364,6 +376,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
 
   function clearImportState() {
     setFile(null);
+    setArchivePassword("");
     if (inputRef.current) inputRef.current.value = "";
     setPreview(null);
     setEntries([]);
@@ -392,10 +405,8 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
     setCommitResult(null);
     setResultOpen(false);
     try {
-      const form = new FormData();
-      if (providerOverride !== "auto") form.set("provider", providerOverride);
-      form.set("file", file);
-      form.set("alipayFundRounding", String(alipayFundRounding));
+      const form = createImportPreviewForm(providerOverride, file, alipayFundRounding, archivePassword);
+      setArchivePassword("");
       const res = await apiFetch("/api/ledger/imports/preview", { method: "POST", body: form }, { kind: "write" });
       const data = await readJson<ImportPreview>(res);
       if (!res.ok || data.error) throw new Error(data.error || "生成预览失败");
@@ -716,6 +727,7 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
               </div>
               <div className="mt-4 text-base font-medium leading-6 text-ink">拖拽账单到这里，或点击选择文件</div>
               <div className="mt-1 max-w-full break-words text-sm text-stone">当前模式：{selectedProvider.label} · {selectedProvider.accept}</div>
+              <div className="mt-1 text-xs leading-5 text-stone">支持普通 ZIP 和经典 ZipCrypto 加密压缩包</div>
               {file ? (
                 <div className="mt-5 flex w-full max-w-full items-center gap-3 rounded-2xl border border-line bg-panel px-3 py-3 text-left text-sm sm:w-auto sm:px-4">
                   <FileSpreadsheet className="h-5 w-5 shrink-0 text-brand" />
@@ -726,6 +738,21 @@ export function ImportPage({ onImported }: { onImported?: () => void }) {
                 </div>
               ) : null}
             </div>
+            {isZipUpload ? (
+              <Label className="mt-4 block w-full text-left">
+                <span className="mb-2 block text-sm font-medium text-ink">压缩包密码（可选）</span>
+                <Input
+                  type="password"
+                  value={archivePassword}
+                  maxLength={256}
+                  autoComplete="off"
+                  placeholder="输入账单压缩包密码"
+                  className="h-10 rounded-xl bg-panel"
+                  onChange={(event) => setArchivePassword(event.target.value)}
+                />
+                <span className="mt-1 block text-xs leading-5 text-stone">留空时会尝试服务端已配置密码和六位数字密码。</span>
+              </Label>
+            ) : null}
           </div>
 
           <div className="grid min-w-0 max-w-full gap-3 overflow-hidden">
