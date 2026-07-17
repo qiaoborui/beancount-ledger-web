@@ -125,6 +125,7 @@ jobs:
       - name: Deploy private ZIP worker
         id: deploy-zip-worker
         env:
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           GCP_ZIP_WORKER_SERVICE_ACCOUNT: ${{ vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT }}
         run: |
@@ -175,7 +176,9 @@ jobs:
             echo "::error::ZIP worker URL was not published"
             exit 1
           fi
-          worker_token="$(gcloud auth print-identity-token --audiences="${worker_url}")"
+          worker_token="$(gcloud auth print-identity-token \
+            --impersonate-service-account="${GCP_DEPLOY_SERVICE_ACCOUNT}" \
+            --audiences="${worker_url}")"
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 \
             --header "Authorization: Bearer ${worker_token}" \
             "${worker_url}/health"
