@@ -472,21 +472,31 @@ export function AccountManager({ accounts, onAdded, showToast }: { accounts: Acc
   const [account, setAccount] = useState("");
   const [alias, setAlias] = useState("");
   const [currency, setCurrency] = useState("");
-  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const groups: { key: AccountGroup; label: string }[] = [{ key: "cash", label: "现金账户" }, { key: "credit", label: "信用卡" }, { key: "liability", label: "其他负债" }, { key: "wealth", label: "理财账户" }, { key: "receivable", label: "应收应付" }, { key: "expense", label: "支出分类" }, { key: "income", label: "收入分类" }, { key: "equity", label: "权益" }, { key: "other", label: "其他" }];
   const visibleGroups = groups.map((group) => ({ ...group, rows: accounts.filter((account) => account.group === group.key) })).filter((group) => group.rows.length > 0);
   async function submit() {
-    setMessage("写入中...");
-    const res = await apiFetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: currency.trim().toUpperCase() }) }, { kind: "write" });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) { setMessage(data.error || "新增失败"); return; }
-    setMessage("账户已新增");
-    setAccount("");
-    setAlias("");
-    onAdded();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await apiFetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: currency.trim().toUpperCase() }) }, { kind: "write" });
+      const data = await readJson<{ error?: string }>(res);
+      if (!res.ok) {
+        showToast("error", data.error || "新增账户失败");
+        return;
+      }
+      showToast("success", "账户已新增");
+      setAccount("");
+      setAlias("");
+      await onAdded();
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "新增账户失败");
+    } finally {
+      setSubmitting(false);
+    }
   }
-  return <section className="card p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="font-serif text-2xl">账户管理</h2><p className="mt-2 text-sm text-olive">这里管理账户定义和分组；余额集中在下方“账户余额”里并默认隐藏。</p></div><Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-olive" onPointerEnter={() => void loadAccountAgentChat()} onFocus={() => void loadAccountAgentChat()} onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button></div><div className="mt-4 grid gap-3 sm:grid-cols-[150px_1fr_1fr_110px_auto]"><Input className="h-12 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-12 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-12 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-12 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-12 px-4" onClick={submit}>新增账户</Button></div>{message && <p className="mt-2 text-sm text-olive">{message}</p>}{visibleGroups.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{visibleGroups.map((group) => <div key={group.key} className="rounded-xl border border-line bg-panel p-3"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="mt-2 space-y-2">{group.rows.map((a) => <div key={a.account} className="text-sm"><div className="flex items-center gap-2"><strong>{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></div>)}</div> : <p className="mt-5 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}{agentOpen && <Suspense fallback={null}><LazyAccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} showToast={showToast} /></Suspense>}</section>;
+  return <section className="card p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="font-serif text-2xl">账户管理</h2><p className="mt-2 text-sm text-olive">这里管理账户定义和分组；余额集中在下方“账户余额”里并默认隐藏。</p></div><Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-olive" onPointerEnter={() => void loadAccountAgentChat()} onFocus={() => void loadAccountAgentChat()} onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button></div><div className="mt-4 grid gap-3 sm:grid-cols-[150px_1fr_1fr_110px_auto]"><Input className="h-12 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-12 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-12 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-12 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-12 px-4" disabled={submitting} onClick={submit}>{submitting ? "新增中…" : "新增账户"}</Button></div>{visibleGroups.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{visibleGroups.map((group) => <div key={group.key} className="rounded-xl border border-line bg-panel p-3"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="mt-2 space-y-2">{group.rows.map((a) => <div key={a.account} className="text-sm"><div className="flex items-center gap-2"><strong>{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></div>)}</div> : <p className="mt-5 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}{agentOpen && <Suspense fallback={null}><LazyAccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} showToast={showToast} /></Suspense>}</section>;
 }
 
 // ── 账户状态指示器 ──

@@ -8,6 +8,8 @@ import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatu
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
+type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
+
 const themeOptions: { value: ThemeMode; label: string; description: string }[] = [
   { value: "system", label: "跟随系统", description: "系统切换时自动同步" },
   { value: "light", label: "浅色", description: "固定使用纸张浅色" },
@@ -55,6 +57,7 @@ export function SettingsPage({
   onEnableQuickUnlock,
   onDisableQuickUnlock,
   onEnableOfflineUnlock,
+  showToast,
 }: {
   settings: PrivacySettings;
   commodities: string[];
@@ -71,6 +74,7 @@ export function SettingsPage({
   onEnableQuickUnlock: (secret: string, mode: QuickUnlockMode) => void | Promise<void>;
   onDisableQuickUnlock: () => void | Promise<void>;
   onEnableOfflineUnlock: (secret: string) => void | Promise<void>;
+  showToast: ToastFn;
 }) {
   function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
     if (checked) onMobileTabHrefsChange(Array.from(new Set([...mobileTabHrefs, href])).slice(0, 5));
@@ -80,9 +84,9 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
-    <ApiEndpointSettingsPanel />
-    <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} />
-    <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} />
+    <ApiEndpointSettingsPanel showToast={showToast} />
+    <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} showToast={showToast} />
+    <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} showToast={showToast} />
 
     <section className="card p-5 md:p-6">
       <div className="border-l-4 border-brand pl-4">
@@ -164,10 +168,9 @@ export function SettingsPage({
   </div>;
 }
 
-function ApiEndpointSettingsPanel() {
+function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
   const [settings, setSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
   const [draftUrl, setDraftUrl] = useState("");
-  const [message, setMessage] = useState("");
   const [testingId, setTestingId] = useState<string | null>(null);
   const [probeResults, setProbeResults] = useState<Record<string, ApiEndpointProbeResult>>({});
   const [, setHealthRevision] = useState(0);
@@ -181,14 +184,14 @@ function ApiEndpointSettingsPanel() {
   function save(next: ApiEndpointSettings, notice = "") {
     setSettings(next);
     writeApiEndpointSettings(next);
-    if (notice) setMessage(notice);
+    if (notice) showToast("success", notice);
   }
 
   function addEndpoint() {
     try {
       const url = normalizeApiEndpointUrl(draftUrl);
       if (settings.endpoints.some((endpoint) => endpoint.url === url)) {
-        setMessage("这个后端已经在列表里。");
+        showToast("info", "这个后端已经在列表里");
         return;
       }
       const endpoint = { id: createApiEndpointId(), url, enabled: true };
@@ -199,13 +202,13 @@ function ApiEndpointSettingsPanel() {
       setDraftUrl("");
       save(next, "已添加后端；需要时请单独测速或直接切换验证。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "添加失败");
+      showToast("error", error instanceof Error ? error.message : "添加后端失败");
     }
   }
 
   async function activateEndpoint(endpoint: ApiEndpoint) {
     if (!endpoint.enabled || endpoint.id === settings.activeId) return;
-    setMessage("正在验证所选后端…");
+    showToast("info", "正在验证所选后端…");
     try {
       const result = await probeApiEndpoint(endpoint);
       setProbeResults((current) => ({ ...current, [endpoint.id]: result }));
@@ -214,7 +217,7 @@ function ApiEndpointSettingsPanel() {
       if (next.activeId !== endpoint.id) throw new Error("所选后端与当前账本不兼容");
       save(next, "已切换后端，请重新登录。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "切换后端失败");
+      showToast("error", error instanceof Error ? error.message : "切换后端失败");
     }
   }
 
@@ -243,7 +246,6 @@ function ApiEndpointSettingsPanel() {
   async function testEndpoint(endpoint: ApiEndpoint) {
     if (testingId || !endpoint.enabled) return;
     setTestingId(endpoint.id);
-    setMessage("");
     try {
       const result = await probeApiEndpoint(endpoint);
       let compatibleResult = result;
@@ -253,10 +255,10 @@ function ApiEndpointSettingsPanel() {
           save(next, `${endpointLabel(endpoint)} 测速完成：${result.latencyMs}ms。`);
         } catch (error) {
           compatibleResult = { ...result, ok: false, error: error instanceof Error ? error.message : "后端不兼容" };
-          setMessage(compatibleResult.error ?? "后端不兼容");
+          showToast("error", compatibleResult.error ?? "后端不兼容");
         }
       } else {
-        setMessage(result.error ?? "测速失败");
+        showToast("error", result.error ?? "测速失败");
       }
       setProbeResults((current) => ({ ...current, [endpoint.id]: compatibleResult }));
     } finally {
@@ -315,7 +317,6 @@ function ApiEndpointSettingsPanel() {
       })}
     </div>
     <p className="mt-3 text-xs leading-5 text-stone">测速只请求所点的后端，不会批量唤醒其他地址。自定义后端必须是 HTTPS，并需要允许当前前端 Origin 的 CORS；设置只保存在当前浏览器。</p>
-    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
   </section>;
 }
 
@@ -337,12 +338,11 @@ function IconButton({ label, disabled, onClick, children }: { label: string; dis
   return <button type="button" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-paper text-olive hover:bg-tag disabled:opacity-40" aria-label={label} title={label} disabled={disabled} onClick={onClick}>{children}</button>;
 }
 
-function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, onEnable, onDisable }: { enabled: boolean; mode: QuickUnlockMode; sensitiveUnlocked: boolean; onEnable: (secret: string, mode: QuickUnlockMode) => void | Promise<void>; onDisable: () => void | Promise<void> }) {
+function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, onEnable, onDisable, showToast }: { enabled: boolean; mode: QuickUnlockMode; sensitiveUnlocked: boolean; onEnable: (secret: string, mode: QuickUnlockMode) => void | Promise<void>; onDisable: () => void | Promise<void>; showToast: ToastFn }) {
   const [mode, setMode] = useState<QuickUnlockMode>(initialMode);
   const [secret, setSecret] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     setMode(initialMode);
@@ -359,26 +359,24 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
   async function submit() {
     if (saving) return;
     if (!sensitiveUnlocked) {
-      setMessage("请先解锁敏感数据，再设置本机快速解锁。");
+      showToast("error", "请先解锁敏感数据，再设置本机快速解锁");
       return;
     }
     if (!secret) {
-      setMessage(mode === "numeric" ? "请输入数字解锁码。" : "请输入本机解锁口令。");
+      showToast("error", mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
       return;
     }
     if (secret !== confirm) {
-      setMessage("两次输入不一致。");
+      showToast("error", "两次输入不一致");
       return;
     }
     setSaving(true);
-    setMessage("");
     try {
       await onEnable(secret, mode);
       setSecret("");
       setConfirm("");
-      setMessage("已启用本机快速解锁。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "启用失败");
+      showToast("error", error instanceof Error ? error.message : "启用快速解锁失败");
     } finally {
       setSaving(false);
     }
@@ -387,12 +385,10 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
   async function disable() {
     if (saving) return;
     setSaving(true);
-    setMessage("");
     try {
       await onDisable();
-      setMessage("已关闭本机快速解锁。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "关闭失败");
+      showToast("error", error instanceof Error ? error.message : "关闭快速解锁失败");
     } finally {
       setSaving(false);
     }
@@ -429,35 +425,31 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
       {enabled && <button type="button" className="text-brand disabled:opacity-50" disabled={saving} onClick={() => void disable()}>关闭当前设备快速解锁</button>}
     </div>
     {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">本机快速解锁只能在敏感数据已解锁时设置。</p>}
-    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
   </section>;
 }
 
-function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable }: { enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void> }) {
+function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast }: { enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void>; showToast: ToastFn }) {
   const [secret, setSecret] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
 
   async function submit() {
     if (saving) return;
     if (!sensitiveUnlocked) {
-      setMessage("请先解锁敏感数据。");
+      showToast("error", "请先解锁敏感数据");
       return;
     }
     if (secret !== confirm) {
-      setMessage("两次输入不一致。");
+      showToast("error", "两次输入不一致");
       return;
     }
     setSaving(true);
-    setMessage("");
     try {
       await onEnable(secret);
       setSecret("");
       setConfirm("");
-      setMessage("已启用离线解锁。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "启用失败");
+      showToast("error", error instanceof Error ? error.message : "启用离线解锁失败");
     } finally {
       setSaving(false);
     }
@@ -475,7 +467,6 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable }: { enabl
       <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? "保存中…" : enabled ? "更新" : "启用"}</button>
     </div>
     {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">离线解锁码只能在敏感数据已解锁时设置。</p>}
-    {message && <p className="mt-3 text-sm text-stone">{message}</p>}
   </section>;
 }
 
