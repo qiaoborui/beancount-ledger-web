@@ -4,9 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +22,93 @@ import (
 
 	pdf "github.com/ledongthuc/pdf"
 )
+
+func TestManualImportZipPasswordCandidates(t *testing.T) {
+	candidates, err := manualImportZipPasswordCandidates("manual password", []string{"configured", "manual password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(candidates, ","); got != "manual password,configured" {
+		t.Fatalf("candidates=%q", got)
+	}
+	if _, err := manualImportZipPasswordCandidates(strings.Repeat("x", 257), nil); err == nil {
+		t.Fatal("expected oversized password to be rejected")
+	}
+}
+
+func TestExtractImportZIPUsesManualPassword(t *testing.T) {
+	archive := encryptedStoredZIP(t, "statement.csv", []byte("date,amount\n2026-07-01,88.00\n"), "manual password")
+	upload, password, err := extractImportZIP(context.Background(), archive, []string{"manual password", "configured"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upload.Filename != "statement.csv" || string(upload.Content) != "date,amount\n2026-07-01,88.00\n" || password != "manual password" {
+		t.Fatalf("upload=%#v password=%q", upload, password)
+	}
+}
+
+func encryptedStoredZIP(t *testing.T, filename string, plain []byte, password string) []byte {
+	t.Helper()
+	crc := crc32.ChecksumIEEE(plain)
+	keys := initializeZipKeys([]byte(password))
+	header := append(bytes.Repeat([]byte{0}, 11), byte(crc>>24))
+	encrypted := make([]byte, 0, len(header)+len(plain))
+	for _, value := range append(header, plain...) {
+		temporary := uint16(keys.key2 | 2)
+		encrypted = append(encrypted, value^byte((uint32(temporary)*uint32(temporary^1))>>8))
+		keys.update(value)
+	}
+
+	var archive bytes.Buffer
+	write16 := func(value uint16) { t.Helper(); _ = binary.Write(&archive, binary.LittleEndian, value) }
+	write32 := func(value uint32) { t.Helper(); _ = binary.Write(&archive, binary.LittleEndian, value) }
+	name := []byte(filename)
+	compressedSize := uint32(len(encrypted))
+	write32(zipLocalHeaderSignature)
+	write16(20)
+	write16(1)
+	write16(0)
+	write16(0)
+	write16(0)
+	write32(crc)
+	write32(compressedSize)
+	write32(uint32(len(plain)))
+	write16(uint16(len(name)))
+	write16(0)
+	archive.Write(name)
+	archive.Write(encrypted)
+
+	centralOffset := uint32(archive.Len())
+	write32(zipCentralHeaderSignature)
+	write16(20)
+	write16(20)
+	write16(1)
+	write16(0)
+	write16(0)
+	write16(0)
+	write32(crc)
+	write32(compressedSize)
+	write32(uint32(len(plain)))
+	write16(uint16(len(name)))
+	write16(0)
+	write16(0)
+	write16(0)
+	write16(0)
+	write32(0)
+	write32(0)
+	archive.Write(name)
+	centralSize := uint32(archive.Len()) - centralOffset
+
+	write32(zipEndHeaderSignature)
+	write16(0)
+	write16(0)
+	write16(1)
+	write16(1)
+	write32(centralSize)
+	write32(centralOffset)
+	write16(0)
+	return archive.Bytes()
+}
 
 func TestImportPreviewAndCommit(t *testing.T) {
 	cfg := testLedger(t)

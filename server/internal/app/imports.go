@@ -102,7 +102,7 @@ type importUpload struct {
 	Content  []byte
 }
 
-func (s *Server) createImportPreview(ctx context.Context, providerOverride string, alipayFundRounding bool, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
+func (s *Server) createImportPreview(ctx context.Context, providerOverride string, alipayFundRounding bool, archivePassword string, header *multipart.FileHeader, originalHeader *multipart.FileHeader) (ginH, error) {
 	input, err := importUploadFromMultipart(header)
 	if err != nil {
 		return nil, err
@@ -116,12 +116,16 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 		original = &value
 	}
 	if strings.EqualFold(filepath.Ext(input.Filename), ".zip") {
+		passwordCandidates, err := manualImportZipPasswordCandidates(archivePassword, s.cfg.GmailZipPasswords)
+		if err != nil {
+			return nil, err
+		}
 		timeoutSeconds := s.cfg.GmailZipTimeoutSeconds
 		if timeoutSeconds <= 0 {
 			timeoutSeconds = 20
 		}
 		zipContext, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-		extracted, _, err := extractImportZIP(zipContext, input.Content, s.cfg.GmailZipPasswords)
+		extracted, _, err := extractImportZIP(zipContext, input.Content, passwordCandidates)
 		cancel()
 		if err != nil {
 			return nil, err
@@ -133,6 +137,22 @@ func (s *Server) createImportPreview(ctx context.Context, providerOverride strin
 		input = extracted
 	}
 	return s.createImportPreviewFromUploads(ctx, providerOverride, alipayFundRounding, input, original)
+}
+
+func manualImportZipPasswordCandidates(provided string, configured []string) ([]string, error) {
+	if len([]byte(provided)) > 256 {
+		return nil, errors.New("压缩包密码超过 256 字节")
+	}
+	candidates := make([]string, 0, len(configured)+1)
+	if provided != "" {
+		candidates = append(candidates, provided)
+	}
+	for _, candidate := range configured {
+		if candidate != "" && candidate != provided {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates, nil
 }
 
 func importUploadFromMultipart(header *multipart.FileHeader) (importUpload, error) {

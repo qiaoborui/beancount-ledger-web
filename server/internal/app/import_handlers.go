@@ -32,7 +32,7 @@ func (s *Server) importsPreview(c *gin.Context) {
 	} else {
 		originalHeader = nil
 	}
-	result, err := s.createImportPreview(c.Request.Context(), c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), header, originalHeader)
+	result, err := s.createImportPreview(c.Request.Context(), c.Request.FormValue("provider"), truthyFormValue(c.Request.FormValue("alipayFundRounding")), c.Request.FormValue("archivePassword"), header, originalHeader)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
