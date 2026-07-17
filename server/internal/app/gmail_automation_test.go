@@ -126,6 +126,17 @@ func TestDecodeGmailPush(t *testing.T) {
 	}
 }
 
+func TestDecodeGmailPushAcceptsNumericHistoryID(t *testing.T) {
+	payload := base64.RawStdEncoding.EncodeToString([]byte(`{"emailAddress":"owner@example.com","historyId":12345}`))
+	data, messageID, err := decodeGmailPush([]byte(`{"message":{"data":"` + payload + `","messageId":"pubsub-1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.EmailAddress != "owner@example.com" || data.HistoryID != "12345" || messageID != "pubsub-1" {
+		t.Fatalf("unexpected push data: %#v", data)
+	}
+}
+
 func TestDecodeGmailPushAcceptsBase64URLData(t *testing.T) {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"emailAddress":"a😀@example.com","historyId":"12345"}`))
 	if !strings.Contains(payload, "-") && !strings.Contains(payload, "_") {
@@ -182,7 +193,7 @@ func TestGmailPubSubAcknowledgesAfterDurableEnqueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := newRouter(cfg, server)
-	data := base64.RawStdEncoding.EncodeToString([]byte(`{"emailAddress":"owner@example.com","historyId":"123"}`))
+	data := base64.RawStdEncoding.EncodeToString([]byte(`{"emailAddress":"owner@example.com","historyId":123}`))
 	request := httptest.NewRequest(http.MethodPost, "/api/integrations/gmail/pubsub", strings.NewReader(`{"message":{"data":"`+data+`","messageId":"push-1"}}`))
 	request.Header.Set("Authorization", "Bearer signed")
 	response := httptest.NewRecorder()
@@ -191,7 +202,7 @@ func TestGmailPubSubAcknowledgesAfterDurableEnqueue(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	store, err := server.readGmailPushEvents(context.Background())
-	if err != nil || len(store.Items) != 1 || store.Items[0].ID != "push-1" || store.Items[0].Status != "queued" {
+	if err != nil || len(store.Items) != 1 || store.Items[0].ID != "push-1" || store.Items[0].HistoryID != 123 || store.Items[0].Status != "queued" {
 		t.Fatalf("events=%#v err=%v", store.Items, err)
 	}
 }
