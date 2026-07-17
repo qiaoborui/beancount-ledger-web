@@ -47,6 +47,30 @@ func TestExtractImportZIPUsesManualPassword(t *testing.T) {
 	}
 }
 
+func TestExtractImportZIPFallsBackToUpperAlnumPassword(t *testing.T) {
+	archive := encryptedStoredZIP(t, "statement.csv", []byte("date,amount\n2026-07-01,88.00\n"), "00000A")
+	upload, password, err := extractImportZIP(context.Background(), archive, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upload.Filename != "statement.csv" || string(upload.Content) != "date,amount\n2026-07-01,88.00\n" || password != "00000A" {
+		t.Fatalf("upload=%#v password=%q", upload, password)
+	}
+}
+
+func TestImportZIPSearchUsesProcessWideSlot(t *testing.T) {
+	if err := acquireImportZIPSearch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseImportZIPSearch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := acquireImportZIPSearch(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire error = %v", err)
+	}
+}
+
 func encryptedStoredZIP(t *testing.T, filename string, plain []byte, password string) []byte {
 	t.Helper()
 	crc := crc32.ChecksumIEEE(plain)
