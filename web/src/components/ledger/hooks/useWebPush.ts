@@ -92,14 +92,14 @@ export function useWebPush(showToast: (kind: "info" | "success" | "error", text:
   const subscribe = useCallback(async () => {
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
+      const permission = await Notification.requestPermission();
+      if (permission === "denied") throw new Error("浏览器已阻止通知，请在站点设置中允许后重试");
+      if (permission !== "granted") throw new Error("通知权限尚未授权");
+
       const configRes = await apiFetch("/api/push/subscription", undefined, { kind: "auth" });
       const config = await readJson<{ error?: string; configured?: boolean; publicKey?: string }>(configRes);
       if (!configRes.ok) throw new Error(config.error || "读取 Web Push 配置失败");
       if (!config.publicKey || !config.configured) throw new Error("Web Push 尚未配置 VAPID keys");
-
-      const permission = await Notification.requestPermission();
-      if (permission === "denied") throw new Error("浏览器已阻止通知，请在站点设置中允许后重试");
-      if (permission !== "granted") throw new Error("通知权限尚未授权");
 
       const registration = await navigator.serviceWorker.ready;
       const existing = await registration.pushManager.getSubscription();
