@@ -321,6 +321,22 @@ func (s *Server) gmailSyncNow(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
+	if pendingID := strings.TrimSpace(c.Query("pendingId")); pendingID != "" {
+		item, err := s.retryGmailPendingImport(c.Request.Context(), pendingID)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "待重试账单不存在"})
+				return
+			}
+			errorJSON(c, http.StatusBadRequest, err)
+			return
+		}
+		item.SourceKey = ""
+		item.OutputFile = ""
+		item.StoredBytes = 0
+		c.JSON(http.StatusOK, gin.H{"ok": true, "item": item})
+		return
+	}
 	connection, connected, err := s.gmailConnection(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)

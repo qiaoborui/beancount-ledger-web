@@ -766,21 +766,8 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		if !reserved {
 			continue
 		}
-		original := &importUpload{Filename: "gmail-" + safeSuffix(messageID) + ".eml", Content: raw}
-		if strings.EqualFold(filepath.Ext(candidate.Upload.Filename), ".eml") && bytes.Equal(candidate.Upload.Content, raw) {
-			original = nil
-		}
-		preview, previewErr := ginH(nil), candidate.Error
-		if previewErr == nil {
-			preview, previewErr = s.createImportPreviewFromUploadsWithID(ctx, item.ImportID, candidate.ProviderOverride, false, candidate.Upload, original)
-		}
-		if previewErr != nil {
-			item.Status = "failed"
-			item.Error = previewErr.Error()
-		} else {
-			item.Provider, _ = preview["provider"].(string)
-			item.CandidateCount = anyInt(preview["candidateCount"])
-			item.Status = "ready"
+		item, _ = s.previewGmailCandidate(ctx, item, candidate, raw)
+		if item.Status == "ready" {
 			ready++
 		}
 		if err := s.finalizeGmailPending(ctx, item); err != nil {
@@ -792,6 +779,119 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		_, _ = s.notificationService.Publish(ctx, NotificationMessage{Title: "收到新账单", Body: fmt.Sprintf("%s：%d 份账单等待 Review", valueOr(envelope.Subject, envelope.Sender), ready), URL: "/import", Tag: "gmail-import-" + messageID})
 	}
 	return nil
+}
+
+func (s *Server) previewGmailCandidate(ctx context.Context, item GmailPendingImport, candidate gmailImportCandidate, raw []byte) (GmailPendingImport, error) {
+	original := &importUpload{Filename: "gmail-" + safeSuffix(item.MessageID) + ".eml", Content: raw}
+	if strings.EqualFold(filepath.Ext(candidate.Upload.Filename), ".eml") && bytes.Equal(candidate.Upload.Content, raw) {
+		original = nil
+	}
+	preview, previewErr := ginH(nil), candidate.Error
+	if previewErr == nil {
+		preview, previewErr = s.createImportPreviewFromUploadsWithID(ctx, item.ImportID, candidate.ProviderOverride, false, candidate.Upload, original)
+	}
+	if previewErr != nil {
+		item.Status = "failed"
+		item.Error = previewErr.Error()
+		return item, previewErr
+	}
+	item.Provider, _ = preview["provider"].(string)
+	item.CandidateCount = anyInt(preview["candidateCount"])
+	item.Status = "ready"
+	item.Error = ""
+	return item, nil
+}
+
+func (s *Server) retryGmailPendingImport(ctx context.Context, id string) (GmailPendingImport, error) {
+	owner := randomID()
+	claimed, err := s.claimGmailSyncLease(ctx, owner)
+	if err != nil {
+		return GmailPendingImport{}, err
+	}
+	if !claimed {
+		return GmailPendingImport{}, errGmailSyncBusy
+	}
+	defer s.releaseGmailSyncLease(context.Background(), owner)
+	api, connection, err := s.connectedGmailAPI(ctx)
+	if err != nil {
+		return GmailPendingImport{}, err
+	}
+	return s.retryGmailPendingImportWithAPI(ctx, api, connection, id)
+}
+
+func (s *Server) retryGmailPendingImportWithAPI(ctx context.Context, api gmailAPI, connection gmailConnection, id string) (GmailPendingImport, error) {
+	item, previousImportID, err := s.claimGmailPendingRetry(ctx, id)
+	if err != nil {
+		return GmailPendingImport{}, err
+	}
+	fail := func(retryErr error) (GmailPendingImport, error) {
+		item.Status = "failed"
+		item.Error = retryErr.Error()
+		if finalizeErr := s.finalizeGmailPending(ctx, item); finalizeErr != nil {
+			return item, errors.Join(retryErr, finalizeErr)
+		}
+		return item, retryErr
+	}
+	if previousImportID != "" {
+		if err := s.cleanupImportRuntime(ctx, previousImportID); err != nil {
+			return fail(err)
+		}
+	}
+	message, err := api.RawMessage(ctx, item.MessageID)
+	if err != nil {
+		return fail(err)
+	}
+	if !stringIn(connection.LabelID, message.LabelIds) {
+		return fail(errors.New("原邮件已移出 Gmail 账单 Label"))
+	}
+	raw, err := decodeGmailRaw(message.Raw)
+	if err != nil {
+		return fail(err)
+	}
+	envelope, err := parseGmailMessage(raw, message.InternalDate)
+	if err != nil {
+		return fail(err)
+	}
+	if !envelope.Authenticated {
+		return fail(errors.New("邮件未通过 Gmail DMARC 验证"))
+	}
+	if !gmailSenderAllowed(envelope.Sender, s.cfg.GmailAllowedSenders) {
+		return fail(errors.New("发件人不在 Gmail 自动账单 allowlist: " + envelope.Sender))
+	}
+	candidates, _ := s.gmailImportCandidates(ctx, envelope, raw, item.MessageID, map[string]struct{}{})
+	candidate, ok := gmailRetryCandidate(candidates, item.MessageID, item.SourceKey)
+	if !ok {
+		return fail(errors.New("原邮件中找不到对应的账单附件"))
+	}
+	item.ThreadID = message.ThreadId
+	item.Sender = envelope.Sender
+	item.Subject = envelope.Subject
+	item.ReceivedAt = envelope.ReceivedAt
+	item.Filename = candidate.Upload.Filename
+	item.StoredBytes = int64(len(candidate.Upload.Content) + len(raw))
+	item, previewErr := s.previewGmailCandidate(ctx, item, candidate, raw)
+	if err := s.finalizeGmailPending(ctx, item); err != nil {
+		return item, err
+	}
+	if previewErr != nil {
+		return item, previewErr
+	}
+	if s.notificationService != nil {
+		_, _ = s.notificationService.Publish(ctx, NotificationMessage{Title: "账单重新解析完成", Body: valueOr(item.Subject, item.Filename) + " 等待 Review", URL: "/import", Tag: "gmail-import-retry-" + item.ID})
+	}
+	return item, nil
+}
+
+func gmailRetryCandidate(candidates []gmailImportCandidate, messageID, sourceKey string) (gmailImportCandidate, bool) {
+	for _, candidate := range candidates {
+		if messageID+":"+sha256Hex(candidate.Upload.Content) == sourceKey {
+			return candidate, true
+		}
+	}
+	if sourceKey == "" && len(candidates) == 1 {
+		return candidates[0], true
+	}
+	return gmailImportCandidate{}, false
 }
 
 func (s *Server) recordGmailEnvelopeFailure(ctx context.Context, messageID string, raw []byte, envelope gmailMessageEnvelope, reason, message string) error {
@@ -1266,6 +1366,41 @@ func (s *Server) updateGmailPendingStatusUnlocked(ctx context.Context, id, statu
 		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	return s.writeGmailPending(ctx, store)
+}
+
+func (s *Server) claimGmailPendingRetry(ctx context.Context, id string) (GmailPendingImport, string, error) {
+	if _, err := s.gmailPendingSnapshot(ctx); err != nil {
+		return GmailPendingImport{}, "", err
+	}
+	var claimed GmailPendingImport
+	previousImportID := ""
+	err := s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+		store, err := s.readGmailPending(lockCtx)
+		if err != nil {
+			return err
+		}
+		for index := range store.Items {
+			item := &store.Items[index]
+			if item.ID != id && item.ImportID != id {
+				continue
+			}
+			if item.Status != "failed" {
+				return fmt.Errorf("自动账单状态为 %s，无法重试", item.Status)
+			}
+			if item.MessageID == "" {
+				return errors.New("自动账单缺少 Gmail message ID，无法重试")
+			}
+			previousImportID = item.ImportID
+			item.ImportID = randomID()
+			item.Status = "processing"
+			item.Error = ""
+			item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			claimed = *item
+			return s.writeGmailPending(lockCtx, store)
+		}
+		return os.ErrNotExist
+	})
+	return claimed, previousImportID, err
 }
 
 func (s *Server) claimGmailPendingImport(ctx context.Context, importID string) (bool, error) {
