@@ -162,6 +162,18 @@ export function reviewableGmailPendingImports(items: GmailPendingImport[]) {
   return items.filter((item) => item.status === "ready" || item.status === "failed");
 }
 
+export function gmailPendingImportActions(status: GmailPendingImport["status"]) {
+  return {
+    retry: status === "failed",
+    review: status === "ready",
+    dismiss: status === "ready" || status === "failed",
+  };
+}
+
+export function gmailPendingRetryURL(id: string) {
+  return `/api/integrations/gmail/sync?pendingId=${encodeURIComponent(id)}`;
+}
+
 function formatImportTotals(entries: ImportEntry[]) {
   const totals = new Map<string, number>();
   for (const entry of entries) {
@@ -584,6 +596,19 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     }
   }
 
+  async function retryPendingImport(item: GmailPendingImport) {
+    setGmailLoading(true);
+    try {
+      await fetchJson<{ ok?: boolean; item?: GmailPendingImport }>(gmailPendingRetryURL(item.id), { method: "POST" }, undefined, { kind: "write" });
+      if (await loadGmailAutomation(true)) showToast("success", "账单重新解析完成");
+    } catch (err) {
+      await loadGmailAutomation();
+      reportActionError(err);
+    } finally {
+      setGmailLoading(false);
+    }
+  }
+
   function updateMetadata(id: string, key: string, value: string) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, metadata: { ...entry.metadata, [key]: value } } : entry)));
   }
@@ -663,23 +688,27 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           {gmailStatus?.lastError ? <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><span>{gmailStatus.lastError}</span></Alert> : null}
           {reviewablePendingImports.length > 0 ? (
             <div className="grid gap-2">
-              {reviewablePendingImports.map((item) => (
-                <div key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-line bg-paper p-3 sm:flex-row sm:items-center">
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--selected-bg)] text-brand"><Inbox className="h-5 w-5" /></div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
-                      <span className="truncate text-sm font-medium text-ink">{item.subject || item.filename}</span>
+              {reviewablePendingImports.map((item) => {
+                const actions = gmailPendingImportActions(item.status);
+                return (
+                  <div key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-line bg-paper p-3 sm:flex-row sm:items-center">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--selected-bg)] text-brand"><Inbox className="h-5 w-5" /></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
+                        <span className="truncate text-sm font-medium text-ink">{item.subject || item.filename}</span>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-stone">{item.sender} · {item.filename}{item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}</div>
+                      {item.error ? <div className="mt-1 line-clamp-2 text-xs text-destructive">{item.error}</div> : null}
                     </div>
-                    <div className="mt-1 truncate text-xs text-stone">{item.sender} · {item.filename}{item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}</div>
-                    {item.error ? <div className="mt-1 line-clamp-2 text-xs text-destructive">{item.error}</div> : null}
+                    <div className="flex shrink-0 gap-2">
+                      {actions.retry ? <Button variant="outline" size="sm" onClick={() => void retryPendingImport(item)} disabled={gmailLoading}><RefreshCw className="h-4 w-4" />重试</Button> : null}
+                      {actions.dismiss ? <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />忽略</Button> : null}
+                      {actions.review ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>Review<ArrowRight className="h-4 w-4" /></Button> : null}
+                    </div>
                   </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />忽略</Button>
-                    {item.status === "ready" ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>Review<ArrowRight className="h-4 w-4" /></Button> : null}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : gmailStatus?.connected ? <div className="rounded-2xl border border-dashed border-line px-4 py-5 text-center text-sm text-stone">当前没有待 Review 的 Gmail 账单</div> : null}
         </CardContent>

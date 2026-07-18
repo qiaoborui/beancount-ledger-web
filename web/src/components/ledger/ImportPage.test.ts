@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiResponseError } from "@/lib/clientFetch";
-import { createImportPreviewForm, importActionFeedback, importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
+import { createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, importActionFeedback, importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -137,6 +137,12 @@ describe("Gmail pending imports", () => {
       { ...base, id: "dismissed", status: "dismissed" },
     ]);
     expect(visible.map((item) => item.id)).toEqual(["ready", "failed"]);
+  });
+
+  it("offers retry for failed imports", () => {
+    expect(gmailPendingImportActions("failed")).toEqual({ retry: true, review: false, dismiss: true });
+    expect(gmailPendingImportActions("ready")).toEqual({ retry: false, review: true, dismiss: true });
+    expect(gmailPendingRetryURL("pending/cmb")).toBe("/api/integrations/gmail/sync?pendingId=pending%2Fcmb");
   });
 });
 

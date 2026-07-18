@@ -709,6 +709,108 @@ func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
 	}
 }
 
+func TestRetryFailedGmailPendingImportRebuildsPreview(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailAllowedSenders = []string{cmbCreditGmailSender}
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "cmb-credit-card-config.yaml"), "cmb: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("PYTHON_BIN", fakeDedupPython(t))
+	dependencies, err := buildApplicationDependencies(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := closeResources(dependencies.closers); err != nil {
+			t.Error(err)
+		}
+	})
+	cmbImporter := staticBillImporter{
+		id:              "cmb",
+		label:           "招商银行信用卡",
+		title:           "CMB Credit Card",
+		uiOrder:         30,
+		config:          importProviderConfig{Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf"}, Label: "招商银行信用卡"},
+		documentAccount: "Assets:Cash",
+		engine: nativeImportEngine("test-cmb-retry", func(_ *Server, _ context.Context, _, outputFile string) error {
+			return os.WriteFile(outputFile, []byte(strings.Join([]string{
+				`2026-07-05 * "测试商户" "招商银行信用卡 PDF"`,
+				`  source: "cmb"`,
+				"  Expenses:Food 12.34 CNY",
+				"  Assets:Cash -12.34 CNY",
+				"",
+			}, "\n")), 0o600)
+		}),
+		prepare: func(_ *Server, input importFileInput) (preparedImportInput, error) {
+			return preparedImportInput{InputFile: input.InputFile, RawRowCount: 1, FilteredRowCount: 1}, nil
+		},
+	}
+	server := &Server{
+		cfg:                 cfg,
+		runtimeStore:        dependencies.runtimeStore,
+		indexStore:          dependencies.indexStore,
+		indexStoreErr:       dependencies.indexStoreErr,
+		cache:               dependencies.cache,
+		importers:           newBillImporterRegistry(cmbImporter),
+		moduleNames:         dependencies.moduleNames,
+		notificationService: dependencies.notificationService,
+		writer:              dependencies.writer,
+		accountService:      dependencies.accountService,
+		queryPort:           dependencies.queryPort,
+		snapshotPort:        dependencies.snapshotPort,
+		reconcileService:    dependencies.reconcileService,
+		txService:           dependencies.txService,
+		limiter:             dependencies.limiter,
+	}
+	pdf := []byte("%PDF-1.7 synthetic statement")
+	messageID := "cmb-retry"
+	sourceKey := messageID + ":" + sha256Hex(pdf)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	failed := GmailPendingImport{ID: "pending-cmb", ImportID: "failed-import", SourceKey: sourceKey, MessageID: messageID, Sender: cmbCreditGmailSender, Subject: "招商银行信用卡电子账单", Filename: "statement.pdf", Status: "failed", Error: "unknown time zone Asia/Shanghai", CreatedAt: now, UpdatedAt: now}
+	if err := server.writeGmailPending(context.Background(), gmailPendingStore{Version: 1, Items: []GmailPendingImport{failed}}); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: 招商银行信用卡 <ccsvc@message.cmbchina.com>",
+		"To: owner@example.com",
+		"Subject: 招商银行信用卡电子账单",
+		"Authentication-Results: mx.google.com; dmarc=pass header.from=message.cmbchina.com",
+		"Content-Type: multipart/mixed; boundary=cmb-retry-boundary",
+		"",
+		"--cmb-retry-boundary",
+		"Content-Type: application/pdf; name=statement.pdf",
+		"Content-Disposition: attachment; filename=statement.pdf",
+		"Content-Transfer-Encoding: base64",
+		"",
+		base64.StdEncoding.EncodeToString(pdf),
+		"--cmb-retry-boundary--",
+		"",
+	}, "\r\n")
+	api := &fakeGmailAPI{messages: map[string]*gmail.Message{
+		messageID: {Id: messageID, LabelIds: []string{"label-1"}, Raw: base64.RawURLEncoding.EncodeToString([]byte(raw))},
+	}}
+	connection := gmailConnection{Email: "owner@example.com", LabelID: "label-1"}
+	retried, err := server.retryGmailPendingImportWithAPI(context.Background(), api, connection, failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.ID != failed.ID || retried.Status != "ready" || retried.Provider != "cmb" || retried.CandidateCount != 1 || retried.ImportID == failed.ImportID {
+		t.Fatalf("retried=%#v", retried)
+	}
+	if strings.Join(api.rawCalls, ",") != messageID || retried.Error != "" {
+		t.Fatalf("raw calls=%v error=%q", api.rawCalls, retried.Error)
+	}
+	store, err := server.readGmailPending(context.Background())
+	if err != nil || len(store.Items) != 1 || store.Items[0].Status != "ready" {
+		t.Fatalf("store=%#v err=%v", store, err)
+	}
+}
+
 func TestRecoverStaleProcessingImport(t *testing.T) {
 	cfg := testLedger(t)
 	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
