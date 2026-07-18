@@ -30,6 +30,27 @@ type fakeGmailAPI struct {
 	historyErr  error
 }
 
+type recordingNotificationChannel struct {
+	messages []NotificationMessage
+}
+
+func (c *recordingNotificationChannel) ID() string { return "recording" }
+
+func (c *recordingNotificationChannel) Send(_ context.Context, message NotificationMessage) (NotificationDeliveryResult, error) {
+	c.messages = append(c.messages, message)
+	return NotificationDeliveryResult{Attempted: 1, Sent: 1}, nil
+}
+
+func recordingNotificationService(t *testing.T) (*NotificationService, *recordingNotificationChannel) {
+	t.Helper()
+	channel := &recordingNotificationChannel{}
+	registry := newNotificationChannelRegistry()
+	if err := registry.Register(channel); err != nil {
+		t.Fatal(err)
+	}
+	return &NotificationService{channels: registry}, channel
+}
+
 func (f *fakeGmailAPI) Profile(context.Context) (*gmail.Profile, error) { return &gmail.Profile{}, nil }
 func (f *fakeGmailAPI) Labels(context.Context) ([]*gmail.Label, error)  { return nil, nil }
 func (f *fakeGmailAPI) Watch(context.Context, string, string) (*gmail.WatchResponse, error) {
@@ -47,6 +68,45 @@ func (f *fakeGmailAPI) RawMessage(_ context.Context, id string) (*gmail.Message,
 	return f.messages[id], nil
 }
 func (f *fakeGmailAPI) Stop(context.Context) error { return nil }
+
+func TestNotifyGmailImportProcessedPublishesAggregatedResult(t *testing.T) {
+	service, channel := recordingNotificationService(t)
+	server := &Server{notificationService: service}
+
+	server.notifyGmailImportProcessed(context.Background(), "message-1", "七月账单", 2, 1, false)
+
+	if len(channel.messages) != 1 {
+		t.Fatalf("messages=%#v", channel.messages)
+	}
+	message := channel.messages[0]
+	if message.Title != "自动账单处理完成" || message.Body != "七月账单：2 份等待 Review，1 份处理失败" || message.URL != "/import" || message.Tag != "gmail-import-message-1" {
+		t.Fatalf("message=%#v", message)
+	}
+
+	server.notifyGmailImportProcessed(context.Background(), "pending-1", "七月账单", 1, 0, true)
+	if len(channel.messages) != 2 || channel.messages[1].Tag != "gmail-import-retry-pending-1" || channel.messages[1].Body != "七月账单：1 份等待 Review" {
+		t.Fatalf("retry messages=%#v", channel.messages)
+	}
+}
+
+func TestRecordGmailEnvelopeFailurePublishesNotification(t *testing.T) {
+	cfg := testLedger(t)
+	service, channel := recordingNotificationService(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), notificationService: service}
+	envelope := gmailMessageEnvelope{Sender: "bill@example.com", Subject: "七月账单"}
+
+	if err := server.recordGmailEnvelopeFailure(context.Background(), "message-failed", []byte("raw message"), envelope, "unsupported", "账单格式无法识别"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(channel.messages) != 1 {
+		t.Fatalf("messages=%#v", channel.messages)
+	}
+	message := channel.messages[0]
+	if message.Title != "自动账单处理失败" || message.Body != "七月账单：1 份处理失败" || message.Tag != "gmail-import-message-failed" {
+		t.Fatalf("message=%#v", message)
+	}
+}
 
 func TestGmailSecretRoundTrip(t *testing.T) {
 	cfg := Config{GmailTokenEncryptionKey: base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}

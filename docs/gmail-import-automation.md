@@ -25,6 +25,8 @@ Cloud Scheduler every 30 minutes
 
 The Cloud Run backend scales to zero during quiet periods. Pub/Sub wakes it to validate, persist, and immediately process each event. Google Cloud Scheduler wakes the drain endpoint every 30 minutes as a retry fallback and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work.
 
+When processing reaches a durable `ready` or `failed` pending-import state, the notification service publishes one aggregated Web Push message per Gmail message. The notification reports the counts waiting for Review and requiring attention, links to `/import`, and uses a stable tag so browser notification trays can collapse repeated delivery. Retry processing publishes the same completion result with a retry-specific tag. Web Push delivery remains best-effort after the pending state is stored.
+
 ## Google Cloud setup
 
 1. Create a personal Google Cloud project and enable the Gmail API and Cloud Pub/Sub API.
@@ -107,7 +109,7 @@ Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS
 2. Select **Connect Gmail**, approve read-only Gmail access, and return to the import page.
 3. Confirm the card shows the connected Gmail address and `Ledger/Bills` Label.
 4. Send or relabel one safe test statement from an allowed sender.
-5. Confirm a pending Review item appears and its Web Push notification links to `/import`.
+5. Confirm the Web Push notification reports the processing result and links to `/import`.
 6. Review the generated entries and commit them through the normal import flow.
 
 The status endpoint is `GET /api/integrations/gmail/status`. Sensitive unlock protects connection changes, synchronization, pending financial previews, dismissal, and Gmail-backed commits. Cloud Scheduler calls `POST /api/integrations/gmail/drain` and `POST /api/integrations/gmail/renew` with Google-signed OIDC tokens. Disconnect revokes the Google refresh token before deleting the local encrypted credential.

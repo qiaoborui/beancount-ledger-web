@@ -754,7 +754,7 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		}
 		return s.recordGmailEnvelopeFailure(ctx, messageID, raw, envelope, "unsupported", "邮件没有可识别的账单附件: "+gmailAttachmentSummary(envelope.Attachments))
 	}
-	ready := 0
+	ready, failed := 0, 0
 	for _, candidate := range candidates {
 		sourceKey := messageID + ":" + sha256Hex(candidate.Upload.Content)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -769,16 +769,43 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 		item, _ = s.previewGmailCandidate(ctx, item, candidate, raw)
 		if item.Status == "ready" {
 			ready++
+		} else if item.Status == "failed" {
+			failed++
 		}
 		if err := s.finalizeGmailPending(ctx, item); err != nil {
 			_ = s.cleanupImportRuntime(context.Background(), item.ImportID)
 			return err
 		}
 	}
-	if ready > 0 && s.notificationService != nil {
-		_, _ = s.notificationService.Publish(ctx, NotificationMessage{Title: "收到新账单", Body: fmt.Sprintf("%s：%d 份账单等待 Review", valueOr(envelope.Subject, envelope.Sender), ready), URL: "/import", Tag: "gmail-import-" + messageID})
-	}
+	s.notifyGmailImportProcessed(ctx, messageID, valueOr(envelope.Subject, envelope.Sender), ready, failed, false)
 	return nil
+}
+
+func (s *Server) notifyGmailImportProcessed(ctx context.Context, messageID, label string, ready, failed int, retry bool) {
+	if s.notificationService == nil || ready+failed == 0 {
+		return
+	}
+	title := "自动账单处理完成"
+	parts := make([]string, 0, 2)
+	if ready > 0 {
+		parts = append(parts, fmt.Sprintf("%d 份等待 Review", ready))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d 份处理失败", failed))
+		if ready == 0 {
+			title = "自动账单处理失败"
+		}
+	}
+	tag := "gmail-import-" + messageID
+	if retry {
+		tag = "gmail-import-retry-" + messageID
+	}
+	_, _ = s.notificationService.Publish(ctx, NotificationMessage{
+		Title: title,
+		Body:  valueOr(label, "Gmail 自动账单") + "：" + strings.Join(parts, "，"),
+		URL:   "/import",
+		Tag:   tag,
+	})
 }
 
 func (s *Server) previewGmailCandidate(ctx context.Context, item GmailPendingImport, candidate gmailImportCandidate, raw []byte) (GmailPendingImport, error) {
@@ -830,6 +857,7 @@ func (s *Server) retryGmailPendingImportWithAPI(ctx context.Context, api gmailAP
 		if finalizeErr := s.finalizeGmailPending(ctx, item); finalizeErr != nil {
 			return item, errors.Join(retryErr, finalizeErr)
 		}
+		s.notifyGmailImportProcessed(ctx, item.ID, valueOr(item.Subject, item.Filename), 0, 1, true)
 		return item, retryErr
 	}
 	if previousImportID != "" {
@@ -874,11 +902,10 @@ func (s *Server) retryGmailPendingImportWithAPI(ctx context.Context, api gmailAP
 		return item, err
 	}
 	if previewErr != nil {
+		s.notifyGmailImportProcessed(ctx, item.ID, valueOr(item.Subject, item.Filename), 0, 1, true)
 		return item, previewErr
 	}
-	if s.notificationService != nil {
-		_, _ = s.notificationService.Publish(ctx, NotificationMessage{Title: "账单重新解析完成", Body: valueOr(item.Subject, item.Filename) + " 等待 Review", URL: "/import", Tag: "gmail-import-retry-" + item.ID})
-	}
+	s.notifyGmailImportProcessed(ctx, item.ID, valueOr(item.Subject, item.Filename), 1, 0, true)
 	return item, nil
 }
 
@@ -902,7 +929,11 @@ func (s *Server) recordGmailEnvelopeFailure(ctx context.Context, messageID strin
 	if err != nil || !reserved {
 		return err
 	}
-	return s.finalizeGmailPending(ctx, item)
+	if err := s.finalizeGmailPending(ctx, item); err != nil {
+		return err
+	}
+	s.notifyGmailImportProcessed(ctx, messageID, valueOr(envelope.Subject, envelope.Sender), 0, 1, false)
+	return nil
 }
 
 func (s *Server) recordGmailMessageFailure(ctx context.Context, messageID string, processErr error) error {
@@ -913,7 +944,11 @@ func (s *Server) recordGmailMessageFailure(ctx context.Context, messageID string
 	if err != nil || !reserved {
 		return err
 	}
-	return s.finalizeGmailPending(ctx, item)
+	if err := s.finalizeGmailPending(ctx, item); err != nil {
+		return err
+	}
+	s.notifyGmailImportProcessed(ctx, messageID, item.Filename, 0, 1, false)
+	return nil
 }
 
 func decodeGmailRaw(value string) ([]byte, error) {
