@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, Minus, Plus, RotateCcw, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, Check, Minus, Plus, RotateCcw, Send, Zap } from "lucide-react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatus, applyApiEndpointProbe, createApiEndpointId, displayApiEndpointUrl, hasKnownApiEndpointAuthentication, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, withActiveApiEndpoint, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
+import { getWebPushPresentation, useWebPush } from "./hooks/useWebPush";
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
@@ -84,6 +85,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <NotificationSettingsPanel showToast={showToast} />
     <ApiEndpointSettingsPanel showToast={showToast} />
     <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} showToast={showToast} />
     <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} showToast={showToast} />
@@ -166,6 +168,63 @@ export function SettingsPage({
       </div>
     </section>
   </div>;
+}
+
+function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {
+  const { state, refresh, subscribe, unsubscribe, sendTest } = useWebPush(showToast);
+  const presentation = getWebPushPresentation(state);
+  const statusClassName = presentation.tone === "success"
+    ? "bg-brand/10 text-brand"
+    : presentation.tone === "warning"
+      ? "bg-[var(--danger)]/10 text-[var(--danger)]"
+      : "bg-tag text-stone";
+
+  async function updateSubscription(checked: boolean) {
+    if (checked) await subscribe();
+    else await unsubscribe();
+  }
+
+  return <section className="card p-5 md:p-6">
+    <div className="flex items-start gap-3">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">
+        <BellRing className="h-5 w-5" aria-hidden="true" />
+      </span>
+      <div>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">device notifications</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">设备通知</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">自动账单完成解析或进入失败状态时，通过 Web Push 提醒当前设备。订阅按浏览器分别管理。</p>
+      </div>
+    </div>
+
+    <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-line bg-panel p-4">
+      <label htmlFor="web-push-enabled" className={`min-w-0 ${presentation.toggleDisabled ? "cursor-default" : "cursor-pointer"}`}>
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-ink">自动导入通知</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs ${statusClassName}`}>{presentation.status}</span>
+        </span>
+        <span id="web-push-description" className="mt-1 block max-w-2xl text-sm leading-6 text-olive">{presentation.description}</span>
+      </label>
+      <Switch
+        id="web-push-enabled"
+        checked={state.subscribed}
+        disabled={presentation.toggleDisabled}
+        aria-describedby="web-push-description"
+        onCheckedChange={(checked) => void updateSubscription(checked)}
+      />
+    </div>
+
+    <div className="mt-3 flex min-h-10 flex-wrap items-center gap-3">
+      {presentation.testAvailable && <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand px-3.5 text-sm font-medium text-paper disabled:opacity-50" disabled={state.loading} onClick={() => void sendTest()}>
+        <Send className="h-4 w-4" aria-hidden="true" />
+        发送测试通知
+      </button>}
+      <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3.5 text-sm font-medium text-brand hover:bg-tag disabled:opacity-50" disabled={state.loading} onClick={() => void refresh()}>
+        <RotateCcw className={`h-4 w-4 ${state.loading ? "animate-spin" : ""}`} aria-hidden="true" />
+        {state.loading ? "检查中…" : "重新检查"}
+      </button>
+      {state.error && <span className="text-sm text-[var(--danger)]">{state.error}</span>}
+    </div>
+  </section>;
 }
 
 function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
