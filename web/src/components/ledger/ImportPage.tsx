@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { ApiResponseError, fetchJson } from "@/lib/clientFetch";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
@@ -295,7 +295,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
 
   const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
   const hasCommitted = commitResult?.ok === true;
-  const canCommit = Boolean(preview) && !committing && !hasCommitted;
+  const invalidEntryCount = useMemo(() => entries.filter(importEntryHasReviewError).length, [entries]);
+  const canCommit = Boolean(preview) && invalidEntryCount === 0 && !committing && !hasCommitted;
   const originalEntryCount = preview?.entries.length ?? 0;
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
@@ -362,15 +363,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     }
   }, [entries, selectedEntryId]);
 
-  function editableAccountLabel(entry: ImportEntry) {
-    if (entry.categoryAccount.startsWith("Expenses:") || entry.categoryAccount.startsWith("Income:")) return "分类账户";
-    return "对方账户";
-  }
-
-  function categoryAccountOptions(entry: ImportEntry) {
-    if (!entry.categoryAccount || accountOptions.some((account) => account.account === entry.categoryAccount)) return accountOptions;
-    const previewAccount = preview?.accountOptions.find((account) => account.account === entry.categoryAccount);
-    return [previewAccount ?? { account: entry.categoryAccount, label: entry.categoryAccount, group: "current", active: true }, ...accountOptions];
+  function postingAccountOptions(entry: ImportEntry) {
+    const currentAccounts = new Set([...entry.postings.map((posting) => posting.account), entry.categoryAccount, entry.fundingAccount].filter(Boolean));
+    const options = [...accountOptions];
+    for (const account of currentAccounts) {
+      if (options.some((option) => option.account === account)) continue;
+      options.push(preview?.accountOptions.find((option) => option.account === account) ?? { account, label: account, group: "current", active: true });
+    }
+    return options;
   }
 
   function accountDisplayName(account: string) {
@@ -465,6 +465,18 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
 
   function updateEntry(id: string, patch: Partial<ImportEntry>) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  }
+
+  function updatePosting(id: string, index: number, patch: Partial<ImportPosting>) {
+    setEntries((current) => current.map((entry) => (entry.id === id ? updateImportPosting(entry, index, patch) : entry)));
+  }
+
+  function addPosting(id: string) {
+    setEntries((current) => current.map((entry) => (entry.id === id ? appendImportPosting(entry) : entry)));
+  }
+
+  function removePosting(id: string, index: number) {
+    setEntries((current) => current.map((entry) => (entry.id === id ? removeImportPosting(entry, index) : entry)));
   }
 
   function removeEntry(id: string) {
@@ -921,7 +933,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           size="xl"
           align="center"
           bodyClassName="!p-0 xl:!overflow-hidden"
-          panelClassName="xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[96vw] 2xl:!max-w-[1440px]"
+          panelClassName="xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[98vw] 2xl:!max-w-[1720px]"
           closeLabel={committing ? "写入中" : "关闭"}
           footer={
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -929,6 +941,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
                   {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
                 </Badge>
+                {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{invalidEntryCount} 条分录需修正</span> : null}
                 <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
                 <span className="tabular-nums">{reviewTotalAmount} 合计</span>
               </div>
@@ -1005,7 +1018,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </Alert>
               ) : null}
 
-              <div className="grid min-w-0 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] xl:items-stretch xl:overflow-hidden">
+              <div className="grid min-w-0 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.72fr)_minmax(560px,1.28fr)] xl:items-stretch xl:overflow-hidden 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(680px,1.3fr)]">
                 <section className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
@@ -1089,15 +1102,16 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                     </div>
 
                     <div className="space-y-4 p-4">
-                      <ImportFlowPanel
+                      <ImportEntryEditor
                         entry={selectedEntry}
                         fromLabel={accountDisplayName(importFlowForEntry(selectedEntry).from)}
                         toLabel={accountDisplayName(importFlowForEntry(selectedEntry).to)}
-                        accountLabel={editableAccountLabel(selectedEntry)}
-                        accountOptions={categoryAccountOptions(selectedEntry)}
+                        accountOptions={postingAccountOptions(selectedEntry)}
                         disabled={committing || hasCommitted}
-                        onNarrationChange={(value) => updateEntry(selectedEntry.id, { narration: value })}
-                        onCategoryAccountChange={(value) => updateEntry(selectedEntry.id, { categoryAccount: value })}
+                        onEntryChange={(patch) => updateEntry(selectedEntry.id, patch)}
+                        onPostingChange={(index, patch) => updatePosting(selectedEntry.id, index, patch)}
+                        onPostingAdd={() => addPosting(selectedEntry.id)}
+                        onPostingRemove={(index) => removePosting(selectedEntry.id, index)}
                       />
 
                       <details open className="rounded-xl border border-line bg-paper px-3 py-2.5">
@@ -1105,11 +1119,11 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                         <div className="mt-3 grid gap-2">
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">note</span>
-                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" />
+                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" disabled={committing || hasCommitted} />
                           </Label>
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">purpose</span>
-                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" />
+                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" disabled={committing || hasCommitted} />
                           </Label>
                         </div>
                       </details>
@@ -1337,70 +1351,248 @@ export function importFlowForEntry(entry: ImportEntry) {
   return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
 }
 
-function ImportFlowPanel({
+function isCategoryPosting(account: string) {
+  return account.startsWith("Expenses:") || account.startsWith("Income:");
+}
+
+function normalizeImportPostingAccounts(entry: ImportEntry, postings: ImportPosting[]) {
+  const accounts = new Set(postings.map((posting) => posting.account).filter(Boolean));
+  const categoryAccount = accounts.has(entry.categoryAccount)
+    ? entry.categoryAccount
+    : postings.find((posting) => isCategoryPosting(posting.account))?.account || postings[0]?.account || entry.categoryAccount;
+  const fundingAccount = accounts.has(entry.fundingAccount) && entry.fundingAccount !== categoryAccount
+    ? entry.fundingAccount
+    : postings.find((posting) => posting.account && posting.account !== categoryAccount && !isCategoryPosting(posting.account))?.account
+      || postings.find((posting) => posting.account && posting.account !== categoryAccount)?.account
+      || entry.fundingAccount;
+  const amountPosting = postings.find((posting) => posting.account === fundingAccount)
+    ?? postings.find((posting) => posting.account === categoryAccount)
+    ?? postings.find((posting) => Number.isFinite(Number(posting.amount)));
+  const amount = amountPosting && Number.isFinite(Number(amountPosting.amount)) ? Math.abs(Number(amountPosting.amount)) : entry.amount;
+  return {
+    ...entry,
+    categoryAccount,
+    fundingAccount,
+    amount,
+    currency: amountPosting?.currency || entry.currency,
+    postings,
+  };
+}
+
+export function updateImportPosting(entry: ImportEntry, index: number, patch: Partial<ImportPosting>) {
+  const currentPosting = entry.postings[index];
+  if (!currentPosting) return entry;
+  const postings = entry.postings.map((posting, postingIndex) => (postingIndex === index ? { ...posting, ...patch } : posting));
+  const nextEntry = { ...entry };
+  if (patch.account !== undefined) {
+    if (currentPosting.account === entry.categoryAccount) nextEntry.categoryAccount = patch.account;
+    if (currentPosting.account === entry.fundingAccount) nextEntry.fundingAccount = patch.account;
+  }
+  return normalizeImportPostingAccounts(nextEntry, postings);
+}
+
+export function appendImportPosting(entry: ImportEntry) {
+  const currency = entry.postings.at(-1)?.currency || entry.currency || "CNY";
+  return normalizeImportPostingAccounts(entry, [...entry.postings, { account: "", amount: "", currency }]);
+}
+
+export function removeImportPosting(entry: ImportEntry, index: number) {
+  if (entry.postings.length <= 2 || !entry.postings[index]) return entry;
+  return normalizeImportPostingAccounts(entry, entry.postings.filter((_, postingIndex) => postingIndex !== index));
+}
+
+export function summarizeImportPostings(postings: ImportPosting[]) {
+  const totals = new Map<string, number>();
+  let hasInvalidAmount = false;
+  for (const posting of postings) {
+    const amount = Number(posting.amount);
+    const currency = posting.currency.trim().toUpperCase() || "未指定";
+    if (!Number.isFinite(amount)) {
+      hasInvalidAmount = true;
+      continue;
+    }
+    totals.set(currency, (totals.get(currency) ?? 0) + amount);
+  }
+  return {
+    hasInvalidAmount,
+    totals: [...totals.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([currency, amount]) => ({ currency, amount })),
+  };
+}
+
+export function importEntryHasReviewError(entry: ImportEntry) {
+  return entry.postings.length < 2 || entry.postings.some((posting) => (
+    !posting.account.trim()
+    || !posting.amount.trim()
+    || !Number.isFinite(Number(posting.amount))
+    || !posting.currency.trim()
+  ));
+}
+
+function ImportEntryEditor({
   entry,
   fromLabel,
   toLabel,
-  accountLabel,
   accountOptions,
   disabled,
-  onNarrationChange,
-  onCategoryAccountChange,
+  onEntryChange,
+  onPostingChange,
+  onPostingAdd,
+  onPostingRemove,
 }: {
   entry: ImportEntry;
   fromLabel: string;
   toLabel: string;
-  accountLabel: string;
   accountOptions: AccountOption[];
   disabled: boolean;
-  onNarrationChange: (value: string) => void;
-  onCategoryAccountChange: (value: string) => void;
+  onEntryChange: (patch: Partial<ImportEntry>) => void;
+  onPostingChange: (index: number, patch: Partial<ImportPosting>) => void;
+  onPostingAdd: () => void;
+  onPostingRemove: (index: number) => void;
 }) {
   const flow = importFlowForEntry(entry);
+  const postingSummary = summarizeImportPostings(entry.postings);
   const metaItems = [
     { label: "方式", value: entry.method || "-" },
     { label: "订单号", value: entry.orderId || "-" },
   ];
   return (
-    <div className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-medium text-brand">{flow.kind}</div>
-          <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="bg-panel text-warm">{entry.date}</Badge>
-            {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
+    <div className="grid min-w-0 gap-4">
+      <section className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-4">
+        <div className="flex min-w-0 items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-brand">{flow.kind}</div>
+            <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="bg-panel text-warm">{entry.date}</Badge>
+              <Badge variant="outline" className="border-brand/35 bg-panel text-warm">{entry.postings.length} 个账户</Badge>
+              {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
+            <div className="mt-1 text-xs text-stone">主金额</div>
           </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
-          <div className="mt-1 text-xs text-stone">{entry.currency}</div>
+        <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-t border-brand/15 pt-3">
+          <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
+          <span className="grid h-8 w-8 place-items-center rounded-full border border-brand/25 bg-panel text-brand" aria-hidden="true">
+            <ArrowRight className="h-4 w-4" />
+          </span>
+          <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
         </div>
-      </div>
-      <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-        <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
-        <span className="grid h-8 w-8 place-items-center rounded-full border border-brand/25 bg-panel text-brand" aria-hidden="true">
-          <ArrowRight className="h-4 w-4" />
-        </span>
-        <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
-      </div>
-      <div className="mt-4 space-y-3 rounded-xl border border-brand/15 bg-panel/70 p-3">
-        <Label className="block min-w-0">
-          <span className="mb-1.5 block text-xs font-medium text-stone">账本标题</span>
-          <Input className="h-10 min-w-0 border-line bg-paper shadow-sm" value={entry.narration} onChange={(event) => onNarrationChange(event.target.value)} disabled={disabled} />
+      </section>
+
+      <section className="rounded-xl border border-line bg-paper p-4">
+        <div className="mb-3">
+          <div className="text-sm font-medium text-ink">交易信息</div>
+          <div className="mt-0.5 text-xs text-stone">日期、状态、收付款方和账本标题都可以在审核时修正。</div>
+        </div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(9rem,0.7fr)_7rem_minmax(0,1.3fr)]">
+          <Label className="block min-w-0">
+            <span className="mb-1.5 block text-xs text-stone">日期</span>
+            <Input type="date" className="h-10 min-w-0 bg-panel" value={entry.date} onChange={(event) => onEntryChange({ date: event.target.value })} disabled={disabled} />
+          </Label>
+          <Label className="block min-w-0">
+            <span className="mb-1.5 block text-xs text-stone">状态</span>
+            <Select value={entry.flag} onValueChange={(value) => onEntryChange({ flag: value as ImportEntry["flag"] })} disabled={disabled}>
+              <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-panel"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="*">* 已确认</SelectItem><SelectItem value="!">! 待确认</SelectItem></SelectContent>
+            </Select>
+          </Label>
+          <Label className="block min-w-0">
+            <span className="mb-1.5 block text-xs text-stone">收付款方</span>
+            <Input className="h-10 min-w-0 bg-panel" value={entry.payee} onChange={(event) => onEntryChange({ payee: event.target.value })} disabled={disabled} />
+          </Label>
+        </div>
+        <Label className="mt-3 block min-w-0">
+          <span className="mb-1.5 block text-xs text-stone">账本标题</span>
+          <Input className="h-10 min-w-0 bg-panel" value={entry.narration} onChange={(event) => onEntryChange({ narration: event.target.value })} disabled={disabled} />
         </Label>
-        <Label className="block min-w-0">
-          <span className="mb-1.5 block text-xs font-medium text-stone">{accountLabel}</span>
-          <Select value={entry.categoryAccount} onValueChange={onCategoryAccountChange} disabled={disabled}>
-            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-paper text-sm text-ink shadow-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="max-h-80">
-              {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Label>
-        <div className="grid min-w-0 gap-2 border-t border-brand/15 pt-3 text-xs leading-5 text-stone">
+      </section>
+
+      <section className="rounded-xl border border-line bg-panel/60 p-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-ink">分录明细</div>
+            <div className="mt-0.5 text-xs leading-5 text-stone">每一行都是一条 Beancount posting，可编辑来源账户、目标账户并添加拆分账户。</div>
+          </div>
+          <Button type="button" variant="outline" className="h-9 shrink-0 rounded-xl bg-paper px-3" onClick={onPostingAdd} disabled={disabled}>
+            <Plus className="h-4 w-4" />
+            添加账户
+          </Button>
+        </div>
+
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+          {postingSummary.totals.map((total) => {
+            const balanced = Math.abs(total.amount) < 0.000001;
+            return <span key={total.currency} className={cn("rounded-full border px-2 py-1 tabular-nums", balanced ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]")}>{total.currency} 小计 {balanced ? "0.00" : total.amount.toFixed(2)}</span>;
+          })}
+          {postingSummary.hasInvalidAmount ? <span className="rounded-full bg-destructive/10 px-2 py-1 text-destructive">存在无效金额</span> : null}
+          {entry.postings.some((posting) => posting.priceKind || posting.priceAmount || posting.priceCurrency) ? <span className="text-stone">带价格的多币种分录以写入前校验为准</span> : null}
+        </div>
+
+        <div className="mt-3 grid min-w-0 gap-3">
+          {entry.postings.map((posting, index) => {
+            const role = posting.account === entry.categoryAccount ? "主分类" : posting.account === entry.fundingAccount ? "来源账户" : isCategoryPosting(posting.account) ? "拆分分类" : `账户 ${index + 1}`;
+            const hasPrice = Boolean(posting.priceKind || posting.priceAmount || posting.priceCurrency);
+            return (
+              <div key={`${index}-${posting.account}`} className="min-w-0 rounded-xl border border-line bg-paper p-3">
+                <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tag font-mono text-[11px] text-stone">{index + 1}</span>
+                    <span className="truncate text-xs font-medium text-olive">{role}</span>
+                  </div>
+                  <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 text-stone hover:text-destructive" onClick={() => onPostingRemove(index)} disabled={disabled || entry.postings.length <= 2} title={entry.postings.length <= 2 ? "至少保留 2 条分录" : "删除这条分录"}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_9rem_6.5rem]">
+                  <Label className="block min-w-0">
+                    <span className="mb-1.5 block text-xs text-stone">账户</span>
+                    <Select value={posting.account || undefined} onValueChange={(value) => onPostingChange(index, { account: value })} disabled={disabled}>
+                      <SelectTrigger className={cn("h-10 w-full min-w-0 rounded-xl bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder="选择账户" /></SelectTrigger>
+                      <SelectContent className="max-h-80">
+                        {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Label>
+                  <Label className="block min-w-0">
+                    <span className="mb-1.5 block text-xs text-stone">金额</span>
+                    <Input className="h-10 bg-panel text-right tabular-nums" inputMode="decimal" value={posting.amount} onChange={(event) => onPostingChange(index, { amount: event.target.value })} disabled={disabled} placeholder="0.00" aria-invalid={!posting.amount.trim() || !Number.isFinite(Number(posting.amount))} />
+                  </Label>
+                  <Label className="block min-w-0">
+                    <span className="mb-1.5 block text-xs text-stone">币种</span>
+                    <Input className="h-10 bg-panel uppercase" value={posting.currency} onChange={(event) => onPostingChange(index, { currency: event.target.value.toUpperCase() })} disabled={disabled} placeholder="CNY" aria-invalid={!posting.currency.trim()} />
+                  </Label>
+                </div>
+                <details className="mt-2 border-t border-line pt-2">
+                  <summary className="cursor-pointer text-xs text-stone">价格 / 成本{hasPrice ? "（已设置）" : "（可选）"}</summary>
+                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-3">
+                    <Label className="block min-w-0">
+                      <span className="mb-1.5 block text-xs text-stone">类型</span>
+                      <Select value={posting.priceKind ?? "none"} onValueChange={(value) => onPostingChange(index, value === "none" ? { priceKind: undefined, priceAmount: undefined, priceCurrency: undefined } : { priceKind: value as ImportPosting["priceKind"] })} disabled={disabled}>
+                        <SelectTrigger className="h-9 w-full min-w-0 rounded-xl bg-panel"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="none">无</SelectItem><SelectItem value="unit">单价 @</SelectItem><SelectItem value="total">总价 @@</SelectItem></SelectContent>
+                      </Select>
+                    </Label>
+                    <Label className="block min-w-0">
+                      <span className="mb-1.5 block text-xs text-stone">价格</span>
+                      <Input className="h-9 bg-panel text-right tabular-nums" inputMode="decimal" value={posting.priceAmount ?? ""} onChange={(event) => onPostingChange(index, { priceAmount: event.target.value })} disabled={disabled || !posting.priceKind} />
+                    </Label>
+                    <Label className="block min-w-0">
+                      <span className="mb-1.5 block text-xs text-stone">计价币种</span>
+                      <Input className="h-9 bg-panel uppercase" value={posting.priceCurrency ?? ""} onChange={(event) => onPostingChange(index, { priceCurrency: event.target.value.toUpperCase() })} disabled={disabled || !posting.priceKind} />
+                    </Label>
+                  </div>
+                </details>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-paper p-3">
+        <div className="grid min-w-0 gap-2 text-xs leading-5 text-stone sm:grid-cols-2">
           {metaItems.map((item) => (
             <div key={item.label} className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
               <span className="text-olive">{item.label}</span>
@@ -1408,7 +1600,7 @@ function ImportFlowPanel({
             </div>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

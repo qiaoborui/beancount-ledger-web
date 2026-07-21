@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiResponseError } from "@/lib/clientFetch";
-import { createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, importActionFeedback, importFlowForEntry, latestImportDocumentsByProvider, reviewableGmailPendingImports } from "./ImportPage";
+import { appendImportPosting, createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, importActionFeedback, importEntryHasReviewError, importFlowForEntry, latestImportDocumentsByProvider, removeImportPosting, reviewableGmailPendingImports, summarizeImportPostings, updateImportPosting } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -86,6 +86,54 @@ describe("import flow display", () => {
       from: "Assets:CN:Bank:PrimaryChecking",
       to: "Assets:CN:Wechat:Balance",
       kind: "账户转移",
+    });
+  });
+});
+
+describe("import posting editor", () => {
+  it("keeps the legacy funding account and displayed amount in sync", () => {
+    const updated = updateImportPosting(entry({}), 1, {
+      account: "Assets:CN:Cash",
+      amount: "-96.50",
+    });
+
+    expect(updated.fundingAccount).toBe("Assets:CN:Cash");
+    expect(updated.amount).toBe(96.5);
+    expect(updated.postings[1]).toMatchObject({ account: "Assets:CN:Cash", amount: "-96.50" });
+  });
+
+  it("supports split postings and repairs the primary category after removal", () => {
+    const split = entry({
+      postings: [
+        { account: "Expenses:Food:Meals", amount: "60.00", currency: "CNY" },
+        { account: "Expenses:Transport:Taxi", amount: "22.00", currency: "CNY" },
+        { account: "Liabilities:CN:CMB:CreditCard:0016", amount: "-82.00", currency: "CNY" },
+      ],
+    });
+
+    const updated = removeImportPosting(split, 0);
+
+    expect(updated.postings).toHaveLength(2);
+    expect(updated.categoryAccount).toBe("Expenses:Transport:Taxi");
+    expect(updated.fundingAccount).toBe("Liabilities:CN:CMB:CreditCard:0016");
+  });
+
+  it("adds a blank posting using the most recent posting currency", () => {
+    const updated = appendImportPosting(entry({ currency: "USD" }));
+
+    expect(updated.postings).toHaveLength(3);
+    expect(updated.postings[2]).toEqual({ account: "", amount: "", currency: "CNY" });
+    expect(importEntryHasReviewError(updated)).toBe(true);
+  });
+
+  it("summarizes posting totals and reports invalid amounts", () => {
+    expect(summarizeImportPostings([
+      { account: "Expenses:Food", amount: "80", currency: "cny" },
+      { account: "Assets:Cash", amount: "-50", currency: "CNY" },
+      { account: "Assets:Card", amount: "oops", currency: "CNY" },
+    ])).toEqual({
+      hasInvalidAmount: true,
+      totals: [{ currency: "CNY", amount: 30 }],
     });
   });
 });
