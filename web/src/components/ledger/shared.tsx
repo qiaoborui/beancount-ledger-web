@@ -1,5 +1,7 @@
 import { CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 import type { LedgerToast } from "./hooks/useToast";
 
 export function Toast({ toast, onClose }: { toast: LedgerToast; onClose: () => void }) {
@@ -25,5 +27,39 @@ export function HiddenPanel({ text }: { text: string }) {
 }
 
 export function Metric({ label, value, cls }: { label: string; value: string; cls: string }) {
-  return <div className="min-w-0"><div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone">{label}</div><div className={`mt-1 truncate font-serif font-medium ${cls}`}>{value}</div></div>;
+  return <div className="min-w-0"><div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone">{label}</div><div className={`mt-1 truncate font-serif font-medium ${cls}`} title={value}>{value}</div></div>;
+}
+
+export function ResponsiveValueRow({
+  label,
+  value,
+  detail,
+  className,
+  contentClassName,
+  labelClassName,
+  valueClassName,
+  detailClassName,
+  valueTitle,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  detail?: ReactNode;
+  className?: string;
+  contentClassName?: string;
+  labelClassName?: string;
+  valueClassName?: string;
+  detailClassName?: string;
+  valueTitle?: string;
+}) {
+  return (
+    <div className={cn("@container min-w-0 max-w-full", className)}>
+      <div className={cn("grid min-w-0 grid-cols-1 gap-x-3 gap-y-0.5 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-baseline", contentClassName)}>
+        <div className={cn("min-w-0 [overflow-wrap:anywhere]", labelClassName)}>{label}</div>
+        <div className={cn("min-w-0 max-w-full truncate text-left tabular-nums @sm:text-right", valueClassName)} title={valueTitle}>
+          {value}
+        </div>
+      </div>
+      {detail != null && <div className={cn("mt-0.5 min-w-0 [overflow-wrap:anywhere]", detailClassName)}>{detail}</div>}
+    </div>
+  );
 }

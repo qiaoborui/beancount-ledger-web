@@ -102,8 +102,8 @@ export function MobileSheet({ open, title, children, footer, onClose, shouldClos
             <button ref={closeButtonRef} className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm" onClick={requestClose}>{closeLabel}</button>
           </div>
         </div>
-        <div className={`min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 ${bodyClassName}`}>{children}</div>
-        {footer && <div className="shrink-0 border-t border-line bg-paper/95 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur sm:px-5">{footer}</div>}
+        <div className={`@container min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 ${bodyClassName}`}>{children}</div>
+        {footer && <div className="@container shrink-0 border-t border-line bg-paper/95 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur sm:px-5">{footer}</div>}
       </div>
     </div>,
     document.body,

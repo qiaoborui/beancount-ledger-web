@@ -12,6 +12,7 @@ import { formatAccountOptionLabel, isLedgerAccount } from "./accountDisplay";
 import { DEFAULT_DASHBOARD_FILTERS, dashboardFiltersToApiQuery, dashboardFiltersToSearchParams, hasActiveDashboardFilters, normalizeDashboardFilters, parseDashboardFiltersFromSearch, type DashboardFilterKey, type DashboardFilterState } from "./dashboardFilters";
 import type { DashboardFilterOption, DashboardSummary } from "./types";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
+import { ResponsiveValueRow } from "./shared";
 
 const COLORS = [
   "var(--chart-palette-1)",
@@ -795,10 +796,7 @@ function CategoryRank({ rows, currency, visible, onOpenTransactions }: { rows: D
   const maxValue = Math.max(1, ...rows.map((row) => row.total));
   return <div className="mt-4 space-y-3">
     {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ category: row.account }))}>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
-        <strong className="shrink-0 text-warm">{visible ? formatCompactValuation(row.total / 100, currency) : "••••••"}</strong>
-      </div>
+      <ResponsiveValueRow label={formatAccountOptionLabel(row.account, row.label, row.alias)} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.total / 100, currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.total / 100, currency) : "金额已隐藏"} />
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full" style={{ width: `${row.total / maxValue * 100}%`, background: COLORS[index % COLORS.length] }} /></div>
     </button>)}
   </div>;
@@ -809,10 +807,7 @@ function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSumma
   const maxValue = Math.max(1, ...data.topPayees.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
     {data.topPayees.slice(0, 8).map((row) => <button key={row.payee} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.payee }))}>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-olive">{row.payee}</span>
-        <strong className="shrink-0 text-warm">{visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"}</strong>
-      </div>
+      <ResponsiveValueRow label={row.payee} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.amount / 100, data.currency) : "金额已隐藏"} />
       <div className="mt-1 flex items-center gap-2">
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-line"><div className="h-full bg-[rgb(var(--color-expense))]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
         <span className="w-10 text-right text-xs text-stone">{row.txCount} 笔</span>
@@ -824,12 +819,8 @@ function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSumma
 function AnomalyList({ rows, currency, visible, onSelectCategory }: { rows: DashboardSummary["anomalies"]; currency: string; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   if (!rows.length) return <EmptyPanel text="暂无高额支出" />;
   return <div className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
-    {rows.slice(0, 8).map((row) => <button key={`${row.source}:${row.account}`} className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-olive">{row.payee || row.narration || row.account}</span>
-        <span className="mt-0.5 block truncate text-xs text-stone">{row.date} · {row.account.replace(/^Expenses:/, "")}</span>
-      </span>
-      <strong className="shrink-0 amount-expense">{visible ? formatCompactValuation(row.amount / 100, currency) : "••••••"}</strong>
+    {rows.slice(0, 8).map((row) => <button key={`${row.source}:${row.account}`} className="w-full p-3 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
+      <ResponsiveValueRow label={row.payee || row.narration || row.account} labelClassName="truncate text-sm font-medium text-olive" value={visible ? formatCompactValuation(row.amount / 100, currency) : "••••••"} valueClassName="font-semibold amount-expense" valueTitle={visible ? formatCompactValuation(row.amount / 100, currency) : "金额已隐藏"} detail={`${row.date} · ${row.account.replace(/^Expenses:/, "")}`} detailClassName="truncate text-xs text-stone" />
     </button>)}
   </div>;
 }
@@ -840,10 +831,7 @@ function PaymentAccounts({ data, visible, onOpenTransactions }: { data: Dashboar
   const maxValue = Math.max(1, ...rows.map((row) => row.amount));
   return <div className="mt-4 space-y-3">
     {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.account }))}>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="min-w-0 truncate text-olive">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
-        <strong className="shrink-0 text-warm">{visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"}</strong>
-      </div>
+      <ResponsiveValueRow label={formatAccountOptionLabel(row.account, row.label, row.alias)} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.amount / 100, data.currency) : "金额已隐藏"} />
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full bg-[var(--chart-tertiary)]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
     </button>)}
   </div>;

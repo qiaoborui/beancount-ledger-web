@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { MobileSheet } from "./MobileSheet";
+import { ResponsiveValueRow } from "./shared";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountView, MetadataValue, Txn } from "./types";
@@ -245,13 +246,16 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
   const pending = pendingLabel(txn);
   return (
     <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="min-w-0">
+      <ResponsiveValueRow
+        label={<div className="min-w-0">
           <strong className="block truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
           {pending && <span className="mt-1 inline-block rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
-        </div>
-        {amt != null && <span className={`shrink-0 text-base font-semibold tabular-nums ${amountColor(amt)}`}>{fmtTxnAmount(amt, primary?.currency)}</span>}
-      </div>
+        </div>}
+        labelClassName="truncate"
+        value={amt != null ? fmtTxnAmount(amt, primary?.currency) : null}
+        valueClassName={amt != null ? `text-base font-semibold ${amountColor(amt)}` : "hidden"}
+        valueTitle={amt != null ? fmtTxnAmount(amt, primary?.currency) : undefined}
+      />
       <div className="mt-1 text-sm leading-5 text-warm [overflow-wrap:anywhere]">{txn.narration}</div>
       {viewMode === "full" ? (
         <>
@@ -730,7 +734,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
         </label>
       </section>
 
-      <section className="min-w-0 rounded-2xl border border-line bg-panel/60 p-3">
+      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/60 p-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="font-medium text-warm">资金流向</h3>
@@ -747,7 +751,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
           </Button>
         </div>
         <div className="mt-3 grid min-w-0 gap-3">
-          {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 sm:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
+          {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 @lg:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
             <div className="min-w-0">
               <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone">
                 <span>账户 {i + 1}</span>
@@ -798,32 +802,32 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
         </label>
       </section>
     </div> : <div className="grid min-w-0 gap-4">
-      <section className="min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
+        <div className="flex min-w-0 flex-col gap-3 @sm:flex-row @sm:items-start @sm:justify-between">
           <div className="min-w-0">
             <div className="text-xs text-stone">{txn.date}</div>
             <div className="mt-1 text-lg font-medium text-warm [overflow-wrap:anywhere]">{txn.payee || "无收付款方"}</div>
             <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
             <MetadataBadges txn={txn} />
           </div>
-          {primary && <div className="shrink-0 rounded-xl border border-line bg-paper px-3 py-2 text-right">
+          {primary && <div className="min-w-0 rounded-xl border border-line bg-paper px-3 py-2 text-left @sm:shrink-0 @sm:text-right">
             <div className="text-[11px] text-stone">主金额</div>
-            <div className={`mt-0.5 text-lg font-semibold ${amountColor(primary.amount)}`}>{fmtTxnAmount(primary.amount, primary.currency)}</div>
+            <div className={`mt-0.5 truncate text-lg font-semibold ${amountColor(primary.amount)}`} title={fmtTxnAmount(primary.amount, primary.currency)}>{fmtTxnAmount(primary.amount, primary.currency)}</div>
           </div>}
         </div>
       </section>
 
-      <section className="min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
+      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-medium text-warm">资金流向</h3>
           <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{txn.postings.length} 条</span>
         </div>
-        <div className="mt-3 grid min-w-0 gap-2">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <div className="mt-3 grid min-w-0 gap-2">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-center">
           <div className="min-w-0">
             <div className="text-xs text-stone">#{i + 1} {shortAccount(p.account)}</div>
             <div className="mt-0.5 text-sm text-warm [overflow-wrap:anywhere]">{p.account}</div>
           </div>
-          <strong className={`text-left text-sm tabular-nums sm:text-right ${amountColor(p.amount)}`}>{fmtPostingAmount(p.amount, p.currency)}</strong>
+          <strong className={`min-w-0 truncate text-left text-sm tabular-nums @sm:text-right ${amountColor(p.amount)}`} title={fmtPostingAmount(p.amount, p.currency)}>{fmtPostingAmount(p.amount, p.currency)}</strong>
         </div>)}</div>
       </section>
     </div>}

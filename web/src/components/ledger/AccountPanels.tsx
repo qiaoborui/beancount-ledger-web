@@ -8,6 +8,7 @@ import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/mone
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatAccountOptionLabel } from "./accountDisplay";
+import { ResponsiveValueRow } from "./shared";
 import type { AccountGroup, AccountStatus, AccountView, CreditCardAnalytics, Txn } from "./types";
 
 const loadAccountAgentChat = () => import("./AccountAgentChat");
@@ -98,11 +99,11 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
         {groups.map((group, index) => {
           const open = openGroups[group.key] ?? false;
           const dragging = draggedGroupKey === group.key;
-          return <div key={group.key} className={`overflow-hidden rounded-xl border border-line bg-panel transition-colors ${dragging ? "border-brand bg-brand/5" : ""}`}>
+          return <div key={group.key} className={`@container overflow-hidden rounded-xl border border-line bg-panel transition-colors ${dragging ? "border-brand bg-brand/5" : ""}`}>
             <div
               role="button"
               tabIndex={0}
-              className="flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left outline-none hover:bg-paper focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel"
+              className="grid w-full min-w-0 cursor-pointer grid-cols-1 gap-3 p-4 text-left outline-none hover:bg-paper focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-start"
               draggable
               onDragStart={(event) => {
                 setDraggedGroupKey(group.key);
@@ -134,9 +135,9 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                   <span className="mt-0.5 block truncate text-xs text-stone">{group.path} · {group.rows.length} 个账户 · {group.currencies.length > 1 ? `${group.currencies.length} 个币种` : group.currencies[0] ?? "无币种"}</span>
                 </span>
               </span>
-              <span className="flex shrink-0 items-center gap-3">
-                <span className="text-right">
-                  <span className={`block font-semibold ${group.total < 0 ? "amount-expense" : "amount-gold"}`}>{formatGroupAmount(group, groupVisible(group))}</span>
+              <span className="flex min-w-0 items-center justify-between gap-3 @sm:shrink-0 @sm:justify-end">
+                <span className="min-w-0 text-left @sm:text-right">
+                  <span className={`block truncate font-semibold ${group.total < 0 ? "amount-expense" : "amount-gold"}`} title={formatGroupAmount(group, groupVisible(group))}>{formatGroupAmount(group, groupVisible(group))}</span>
                   <span className="text-xs text-stone">异常 {group.issueCount}</span>
                 </span>
                 <ChevronDown className={`h-5 w-5 text-olive transition ${open ? "rotate-180" : ""}`} />
@@ -187,10 +188,14 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                   {expanded && <div className="hidden border-t border-line bg-paper/80 px-4 py-4 xl:block">
                     <AccountDetailPanel row={row} visible={visible} status={status} lastActivity={lastActivityMap.get(row.account)} points={trendMap[row.account] ?? []} onToggleAccount={onToggleAccount} inline />
                   </div>}
-                  <div className="flex items-center justify-between gap-3 px-4 pb-3 xl:hidden">
-                    <span className={`text-sm font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
-                    <span className="text-xs text-stone">{status ? statusTitle(status) : "未检查"}</span>
-                  </div>
+                  <ResponsiveValueRow
+                    className="px-4 pb-3 xl:hidden"
+                    label={formatRowAmount(row, visible)}
+                    labelClassName={`truncate text-sm font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}
+                    value={status ? statusTitle(status) : "未检查"}
+                    valueClassName="text-xs text-stone"
+                    valueTitle={status ? statusTitle(status) : "未检查"}
+                  />
                 </div>;
               })}
             </div>}
@@ -464,7 +469,7 @@ export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAcc
 }
 
 function CreditSummary({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-line bg-panel p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 font-medium text-olive">{value}</div></div>;
+  return <div className="min-w-0 rounded-xl border border-line bg-panel p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 min-w-0 truncate font-medium text-olive" title={value}>{value}</div></div>;
 }
 
 export function AccountManager({ accounts, onAdded, showToast }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
