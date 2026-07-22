@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { formatMoney } from "@/lib/money";
 import { formatTimeRangeLabel, makeTimeRange, navigateTimeRange, type TimePreset, type TimeRange } from "@/lib/timeRange";
+import { ResponsiveValueRow } from "./shared";
 import type { AccountDetailRow } from "./types";
 
 type AccountDetail = {
@@ -39,8 +40,9 @@ function chartMoney(value: number) {
   }).format(value);
 }
 
-function AmountCell({ amount, currency }: { amount: number; currency: string }) {
+function AmountCell({ amount, currency, className = "" }: { amount: number; currency: string; className?: string }) {
   const sign = amount >= 0 ? "+" : "";
+  const value = `${sign}${formatMoney(amount / 100, currency)}`;
   const cls =
     amount > 0
       ? "amount-income"
@@ -48,9 +50,8 @@ function AmountCell({ amount, currency }: { amount: number; currency: string }) 
         ? "amount-expense"
         : "text-stone";
   return (
-    <span className={`whitespace-nowrap tabular-nums font-medium ${cls}`}>
-      {sign}
-      {formatMoney(amount / 100, currency)}
+    <span className={`block min-w-0 max-w-full truncate tabular-nums font-medium ${cls} ${className}`} title={value}>
+      {value}
     </span>
   );
 }
@@ -235,11 +236,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
             当前余额
           </span>
           <div
-            className={`mt-1 text-2xl font-semibold ${
+            className={`mt-1 min-w-0 max-w-full truncate text-2xl font-semibold ${
               data.account.startsWith("Liabilities")
                 ? "amount-expense"
                 : "amount-gold"
             }`}
+            title={formatMoney(data.currentBalance / 100, data.currency)}
           >
             {formatMoney(data.currentBalance / 100, data.currency)}
           </div>
@@ -289,7 +291,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                 {chartData[0].date} ~ {chartData.at(-1)!.date}
               </p>
             </div>
-            <div className={`shrink-0 text-sm font-medium tabular-nums ${periodSummary.netChange >= 0 ? "amount-income" : "amount-expense"}`}>
+            <div className={`min-w-0 max-w-full truncate text-sm font-medium tabular-nums sm:shrink-0 ${periodSummary.netChange >= 0 ? "amount-income" : "amount-expense"}`} title={`${periodSummary.netChange >= 0 ? "+" : ""}${formatMoney(periodSummary.netChange / 100, data.currency)}`}>
               {periodSummary.netChange >= 0 ? "+" : ""}{formatMoney(periodSummary.netChange / 100, data.currency)}
             </div>
           </div>
@@ -336,22 +338,22 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   );
 }
 
-function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: AccountPeriodSummary; rows: AccountDetailRow[]; currency: string }) {
+export function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: AccountPeriodSummary; rows: AccountDetailRow[]; currency: string }) {
   const hasRows = rows.length > 0;
   return (
-    <section className="card min-w-0 max-w-full overflow-hidden p-4">
+    <section className="card @container min-w-0 max-w-full overflow-hidden p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-serif text-2xl">期间摘要</h2>
           <p className="mt-1 text-sm text-olive">{hasRows ? `${rows.length} 笔变动解释当前范围` : "当前范围暂无账户变动"}</p>
         </div>
       </div>
-      <div className="mt-4 grid min-w-0 grid-cols-3 divide-x divide-line overflow-hidden rounded-xl border border-line bg-panel text-center">
+      <div className="mt-4 grid min-w-0 grid-cols-1 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel text-center @xs:grid-cols-3 @xs:divide-x @xs:divide-y-0">
         <SummaryMetric label="流入" value={formatMoney(summary.inflow / 100, currency)} cls="amount-income" />
         <SummaryMetric label="流出" value={formatMoney(summary.outflow / 100, currency)} cls="amount-expense" />
         <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatMoney(summary.netChange / 100, currency)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
       </div>
-      <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
+      <div className="mt-3 grid min-w-0 gap-2 @lg:grid-cols-2">
         <ExtremeRow label="最大流入" row={summary.maxInflow} currency={currency} />
         <ExtremeRow label="最大流出" row={summary.maxOutflow} currency={currency} />
       </div>
@@ -360,13 +362,17 @@ function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: Accoun
         {summary.counterparties.length ? (
           <div className="mt-2 space-y-2">
             {summary.counterparties.map((item) => (
-              <div key={item.account} className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel px-3 py-2">
-                <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate text-olive">{item.account}</span>
-                  <strong className="shrink-0 whitespace-nowrap tabular-nums text-warm">{formatMoney(item.amount / 100, currency)}</strong>
-                </div>
-                <div className="mt-0.5 text-xs text-stone">{item.count} 笔相关变动</div>
-              </div>
+              <ResponsiveValueRow
+                key={item.account}
+                className="overflow-hidden rounded-xl border border-line bg-panel px-3 py-2"
+                label={item.account}
+                labelClassName="truncate text-sm text-olive"
+                value={<strong className="font-semibold">{formatMoney(item.amount / 100, currency)}</strong>}
+                valueClassName="text-sm text-warm"
+                valueTitle={formatMoney(item.amount / 100, currency)}
+                detail={`${item.count} 笔相关变动`}
+                detailClassName="text-xs text-stone"
+              />
             ))}
           </div>
         ) : (
@@ -378,18 +384,18 @@ function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: Accoun
 }
 
 function SummaryMetric({ label, value, cls }: { label: string; value: string; cls: string }) {
-  return <div className="min-w-0 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-sm font-semibold tabular-nums sm:text-base ${cls}`}>{value}</div></div>;
+  return <div className="min-w-0 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1 truncate text-sm font-semibold tabular-nums @sm:text-base ${cls}`} title={value}>{value}</div></div>;
 }
 
 function ExtremeRow({ label, row, currency }: { label: string; row: AccountDetailRow | null; currency: string }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel p-3">
+    <div className="@container min-w-0 overflow-hidden rounded-xl border border-line bg-panel p-3">
       <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
       {row ? (
         <>
-          <div className="mt-1 flex min-w-0 items-baseline justify-between gap-2">
+          <div className="mt-1 grid min-w-0 grid-cols-1 gap-x-2 gap-y-0.5 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-baseline">
             <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || "（无对手）"}</span>
-            <AmountCell amount={row.change} currency={currency} />
+            <AmountCell amount={row.change} currency={currency} className="text-left @sm:text-right" />
           </div>
           <div className="mt-0.5 min-w-0 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
         </>
@@ -475,7 +481,8 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                   className="account-detail-row-button min-w-0 w-full overflow-hidden p-3 text-left"
                   onClick={() => toggleExpand(key)}
                 >
-                  <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="@container min-w-0">
+                    <div className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 @xs:grid-cols-[minmax(0,1fr)_auto] @xs:items-start">
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <strong className="truncate text-sm">
@@ -491,26 +498,29 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                         {row.narration}
                       </div>
                     </div>
-                    <div className="shrink-0 text-right">
+                    <div className="min-w-0 text-left @xs:text-right">
                       <div className="text-sm">
-                        <AmountCell amount={row.change} currency={currency} />
+                        <AmountCell amount={row.change} currency={currency} className="text-left @xs:text-right" />
                       </div>
                       <div className="mt-0.5 text-xs tabular-nums text-stone">
                         {row.date}
                       </div>
                     </div>
+                    </div>
                   </div>
-                  <div className="mt-1.5 flex min-w-0 items-baseline justify-between gap-x-3 gap-y-0.5">
-                    <span className="shrink-0 whitespace-nowrap text-xs text-stone">
+                  <ResponsiveValueRow
+                    className="mt-1.5"
+                    label={<span title={`余额 ${formatMoney(row.balance / 100, currency)}`}>
                       余额{" "}
                       <span className="font-medium tabular-nums text-warm">
                         {formatMoney(row.balance / 100, currency)}
                       </span>
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-right text-xs text-stone/60">
-                      {counterParties.join(" · ") || "—"}
-                    </span>
-                  </div>
+                    </span>}
+                    labelClassName="truncate text-xs text-stone"
+                    value={counterParties.join(" · ") || "—"}
+                    valueClassName="text-xs text-stone/60"
+                    valueTitle={counterParties.join(" · ") || "—"}
+                  />
                 </button>
 
                 {isExpanded && (
@@ -519,34 +529,32 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                       {row.txn.postings.map((p, j) => {
                         const isSelf = p.account === account;
                         return (
-                          <div
+                          <ResponsiveValueRow
                             key={`${p.account}:${j}`}
-                            className={`flex min-w-0 justify-between gap-3 overflow-hidden rounded-lg px-2 py-1 text-xs ${
+                            className={`overflow-hidden rounded-lg px-2 py-1 text-xs ${
                               isSelf
                                 ? "bg-brand/5 font-medium"
                                 : "bg-paper"
                             }`}
-                          >
-                            <span className="min-w-0 flex-1 truncate">
+                            label={<span className="block min-w-0 truncate">
                               {p.account}
                               {isSelf && (
                                 <span className="ml-1 text-stone">
                                   ← 本账户
                                 </span>
                               )}
-                            </span>
-                            <span
-                              className={`shrink-0 tabular-nums ${
-                                p.amount > 0
-                                  ? "text-[var(--success)]"
-                                  : p.amount < 0
-                                    ? "text-[var(--danger)]"
-                                    : "text-stone"
-                              }`}
-                            >
-                              {formatMoney(p.amount / 100, p.currency ?? currency)}
-                            </span>
-                          </div>
+                            </span>}
+                            labelClassName="truncate"
+                            value={formatMoney(p.amount / 100, p.currency ?? currency)}
+                            valueTitle={formatMoney(p.amount / 100, p.currency ?? currency)}
+                            valueClassName={
+                              p.amount > 0
+                                ? "text-[var(--success)]"
+                                : p.amount < 0
+                                  ? "text-[var(--danger)]"
+                                  : "text-stone"
+                            }
+                          />
                         );
                       })}
                     </div>

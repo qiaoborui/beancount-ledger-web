@@ -2,6 +2,7 @@ import { formatCny, formatCompactCny, formatMoney } from "@/lib/money";
 import { ChevronDown, LineChart as LineChartIcon, Search, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ResponsiveValueRow } from "./shared";
 import type { CommodityPrice, InvestmentHolding, InvestmentLot, InvestmentPosition, InvestmentQuote, InvestmentRealizedTrade, InvestmentSummary } from "./types";
 
 type PricePoint = { date: string; price: number };
@@ -463,20 +464,8 @@ function AccountDistribution({ positions, holding }: { positions: InvestmentPosi
         <div className="mt-3 divide-y divide-line">
           {positions.map((position) => (
             <div key={`${position.account}:${position.commodity}`} className="py-3 first:pt-0 last:pb-0">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-olive">{position.accountLabel}</div>
-                  <div className="mt-1 truncate text-xs text-stone">{position.account}</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-sm font-semibold tabular-nums text-warm">{formatCnyValue(position.marketValueCny)}</div>
-                  <div className="mt-1 text-xs tabular-nums text-stone">{totalValue > 0 ? `${(Number(position.marketValueCny ?? 0) / totalValue * 100).toFixed(1)}%` : "暂无"}</div>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs text-stone">
-                <span>{formatQuantity(position.quantity)} 股</span>
-                <span>成本 {formatCostPrice(position.averageCost, position.costCurrency)}</span>
-              </div>
+              <ResponsiveValueRow label={position.accountLabel} labelClassName="truncate text-sm font-medium text-olive" value={formatCnyValue(position.marketValueCny)} valueClassName="text-sm font-semibold text-warm" valueTitle={formatCnyValue(position.marketValueCny)} detail={position.account} detailClassName="truncate text-xs text-stone" />
+              <ResponsiveValueRow className="mt-2" label={`${formatQuantity(position.quantity)} 股`} labelClassName="text-xs text-stone" value={`成本 ${formatCostPrice(position.averageCost, position.costCurrency)}`} valueClassName="text-xs text-stone" valueTitle={`成本 ${formatCostPrice(position.averageCost, position.costCurrency)}`} detail={totalValue > 0 ? `${(Number(position.marketValueCny ?? 0) / totalValue * 100).toFixed(1)}% 仓位` : "暂无仓位比例"} detailClassName="text-xs text-stone/70" />
             </div>
           ))}
         </div>

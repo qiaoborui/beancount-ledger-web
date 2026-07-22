@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { formatValuation } from "@/lib/money";
 import { CashFlowCard } from "./CashFlowCard";
-import { HiddenPanel, Metric } from "./shared";
+import { HiddenPanel, Metric, ResponsiveValueRow } from "./shared";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
@@ -71,14 +71,14 @@ function formatChange(value: number | null): string {
 
 function RankList({ rows, empty, valuationCurrency }: { rows: { key: string; label: string; amount: number; detail: string }[]; empty: string; valuationCurrency: string }) {
   if (!rows.length) return <div className="rounded-xl border border-line bg-paper p-4 text-sm text-stone">{empty}</div>;
-  return <div className="grid gap-2">
-    {rows.slice(0, 5).map((row, index) => <div key={row.key} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-paper p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+  return <div className="@container grid gap-2">
+    {rows.slice(0, 5).map((row, index) => <div key={row.key} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-paper p-3 @sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tag text-xs text-stone">{index + 1}</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-warm">{row.label}</div>
         <div className="mt-0.5 text-xs text-stone">{row.detail}</div>
       </div>
-      <strong className="col-start-2 min-w-0 justify-self-end text-right text-sm tabular-nums amount-expense sm:col-start-auto">{formatValuation(row.amount / 100, valuationCurrency)}</strong>
+      <strong className="col-start-2 min-w-0 max-w-full truncate justify-self-end text-right text-sm tabular-nums amount-expense @sm:col-start-auto" title={formatValuation(row.amount / 100, valuationCurrency)}>{formatValuation(row.amount / 100, valuationCurrency)}</strong>
     </div>)}
   </div>;
 }
@@ -94,19 +94,15 @@ function CategoryAnalyticsPanel({ rows, topPayees, topPaymentAccounts, valuation
       <CollapsibleAnalysisCard title="Top 分类" subtitle="点击分类查看流水">
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
           {topRows.map((row) => <button key={row.account} className="rounded-xl border border-line bg-panel p-3 text-left transition-colors hover:bg-tag" onClick={() => onSelectCategory?.(row.account, "prefix")}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-warm">{formatAccountOptionLabel(row.account, row.label, row.alias)}</div>
-                <div className="mt-1 text-xs text-stone">{row.txCount} 笔 · 占支出 {formatPercent(row.share)}</div>
-              </div>
-              <div className="shrink-0 text-right">
-                <div className="amount-expense text-sm font-medium tabular-nums">{formatValuation(row.amount / 100, valuationCurrency)}</div>
-                <div className={`mt-1 inline-flex items-center gap-0.5 text-xs ${row.changeRatio != null && row.changeRatio > 0 ? "amount-expense" : "amount-income"}`}>
-                  {row.changeRatio != null && row.changeRatio > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                  {formatChange(row.changeRatio)}
-                </div>
-              </div>
-            </div>
+            <ResponsiveValueRow
+              label={formatAccountOptionLabel(row.account, row.label, row.alias)}
+              labelClassName="truncate text-sm font-medium text-warm"
+              value={formatValuation(row.amount / 100, valuationCurrency)}
+              valueClassName="text-sm font-medium amount-expense"
+              valueTitle={formatValuation(row.amount / 100, valuationCurrency)}
+              detail={<span className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span>{row.txCount} 笔 · 占支出 {formatPercent(row.share)}</span><span className={`inline-flex items-center gap-0.5 ${row.changeRatio != null && row.changeRatio > 0 ? "amount-expense" : "amount-income"}`}>{row.changeRatio != null && row.changeRatio > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}{formatChange(row.changeRatio)}</span></span>}
+              detailClassName="text-xs text-stone"
+            />
           </button>)}
         </div>
       </CollapsibleAnalysisCard>
@@ -116,9 +112,9 @@ function CategoryAnalyticsPanel({ rows, topPayees, topPaymentAccounts, valuation
       <CollapsibleAnalysisCard title="待整理" subtitle={unknown ? "发现未分类支出" : "分类状态"}>
         {unknown ? <button className="w-full rounded-xl border border-[var(--danger)]/30 bg-paper p-4 text-left transition-colors hover:bg-tag" onClick={() => onSelectCategory?.("Expenses:Unknown", "exact")}>
           <div className="text-sm font-medium text-[var(--danger)]">Expenses:Unknown</div>
-          <div className="mt-2 text-2xl font-semibold tabular-nums text-warm">{formatValuation(unknown.amount / 100, valuationCurrency)}</div>
+          <div className="mt-2 min-w-0 truncate text-2xl font-semibold tabular-nums text-warm" title={formatValuation(unknown.amount / 100, valuationCurrency)}>{formatValuation(unknown.amount / 100, valuationCurrency)}</div>
           <div className="mt-1 text-xs text-stone">{unknown.txCount} 笔 · 占支出 {formatPercent(unknown.share)}</div>
-          {unknown.topPayees.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{unknown.topPayees.map((payee) => <span key={payee.payee} className="rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone">{payee.payee} · {formatValuation(payee.amount / 100, valuationCurrency)}</span>)}</div>}
+          {unknown.topPayees.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{unknown.topPayees.map((payee) => <span key={payee.payee} className="max-w-full rounded-full bg-tag px-2 py-0.5 text-[11px] text-stone [overflow-wrap:anywhere]">{payee.payee} · {formatValuation(payee.amount / 100, valuationCurrency)}</span>)}</div>}
         </button> : <div className="rounded-xl border border-line bg-paper p-4 text-sm text-stone">当前周期没有 Expenses:Unknown。</div>}
       </CollapsibleAnalysisCard>
       <CollapsibleAnalysisCard title="Top 支付账户" subtitle="按 Assets / Liabilities 出账账户汇总">
