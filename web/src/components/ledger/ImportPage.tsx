@@ -927,47 +927,75 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       {preview ? (
         <MobileSheet
           open={reviewOpen}
-          title={`${providerLabel(preview.provider, providerChoices)}导入审核`}
+          title={(
+            <>
+              <span className="sm:hidden">导入审核</span>
+              <span className="hidden sm:inline">{providerLabel(preview.provider, providerChoices)}导入审核</span>
+            </>
+          )}
           onClose={() => setReviewOpen(false)}
           shouldClose={() => !committing}
           size="xl"
           align="center"
           bodyClassName="!p-0 xl:!overflow-hidden"
-          panelClassName="xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[98vw] 2xl:!max-w-[1720px]"
+          panelClassName="!h-[100dvh] !max-h-[100dvh] !rounded-none sm:!h-[92dvh] sm:!max-h-[calc(100dvh-env(safe-area-inset-top)-0.75rem)] sm:!rounded-3xl xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[98vw] 2xl:!max-w-[1720px]"
           closeLabel={committing ? "写入中" : "关闭"}
           footer={
-            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
+            <div>
+              <div className="grid min-w-0 gap-2 sm:hidden">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
+                  <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
+                    {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `${entries.length} 待写入`}
+                  </Badge>
+                  {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{invalidEntryCount} 条需修正</span> : null}
+                  <span className="tabular-nums">{reviewTotalAmount}</span>
+                </div>
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-2">
+                  <Button className="min-w-0" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后"}</Button>
+                  <Button className="min-w-0" onClick={commitImport} disabled={!canCommit}>
+                    {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                    {committing ? "写入中" : hasCommitted ? "已写入" : "确认写入"}
+                  </Button>
+                </div>
+                {!hasCommitted ? (
+                  <Button className="h-8 min-w-0 justify-start px-0 text-xs text-stone hover:text-destructive" variant="ghost" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                    <Trash2 className="h-3.5 w-3.5" /> 丢弃草稿
+                  </Button>
+                ) : null}
+              </div>
+              <div className="hidden min-w-0 flex-col gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
                 <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
                   {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
                 </Badge>
                 {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{invalidEntryCount} 条分录需修正</span> : null}
                 <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
                 <span className="tabular-nums">{reviewTotalAmount} 合计</span>
-              </div>
-              <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
-                <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
-                {hasCommitted ? (
-                  <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
-                    <FileUp className="h-4 w-4" />
-                    导入新账单
+                </div>
+                <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
+                  <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
+                  {hasCommitted ? (
+                    <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
+                      <FileUp className="h-4 w-4" />
+                      导入新账单
+                    </Button>
+                  ) : (
+                    <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
+                      <Trash2 className="h-4 w-4" />
+                      丢弃草稿
+                    </Button>
+                  )}
+                  <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
+                    {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                    {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
                   </Button>
-                ) : (
-                  <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
-                    <Trash2 className="h-4 w-4" />
-                    丢弃草稿
-                  </Button>
-                )}
-                <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
-                  {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                  {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
-                </Button>
+                </div>
               </div>
             </div>
           }
         >
           <div className="flex h-full min-h-0 min-w-0 flex-col bg-paper">
-            <div className="shrink-0 border-b border-line bg-panel px-4 py-4 sm:px-5 xl:py-3">
+            <div className="shrink-0 border-b border-line bg-panel px-3 py-2 sm:px-5 sm:py-4 xl:py-3">
               <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -975,14 +1003,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                     <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
                     <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{preview.originalFilename}</span>
                   </div>
-                  <div className="mt-1 text-xs leading-5 text-stone">{preview.providerDetection.reason}</div>
+                  <div className="mt-1 hidden text-xs leading-5 text-stone sm:block">{preview.providerDetection.reason}</div>
                 </div>
-                <div className="grid grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone">
+                <div className="hidden grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone sm:grid">
                   <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
                   <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
-              <div className="mt-4 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4 xl:mt-3">
+              <div className="mt-4 hidden min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid sm:grid-cols-4 xl:mt-3">
                 <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
                 <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
                 <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
@@ -990,7 +1018,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               </div>
             </div>
 
-            <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 sm:px-5 xl:min-h-0 xl:overflow-hidden xl:py-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-2 sm:gap-3 sm:px-5 sm:py-3 xl:min-h-0 xl:overflow-hidden xl:py-3">
               {commitResult?.ok ? (
                 <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1019,7 +1047,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               ) : null}
 
               <div className="grid min-w-0 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.72fr)_minmax(560px,1.28fr)] xl:items-stretch xl:overflow-hidden 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(680px,1.3fr)]">
-                <section className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
+                <section className="hidden min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
@@ -1140,6 +1168,39 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                       </Button>
                     </div>
                   </aside>
+                ) : null}
+
+                {entries.length > 0 ? (
+                  <details className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:hidden">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-paper px-3 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+                      <span>候选交易</span>
+                      <span className="rounded-full bg-tag px-2 py-1 text-xs font-normal text-stone">{entries.length} 待写入</span>
+                    </summary>
+                    <div className="max-h-80 divide-y divide-line overflow-y-auto border-t border-line">
+                      {entries.map((entry, index) => {
+                        const selected = selectedEntry?.id === entry.id;
+                        return (
+                          <article key={entry.id} className={cn("grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem] items-center", selected ? "bg-[var(--selected-bg)]" : "bg-panel")}>
+                            <button type="button" className="min-w-0 px-3 py-2 text-left" onClick={() => selectReviewEntry(entry.id)}>
+                              <div className="flex min-w-0 items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span className="font-mono text-[11px] text-stone">{String(index + 1).padStart(2, "0")}</span>
+                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || "未命名商户"}</span>
+                                  </div>
+                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.date} · {entry.narration || "未填写标题"}</div>
+                                </div>
+                                <div className="shrink-0 text-right font-serif text-sm font-medium text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
+                              </div>
+                            </button>
+                            <Button type="button" variant="ghost" size="icon-sm" className="mr-1 text-stone hover:text-destructive" onClick={() => removeEntry(entry.id)} disabled={committing || hasCommitted} title="移除这条候选交易">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </details>
                 ) : null}
               </div>
 
@@ -1456,9 +1517,9 @@ function ImportEntryEditor({
     { label: "订单号", value: entry.orderId || "-" },
   ];
   return (
-    <div className="grid min-w-0 gap-4">
-      <section className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-4">
-        <div className="flex min-w-0 items-start justify-between gap-4">
+    <div className="grid min-w-0 gap-3 sm:gap-4">
+      <section className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3 sm:p-4">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-brand">{flow.kind}</div>
             <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
@@ -1468,7 +1529,7 @@ function ImportEntryEditor({
               {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
             </div>
           </div>
-          <div className="shrink-0 text-right">
+          <div className="shrink-0 text-left sm:text-right">
             <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
             <div className="mt-1 text-xs text-stone">主金额</div>
           </div>
@@ -1482,10 +1543,10 @@ function ImportEntryEditor({
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-paper p-4">
+      <section className="rounded-xl border border-line bg-paper p-3 sm:p-4">
         <div className="mb-3">
           <div className="text-sm font-medium text-ink">交易信息</div>
-          <div className="mt-0.5 text-xs text-stone">日期、状态、收付款方和账本标题都可以在审核时修正。</div>
+          <div className="mt-0.5 hidden text-xs text-stone sm:block">日期、状态、收付款方和账本标题都可以在审核时修正。</div>
         </div>
         <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(9rem,0.7fr)_7rem_minmax(0,1.3fr)]">
           <Label className="block min-w-0">
@@ -1510,11 +1571,11 @@ function ImportEntryEditor({
         </Label>
       </section>
 
-      <section className="rounded-xl border border-line bg-panel/60 p-4">
+      <section className="rounded-xl border border-line bg-panel/60 p-3 sm:p-4">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-medium text-ink">分录明细</div>
-            <div className="mt-0.5 text-xs leading-5 text-stone">每一行都是一条 Beancount posting，可编辑来源账户、目标账户并添加拆分账户。</div>
+            <div className="mt-0.5 hidden text-xs leading-5 text-stone sm:block">每一行都是一条 Beancount posting，可编辑来源账户、目标账户并添加拆分账户。</div>
           </div>
           <Button type="button" variant="outline" className="h-9 shrink-0 rounded-xl bg-paper px-3" onClick={onPostingAdd} disabled={disabled}>
             <Plus className="h-4 w-4" />
@@ -1546,8 +1607,8 @@ function ImportEntryEditor({
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_9rem_6.5rem]">
-                  <Label className="block min-w-0">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_5.5rem] gap-2 lg:grid-cols-[minmax(0,1fr)_9rem_6.5rem]">
+                  <Label className="col-span-2 block min-w-0 lg:col-span-1">
                     <span className="mb-1.5 block text-xs text-stone">账户</span>
                     <Select value={posting.account || undefined} onValueChange={(value) => onPostingChange(index, { account: value })} disabled={disabled}>
                       <SelectTrigger className={cn("h-10 w-full min-w-0 rounded-xl bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder="选择账户" /></SelectTrigger>
@@ -1567,7 +1628,7 @@ function ImportEntryEditor({
                 </div>
                 <details className="mt-2 border-t border-line pt-2">
                   <summary className="cursor-pointer text-xs text-stone">价格 / 成本{hasPrice ? "（已设置）" : "（可选）"}</summary>
-                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-3">
+                  <div className="mt-2 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
                     <Label className="block min-w-0">
                       <span className="mb-1.5 block text-xs text-stone">类型</span>
                       <Select value={posting.priceKind ?? "none"} onValueChange={(value) => onPostingChange(index, value === "none" ? { priceKind: undefined, priceAmount: undefined, priceCurrency: undefined } : { priceKind: value as ImportPosting["priceKind"] })} disabled={disabled}>
