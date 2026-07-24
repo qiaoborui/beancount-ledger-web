@@ -655,6 +655,13 @@ func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
 	if preview["provider"] != "alipay" || anyInt(preview["candidateCount"]) != 1 {
 		t.Fatalf("preview=%#v", preview)
 	}
+	meta, err := server.readImportMeta(context.Background(), item.ImportID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.OriginalFilename != "支付宝交易明细.csv" || filepath.Ext(meta.OriginalFilename) != ".csv" || meta.DocumentFileKey != "" {
+		t.Fatalf("expected Gmail attachment archive metadata to keep CSV input, got %#v", meta)
+	}
 }
 
 func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
@@ -766,6 +773,13 @@ func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
 	item := pending.Items[0]
 	if item.Status != "ready" || item.Provider != "cmb" || item.Filename != "statement.pdf" || item.CandidateCount != 1 {
 		t.Fatalf("item=%#v", item)
+	}
+	meta, err := server.readImportMeta(context.Background(), item.ImportID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.OriginalFilename != "statement.pdf" || filepath.Ext(meta.OriginalFilename) != ".pdf" || meta.DocumentFileKey != "" {
+		t.Fatalf("expected Gmail PDF attachment archive metadata to keep PDF input, got %#v", meta)
 	}
 }
 
