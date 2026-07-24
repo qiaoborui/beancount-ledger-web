@@ -431,7 +431,7 @@ func TestImportProvidersEndpoint(t *testing.T) {
 	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "alipay-small-purse" || response.Providers[2].ID != "wechat" || response.Providers[3].ID != "cmb" || response.Providers[4].ID != "ccb-credit" || response.Providers[5].ID != "cmb-checking" {
 		t.Fatalf("unexpected provider order: %#v", response.Providers)
 	}
-	if response.Providers[4].Label != "建设银行信用卡" || response.Providers[4].Accept != ".eml / .html / .htm / .csv" {
+	if response.Providers[4].Label != "建设银行信用卡" || response.Providers[4].Accept != ".eml / .html / .htm / .pdf / .csv" {
 		t.Fatalf("unexpected ccb metadata: %#v", response.Providers[4])
 	}
 	if response.Providers[0].Engine != "deg-module" || response.Providers[1].Engine != "native-alipay-small-purse" || response.Providers[4].Engine != "native-ccb-credit" || response.Providers[5].Engine != "deg-module" {
@@ -1553,6 +1553,11 @@ func TestCcbCreditEmailImportHelpers(t *testing.T) {
 	if err != nil || detection.Provider != "ccb-credit" {
 		t.Fatalf("unexpected encoded EML detection: %#v err=%v", detection, err)
 	}
+
+	detection, err = detectImportProvider("龙卡信用卡对账单.pdf", []byte("%PDF-1.6 synthetic statement"), "")
+	if err != nil || detection.Provider != "ccb-credit" {
+		t.Fatalf("unexpected CCB PDF detection: %#v err=%v", detection, err)
+	}
 }
 
 func TestCcbCreditAllPlatformPreview(t *testing.T) {
@@ -1676,6 +1681,28 @@ func TestCcbCreditEmailParserWithFixture(t *testing.T) {
 	}
 }
 
+func TestCcbCreditPDFParserWithFixture(t *testing.T) {
+	fixture := strings.TrimSpace(os.Getenv("CCB_CREDIT_PDF_FIXTURE"))
+	if fixture == "" {
+		t.Skip("set CCB_CREDIT_PDF_FIXTURE to verify a real 建设银行信用卡 PDF")
+	}
+	content := mustRead(t, fixture)
+	detection, err := detectImportProvider(filepath.Base(fixture), content, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.Provider != "ccb-credit" {
+		t.Fatalf("provider = %s", detection.Provider)
+	}
+	statement, err := parseCcbCreditStatementPDF(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statement.Rows) == 0 {
+		t.Fatalf("expected PDF statement rows, got %#v", statement)
+	}
+}
+
 func ccbCreditTestEmail(csvRows []string) string {
 	bodyRows := []string{}
 	for _, row := range csvRows {
@@ -1771,6 +1798,33 @@ func TestCmbPDFLayoutTextParser(t *testing.T) {
 	}
 	if !strings.Contains(result.CSV, "05/02,05/04,PP*APPLE.COM/BILL,34.17,9813,4.99(US)") {
 		t.Fatalf("missing foreign currency row:\n%s", result.CSV)
+	}
+}
+
+func TestCcbCreditPDFLayoutTextParser(t *testing.T) {
+	text := strings.Join([]string{
+		"龙卡信用卡对账单 Credit Card Statement",
+		"本期账单日 Statement Date 2026-07-21",
+		"账单周期 Statement Cycle 2026/06/22-2026/07/21",
+		"本期到期还款日 Payment Due Date 2026/08/10",
+		"【交易明细】",
+		"交易日 银行记账日 卡号后四位 交易描述 交易币/金额 结算币/金额",
+		"2026-06-22 2026-06-22 7720 财付通-微信支付-瑞幸咖啡 CNY 9.90 CNY 9.90",
+		"2026/07/07 2026/07/07 7720 银联入账 乔博睿 3075 CNY -494.47 CNY -494.47",
+		"*** 结束 The End ***",
+	}, "\n")
+	statement, err := parseCcbCreditPDFLayoutText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statement.Cycle != "2026/06/22-2026/07/21" || statement.DueDate != "2026-08-10" || len(statement.Rows) != 2 {
+		t.Fatalf("unexpected PDF statement: %#v", statement)
+	}
+	if statement.Rows[0].Description != "财付通-微信支付-瑞幸咖啡" || statement.Rows[0].SettlementAmount != "9.90" {
+		t.Fatalf("unexpected first row: %#v", statement.Rows[0])
+	}
+	if statement.Rows[1].TransactionDate != "2026-07-07" || statement.Rows[1].Description != "银联入账乔博睿3075" || statement.Rows[1].SettlementAmount != "-494.47" {
+		t.Fatalf("unexpected payment row: %#v", statement.Rows[1])
 	}
 }
 

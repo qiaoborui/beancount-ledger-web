@@ -235,7 +235,12 @@ var billImporters = []billImporter{
 		config:          importProviderConfig{Config: "imports/cmb-credit-card-config.yaml", Output: "cmb-credit-output.bean", Extensions: []string{".pdf", ".csv"}, Label: "招商银行信用卡", Detail: "信用卡 PDF（支持 Gmail 附件）或已转换 CSV"},
 		documentAccount: "Liabilities:CN:CMB:CreditCard:0016",
 		detect: func(filename, sample, ext string) (providerDetection, bool) {
-			if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") {
+			ccbPDFName := regexp.MustCompile(`中国建设银行信用卡|建设银行信用卡|建行信用卡|龙卡信用卡`)
+			ccbPDFTable := regexp.MustCompile(`交易日\s+银行记账日\s+卡号后四位|T-Date\s+P-Date\s+Card\s+Number`)
+			if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") && !ccbPDFName.MatchString(filename) && !ccbPDFName.MatchString(sample) {
+				if ccbPDFTable.MatchString(sample) {
+					return providerDetection{}, false
+				}
 				return providerDetection{Provider: "cmb", Reason: "PDF 文件将按招商银行信用卡账单解析", Confidence: "medium"}, true
 			}
 			if ext == ".csv" && regexp.MustCompile(`招商银行信用卡对账单|交易日,记账日,交易摘要,人民币金额,卡号末四位,交易地金额`).MatchString(sample) {
@@ -272,13 +277,16 @@ var billImporters = []billImporter{
 		label:           "建设银行信用卡",
 		title:           "CCB Credit Card",
 		uiOrder:         35,
-		config:          importProviderConfig{Config: "imports/ccb-credit-card-config.yaml", Output: "ccb-credit-output.bean", Extensions: []string{".eml", ".html", ".htm", ".csv"}, Label: "建设银行信用卡", Detail: "信用卡邮件 EML、HTML 或标准 CSV"},
+		config:          importProviderConfig{Config: "imports/ccb-credit-card-config.yaml", Output: "ccb-credit-output.bean", Extensions: []string{".eml", ".html", ".htm", ".pdf", ".csv"}, Label: "建设银行信用卡", Detail: "信用卡邮件 EML、HTML、PDF 或标准 CSV"},
 		documentAccount: "Liabilities:CN:CCB:CreditCard:7720",
 		detect: func(filename, sample, ext string) (providerDetection, bool) {
 			ccbEmailSignature := regexp.MustCompile(`(?i)service@vip\.ccb\.com|vip\.ccb\.com|creditcard\.ccb\.com`)
-			ccbStatementSignature := regexp.MustCompile(`中国建设银行信用卡电子账单|龙卡信用卡对账单|Credit Card Statement`)
+			ccbStatementSignature := regexp.MustCompile(`(?i)中国建设银行信用卡电子账单|中国建设银行信用卡|建设银行信用卡|建行信用卡|龙卡信用卡对账单|龙卡信用卡|Credit Card Statement|交易日\s+银行记账日\s+卡号后四位|T-Date\s+P-Date\s+Card\s+Number`)
 			if (ext == ".eml" || ext == ".html" || ext == ".htm") && (ccbStatementSignature.MatchString(filename) || ccbStatementSignature.MatchString(sample) || ccbEmailSignature.MatchString(sample)) {
 				return providerDetection{Provider: "ccb-credit", Reason: "邮件内容包含建设银行信用卡账单字段", Confidence: "high"}, true
+			}
+			if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") && (ccbStatementSignature.MatchString(filename) || ccbStatementSignature.MatchString(sample)) {
+				return providerDetection{Provider: "ccb-credit", Reason: "PDF 内容包含建设银行信用卡账单字段", Confidence: "high"}, true
 			}
 			if ext == ".csv" && regexp.MustCompile(`交易日,银行记账日,卡号后四位,交易描述,交易币种,交易金额,结算币种,结算金额|transactionDate,postingDate,cardLast4,description,transactionCurrency,transactionAmount,settlementCurrency,settlementAmount`).MatchString(sample) {
 				return providerDetection{Provider: "ccb-credit", Reason: "CSV 内容包含建设银行信用卡标准字段", Confidence: "high"}, true
@@ -302,9 +310,9 @@ var billImporters = []billImporter{
 		},
 		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
 			if generated.CandidateCount != prepared.FilteredRowCount {
-				return nil, fmt.Errorf("建设银行信用卡行数核对失败：邮件/CSV 明细 %d 条，Web 前置过滤后 %d 条，但生成 %d 条。已停止导入，请检查邮件解析或配置", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
+				return nil, fmt.Errorf("建设银行信用卡行数核对失败：邮件/PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，但生成 %d 条。已停止导入，请检查账单解析或配置", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount)
 			}
-			return []string{fmt.Sprintf("建设银行信用卡行数核对通过：邮件/CSV 明细 %d 条，Web 前置过滤后 %d 条，生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+			return []string{fmt.Sprintf("建设银行信用卡行数核对通过：邮件/PDF/CSV 明细 %d 条，Web 前置过滤后 %d 条，生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, prepared.FilteredRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
 		},
 		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
 			return prepared.RawRowCount, prepared.FilteredRowCount
@@ -392,7 +400,7 @@ func detectImportProvider(filename string, content []byte, override string) (pro
 }
 
 func errorsUnsupportedBillType() error {
-	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
+	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/PDF/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func decorateStatementHashEntries(meta importMeta, entries []ImportEntry) {

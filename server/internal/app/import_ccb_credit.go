@@ -103,6 +103,24 @@ func (s *Server) prepareCcbCreditInput(inputFile, originalFilename, importID str
 		if statement.DueDate != "" {
 			warnings = append(warnings, "建行信用卡到期还款日："+statement.DueDate)
 		}
+	} else if ext == ".pdf" {
+		statement, err := parseCcbCreditStatementPDF(inputFile)
+		if err != nil {
+			return preparedImportInput{}, err
+		}
+		dateStart, dateEnd = ccbCreditStatementDateRange(statement)
+		rawRowCount = len(statement.Rows)
+		normalizedFile = previewPath(s.cfg, importID, "ccb-credit-normalized.csv")
+		if err := writeCcbCreditCSV(statement.Rows, normalizedFile); err != nil {
+			return preparedImportInput{}, err
+		}
+		warnings = append(warnings, fmt.Sprintf("已从建设银行信用卡 PDF 解析 %d 条账单明细。", len(statement.Rows)))
+		if statement.Cycle != "" {
+			warnings = append(warnings, "建行信用卡账单周期："+statement.Cycle)
+		}
+		if statement.DueDate != "" {
+			warnings = append(warnings, "建行信用卡到期还款日："+statement.DueDate)
+		}
 	} else if ext == ".csv" {
 		rows, err := readCcbCreditCSVRows(inputFile)
 		if err != nil {
@@ -112,7 +130,7 @@ func (s *Server) prepareCcbCreditInput(inputFile, originalFilename, importID str
 		rawRowCount = len(rows)
 		warnings = append(warnings, "当前上传的是建设银行信用卡标准 CSV。")
 	} else {
-		return preparedImportInput{}, fmt.Errorf("建设银行信用卡账单文件类型不正确，应为 .eml/.html/.csv")
+		return preparedImportInput{}, fmt.Errorf("建设银行信用卡账单文件类型不正确，应为 .eml/.html/.pdf/.csv")
 	}
 
 	prefilteredFile := previewPath(s.cfg, importID, "ccb-credit-prefiltered.csv")
@@ -621,6 +639,14 @@ func parseCcbCreditStatementFile(inputFile string) (ccbCreditParsedStatement, er
 	return parseCcbCreditStatementHTML(string(raw))
 }
 
+func parseCcbCreditStatementPDF(inputFile string) (ccbCreditParsedStatement, error) {
+	text, err := extractPDFPlainText(inputFile)
+	if err != nil {
+		return ccbCreditParsedStatement{}, err
+	}
+	return parseCcbCreditPDFLayoutText(text)
+}
+
 func extractHTMLFromEML(raw []byte) (string, error) {
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
@@ -687,6 +713,14 @@ func parseCcbCreditStatementHTML(raw string) (ccbCreditParsedStatement, error) {
 	if err != nil {
 		return ccbCreditParsedStatement{}, err
 	}
+	return parseCcbCreditStatementTokens(tokens, "邮件")
+}
+
+func parseCcbCreditPDFLayoutText(raw string) (ccbCreditParsedStatement, error) {
+	return parseCcbCreditStatementTokens(plainTextTokens(raw), "PDF")
+}
+
+func parseCcbCreditStatementTokens(tokens []string, sourceLabel string) (ccbCreditParsedStatement, error) {
 	statement := ccbCreditParsedStatement{
 		Statement:  firstDateAfter(tokens, "本期账单日"),
 		Cycle:      firstCycleAfter(tokens, "账单周期"),
@@ -696,11 +730,23 @@ func parseCcbCreditStatementHTML(raw string) (ccbCreditParsedStatement, error) {
 	}
 	rows := parseCcbCreditRowsFromTokens(tokens)
 	if len(rows) == 0 {
-		return ccbCreditParsedStatement{}, errors.New("未从建设银行信用卡邮件中解析到交易明细")
+		return ccbCreditParsedStatement{}, fmt.Errorf("未从建设银行信用卡%s中解析到交易明细", sourceLabel)
 	}
 	statement.Rows = rows
 	statement.RawRowCount = len(rows)
 	return statement, nil
+}
+
+func plainTextTokens(raw string) []string {
+	text := strings.ReplaceAll(raw, "\u00a0", " ")
+	tokens := []string{}
+	for _, field := range strings.Fields(text) {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			tokens = append(tokens, field)
+		}
+	}
+	return tokens
 }
 
 func htmlTextTokens(raw string) ([]string, error) {
@@ -729,22 +775,25 @@ func htmlTextTokens(raw string) ([]string, error) {
 }
 
 func parseCcbCreditRowsFromTokens(tokens []string) []ccbCreditRow {
-	start := 0
+	start := -1
 	for index, token := range tokens {
 		if token == "【交易明细】" {
 			start = index
 			break
 		}
 	}
+	if start < 0 {
+		return nil
+	}
 	rows := []ccbCreditRow{}
-	dateRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	dateRe := regexp.MustCompile(`^\d{4}[-/]\d{2}[-/]\d{2}$`)
 	cardRe := regexp.MustCompile(`^\d{4}$`)
 	moneyRe := regexp.MustCompile(`^-?[\d,]+\.\d{2}$`)
 	for i := start; i+7 < len(tokens); i++ {
 		if !dateRe.MatchString(tokens[i]) || !dateRe.MatchString(tokens[i+1]) || !cardRe.MatchString(tokens[i+2]) {
 			continue
 		}
-		row := ccbCreditRow{TransactionDate: tokens[i], PostingDate: tokens[i+1], CardLast4: tokens[i+2], RowNumber: len(rows) + 1}
+		row := ccbCreditRow{TransactionDate: normalizeCcbCreditDate(tokens[i]), PostingDate: normalizeCcbCreditDate(tokens[i+1]), CardLast4: tokens[i+2], RowNumber: len(rows) + 1}
 		j := i + 3
 		descriptionParts := []string{}
 		for j < len(tokens) && !ccbCreditCurrencyToken(tokens[j]) {

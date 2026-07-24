@@ -18,6 +18,14 @@ var (
 )
 
 func extractPDFPlainText(inputFile string) (string, error) {
+	data, err := os.ReadFile(inputFile)
+	if err != nil {
+		return "", err
+	}
+	return extractPDFPlainTextFromBytes(data)
+}
+
+func extractPDFPlainTextFromBytes(data []byte) (string, error) {
 	pdfiumPoolOnce.Do(func() {
 		pdfiumPool, pdfiumPoolErr = webassembly.Init(webassembly.Config{
 			MaxIdle:      2,
@@ -35,10 +43,6 @@ func extractPDFPlainText(inputFile string) (string, error) {
 	}
 	defer instance.Close()
 
-	data, err := os.ReadFile(inputFile)
-	if err != nil {
-		return "", err
-	}
 	doc, err := instance.OpenDocument(&requests.OpenDocument{File: &data})
 	if err != nil {
 		return "", err
