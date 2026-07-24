@@ -280,6 +280,11 @@ func (r *BillImporterRegistry) Detect(filename string, content []byte, override 
 	if len(content) > 32768 {
 		sample = string(content[:32768])
 	}
+	if ext == ".pdf" && strings.HasPrefix(sample, "%PDF-") {
+		if text, err := extractPDFPlainTextFromBytes(content); err == nil && strings.TrimSpace(text) != "" {
+			sample += "\n" + text
+		}
+	}
 	for _, importer := range r.ordered {
 		if detection, ok := importer.Detect(filename, sample, ext); ok {
 			return detection, nil
