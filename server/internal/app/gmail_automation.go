@@ -169,6 +169,7 @@ type gmailImportCandidate struct {
 	Upload           importUpload
 	ProviderOverride string
 	Error            error
+	EmailFallback    bool
 }
 
 type gmailAPI interface {
@@ -809,9 +810,9 @@ func (s *Server) notifyGmailImportProcessed(ctx context.Context, messageID, labe
 }
 
 func (s *Server) previewGmailCandidate(ctx context.Context, item GmailPendingImport, candidate gmailImportCandidate, raw []byte) (GmailPendingImport, error) {
-	original := &importUpload{Filename: "gmail-" + safeSuffix(item.MessageID) + ".eml", Content: raw}
-	if strings.EqualFold(filepath.Ext(candidate.Upload.Filename), ".eml") && bytes.Equal(candidate.Upload.Content, raw) {
-		original = nil
+	var original *importUpload
+	if candidate.EmailFallback {
+		original = &importUpload{Filename: "gmail-" + safeSuffix(item.MessageID) + ".eml", Content: raw}
 	}
 	preview, previewErr := ginH(nil), candidate.Error
 	if previewErr == nil {
@@ -990,7 +991,7 @@ func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessag
 	if usable == 0 && !duplicateSkipped {
 		filename := "gmail-" + safeSuffix(messageID) + ".eml"
 		if _, err := s.importerRegistry().Detect(filename, raw, ""); err == nil {
-			candidates = append(candidates, gmailImportCandidate{Upload: importUpload{Filename: filename, Content: raw}})
+			candidates = append(candidates, gmailImportCandidate{Upload: importUpload{Filename: filename, Content: raw}, EmailFallback: true})
 		}
 	}
 	return candidates, duplicateSkipped
