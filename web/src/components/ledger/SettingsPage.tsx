@@ -91,7 +91,7 @@ export function SettingsPage({
     <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} showToast={showToast} />
 
     <section className="card p-5 md:p-6">
-      <div className="border-l-4 border-brand pl-4">
+      <div className="border-b border-line pb-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">valuation</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">汇总估值</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">用于首页、趋势看板、净资产和损益汇总。单个账户余额仍显示账户原币。</p>
@@ -105,7 +105,7 @@ export function SettingsPage({
     </section>
 
     <section className="card p-5 md:p-6">
-      <div className="border-l-4 border-brand pl-4">
+      <div className="border-b border-line pb-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">appearance</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">外观设置</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">默认跟随系统深浅色，也可以在这里手动固定。设置只保存在当前浏览器。</p>
@@ -131,7 +131,7 @@ export function SettingsPage({
     </section>
 
     <section className="card p-5 md:p-6">
-      <div className="border-l-4 border-brand pl-4">
+      <div className="border-b border-line pb-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">mobile navigation</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">底部 Tab</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">选择移动端底部栏展示哪些页面，最多 5 个。未展示的页面仍可从左上角菜单进入。</p>
@@ -155,7 +155,7 @@ export function SettingsPage({
     </section>
 
     <section className="card p-5 md:p-6">
-      <div className="border-l-4 border-brand pl-4">
+      <div className="border-b border-line pb-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">privacy defaults</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">默认显示设置</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">控制打开账本时哪些金额默认可见。设置只保存在当前浏览器，不写入 Beancount 文件。</p>
@@ -326,7 +326,7 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
   }
 
   return <section className="card p-5 md:p-6">
-    <div className="flex flex-col gap-4 border-l-4 border-brand pl-4 md:flex-row md:items-start md:justify-between">
+    <div className="flex flex-col gap-4 border-b border-line pb-4 md:flex-row md:items-start md:justify-between">
       <div>
         <div className="text-xs uppercase tracking-[0.24em] text-stone">request endpoints</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">请求地址管理</h1>
@@ -454,7 +454,7 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
   }
 
   return <section className="card p-5 md:p-6">
-    <div className="border-l-4 border-brand pl-4">
+    <div className="border-b border-line pb-4">
       <div className="text-xs uppercase tracking-[0.24em] text-stone">quick unlock</div>
       <h1 className="mt-2 font-serif text-3xl font-medium">本机快速解锁</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "当前浏览器已保存一个加密设备凭证；输入本机码即可快速查看敏感数据。" : "为当前浏览器设置一个独立解锁码。移动端可用纯数字，桌面端可用任意口令。"}</p>
@@ -515,7 +515,7 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast
   }
 
   return <section className="card p-5 md:p-6">
-    <div className="border-l-4 border-brand pl-4">
+    <div className="border-b border-line pb-4">
       <div className="text-xs uppercase tracking-[0.24em] text-stone">offline unlock</div>
       <h1 className="mt-2 font-serif text-3xl font-medium">离线解锁</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "已为这个浏览器保存加密缓存；断网时可用离线解锁码查看余额和净资产。" : "设置后，完整敏感缓存会加密保存在当前浏览器，用于断网冷启动查看。"}</p>
@@ -553,7 +553,7 @@ function LocalAccessPanel() {
       : "适合跨网络访问；请确认这个域名会长期保留，避免 Passkey Origin 变化。";
 
   return <section className="card p-5 md:p-6">
-    <div className="border-l-4 border-brand pl-4">
+    <div className="border-b border-line pb-4">
       <div className="text-xs uppercase tracking-[0.24em] text-stone">local access</div>
       <h1 className="mt-2 font-serif text-3xl font-medium">本地优先访问</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{phoneHint}</p>

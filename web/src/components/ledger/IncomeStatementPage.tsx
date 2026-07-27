@@ -11,7 +11,7 @@ import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, P
 export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, valuationCurrency, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; valuationCurrency: string; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
   return <>
     <section className="card overflow-hidden p-0">
-      <div className="border-l-4 border-brand p-4 md:p-5">
+      <div className="border-b border-line p-4 md:p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-[11px] uppercase tracking-[0.2em] text-stone">income statement</div>

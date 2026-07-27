@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, CalendarDays, Eye, EyeOff, PieChart, WalletCards } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Check, Eye, EyeOff } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
@@ -18,236 +18,171 @@ type HomePageProps = {
   onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void;
 };
 
-export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, expenseAnalytics, onPrivacyChange, onSelectCategory }: HomePageProps) {
+export function HomePage({ summary, valuationCurrency, privacySettings, sensitiveUnlocked, creditCards, expenseAnalytics, accountStatuses, onPrivacyChange, onSelectCategory }: HomePageProps) {
   const showAmounts = privacySettings.showHomeSummaryAmounts;
   const displayCurrency = summary?.currency ?? valuationCurrency;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
   const mask = (value: string, sensitive = true) => sensitive ? canShowSensitive ? value : "••••••" : showAmounts ? value : "••••••";
-  const visibleExpenseCategories = expenseAnalytics.filter((row) => row.account !== "Expenses:Unknown");
-  const topCategories = visibleExpenseCategories.slice(0, 3);
-  const topCategory = topCategories[0];
   const dayRows = Object.entries(summary?.days ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const visibleExpenseCategories = expenseAnalytics.filter((row) => row.account !== "Expenses:Unknown");
+  const topCategories = visibleExpenseCategories.slice(0, 6);
   const income = summary?.income ?? 0;
   const expense = summary?.expense ?? 0;
   const net = summary?.net ?? 0;
-  const averageExpense = dayRows.length ? expense / dayRows.length : 0;
   const expenseRatio = income > 0 ? expense / income : null;
   const savingsRate = income > 0 ? net / income : null;
   const expenseDays = dayRows.filter(([, value]) => value.expense > 0).length;
-  const latestDate = dayRows.at(-1)?.[0] ?? "";
+  const averageExpense = expenseDays ? expense / expenseDays : 0;
+  const latestDate = dayRows.at(-1)?.[0] ?? "暂无记录";
   const lastSevenExpense = sumExpense(dayRows.slice(-7));
   const previousSevenExpense = sumExpense(dayRows.slice(-14, -7));
   const weeklyExpenseDelta = previousSevenExpense > 0 ? (lastSevenExpense - previousSevenExpense) / previousSevenExpense : null;
-  const topThreeShare = topCategories.slice(0, 3).reduce((sum, row) => sum + (row.share ?? 0), 0);
-  const netTone = net < 0 ? "amount-expense" : "amount-gold";
-  const dashboardGridClass = "grid min-w-0 gap-3 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]";
+  const attentionAccounts = accountStatuses.filter((row) => row.status === "red" || row.status === "yellow");
+  const openCreditCards = creditCards.filter((row) => row.outstanding > 0);
 
-  return <>
-    <div className={`${dashboardGridClass} xl:items-stretch`}>
-      <section className="card flex min-w-0 flex-col overflow-hidden p-3 md:p-4">
-        <div className="flex min-h-16 items-start justify-between gap-4">
-          <SectionTitle eyebrow="当前周期" title="本期总览" detail="收入、支出、结余和支出速度集中查看。" />
-          <button className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-line bg-panel text-brand hover:bg-tag" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
-            {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-        <div className="rounded-xl bg-paper p-3 shadow-[inset_0_0_0_1px_var(--line)]">
-          <div className="ledger-label">本期结余</div>
-          <div className={`mt-1 break-words font-serif text-2xl font-medium leading-none tracking-[-0.012em] md:text-3xl ${netTone}`}>{mask(formatValuation(net / 100, displayCurrency))}</div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <FlowMetric label="收入" value={mask(formatValuation(income / 100, displayCurrency))} tone="amount-income" />
-            <FlowMetric label="支出" value={mask(formatValuation(expense / 100, displayCurrency), false)} tone="amount-expense" />
-            <FlowMetric label="日均支出" value={mask(formatValuation(averageExpense / 100, displayCurrency), false)} tone="amount-gold" />
+  return <div className="home-dashboard home-console">
+    <section className="border-b border-line bg-panel">
+      <div className="flex min-h-12 items-center justify-between gap-4 border-b border-line px-3 py-2 md:px-4 xl:px-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-sm font-semibold text-ink">本期头寸</h2>
+            <span className="text-[11px] tabular-nums text-stone">账本截止 {latestDate}</span>
           </div>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <SignalCard icon={<WalletCards className="h-4 w-4" />} label="支出占收入" value={expenseRatio == null ? "暂无收入" : formatPercent(expenseRatio)} detail={savingsRate == null ? "还没有可比口径" : `储蓄率 ${formatPercent(savingsRate)}`} tone={expenseRatio != null && expenseRatio > 1 ? "amount-expense" : "amount-income"} />
-          <SignalCard icon={<PieChart className="h-4 w-4" />} label="消费集中度" value={topCategories.length ? formatPercent(topThreeShare) : "暂无分类"} detail={topCategories.length ? "前三类支出占比" : "本期暂无支出分类"} tone="amount-gold" />
-          <SignalCard icon={<CalendarDays className="h-4 w-4" />} label="记录节奏" value={dayRows.length ? `${expenseDays}/${dayRows.length} 天` : "暂无记录"} detail={latestDate ? `最近更新 ${latestDate.slice(5)}` : "等待本期数据"} tone="text-warm" />
+        <button className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-stone hover:bg-tag hover:text-ink" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !privacySettings.showHomeSummaryAmounts)} title={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={privacySettings.showHomeSummaryAmounts ? "隐藏首页金额" : "显示首页金额"}>
+          {privacySettings.showHomeSummaryAmounts ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5">
+        <PositionMetric label="本期结余" value={mask(formatValuation(net / 100, displayCurrency))} detail={savingsRate == null ? "暂无储蓄率" : `储蓄率 ${formatPercent(savingsRate)}`} alert={net < 0} primary />
+        <PositionMetric label="收入" value={mask(formatValuation(income / 100, displayCurrency))} detail={`${dayRows.length} 个记账日`} />
+        <PositionMetric label="支出" value={mask(formatValuation(expense / 100, displayCurrency), false)} detail={expenseRatio == null ? "暂无收入对照" : `收入占用 ${formatPercent(expenseRatio)}`} alert={expenseRatio != null && expenseRatio > 1} />
+        <PositionMetric label="消费日均" value={mask(formatValuation(averageExpense / 100, displayCurrency), false)} detail={`${expenseDays} 个消费日`} />
+        <PositionMetric label="近 7 日支出" value={mask(formatValuation(lastSevenExpense / 100, displayCurrency), false)} detail={weeklyExpenseDelta == null ? "暂无前期对照" : `环比 ${formatSignedPercent(weeklyExpenseDelta)}`} alert={weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3} />
+      </div>
+    </section>
+
+    <section className="grid border-b border-line xl:grid-cols-[minmax(0,6fr)_minmax(17rem,3fr)_minmax(17rem,3fr)] xl:items-start">
+      <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
+        <WorkbenchHeading title="日收支节奏" detail="柱形为支出，折线为收入；点击下方流水继续核对。" meta={`${dayRows.length} 天`} />
+        <div className="h-[18rem] min-w-0 px-2 pb-3 pt-1 md:h-[20rem] md:px-3">
+          <DailyTrend rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
         </div>
-      </section>
-      <DailyTrendCard rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
-    </div>
+      </div>
 
-    <div className={`${dashboardGridClass} mt-4 xl:items-stretch`}>
-      <CategoryFocus rows={topCategories} totalExpense={expense} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
-      <RhythmBrief lastSevenExpense={lastSevenExpense} weeklyExpenseDelta={weeklyExpenseDelta} topCategory={topCategory} dayRows={dayRows} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
-    </div>
+      <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
+        <WorkbenchHeading title="支出分类账" detail="按本期支出金额排序，优先检查高集中分类。" meta={`${topCategories.length} 类`} />
+        <div className="divide-y divide-line">
+          {topCategories.length ? topCategories.map((row, index) => {
+            const content = <>
+              <span className="w-6 shrink-0 text-[11px] tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-ink">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
+                <span className="mt-1 block h-1 overflow-hidden bg-line"><span className="block h-full bg-ink" style={{ width: `${Math.max(3, Math.min(100, (row.share ?? 0) * 100))}%` }} /></span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-xs font-semibold tabular-nums text-ink">{showAmounts ? formatValuation(row.amount / 100, displayCurrency) : "••••••"}</span>
+                <span className="mt-0.5 block text-[10px] tabular-nums text-stone">{row.txCount} 笔 · {formatPercent(row.share)}</span>
+              </span>
+            </>;
+            return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-2.5 px-3 py-3 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-4" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-2.5 px-3 py-3 md:px-4">{content}</div>;
+          }) : <EmptyRail text="本期没有可分析的支出分类。" />}
+        </div>
+      </div>
 
-  </>;
-}
-
-function DailyTrendCard({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
-  const label = rows.length ? `${rows[0][0].slice(5)} ~ ${rows.at(-1)?.[0].slice(5)}` : "本期";
-  const { ref, ready } = useDeferredChartReady(rows.length > 0 && showAmounts);
-  return <section className="card flex h-full min-w-0 flex-col overflow-hidden p-3 md:p-4 xl:min-h-0 max-xl:min-h-[280px]">
-    <div className="flex min-h-16 items-start justify-between gap-3">
-      <SectionTitle eyebrow="日趋势" title="日收支趋势" detail={
-        <span className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--color-expense))]" />支出柱</span>
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[rgb(var(--color-income))]" />收入线</span>
-        </span>
-      } />
-      <span className="ledger-chip rounded-full px-2.5 py-1 text-xs">
-        {label}
-      </span>
-    </div>
-    {rows.length ? showAmounts ? <div ref={ref} className="ledger-chart min-h-[190px] min-w-0 max-w-full flex-1 xl:min-h-0">
-      {ready ? <Suspense fallback={<EmptyPanel text="正在准备趋势图…" className="min-h-[190px]" />}>
-        <LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} />
-      </Suspense> : <EmptyPanel text="趋势图稍后加载" className="min-h-[190px]" />}
-    </div> : <EmptyPanel text="金额已隐藏，显示金额后可查看趋势与明细。" className="mt-0 min-h-[190px] flex-1 xl:min-h-0" /> : <EmptyPanel text="暂无日趋势数据" className="mt-0 min-h-[190px] flex-1 xl:min-h-0" />}
-  </section>;
-}
-
-function SectionTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail?: React.ReactNode }) {
-  return <div className="min-w-0">
-    <div className="ledger-label text-[11px] font-semibold text-stone">{eyebrow}</div>
-    <h2 className="mt-1 text-wrap-balance text-xl font-semibold leading-tight tracking-normal text-warm md:text-[1.375rem]">{title}</h2>
-    {detail && <div className="mt-1.5 text-xs leading-5 text-olive">{detail}</div>}
+      <InspectionBench
+        accountAttention={attentionAccounts.length}
+        openCreditCards={openCreditCards.length}
+        weeklyExpenseDelta={weeklyExpenseDelta}
+        topCategory={topCategories[0]}
+        showAmounts={showAmounts}
+        valuationCurrency={displayCurrency}
+        onSelectCategory={onSelectCategory}
+      />
+    </section>
   </div>;
 }
 
-function EmptyPanel({ text, className = "" }: { text: string; className?: string }) {
-  return <div className={`grid place-items-center rounded-xl bg-paper px-3 py-4 text-center text-sm text-stone shadow-[inset_0_0_0_1px_var(--line)] ${className}`}>{text}</div>;
+function PositionMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: string; alert?: boolean; primary?: boolean }) {
+  return <div className={`min-w-0 border-b border-r border-line px-3 py-3 last:border-r-0 md:border-b-0 md:px-4 ${primary ? "col-span-2 md:col-span-1" : ""}`}>
+    <div className="text-[10px] font-medium text-stone">{label}</div>
+    <div className={`mt-1 truncate font-semibold tracking-[-0.02em] tabular-nums ${primary ? "text-[1.55rem]" : "text-lg"} ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
+    <div className="mt-0.5 truncate text-[10px] text-stone">{detail}</div>
+  </div>;
+}
+
+function WorkbenchHeading({ title, detail, meta }: { title: string; detail: string; meta: string }) {
+  return <div className="flex min-h-[4.5rem] items-start justify-between gap-3 border-b border-line px-3 py-3 md:px-4">
+    <div className="min-w-0">
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <p className="mt-1 truncate text-[11px] text-stone">{detail}</p>
+    </div>
+    <span className="shrink-0 text-[11px] tabular-nums text-stone">{meta}</span>
+  </div>;
+}
+
+function DailyTrend({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
+  const ready = useDeferredChartReady(showAmounts && rows.length > 0);
+  if (!showAmounts) return <div className="grid h-full place-items-center text-sm text-stone">金额已隐藏</div>;
+  if (!rows.length) return <div className="grid h-full place-items-center text-sm text-stone">当前周期暂无日收支数据</div>;
+  if (!ready) return <div className="grid h-full place-items-center text-sm text-stone">正在准备趋势图…</div>;
+  return <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone">正在准备趋势图…</div>}><LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} /></Suspense>;
+}
+
+function InspectionBench({ accountAttention, openCreditCards, weeklyExpenseDelta, topCategory, showAmounts, valuationCurrency, onSelectCategory }: { accountAttention: number; openCreditCards: number; weeklyExpenseDelta: number | null; topCategory?: ExpenseCategoryAnalytics; showAmounts: boolean; valuationCurrency: string; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
+  const checks = [
+    { label: "账户状态", value: accountAttention ? `${accountAttention} 个待处理` : "全部正常", danger: accountAttention > 0, detail: accountAttention ? "存在断言或更新异常" : "未发现红黄状态账户" },
+    { label: "信用卡敞口", value: openCreditCards ? `${openCreditCards} 张有余额` : "无待还余额", danger: false, detail: openCreditCards ? "进入账户页核对到期日" : "本期无需处理" },
+    { label: "支出速度", value: weeklyExpenseDelta == null ? "缺少对照" : formatSignedPercent(weeklyExpenseDelta), danger: weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3, detail: weeklyExpenseDelta == null ? "再积累一个对照周期" : "最近 7 天相对前 7 天" },
+  ];
+  return <aside className="min-w-0 bg-[oklch(0.985_0_0)]">
+    <WorkbenchHeading title="检查台" detail="异常优先，正常状态保持安静。" meta={`${checks.filter((row) => row.danger).length} 异常`} />
+    <div className="divide-y divide-line">
+      {checks.map((row) => <div key={row.label} className="flex items-start gap-3 px-3 py-3 md:px-4">
+        <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${row.danger ? "bg-destructive/10 text-destructive" : "bg-tag text-olive"}`}>
+          {row.danger ? <AlertTriangle className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline justify-between gap-2"><span className="text-[11px] text-stone">{row.label}</span><strong className={`text-xs tabular-nums ${row.danger ? "amount-danger" : "text-ink"}`}>{row.value}</strong></span>
+          <span className="mt-1 block text-[10px] text-stone">{row.detail}</span>
+        </span>
+      </div>)}
+      {topCategory && <button type="button" className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-tag md:px-4" onClick={onSelectCategory ? () => onSelectCategory(topCategory.account, "prefix") : undefined} disabled={!onSelectCategory}>
+        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-tag text-olive">{weeklyExpenseDelta != null && weeklyExpenseDelta > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] text-stone">最大支出入口</span>
+          <strong className="mt-0.5 block truncate text-xs text-ink">{formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias)}</strong>
+          <span className="mt-1 block text-[10px] text-stone">{showAmounts ? formatValuation(topCategory.amount / 100, valuationCurrency) : "••••••"} · {topCategory.txCount} 笔</span>
+        </span>
+      </button>}
+    </div>
+  </aside>;
+}
+
+function EmptyRail({ text }: { text: string }) {
+  return <div className="grid min-h-40 place-items-center px-4 text-center text-xs text-stone">{text}</div>;
 }
 
 function useDeferredChartReady(enabled: boolean) {
-  const ref = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
-
+  const timeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (!enabled) {
       setReady(false);
       return;
     }
-    const element = ref.current;
-    if (!element || ready) return;
-
-    let idleId: number | null = null;
-    let delayId: number | null = null;
     const markReady = () => setReady(true);
-    const scheduleReady = () => {
-      if (delayId != null || idleId != null) return;
-      delayId = window.setTimeout(() => {
-        delayId = null;
-        if (window.requestIdleCallback) idleId = window.requestIdleCallback(markReady, { timeout: 2400 });
-        else markReady();
-      }, 900);
-    };
-    const observer = "IntersectionObserver" in window ? new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) scheduleReady();
-    }, { rootMargin: "160px" }) : null;
-
-    observer?.observe(element);
-    if (!observer) {
-      scheduleReady();
+    if (window.requestIdleCallback) {
+      const idleId = window.requestIdleCallback(markReady, { timeout: 900 });
+      return () => window.cancelIdleCallback?.(idleId);
     }
-
+    timeoutRef.current = window.setTimeout(markReady, 80);
     return () => {
-      observer?.disconnect();
-      if (delayId != null) window.clearTimeout(delayId);
-      if (idleId != null) {
-        if (window.cancelIdleCallback) window.cancelIdleCallback(idleId);
-        else window.clearTimeout(idleId);
-      }
+      if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current);
     };
-  }, [enabled, ready]);
-
-  return { ref, ready };
-}
-
-function FlowMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="min-w-0 rounded-lg bg-panel px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--line)]">
-    <div className="text-[11px] font-semibold text-stone">{label}</div>
-    <div className={`mt-0.5 truncate text-sm font-semibold tabular-nums ${tone}`}>{value}</div>
-  </div>;
-}
-
-function SignalCard({ icon, label, value, detail, tone }: { icon: React.ReactNode; label: string; value: string; detail: string; tone: string }) {
-  return <div className="min-w-0 rounded-xl border border-line bg-panel p-2.5">
-    <div className="flex items-center gap-2 text-xs font-medium text-stone">{icon}<span>{label}</span></div>
-    <div className={`mt-1 truncate text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-    <div className="truncate text-xs text-stone">{detail}</div>
-  </div>;
-}
-
-function CategoryFocus({ rows, totalExpense, showAmounts, valuationCurrency, onSelectCategory }: { rows: ExpenseCategoryAnalytics[]; totalExpense: number; showAmounts: boolean; valuationCurrency: string; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
-  return <section className="card min-w-0 overflow-hidden p-3 md:p-4">
-    <div className="flex min-h-14 items-start justify-between gap-3">
-      <SectionTitle eyebrow="支出结构" title="分类分布" />
-      <span className="ledger-chip shrink-0 rounded-full px-2.5 py-1 text-xs">{rows.length ? `${rows.length} 类` : "暂无"}</span>
-    </div>
-    <div className="mt-2 space-y-2">
-      {rows.length ? rows.map((row, index) => {
-        const share = row.share ?? (totalExpense > 0 ? row.amount / totalExpense : 0);
-        const label = formatAccountOptionLabel(row.account, row.label, row.alias);
-        const content = <><div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-warm">{label}</div>
-            <div className="mt-1 text-xs text-stone">{row.txCount} 笔 · {formatPercent(share)}</div>
-          </div>
-          <div className="shrink-0 text-right text-sm font-semibold tabular-nums text-warm">{showAmounts ? formatValuation(row.amount / 100, valuationCurrency) : "••••••"}</div>
-        </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
-          <div className={index === 0 ? "h-full rounded-full bg-[rgb(var(--color-expense))]" : "h-full rounded-full bg-brand"} style={{ width: `${Math.max(4, Math.min(100, share * 100))}%` }} />
-        </div></>;
-        if (!onSelectCategory) return <div key={row.account} className="rounded-xl bg-paper p-2.5 shadow-[inset_0_0_0_1px_var(--line)]">{content}</div>;
-        return <button key={row.account} type="button" className="w-full rounded-xl bg-paper p-2.5 text-left shadow-[inset_0_0_0_1px_var(--line)] hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button>;
-      }) : <EmptyPanel text="本期还没有支出分类。" />}
-    </div>
-  </section>;
-}
-
-function RhythmBrief({ lastSevenExpense, weeklyExpenseDelta, topCategory, dayRows, showAmounts, valuationCurrency, onSelectCategory }: { lastSevenExpense: number; weeklyExpenseDelta: number | null; topCategory?: ExpenseCategoryAnalytics; dayRows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
-  const recentRows = dayRows.slice(-5).reverse();
-  const weeklyTone = weeklyExpenseDelta != null && weeklyExpenseDelta > 0 ? "amount-expense" : "amount-income";
-  return <section className="card min-w-0 overflow-hidden p-3 md:p-4">
-    <div className="min-h-14">
-      <SectionTitle eyebrow="近期变化" title="动向摘要" />
-    </div>
-    <div className="mt-2 grid gap-2">
-      <BriefRow
-        title="最近 7 天支出"
-        value={showAmounts ? formatValuation(lastSevenExpense / 100, valuationCurrency) : "••••••"}
-        detail={weeklyExpenseDelta == null ? "暂无上个 7 天对照" : `较前 7 天 ${formatSignedPercent(weeklyExpenseDelta)}`}
-        tone={weeklyTone}
-        icon={weeklyExpenseDelta != null && weeklyExpenseDelta > 0 ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-      />
-      <BriefRow
-        title="最大的消费入口"
-        value={topCategory ? formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias) : "暂无分类"}
-        detail={topCategory ? `${topCategory.txCount} 笔 · ${formatPercent(topCategory.share ?? null)}` : "本期没有可分析的支出"}
-        tone="text-warm"
-        onClick={topCategory && onSelectCategory ? () => onSelectCategory(topCategory.account, "prefix") : undefined}
-      />
-    </div>
-    <div className="mt-2 rounded-xl bg-paper p-2.5 shadow-[inset_0_0_0_1px_var(--line)]">
-      <div className="mb-2 flex items-center justify-between gap-3 text-xs text-stone">
-        <span>最近记录日</span>
-        <span>{recentRows.length} 天</span>
-      </div>
-      <div className="space-y-2">
-        {recentRows.length ? recentRows.map(([date, value]) => <div key={date} className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-3 text-sm">
-          <span className="text-stone">{date.slice(5)}</span>
-          <div className="h-1.5 overflow-hidden rounded-full bg-line">
-            <div className="h-full rounded-full bg-[rgb(var(--color-expense))]" style={{ width: `${Math.max(3, Math.min(100, value.expense / Math.max(1, lastSevenExpense) * 100))}%` }} />
-          </div>
-          <span className="min-w-16 text-right text-xs tabular-nums text-warm">{showAmounts ? formatValuation(value.expense / 100, valuationCurrency) : "••••••"}</span>
-        </div>) : <div className="py-3 text-center text-sm text-stone">暂无最近记录。</div>}
-      </div>
-    </div>
-  </section>;
-}
-
-function BriefRow({ title, value, detail, tone, icon, onClick }: { title: string; value: string; detail: string; tone: string; icon?: React.ReactNode; onClick?: () => void }) {
-  const content = <><div className="min-w-0 flex-1">
-    <div className="text-xs text-stone">{title}</div>
-    <div className={`mt-1 truncate text-sm font-semibold tabular-nums ${tone}`}>{value}</div>
-    <div className="mt-0.5 truncate text-xs text-stone">{detail}</div>
-  </div>{icon && <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-paper ${tone}`}>{icon}</span>}</>;
-  if (!onClick) return <div className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel p-2.5">{content}</div>;
-  return <button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-line bg-panel p-2.5 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper" onClick={onClick}>{content}</button>;
+  }, [enabled]);
+  return ready;
 }
 
 function sumExpense(rows: [string, { income: number; expense: number }][]) {

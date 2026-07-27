@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronLeft, ChevronRight, Coins, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, PiggyBank, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { Activity, BookOpen, ChevronLeft, ChevronRight, Coins, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { haptic } from "./ledger/haptics";
@@ -8,19 +8,35 @@ import { preloadLedgerRoute } from "./ledger/routePreload";
 import { defaultMobileTabHrefs, readMobileTabHrefs } from "./ledger/storage";
 import type { LedgerNavHref, ResolvedTheme, ThemeMode } from "./ledger/types";
 
-export const ledgerNavItems: { href: LedgerNavHref; label: string; icon: typeof Home; mobilePrimary: boolean }[] = [
-  { href: "/", label: "总览", icon: Home, mobilePrimary: true },
-  { href: "/dashboard", label: "看板", icon: LayoutDashboard, mobilePrimary: false },
-  { href: "/transactions", label: "流水", icon: List, mobilePrimary: true },
-  { href: "/accounts", label: "账户", icon: BookOpen, mobilePrimary: true },
-  { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false },
-  { href: "/editor", label: "编辑", icon: FileCode2, mobilePrimary: false },
-  { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false },
-  { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false },
-  { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false },
-  { href: "/currencies", label: "货币", icon: Coins, mobilePrimary: false },
-  { href: "/reconcile", label: "对账", icon: Scale, mobilePrimary: false },
-  { href: "/settings", label: "设置", icon: Settings, mobilePrimary: false },
+type LedgerNavGroup = "observe" | "record" | "manage";
+
+type LedgerNavItem = {
+  href: LedgerNavHref;
+  label: string;
+  icon: typeof Home;
+  mobilePrimary: boolean;
+  group: LedgerNavGroup;
+};
+
+export const ledgerNavItems: LedgerNavItem[] = [
+  { href: "/", label: "总览", icon: Home, mobilePrimary: true, group: "observe" },
+  { href: "/dashboard", label: "看板", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
+  { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false, group: "observe" },
+  { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false, group: "observe" },
+  { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false, group: "observe" },
+  { href: "/transactions", label: "流水", icon: List, mobilePrimary: true, group: "record" },
+  { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false, group: "record" },
+  { href: "/editor", label: "编辑", icon: FileCode2, mobilePrimary: false, group: "record" },
+  { href: "/accounts", label: "账户", icon: BookOpen, mobilePrimary: true, group: "manage" },
+  { href: "/currencies", label: "货币", icon: Coins, mobilePrimary: false, group: "manage" },
+  { href: "/reconcile", label: "对账", icon: Scale, mobilePrimary: false, group: "manage" },
+  { href: "/settings", label: "设置", icon: Settings, mobilePrimary: false, group: "manage" },
+];
+
+const navGroups: { id: LedgerNavGroup; label: string }[] = [
+  { id: "observe", label: "观察" },
+  { id: "record", label: "记录" },
+  { id: "manage", label: "管理" },
 ];
 
 const sidebarCollapsedKey = "ledger_sidebar_collapsed";
@@ -39,6 +55,10 @@ function readSidebarCollapsed() {
 function writeSidebarCollapsed(collapsed: boolean) {
   if (typeof window === "undefined") return;
   localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
+}
+
+function isActivePath(pathname: string, href: LedgerNavHref) {
+  return href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function AppShell({ children, pathname, routePending = false, onAdd, sensitiveUnlocked = false, passkeyEnabled = false, sensitiveUnlockAvailable = passkeyEnabled, sensitiveUnlockLabel = "解锁", sensitiveUnlockTitle = "使用 Face ID / Passkey 解锁敏感数据", onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; sensitiveUnlockAvailable?: boolean; sensitiveUnlockLabel?: string; sensitiveUnlockTitle?: string; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
@@ -133,106 +153,110 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
 
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
   const showingRouteProgress = routePending || Boolean(navPendingHref);
-
   return (
-    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(4rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none]">
+    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(3.5rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none] md:pt-0">
+      <a href="#main-content" className="skip-link">跳到主要内容</a>
       {showingRouteProgress && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
-      <header className="fixed inset-x-0 top-0 z-30 border-b border-line bg-panel/95 pt-[env(safe-area-inset-top)] text-ink backdrop-blur supports-[backdrop-filter]:bg-panel/85">
-        <div className="flex h-16 items-center justify-between px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-6">
-          <div className="flex min-w-0 items-center gap-3 md:w-64">
-            <button className="rounded-xl border border-line bg-paper p-2 text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label="打开侧边栏">
-              <Menu className="h-5 w-5" />
+      <header className="app-shell-header fixed inset-x-0 top-0 z-30 border-b border-line bg-panel pt-[env(safe-area-inset-top)] text-ink md:hidden">
+        <div className="flex h-14 items-center px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] md:h-12 md:px-3">
+          <div className="flex min-w-0 items-center gap-2.5 md:w-48 md:gap-2">
+            <button className="grid h-9 w-9 place-items-center rounded-md border border-line bg-paper text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label="打开侧边栏">
+              <Menu className="h-4.5 w-4.5" />
             </button>
-            <ClientNavLink href="/" onClick={(event) => handleNavClick(event, "/")} className="flex min-w-0 items-center gap-3 font-serif text-xl font-medium">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand text-paper"><PiggyBank className="h-5 w-5" /></span>
-              <span className="min-w-0">
-                <span className="block truncate leading-tight">我的账本</span>
-                <span className="block truncate text-[11px] font-normal uppercase tracking-[0.14em] text-stone">private ledger</span>
+            <ClientNavLink href="/" onClick={(event) => handleNavClick(event, "/")} className="flex min-w-0 items-center gap-2.5">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-primary-foreground md:h-7 md:w-7"><Activity className="h-4 w-4 md:h-3.5 md:w-3.5" /></span>
+              <span className="min-w-0 leading-tight">
+                <span className="block truncate text-sm font-semibold tracking-[-0.012em] md:text-[13px]">Ledger</span>
+                <span className="block truncate text-[10px] font-medium tracking-[0.08em] text-stone">个人财务工作台</span>
               </span>
             </ClientNavLink>
           </div>
-          <div className="hidden rounded-full border border-line bg-paper px-4 py-2 text-xs font-medium text-olive lg:block">资产 + 费用 = 负债 + 所有者权益 + 收入</div>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
             <ThemeMenu themeMode={themeMode} resolvedTheme={resolvedTheme} open={themeMenuOpen} onOpenChange={setThemeMenuOpen} onThemeModeChange={onThemeModeChange} />
             {(sensitiveUnlocked || sensitiveUnlockAvailable) && (
               <button
                 type="button"
                 onClick={sensitiveUnlocked ? onLockSensitive : onUnlockSensitive}
                 disabled={sensitiveUnlocked ? !onLockSensitive : !onUnlockSensitive}
-                className={`rounded-xl border border-line bg-paper px-3 py-2 text-sm ${sensitiveUnlocked ? "text-olive hover:bg-tag" : "text-warm hover:bg-tag"}`}
+                className={`inline-flex h-9 items-center gap-2 rounded-md border border-line bg-paper px-2.5 text-sm md:h-8 md:px-2 md:text-xs ${sensitiveUnlocked ? "text-olive hover:bg-tag" : "text-warm hover:bg-tag"}`}
                 aria-label={sensitiveUnlocked ? "锁定敏感数据" : "解锁敏感数据"}
                 aria-pressed={sensitiveUnlocked}
                 title={sensitiveUnlocked ? "重新隐藏敏感数据" : sensitiveUnlockTitle}
               >
-                {sensitiveUnlocked ? <UnlockKeyhole className="inline h-4 w-4 text-brand" /> : <LockKeyhole className="inline h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "重新隐藏" : sensitiveUnlockLabel}</span>
+                {sensitiveUnlocked ? <UnlockKeyhole className="h-4 w-4 text-brand" /> : <LockKeyhole className="h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? "重新隐藏" : sensitiveUnlockLabel}</span>
               </button>
             )}
           </div>
         </div>
       </header>
 
-      {(mobileMenuOpen || mobileMenuClosing) && <div className={`mobile-sidebar-backdrop fixed inset-0 z-40 bg-ink/35 md:hidden ${mobileMenuClosing ? "mobile-sidebar-backdrop-close" : ""}`} onClick={closeMobileMenu}>
-        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel px-[max(1rem,env(safe-area-inset-left))] pb-4 pr-4 pt-[calc(env(safe-area-inset-top)+1rem)] ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-2 font-serif text-xl font-medium"><span className="grid h-8 w-8 place-items-center rounded-xl bg-brand text-paper"><PiggyBank className="h-4 w-4" /></span> 我的账本</div>
-            <button className="rounded-xl border border-line bg-paper p-2 text-stone" onClick={closeMobileMenu} aria-label="关闭侧边栏"><X className="h-4 w-4" /></button>
+      {(mobileMenuOpen || mobileMenuClosing) && <div className={`mobile-sidebar-backdrop fixed inset-0 z-40 bg-ink/45 md:hidden ${mobileMenuClosing ? "mobile-sidebar-backdrop-close" : ""}`} onClick={closeMobileMenu}>
+        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel p-3 ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
+          <div className="mb-4 flex items-center justify-between border-b border-line pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-8 w-8 place-items-center rounded-md bg-brand text-primary-foreground"><Activity className="h-4 w-4" /></span>
+              <div><div className="text-sm font-semibold">Ledger</div><div className="text-[10px] text-stone">个人财务工作台</div></div>
+            </div>
+            <button className="grid h-9 w-9 place-items-center rounded-md border border-line bg-paper text-stone hover:bg-tag" onClick={closeMobileMenu} aria-label="关闭侧边栏"><X className="h-4 w-4" /></button>
           </div>
-          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-stone">全部功能</div>
-          <nav className="space-y-2">
-            {ledgerNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href;
-              return (
-                <ClientNavLink key={item.href} href={item.href} onClick={(event) => handleNavClick(event, item.href, closeMobileMenu)} className={`flex items-center justify-between rounded-2xl px-3 py-3 text-sm ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}>
-                  <span className="flex items-center gap-3"><Icon className="h-4 w-4" /> {item.label}</span>
-                  {!mobileTabHrefs.includes(item.href) && <span className={`rounded-full px-2 py-0.5 text-xs ${active ? "bg-paper/10 text-paper/70" : "bg-tag text-stone"}`}>更多</span>}
-                </ClientNavLink>
-              );
-            })}
-          </nav>
-          <div className="mt-6 rounded-2xl border border-line bg-paper p-4 text-xs leading-5 text-olive">
-            底部 Tab 可在设置页自定义；其他页面仍可从这里进入。
-          </div>
+          <GroupedNavigation pathname={pathname} mobileTabHrefs={mobileTabHrefs} onNavigate={(event, href) => handleNavClick(event, href, closeMobileMenu)} />
+          <div className="mt-5 border-t border-line px-1 pt-4 text-xs leading-5 text-stone">底部导航可在设置中调整，其他功能保留在这里。</div>
         </aside>
       </div>}
 
       <div className="app-shell-frame min-w-0 max-w-full md:flex">
-        <aside className={`app-shell-sidebar desktop-sidebar hidden shrink-0 overflow-hidden border-r border-line bg-panel/75 p-4 md:block ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
-          <div className="desktop-sidebar-header mb-3">
-            <div className="desktop-sidebar-heading min-w-0 overflow-hidden whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] text-stone">本月账页</div>
-            <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle rounded-xl border border-line bg-paper p-2 text-stone hover:bg-tag" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
-              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        <aside className={`app-shell-sidebar desktop-sidebar hidden shrink-0 flex-col overflow-hidden border-r border-line bg-panel md:flex ${sidebarCollapsed ? "desktop-sidebar-collapsed" : ""}`}>
+          <div className="desktop-sidebar-brand flex h-14 shrink-0 items-center border-b border-line px-2.5">
+            <ClientNavLink href="/" onClick={(event) => handleNavClick(event, "/")} className="desktop-sidebar-brand-link flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-brand text-primary-foreground"><Activity className="h-3.5 w-3.5" /></span>
+              <span className="desktop-sidebar-brand-copy min-w-0 leading-tight">
+                <span className="block truncate text-[13px] font-semibold tracking-[-0.012em]">Ledger</span>
+                <span className="block truncate text-[9px] font-medium tracking-[0.06em] text-stone">财务核对工作台</span>
+              </span>
+            </ClientNavLink>
+            <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle grid h-7 w-7 shrink-0 place-items-center rounded-md text-stone hover:bg-tag hover:text-ink" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
+              {sidebarCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
             </button>
           </div>
-          <nav className="space-y-2">
-            {ledgerNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href;
-              return (
-                <ClientNavLink key={item.href} href={item.href} title={sidebarCollapsed ? item.label : undefined} onClick={(event) => handleNavClick(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-2xl text-sm font-medium ${active ? "bg-brand text-paper shadow-sm" : "text-olive hover:bg-paper hover:text-ink"}`}>
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="desktop-sidebar-link-label min-w-0">{item.label}</span>
-                </ClientNavLink>
-              );
-            })}
-          </nav>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+            <GroupedNavigation pathname={pathname} collapsed={sidebarCollapsed} onNavigate={(event, href) => handleNavClick(event, href)} />
+          </div>
+          <div className="desktop-sidebar-utilities shrink-0 border-t border-line p-2">
+            <div className={`flex items-center gap-1.5 ${sidebarCollapsed ? "flex-col" : ""}`}>
+              <ThemeMenu themeMode={themeMode} resolvedTheme={resolvedTheme} open={themeMenuOpen} onOpenChange={setThemeMenuOpen} onThemeModeChange={onThemeModeChange} placement="top" compact={sidebarCollapsed} />
+              {(sensitiveUnlocked || sensitiveUnlockAvailable) && (
+                <button
+                  type="button"
+                  onClick={sensitiveUnlocked ? onLockSensitive : onUnlockSensitive}
+                  disabled={sensitiveUnlocked ? !onLockSensitive : !onUnlockSensitive}
+                  className={`inline-flex h-8 min-w-0 items-center justify-center gap-2 rounded-md px-2 text-xs text-olive hover:bg-tag hover:text-ink ${sidebarCollapsed ? "w-8" : "flex-1"}`}
+                  aria-label={sensitiveUnlocked ? "锁定敏感数据" : "解锁敏感数据"}
+                  aria-pressed={sensitiveUnlocked}
+                  title={sensitiveUnlocked ? "重新隐藏敏感数据" : sensitiveUnlockTitle}
+                >
+                  {sensitiveUnlocked ? <UnlockKeyhole className="h-3.5 w-3.5 shrink-0" /> : <LockKeyhole className="h-3.5 w-3.5 shrink-0" />}
+                  {!sidebarCollapsed && <span className="truncate">{sensitiveUnlocked ? "隐藏金额" : sensitiveUnlockLabel}</span>}
+                </button>
+              )}
+            </div>
+          </div>
         </aside>
 
-        <main data-ledger-main-scroll className="app-shell-main min-w-0 max-w-full flex-1 [overflow-x:clip] px-4 py-5 md:px-8 md:py-10">
-          <div className="mx-auto min-w-0 max-w-[1500px]">{children}</div>
+        <main id="main-content" data-ledger-main-scroll className="app-shell-main min-w-0 max-w-full flex-1 [overflow-x:clip] px-3 py-4 md:px-0 md:py-0">
+          <div className="min-w-0">{children}</div>
         </main>
       </div>
 
-      <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-14 w-14 place-items-center rounded-2xl bg-brand text-paper shadow-lg active:scale-95 md:bottom-8" aria-label="打开快捷操作">
-        <Plus />
+      <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.15rem+env(safe-area-inset-bottom))] right-4 z-30 inline-flex h-12 w-12 items-center justify-center gap-2 rounded-lg bg-brand text-primary-foreground active:scale-95 md:bottom-4 md:right-4 md:h-9 md:w-auto md:px-3" aria-label="打开快捷操作">
+        <Plus className="h-5 w-5 md:h-4 md:w-4" /><span className="hidden text-xs font-semibold md:inline">新建</span>
       </button>
-      <nav className={`mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel/95 px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 backdrop-blur md:hidden`} style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
+      <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1.5 md:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
         {mobilePrimaryNav.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href;
+          const active = isActivePath(pathname, item.href);
           return (
-            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); return; } handleNavClick(event, item.href); }} className={`mobile-bottom-tab mx-1 flex flex-col items-center gap-1 rounded-2xl py-2 text-xs font-medium transition-colors active:scale-95 ${active ? "mobile-bottom-tab-active bg-brand/10 text-brand" : "text-stone"}`}>
-              <Icon className={`h-5 w-5 ${active ? "scale-110" : ""}`} /> {item.label}
+            <ClientNavLink key={item.href} href={item.href} onClick={(event) => { if (active) { event.preventDefault(); onActiveRouteTap?.(); return; } handleNavClick(event, item.href); }} className={`mobile-bottom-tab mx-1 flex min-h-14 flex-col items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-medium active:scale-95 ${active ? "mobile-bottom-tab-active text-brand" : "text-stone"}`}>
+              <Icon className="h-4.5 w-4.5" /> {item.label}
             </ClientNavLink>
           );
         })}
@@ -241,7 +265,26 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
   );
 }
 
-function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeChange }: { themeMode: ThemeMode; resolvedTheme: ResolvedTheme; open: boolean; onOpenChange: (open: boolean) => void; onThemeModeChange: (mode: ThemeMode) => void }) {
+function GroupedNavigation({ pathname, mobileTabHrefs = [], collapsed = false, onNavigate }: { pathname: string; mobileTabHrefs?: LedgerNavHref[]; collapsed?: boolean; onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: LedgerNavHref) => void }) {
+  return <nav className="space-y-3">
+    {navGroups.map((group) => <div key={group.id} className="desktop-nav-group">
+      <div className="desktop-nav-group-label mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-stone">{group.label}</div>
+      <div className="space-y-0.5">
+        {ledgerNavItems.filter((item) => item.group === group.id).map((item) => {
+          const Icon = item.icon;
+          const active = isActivePath(pathname, item.href);
+          return <ClientNavLink key={item.href} href={item.href} title={collapsed ? item.label : undefined} onClick={(event) => onNavigate(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-md text-[13px] font-medium ${active ? "desktop-sidebar-link-active bg-tag text-ink" : "text-olive hover:bg-paper hover:text-ink"}`}>
+            <Icon className={`h-4 w-4 shrink-0 ${active ? "text-brand" : "text-stone"}`} />
+            <span className="desktop-sidebar-link-label min-w-0">{item.label}</span>
+            {!collapsed && mobileTabHrefs.length > 0 && !mobileTabHrefs.includes(item.href) && <span className="ml-auto text-[10px] text-stone">更多</span>}
+          </ClientNavLink>;
+        })}
+      </div>
+    </div>)}
+  </nav>;
+}
+
+function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeChange, placement = "bottom", compact = false }: { themeMode: ThemeMode; resolvedTheme: ResolvedTheme; open: boolean; onOpenChange: (open: boolean) => void; onThemeModeChange: (mode: ThemeMode) => void; placement?: "top" | "bottom"; compact?: boolean }) {
   const activeOption = themeOptions.find((option) => option.value === themeMode) ?? themeOptions[0];
   const ActiveIcon = activeOption.icon;
   const title = `主题：${activeOption.label}，当前${resolvedTheme === "dark" ? "深色" : "浅色"}`;
@@ -256,7 +299,7 @@ function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeCh
     <div className="relative">
       <button
         type="button"
-        className="rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag"
+        className={`inline-flex h-9 items-center justify-center gap-2 rounded-md border border-line bg-paper px-2.5 text-sm text-warm hover:bg-tag md:h-8 md:px-2 md:text-xs ${compact ? "w-8" : ""}`}
         onClick={() => {
           haptic(4);
           onOpenChange(!open);
@@ -266,10 +309,10 @@ function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeCh
         aria-expanded={open}
         title={title}
       >
-        <ActiveIcon className="inline h-4 w-4 text-brand" /> <span className="hidden sm:inline">{activeOption.label}</span>
+        <ActiveIcon className="h-4 w-4 text-brand" /> {!compact && <span className="hidden lg:inline">{activeOption.label}</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-36 rounded-2xl border border-line bg-panel p-1.5 text-sm shadow-lg" role="menu">
+        <div className={`absolute right-0 z-50 w-36 rounded-md border border-line bg-panel p-1.5 text-sm shadow-lg ${placement === "top" ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]"}`} role="menu">
           {themeOptions.map((option) => {
             const Icon = option.icon;
             const active = themeMode === option.value;
@@ -277,12 +320,12 @@ function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeCh
               <button
                 key={option.value}
                 type="button"
-                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left ${active ? "bg-brand text-paper" : "text-olive hover:bg-paper hover:text-ink"}`}
+                className={`flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left ${active ? "bg-tag text-ink" : "text-olive hover:bg-paper hover:text-ink"}`}
                 onClick={() => chooseTheme(option.value)}
                 role="menuitemradio"
                 aria-checked={active}
               >
-                <Icon className={`h-4 w-4 ${active ? "text-paper" : "text-brand"}`} />
+                <Icon className={`h-4 w-4 ${active ? "text-brand" : "text-stone"}`} />
                 <span>{option.label}</span>
               </button>
             );

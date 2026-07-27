@@ -16,12 +16,12 @@ export function HomeDailyTrendChart({ rows, valuationCurrency }: { rows: [string
         <YAxis yAxisId="income" orientation="right" width={48} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
         <Tooltip
           cursor={{ fill: "var(--selected-bg)" }}
-          contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 12, color: "var(--ink)" }}
+          contentStyle={{ background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--ink)", boxShadow: "var(--float-shadow)" }}
           labelFormatter={(label) => String(label)}
           formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name === "收入" ? "收入" : "支出"]}
         />
-        <Bar yAxisId="expense" dataKey="expense" name="支出" fill="rgb(var(--color-expense))" radius={[4, 4, 0, 0]} maxBarSize={22} />
-        <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="rgb(var(--color-income))" strokeWidth={2} dot={{ r: 2, fill: "rgb(var(--color-income))" }} activeDot={{ r: 4 }} />
+        <Bar yAxisId="expense" dataKey="expense" name="支出" fill="var(--chart-secondary)" radius={[3, 3, 0, 0]} maxBarSize={18} />
+        <Line yAxisId="income" type="monotone" dataKey="income" name="收入" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2, fill: "var(--chart-primary)" }} activeDot={{ r: 4 }} />
       </ComposedChart>
     </ResponsiveContainer>
   );

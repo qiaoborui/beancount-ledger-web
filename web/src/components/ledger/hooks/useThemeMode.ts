@@ -18,15 +18,7 @@ function applyTheme(theme: ResolvedTheme) {
   const root = document.documentElement;
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
-  const paperColor = getComputedStyle(root).getPropertyValue("--color-paper").trim();
-  const hex = paperColor ? rgbToHex(paperColor) : (theme === "dark" ? "#1b1d1e" : "#f5f4ed");
-  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", hex);
-}
-
-function rgbToHex(rgb: string): string {
-  const parts = rgb.split(/\s+/).map(Number);
-  if (parts.length !== 3) return rgb;
-  return "#" + parts.map((n) => n.toString(16).padStart(2, "0")).join("");
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#171717" : "#ffffff");
 }
 
 export function useThemeMode() {

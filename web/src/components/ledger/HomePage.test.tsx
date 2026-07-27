@@ -44,7 +44,7 @@ describe("HomePage privacy", () => {
 });
 
 describe("HomePage layout", () => {
-  it("stretches the paired insight cards to equal height on desktop", () => {
+  it("uses a dense three-column insight layout on desktop", () => {
     const html = renderToString(
       <HomePage
         summary={summary}
@@ -58,6 +58,7 @@ describe("HomePage layout", () => {
       />,
     );
 
-    expect(html).toContain("mt-4 xl:items-stretch");
+    expect(html).toContain("xl:grid-cols-[minmax(0,6fr)_minmax(17rem,3fr)_minmax(17rem,3fr)]");
+    expect(html).toContain("xl:items-start");
   });
 });

@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-const color = (name: string) => `rgb(var(--color-${name}) / <alpha-value>)`;
+const color = (name: string) => `oklch(var(--color-${name}) / <alpha-value>)`;
 
 const config: Config = {
   darkMode: ["selector", 'html[data-theme="dark"]'],

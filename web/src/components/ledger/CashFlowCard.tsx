@@ -85,7 +85,7 @@ function CashFlowNodeShape(props: Partial<SankeyNodeProps>) {
 
 function CashFlowLinkShape(props: Partial<SankeyLinkProps>) {
   const { sourceX = 0, sourceY = 0, sourceControlX = 0, targetX = 0, targetY = 0, targetControlX = 0, linkWidth = 1, index = 0, nodes = [], links = [], activeKey, onSelect } = props;
-  const palette = ["rgba(74, 107, 85, 0.25)", "rgba(45, 90, 138, 0.25)", "rgba(181, 139, 107, 0.25)", "rgba(126, 104, 220, 0.22)", "rgba(198, 137, 126, 0.22)"];
+  const palette = ["rgba(30, 30, 30, 0.26)", "rgba(70, 70, 70, 0.24)", "rgba(105, 105, 105, 0.22)", "rgba(135, 135, 135, 0.20)", "rgba(165, 165, 165, 0.18)"];
   const link = links[index];
   const source = link ? nodes[link.source]?.name ?? "来源" : "来源";
   const target = link ? nodes[link.target]?.name ?? "去向" : "去向";
@@ -113,19 +113,19 @@ function buildCashFlowData({ income, expense, expenseAnalytics, totalIncome, tot
 
   if (sensitiveUnlocked && visibleIncomeRows.length) {
     const shownIncomeTotal = visibleIncomeRows.reduce((sum, row) => sum + row.amount, 0);
-    for (const row of visibleIncomeRows) links.push({ source: addNode({ name: row.label, label: compactCashFlowLabel(row.label), color: "rgb(var(--color-income))", value: row.amount, side: "source" }), target: cashFlowIndex, value: Math.max(1, row.amount) });
+    for (const row of visibleIncomeRows) links.push({ source: addNode({ name: row.label, label: compactCashFlowLabel(row.label), color: "oklch(var(--color-income))", value: row.amount, side: "source" }), target: cashFlowIndex, value: Math.max(1, row.amount) });
     const otherIncome = Math.max(0, positiveTotalIncome - shownIncomeTotal);
-    if (otherIncome > 0) links.push({ source: addNode({ name: "其他收入", color: "rgb(var(--color-income))", value: otherIncome, side: "source" }), target: cashFlowIndex, value: otherIncome });
+    if (otherIncome > 0) links.push({ source: addNode({ name: "其他收入", color: "oklch(var(--color-income))", value: otherIncome, side: "source" }), target: cashFlowIndex, value: otherIncome });
   } else if (positiveTotalIncome > 0) {
-    links.push({ source: addNode({ name: sensitiveUnlocked ? "收入" : "收入（已锁定）", color: "rgb(var(--color-income))", value: positiveTotalIncome, side: "source" }), target: cashFlowIndex, value: positiveTotalIncome });
+    links.push({ source: addNode({ name: sensitiveUnlocked ? "收入" : "收入（已锁定）", color: "oklch(var(--color-income))", value: positiveTotalIncome, side: "source" }), target: cashFlowIndex, value: positiveTotalIncome });
   }
 
   for (const row of shownExpenses) {
     const name = row.label.replace(/^Expenses:/, "");
-    links.push({ source: cashFlowIndex, target: addNode({ name, label: compactCashFlowLabel(name), color: "#ff7a1a", value: row.amount, side: "target" }), value: Math.max(1, row.amount) });
+    links.push({ source: cashFlowIndex, target: addNode({ name, label: compactCashFlowLabel(name), color: "var(--chart-secondary)", value: row.amount, side: "target" }), value: Math.max(1, row.amount) });
   }
-  if (otherExpense > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "其他支出", color: "#ff9a4a", value: otherExpense, side: "target" }), value: otherExpense });
-  if (cashSurplus > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "结余", color: "#22c55e", value: cashSurplus, side: "target" }), value: cashSurplus });
+  if (otherExpense > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "其他支出", color: "var(--chart-tertiary)", value: otherExpense, side: "target" }), value: otherExpense });
+  if (cashSurplus > 0) links.push({ source: cashFlowIndex, target: addNode({ name: "结余", color: "var(--chart-primary)", value: cashSurplus, side: "target" }), value: cashSurplus });
   if (cashSurplus < 0) links.push({ source: addNode({ name: "缺口", color: "var(--danger)", value: Math.abs(cashSurplus), side: "source" }), target: cashFlowIndex, value: Math.abs(cashSurplus) });
 
   return { nodes, links };

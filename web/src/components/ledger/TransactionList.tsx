@@ -285,7 +285,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
       id={rowId}
       ref={rowRef}
       type="button"
-      className={`transaction-list-card grid w-full grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${selected ? "bg-[var(--selected-bg)]" : "bg-panel"}`}
+      className={`transaction-list-card grid w-full grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-4 ${selected ? "bg-[var(--selected-bg)]" : "bg-transparent"}`}
       onClick={onSelect}
     >
       <div className="text-xs font-medium tabular-nums text-stone">
@@ -294,13 +294,13 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <strong className="truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
+          <strong className="truncate text-[13px] leading-5 text-ink">{txn.payee}</strong>
           {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>
         <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
-      <div className={`text-right text-base font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt, primary?.currency)}</div>
+      <div className={`text-right text-[13px] font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt, primary?.currency)}</div>
       <div className="min-w-0">
         <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
@@ -505,7 +505,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     </>
   );
 
-  return <section className="mt-6">
+  return <section className={searchable ? "" : "border-b border-line"}>
     <div className="min-w-0">
       {searchable && (
         <>
@@ -520,25 +520,30 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
             {hasFilters && <span className="truncate text-right">已应用筛选</span>}
           </div>
-          <div className="mb-4 hidden rounded-2xl border border-line bg-panel p-3 shadow-sm lg:block">
+          <div className="hidden border-b border-line bg-panel px-3 py-3 lg:block md:px-4">
             {renderFilterControls("desktop")}
           </div>
         </>
       )}
 
-      {rows.length === 0 && <div className="card p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
+      {!searchable && rows.length > 0 && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line bg-[oklch(0.985_0_0)] px-3 py-2 md:px-4">
+        <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">最近流水</h2><p className="mt-0.5 text-[10px] text-stone">选择任一行进入交易检查台</p></div>
+        <span className="shrink-0 text-[11px] tabular-nums text-stone">{rows.length} 笔</span>
+      </div>}
 
-      {searchable && rows.length > 0 ? (
+      {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
+
+      {rows.length > 0 && (
         <>
           <div
-            className="hidden overflow-hidden rounded-2xl border border-line bg-panel shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper lg:block"
+            className="hidden overflow-hidden bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand lg:block"
             tabIndex={0}
             role="grid"
             aria-label="交易流水"
             aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
             onKeyDown={handleDesktopListKeyDown}
           >
-            <div className="grid grid-cols-[84px_minmax(280px,1.2fr)_140px_minmax(260px,1fr)_minmax(180px,0.75fr)] gap-4 border-b border-line bg-paper px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-olive">
+            <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 border-b border-line bg-[oklch(0.975_0_0)] px-3 py-2 text-[10px] font-semibold text-stone md:px-4">
               <span>日期</span>
               <span>交易</span>
               <span className="text-right">金额</span>
@@ -572,11 +577,6 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             })}
           </div>
         </>
-      ) : (
-        pageRows.map((txn) => {
-          const key = transactionKey(txn);
-          return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); }} />;
-        })
       )}
 
       {pager}
@@ -587,11 +587,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
 }
 
 function TransactionPager({ safePage, totalPages, rowsLength, pageSize, setPageSize, setPage }: { safePage: number; totalPages: number; rowsLength: number; pageSize: number; setPageSize: (value: number) => void; setPage: React.Dispatch<React.SetStateAction<number>> }) {
-  return <div className="mt-4 flex flex-col gap-3 rounded-xl border border-line bg-panel p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-    <div className="text-stone">第 {safePage} / {totalPages} 页，显示 {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rowsLength)} 条</div>
+  return <div className="flex flex-col gap-3 border-t border-line bg-panel px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between md:px-4">
+    <div className="tabular-nums text-stone">第 {safePage} / {totalPages} 页 · {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rowsLength)} / {rowsLength}</div>
     <div className="flex items-center gap-2">
       <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
-        <SelectTrigger className="h-9 w-[112px] rounded-xl bg-panel">
+        <SelectTrigger className="h-8 w-[104px] rounded-md bg-panel text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -601,8 +601,8 @@ function TransactionPager({ safePage, totalPages, rowsLength, pageSize, setPageS
           <SelectItem value="100">100 条/页</SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="outline" className="rounded-xl" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</Button>
-      <Button variant="outline" className="rounded-xl" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</Button>
+      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</Button>
+      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</Button>
     </div>
   </div>;
 }

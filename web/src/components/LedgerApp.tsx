@@ -693,12 +693,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-      <div className="mb-6 min-w-0 max-w-full">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-xs uppercase tracking-[0.22em] text-stone">{header.eyebrow}</div>
-            <strong className="font-serif text-2xl font-medium">{header.title}</strong>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
+      <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-3 md:px-4 md:py-2.5 xl:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="w-full min-w-0 md:w-auto md:flex-1">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+              <strong className="block truncate text-base font-semibold tracking-[-0.015em] text-ink md:text-[15px]">{header.title}</strong>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone">
               {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={() => {
                 const conflict = pendingOperations.find((operation) => operation.status === "conflict");
@@ -709,23 +709,24 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={`索引来源: ${indexInfo.source ?? ""}`}>PG 索引 · {indexInfo.gitSHA.slice(0, 7)}</span>}
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
+              </div>
             </div>
             {offlineSensitiveUnlockAvailable && (
-              <form className="mt-3 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void unlockOfflineSensitive(); }}>
+              <form className="mt-2 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void unlockOfflineSensitive(); }}>
                 <input
                   ref={offlineUnlockInputRef}
                   type="password"
-                  className="h-10 min-w-0 rounded-xl border border-line bg-panel px-3 text-sm text-ink"
+                  className="h-9 min-w-0 rounded-md border border-line bg-panel px-3 text-sm text-ink"
                   value={offlineUnlockSecret}
                   onChange={(event) => setOfflineUnlockSecret(event.target.value)}
                   placeholder="离线解锁码"
                   autoComplete="current-password"
                 />
-                <button type="submit" className="h-10 shrink-0 rounded-xl bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>离线解锁</button>
+                <button type="submit" className="h-9 shrink-0 rounded-md bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>离线解锁</button>
               </form>
             )}
           </div>
-          {canShowTimeControls && <TimeRangePicker range={timeRange} onChange={setTimeRange} />}
+          {canShowTimeControls && <div className="workspace-time-control w-full md:w-auto"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
         </div>
       </div>
 
@@ -859,14 +860,14 @@ function useDeferredIdleReady(enabled: boolean, delayMs: number) {
 
 function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {
   return (
-    <section className="mb-4 hidden items-center justify-between gap-3 rounded-2xl border border-line bg-panel p-3 lg:flex">
+    <section className="hidden min-h-12 items-center justify-between gap-3 border-b border-line bg-[oklch(0.985_0_0)] px-3 py-2 lg:flex md:px-4">
       <div>
-        <div className="text-xs uppercase tracking-[0.2em] text-stone">saved views</div>
-        <div className="mt-0.5 text-sm text-olive">常用流水视图</div>
+        <div className="text-xs font-medium text-ink">常用流水视图</div>
+        <div className="mt-0.5 text-[10px] text-stone">一键切换常用核对条件</div>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
         {views.map((view) => (
-          <button key={view.id} type="button" className="rounded-xl border border-line bg-paper px-3 py-2 text-sm text-warm hover:bg-tag" onClick={() => onSelect(view)} title={view.detail}>
+          <button key={view.id} type="button" className="h-7 rounded-md border border-line bg-panel px-2.5 text-xs text-warm hover:bg-tag" onClick={() => onSelect(view)} title={view.detail}>
             {view.label}
           </button>
         ))}
