@@ -414,6 +414,116 @@ button.card:active, a.card:active { transform: scale(0.992); }
   overscroll-behavior-x: contain;
   touch-action: pan-y;
 }
+
+.home-daily-chart {
+  color: var(--stone);
+  font-variant-numeric: tabular-nums;
+  isolation: isolate;
+  touch-action: pan-y;
+}
+
+.home-daily-chart svg {
+  display: block;
+}
+
+.home-daily-chart-plot {
+  fill: transparent;
+}
+
+.home-daily-chart-grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.home-daily-chart-baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.home-daily-chart-axis-label {
+  fill: var(--stone);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.86;
+  pointer-events: none;
+}
+
+.home-daily-chart-bar {
+  fill: var(--chart-secondary);
+  opacity: 0.66;
+  transition: fill 160ms ease, opacity 160ms ease;
+}
+
+.home-daily-chart-bar-active {
+  fill: var(--chart-primary);
+  opacity: 0.92;
+}
+
+.home-daily-chart-line {
+  fill: none;
+  stroke: var(--chart-primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.home-daily-chart-dot {
+  fill: var(--chart-primary);
+  stroke: var(--ivory);
+  stroke-width: 1.5;
+}
+
+.home-daily-chart-dot-active {
+  stroke-width: 2;
+}
+
+.home-daily-chart-cursor line {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.home-daily-chart-cursor rect {
+  fill: var(--selected-bg);
+  opacity: 0.7;
+}
+
+.home-daily-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: 9rem;
+  transform: translate3d(-50%, calc(-100% - 0.75rem), 0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ivory);
+  padding: 0.5rem 0.625rem;
+  box-shadow: 0 12px 32px oklch(0.20 0 0 / 0.14);
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .home-daily-chart-tooltip {
+  box-shadow: 0 14px 36px oklch(0 0 0 / 0.42);
+}
+
+html[data-theme="dark"] .home-daily-chart-bar {
+  opacity: 0.72;
+}
+
+html[data-theme="dark"] .home-daily-chart-bar-active {
+  opacity: 0.96;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .home-daily-chart-bar {
+    opacity: 0.72;
+  }
+
+  html:not([data-theme]) .home-daily-chart-bar-active {
+    opacity: 0.96;
+  }
+}
 .dashboard-panel-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -645,8 +755,8 @@ button.card:active, a.card:active { transform: scale(0.992); }
 
 .desktop-sidebar {
   width: 11rem;
-  background: oklch(0.982 0 0);
-  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  background: var(--ivory);
+  transition: background-color 160ms ease-out;
 }
 
 .desktop-sidebar-collapsed {

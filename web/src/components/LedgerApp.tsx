@@ -860,7 +860,7 @@ function useDeferredIdleReady(enabled: boolean, delayMs: number) {
 
 function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {
   return (
-    <section className="hidden min-h-12 items-center justify-between gap-3 border-b border-line bg-[oklch(0.985_0_0)] px-3 py-2 lg:flex md:px-4">
+    <section className="hidden min-h-12 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 lg:flex md:px-4">
       <div>
         <div className="text-xs font-medium text-ink">常用流水视图</div>
         <div className="mt-0.5 text-[10px] text-stone">一键切换常用核对条件</div>

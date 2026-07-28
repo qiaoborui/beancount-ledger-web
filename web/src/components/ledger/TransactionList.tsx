@@ -526,7 +526,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         </>
       )}
 
-      {!searchable && rows.length > 0 && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line bg-[oklch(0.985_0_0)] px-3 py-2 md:px-4">
+      {!searchable && rows.length > 0 && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 md:px-4">
         <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">最近流水</h2><p className="mt-0.5 text-[10px] text-stone">选择任一行进入交易检查台</p></div>
         <span className="shrink-0 text-[11px] tabular-nums text-stone">{rows.length} 笔</span>
       </div>}
@@ -543,7 +543,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
             onKeyDown={handleDesktopListKeyDown}
           >
-            <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 border-b border-line bg-[oklch(0.975_0_0)] px-3 py-2 text-[10px] font-semibold text-stone md:px-4">
+            <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 border-b border-line bg-tag px-3 py-2 text-[10px] font-semibold text-stone md:px-4">
               <span>日期</span>
               <span>交易</span>
               <span className="text-right">金额</span>

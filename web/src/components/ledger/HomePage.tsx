@@ -136,7 +136,7 @@ function InspectionBench({ accountAttention, openCreditCards, weeklyExpenseDelta
     { label: "信用卡敞口", value: openCreditCards ? `${openCreditCards} 张有余额` : "无待还余额", danger: false, detail: openCreditCards ? "进入账户页核对到期日" : "本期无需处理" },
     { label: "支出速度", value: weeklyExpenseDelta == null ? "缺少对照" : formatSignedPercent(weeklyExpenseDelta), danger: weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3, detail: weeklyExpenseDelta == null ? "再积累一个对照周期" : "最近 7 天相对前 7 天" },
   ];
-  return <aside className="min-w-0 bg-[oklch(0.985_0_0)]">
+  return <aside className="min-w-0 bg-tag">
     <WorkbenchHeading title="检查台" detail="异常优先，正常状态保持安静。" meta={`${checks.filter((row) => row.danger).length} 异常`} />
     <div className="divide-y divide-line">
       {checks.map((row) => <div key={row.label} className="flex items-start gap-3 px-3 py-3 md:px-4">

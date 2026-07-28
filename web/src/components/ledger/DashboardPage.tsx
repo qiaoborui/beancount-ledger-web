@@ -517,7 +517,7 @@ function typeLabel(value: string) {
 function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
   const Icon = collapsed ? ChevronRight : ChevronDown;
   return <section className="border-b border-line">
-    <button type="button" className={`group flex w-full flex-col gap-2 border-b border-line px-3 py-2.5 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between md:px-4 ${collapsed ? "bg-[oklch(0.985_0_0)]" : "bg-panel"}`} onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
+    <button type="button" className={`group flex w-full flex-col gap-2 border-b border-line px-3 py-2.5 text-left transition-colors hover:bg-tag sm:flex-row sm:items-center sm:justify-between md:px-4 ${collapsed ? "bg-tag" : "bg-panel"}`} onClick={() => onToggle(rowId)} aria-expanded={!collapsed}>
       <span className="flex min-w-0 items-center gap-2.5">
         <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-line bg-panel text-olive group-hover:text-brand">
           <Icon className="h-3.5 w-3.5" />
