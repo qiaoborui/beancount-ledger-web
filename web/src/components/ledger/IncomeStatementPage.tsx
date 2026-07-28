@@ -9,7 +9,7 @@ import { formatAccountOptionLabel } from "./accountDisplay";
 import type { AccountAnalytics, ExpenseCategoryAnalytics, IncomeStatementNode, PayeeAnalytics } from "./types";
 
 export function IncomeStatementPage({ income, expense, expenseAnalytics, topPayees, topPaymentAccounts, totalIncome, totalExpense, netIncome, valuationCurrency, visible, sensitiveUnlocked, onToggleVisible, onUnlockSensitive, onSelectCategory }: { income: IncomeStatementNode[]; expense: IncomeStatementNode[]; expenseAnalytics: ExpenseCategoryAnalytics[]; topPayees: PayeeAnalytics[]; topPaymentAccounts: AccountAnalytics[]; totalIncome: number; totalExpense: number; netIncome: number; valuationCurrency: string; visible: boolean; sensitiveUnlocked: boolean; onToggleVisible: () => void; onUnlockSensitive: () => void; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
-  return <>
+  return <div className="ledger-workbench">
     <section className="card overflow-hidden p-0">
       <div className="border-b border-line p-4 md:p-5">
         <div className="flex items-start justify-between gap-4">
@@ -34,13 +34,13 @@ export function IncomeStatementPage({ income, expense, expenseAnalytics, topPaye
       <>
       <CashFlowCard income={income} expense={expense} expenseAnalytics={expenseAnalytics} totalIncome={totalIncome} totalExpense={totalExpense} valuationCurrency={valuationCurrency} sensitiveUnlocked={sensitiveUnlocked} />
       <CategoryAnalyticsPanel rows={expenseAnalytics} topPayees={topPayees} topPaymentAccounts={topPaymentAccounts} valuationCurrency={valuationCurrency} onSelectCategory={onSelectCategory} />
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-px grid gap-px bg-line lg:grid-cols-2">
         <div className="card p-4">
-          <h2 className="mb-3 border-l-2 border-brand pl-3 font-serif text-xl text-warm">收入</h2>
+          <h2 className="mb-3 font-serif text-xl text-warm">收入</h2>
           {sensitiveUnlocked ? (income.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无收入记录</div> : income.map((node) => <TreeNode key={node.account} node={node} visible={visible} valuationCurrency={valuationCurrency} onSelectCategory={onSelectCategory} />)) : <IncomeLockedPanel onUnlock={onUnlockSensitive} />}
         </div>
         <div className="card p-4">
-          <h2 className="mb-3 border-l-2 border-brand pl-3 font-serif text-xl text-warm">支出</h2>
+          <h2 className="mb-3 font-serif text-xl text-warm">支出</h2>
           {expense.length === 0 ? <div className="py-8 text-center text-sm text-stone">本月暂无支出记录</div> : expense.map((node) => <TreeNode key={node.account} node={node} visible={visible} valuationCurrency={valuationCurrency} onSelectCategory={onSelectCategory} />)}
         </div>
       </div>
@@ -50,7 +50,7 @@ export function IncomeStatementPage({ income, expense, expenseAnalytics, topPaye
     )}
 
 
-  </>;
+  </div>;
 }
 
 function IncomeLockedPanel({ onUnlock }: { onUnlock: () => void }) {
