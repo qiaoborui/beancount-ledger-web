@@ -2,10 +2,12 @@
 version: 1
 slug: "web-src-components-ledger-homepage-tsx"
 primary_target: "web/src/components/ledger/HomePage.tsx"
-related_targets: []
+related_targets:
+  - "web/src/components/ledger/HomeReportCharts.tsx"
+  - "server/internal/app/home_report.go"
 ---
 
-# Surface Brief: Financial Control Room Home
+# Surface Brief: Financial Brief Home
 
 ## Mode
 
@@ -13,40 +15,36 @@ Operate
 
 ## Purpose
 
-Answer three questions in the first desktop viewport: What is the current period position, what changed over time, and what requires inspection. Transactions remain available after the first screen as evidence, not as the opening content.
-
-## First Viewport
-
-- The compact command row provides page context, sync/privacy state, and time controls without a duplicate global header.
-- A five-cell position strip carries net result, income, expense, daily pace, and recent seven-day movement.
-- The main working field uses two adjacent monochrome charts: daily rhythm and cumulative position.
-- A right inspection bench summarizes the largest spend day, top category, weekly change, and top category ledger rows.
-- Recent transactions start below the opening workfield.
+Turn the selected period into one continuous financial brief: first judge the result, then locate spending drivers, then inspect the accounts carrying the movement.
 
 ## Information Order
 
-1. Net position and period context.
-2. Income-versus-expense relationship and spending pace.
-3. Daily and cumulative trend evidence.
-4. Inspection bench for anomalies and category concentration.
-5. Transaction evidence after scroll.
+1. Period status: net income, expense, income, transaction count, and budget availability.
+2. Cash-flow evidence: period and cumulative trends, followed by same-period year-over-year comparison.
+3. Spending drivers: category distribution, ranking, selected-category comparison, and expense calendar heatmap.
+4. Funds control: primary payment accounts and selected account balance movement.
+
+## Data Contract
+
+- `GET /api/ledger/home-report` supplies current and previous-year period summaries from one ledger snapshot.
+- Sensitive report data loads only after the existing unlock path succeeds.
+- The selected global time range controls the report; the root route defaults to the current calendar year.
 
 ## Interaction
 
-- Privacy control changes sensitive values consistently.
-- Category rows drill into the existing transaction route.
-- Desktop rows remain table-like and keyboard focusable.
-- The inspection bench is structurally attached to the chart workfield.
+- Privacy control hides every sensitive amount and chart consistently.
+- Comparison mode switches among income, expense, and net income.
+- Category ranking drills into the existing transaction route.
+- Category and account selectors update their attached trend charts without opening overlays.
 
 ## Responsive Behavior
 
-- Desktop: navigation rail, position strip, dual chart workfield, right inspection bench.
-- Tablet: charts and inspection bench stack while preserving compact rows.
-- Mobile: metrics, charts, inspection, and transaction evidence become sequential touch-sized sections.
+- Desktop keeps paired charts and five-column metric rails.
+- Tablet stacks paired workfields while preserving shared borders.
+- Mobile turns each chapter into a linear sequence and allows horizontal heatmap scrolling without shrinking touch targets.
 
-## Exclusions
+## Constraints
 
-- No KPI card grid.
-- No decorative category colors.
-- No duplicate desktop top bar.
-- No recent transaction table in the first home viewport.
+- No detached KPI cards, decorative category palette, persistent shadows, or oversized empty chart regions.
+- Section numbers are functional report chapters rather than decorative eyebrows.
+- Empty, loading, locked, and failed states remain compact and actionable.

@@ -162,7 +162,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
   const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
-  const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("month"));
+  const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange(page === "home" ? "year" : "month"));
   const { toast, showToast, clearToast } = useToast();
   const online = useNetworkStatus();
   const { getScrollTop, scrollToTop } = useRouteScrollMemory(pathname);
@@ -500,7 +500,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
 
-  const unlockedPrivacySettings = unlocked ? { ...privacySettings, showHomeSummaryAmounts: true } : privacySettings;
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
   const headerSensitiveUnlockAvailable = shouldOfferHeaderSensitiveUnlock({
@@ -729,7 +728,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>
       </div>
 
-      {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
+      {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} onSelectCategory={openCategoryTransactions} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要解锁后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要解锁后查看。"))}
@@ -829,7 +828,7 @@ function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
   const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
-    home: { eyebrow: "monthly overview", title: `${label} 总览` },
+    home: { eyebrow: "financial brief", title: "财务简报" },
     dashboard: { eyebrow: "analytics dashboard", title: `${label} 看板` },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
     imports: { eyebrow: "statement import", title: "账单导入" },

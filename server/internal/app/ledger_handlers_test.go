@@ -560,6 +560,48 @@ func TestDashboardReturnsAggregatedReadOnlySeries(t *testing.T) {
 	}
 }
 
+func TestHomeReportReturnsCurrentAndPreviousYearComparisons(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "budgets.bean"), `2026-01-01 custom "budget" Expenses:Food "monthly" 100.00 CNY`+"\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "main.bean"), strings.Join([]string{
+		`option "title" "Test Ledger"`,
+		`option "operating_currency" "CNY"`,
+		`include "commodities.bean"`,
+		`include "accounts.bean"`,
+		`include "prices.bean"`,
+		`include "budgets.bean"`,
+		`include "transactions/2026/05.bean"`,
+		"",
+	}, "\n"))
+	t.Setenv("APP_PASSWORD", "secret")
+	router := testRouter(t, cfg)
+	cookies := loginCookies(t, router)
+
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/home-report?start=2026-01-01&end=2027-01-01", "", cookies)
+	if res.Code != http.StatusOK {
+		t.Fatalf("home report status=%d body=%s", res.Code, res.Body.String())
+	}
+	var body HomeReport
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Start != "2026-01-01" || body.End != "2027-01-01" || body.PreviousStart != "2025-01-01" || body.PreviousEnd != "2026-01-01" {
+		t.Fatalf("unexpected report ranges: %#v", body)
+	}
+	if body.Current.KPIs.Income != 100000 || body.Current.KPIs.Expense != 1200 || body.Current.KPIs.Net != 98800 || body.Current.KPIs.TransactionCount != 2 {
+		t.Fatalf("unexpected current report KPIs: %#v", body.Current.KPIs)
+	}
+	if body.Previous.KPIs.Income != 0 || body.Previous.KPIs.Expense != 0 || body.Previous.KPIs.TransactionCount != 0 {
+		t.Fatalf("unexpected previous report KPIs: %#v", body.Previous.KPIs)
+	}
+	if !body.Budget.Configured || body.Budget.Amount != 120000 || body.Budget.Currency != "CNY" {
+		t.Fatalf("unexpected annual budget: %#v", body.Budget)
+	}
+	if len(body.Current.CashflowSeries) != 12 || len(body.Current.CategorySeries) != 1 || len(body.DailyExpenseSeries) != 1 || len(body.AccountBalanceSeries) != 1 || len(body.TopPaymentAccounts) != 1 {
+		t.Fatalf("unexpected report series: %#v", body)
+	}
+}
+
 func TestTransactionEditDeleteReverseAndReconcile(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

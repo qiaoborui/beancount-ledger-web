@@ -77,6 +77,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledgerRead30s.GET("/transactions", s.transactions)
 	ledgerRead30s.GET("/income-statement", s.incomeStatement)
 	ledgerRead30s.GET("/dashboard", s.dashboard)
+	ledgerRead30s.GET("/home-report", s.homeReport)
 	ledgerRead30s.GET("/reconciliation", s.reconciliation)
 	ledgerRead30s.GET("/notifications", s.notifications)
 
