@@ -116,15 +116,15 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   const trigger = (
     <button
       type="button"
-      className={`flex h-12 min-w-0 flex-1 items-center gap-3 bg-panel px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:h-14 md:min-w-72 md:flex-none md:px-3.5 ${desktopOpen || mobileOpen ? "bg-tag shadow-[inset_0_0_0_1px_var(--brand)]" : "hover:bg-tag active:bg-tag"}`}
+      className={`flex min-h-14 min-w-0 flex-1 items-center gap-3 bg-panel px-4 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:min-h-16 md:min-w-80 md:flex-none md:gap-4 md:px-5 md:py-3 ${desktopOpen || mobileOpen ? "bg-tag shadow-[inset_0_0_0_1px_var(--brand)]" : "hover:bg-tag active:bg-tag"}`}
       onClick={openPicker}
       aria-haspopup="dialog"
       aria-expanded={desktopOpen || mobileOpen}
     >
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-tag text-brand md:h-9 md:w-9"><CalendarDays className="h-4 w-4" /></span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold tracking-[-0.012em] text-ink md:text-[15px]">{formatTimeRangePickerLabel(range)}</span>
-        <span className="mt-1 block truncate text-[11px] tabular-nums text-stone md:text-xs">{formatTimeRangeDateSpan(range)}</span>
+        <span className="block truncate text-sm font-semibold leading-5 tracking-[-0.012em] text-ink md:text-[15px]">{formatTimeRangePickerLabel(range)}</span>
+        <span className="mt-1 block truncate text-[11px] leading-4 tabular-nums text-stone md:text-xs">{formatTimeRangeDateSpan(range)}</span>
       </span>
       <ChevronDown className={`h-4 w-4 shrink-0 text-brand transition-transform ${desktopOpen ? "rotate-180" : ""}`} />
     </button>
@@ -166,11 +166,11 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   return (
     <div ref={containerRef} className="relative w-full min-w-0 md:w-auto">
       <div data-time-range-control="segmented" className="flex w-full min-w-0 overflow-hidden rounded-lg border border-lineSoft bg-panel">
-        <button type="button" className="grid h-12 w-10 shrink-0 place-items-center border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
+        <button type="button" className="grid w-10 shrink-0 place-items-center self-stretch border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-12" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
           <ChevronLeft className="h-4 w-4" />
         </button>
         {trigger}
-        <button type="button" className="grid h-12 w-10 shrink-0 place-items-center border-l border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
+        <button type="button" className="grid w-10 shrink-0 place-items-center self-stretch border-l border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-12" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>

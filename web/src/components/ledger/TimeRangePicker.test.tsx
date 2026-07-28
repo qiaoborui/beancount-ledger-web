@@ -11,8 +11,10 @@ describe("TimeRangePicker layout", () => {
       />,
     );
 
-    expect(html).toContain("md:min-w-72");
-    expect(html).toContain("md:h-14");
+    expect(html).toContain("md:min-w-80");
+    expect(html).toContain("md:min-h-16");
+    expect(html).toContain("md:px-5");
+    expect(html).toContain("md:py-3");
     expect(html).toContain("md:w-12");
     expect(html).toMatch(/data-time-range-control="segmented"[^>]*overflow-hidden[^>]*rounded-lg[^>]*border-lineSoft/);
     expect(html).toMatch(/border-r[^>]*aria-label="上一时间段"/);
