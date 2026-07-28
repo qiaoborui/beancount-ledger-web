@@ -370,8 +370,8 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       setActiveTxnKey(null);
       return;
     }
-    if (!activeTxnKey || !pageRows.some((txn) => transactionKey(txn) === activeTxnKey)) {
-      setActiveTxnKey(transactionKey(pageRows[0]));
+    if (activeTxnKey && !pageRows.some((txn) => transactionKey(txn) === activeTxnKey)) {
+      setActiveTxnKey(null);
     }
   }, [activeTxnKey, pageRows]);
 
@@ -424,8 +424,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
-      const currentIndex = activeIndex >= 0 ? activeIndex : 0;
-      const nextIndex = Math.min(pageRows.length - 1, Math.max(0, currentIndex + direction));
+      const nextIndex = activeIndex >= 0
+        ? Math.min(pageRows.length - 1, Math.max(0, activeIndex + direction))
+        : direction > 0 ? 0 : pageRows.length - 1;
       const nextKey = transactionKey(pageRows[nextIndex]);
       setActiveTxnKey(nextKey);
       focusDesktopRow(nextKey);
@@ -580,7 +581,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           </div>
           {pager}
           </div>
-          {searchable && <TransactionInspector txn={selected ?? pageRows[0]} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
+          {searchable && <TransactionInspector txn={selected} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
         </div>
       )}
     </div>
@@ -778,7 +779,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     onClose();
   }
 
-  const footer = pendingAppend ? <div className="rounded-xl border border-line bg-panel px-4 py-3 text-sm leading-6 text-olive">
+  const footer = pendingAppend ? <div className="text-sm leading-6 text-olive">
     这笔交易还在本地待同步，落账后可编辑、删除或冲销。
   </div> : editing ? <div className="grid grid-cols-2 gap-2">
     <Button variant="outline" className="h-11 bg-panel" onClick={() => { resetForm(); setEditing(false); }}>取消</Button>
@@ -790,13 +791,13 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   </div>;
 
   const body = <>
-    <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-line bg-tag px-4 py-2 text-xs text-stone sm:px-5">
       <span className="min-w-0 [overflow-wrap:anywhere]">{sourceLabel(txn)}</span>
       {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-brand">{pending}</span>}
     </div>
-    {editing ? <div className="grid min-w-0 gap-4">
-      {formError && <Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert>}
-      <section className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel/60 p-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
+    {editing ? <div className="grid min-w-0">
+      {formError && <div className="mx-4 mt-4 sm:mx-5"><Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert></div>}
+      <section className="grid min-w-0 gap-3 border-b border-line px-4 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:px-5">
         <label className="grid gap-1 text-xs text-stone">
           <span>日期</span>
           <Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -811,8 +812,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
         </label>
       </section>
 
-      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/60 p-3">
-        <div className="flex items-center justify-between gap-3">
+      <section className="@container min-w-0 border-b border-line">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
           <div>
             <h3 className="font-medium text-warm">资金流向</h3>
             <p className="mt-0.5 text-xs text-stone">每一行对应一条 Beancount posting，可继续添加参与账户。</p>
@@ -820,15 +821,15 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
           <Button
             type="button"
             variant="outline"
-            className="h-9 shrink-0 rounded-xl bg-panel px-3 text-sm"
+            className="h-9 shrink-0 rounded-md bg-panel px-3 text-sm"
             onClick={() => setPostings((rows) => [...rows, { account: "", amount: "", currency: rows.at(-1)?.currency || "CNY" }])}
           >
             <Plus className="h-4 w-4" />
             <span>添加</span>
           </Button>
         </div>
-        <div className="mt-3 grid min-w-0 gap-3">
-          {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 @lg:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
+        <div className="min-w-0 divide-y divide-line border-t border-line">
+          {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 px-4 py-3 sm:px-5 @lg:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
             <div className="min-w-0">
               <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone">
                 <span>账户 {i + 1}</span>
@@ -857,7 +858,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             <Button
               type="button"
               variant="outline"
-              className="h-10 self-end rounded-xl bg-panel px-0 text-stone hover:text-destructive"
+              className="h-10 self-end rounded-md bg-panel px-0 text-stone hover:text-destructive"
               disabled={postings.length <= 2}
               title={postings.length <= 2 ? "至少保留 2 条资金流向" : "删除这条资金流向"}
               onClick={() => setPostings((rows) => rows.filter((_, idx) => idx !== i))}
@@ -868,7 +869,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
         </div>
       </section>
 
-      <section className="grid min-w-0 gap-3 rounded-2xl border border-line bg-panel/60 p-3">
+      <section className="grid min-w-0 gap-3 px-4 py-4 sm:px-5">
         <label className="grid min-w-0 gap-1 text-xs text-stone">
           <span>标签</span>
           <Input className="h-11 min-w-0 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />
@@ -878,8 +879,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
           <Textarea className="min-h-36 min-w-0 bg-panel font-mono text-xs" value={metadata} onChange={(e) => setMetadata(e.target.value)} placeholder={'{"platform":"taobao","channel":"online"}'} />
         </label>
       </section>
-    </div> : <div className="grid min-w-0 gap-4">
-      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
+    </div> : <div className="grid min-w-0">
+      <section className="@container min-w-0 border-b border-line px-4 py-4 sm:px-5">
         <div className="flex min-w-0 flex-col gap-3 @sm:flex-row @sm:items-start @sm:justify-between">
           <div className="min-w-0">
             <div className="text-xs text-stone">{txn.date}</div>
@@ -887,19 +888,19 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
             <MetadataBadges txn={txn} />
           </div>
-          {primary && <div className="min-w-0 rounded-xl border border-line bg-paper px-3 py-2 text-left @sm:shrink-0 @sm:text-right">
+          {primary && <div className="min-w-0 border-t border-line pt-3 text-left @sm:shrink-0 @sm:border-l @sm:border-t-0 @sm:pl-4 @sm:pt-0 @sm:text-right">
             <div className="text-[11px] text-stone">主金额</div>
             <div className={`mt-0.5 truncate text-lg font-semibold ${amountColor(primary.amount)}`} title={fmtTxnAmount(primary.amount, primary.currency)}>{fmtTxnAmount(primary.amount, primary.currency)}</div>
           </div>}
         </div>
       </section>
 
-      <section className="@container min-w-0 rounded-2xl border border-line bg-panel/70 p-4">
-        <div className="flex items-center justify-between gap-3">
+      <section className="@container min-w-0">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
           <h3 className="font-medium text-warm">资金流向</h3>
           <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{txn.postings.length} 条</span>
         </div>
-        <div className="mt-3 grid min-w-0 gap-2">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 rounded-xl border border-line bg-paper p-3 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-center">
+        <div className="min-w-0 divide-y divide-line">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 px-4 py-3 sm:px-5 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-center">
           <div className="min-w-0">
             <div className="text-xs text-stone">#{i + 1} {shortAccount(p.account)}</div>
             <div className="mt-0.5 text-sm text-warm [overflow-wrap:anywhere]">{p.account}</div>
@@ -921,7 +922,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   };
 
   return <>
-    <MobileSheet open title="流水详情" onClose={onClose} shouldClose={shouldClose} footer={footer} size="xl" panelClassName="sm:max-w-3xl" bodyClassName="overflow-x-hidden">{body}</MobileSheet>
+    <MobileSheet open title={editing ? "编辑流水" : "流水详情"} onClose={onClose} shouldClose={shouldClose} footer={footer} size="xl" panelClassName="sm:max-w-3xl" bodyClassName="overflow-x-hidden !px-0 !py-0">{body}</MobileSheet>
     <AlertDialog open={Boolean(pendingAction)} onOpenChange={(open) => !open && setPendingAction(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>

@@ -1,18 +1,9 @@
 import { useMemo, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCompactValuation, formatValuation } from "@/lib/money";
 import { Metric, ResponsiveValueRow } from "./shared";
 import type { AccountBalance, AccountView, IncomeStatementCache, NetWorthPoint, NetWorthWindows } from "./types";
-
-const COLORS = [
-  "var(--chart-palette-1)",
-  "var(--chart-palette-2)",
-  "var(--chart-palette-3)",
-  "var(--chart-palette-4)",
-  "var(--chart-palette-5)",
-  "var(--chart-palette-6)",
-];
 
 type ChartRow = { date: string; 资产: number; 负债: number; 净资产: number };
 type ViewMode = "daily" | "month-end";
@@ -95,13 +86,13 @@ function AssetAllocation({ accounts, balances, visible, valuationCurrency }: { a
           return (
             <div key={row.label}>
               <ResponsiveValueRow label={row.label} labelClassName="text-sm" value={value} valueClassName="text-sm font-semibold text-warm" valueTitle={value} />
-              <div className="mt-1 h-2 overflow-hidden rounded-xl bg-line"><div className="h-full bg-brand" style={{ width: `${Math.min(Math.abs(pct), 100)}%` }} /></div>
+              <div className="mt-1 h-1.5 overflow-hidden bg-line"><div className="h-full bg-brand" style={{ width: `${Math.min(Math.abs(pct), 100)}%` }} /></div>
             </div>
           );
         })}
         <div>
           <ResponsiveValueRow label="负债 / 总资产" labelClassName="text-sm" value={liabilityValue} valueClassName="text-sm font-semibold text-warm" valueTitle={liabilityValue} />
-          <div className="mt-1 h-2 overflow-hidden rounded-xl bg-line"><div className="h-full bg-[var(--danger)]" style={{ width: `${Math.min(Math.abs(liabilityPct), 100)}%` }} /></div>
+          <div className="mt-1 h-1.5 overflow-hidden bg-line"><div className="h-full bg-[var(--danger)]" style={{ width: `${Math.min(Math.abs(liabilityPct), 100)}%` }} /></div>
         </div>
       </div>
       <p className="mt-3 text-xs text-stone">资产分类优先读取账户 metadata（如 group: "wealth"）；百分比为占总资产比例，负债单独按负债 / 总资产展示。隐私模式下只显示百分比。</p>
@@ -111,11 +102,11 @@ function AssetAllocation({ accounts, balances, visible, valuationCurrency }: { a
 
 function AssetComposition({ accounts, balances, visible, valuationCurrency }: { accounts: AccountView[]; balances: Record<string, number>; visible: boolean; valuationCurrency: string }) {
   const rows = accounts.filter((account) => account.account.startsWith("Assets:")).map((account) => ({ name: account.label || account.account.split(":").at(-1) || account.account, value: Math.max(0, (balances[account.account] ?? 0) / 100) })).filter((row) => row.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
-  return <section className="card p-4"><h2 className="font-serif text-2xl">当前资产明细</h2>{visible ? <div className="ledger-chart mt-4 h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={rows} dataKey="value" nameKey="name" innerRadius={56} outerRadius={92} paddingAngle={2}>{rows.map((_, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value) => formatValuation(Number(value), valuationCurrency)} /><Legend /></PieChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+  return <section className="card overflow-hidden"><ChartHeader title="当前资产明细" detail={`前 ${rows.length} 个资产账户`} />{visible ? rows.length > 0 ? <div className="ledger-chart h-72 px-2 pb-3 pt-2"><ResponsiveContainer width="100%" height="100%"><BarChart layout="vertical" data={rows} margin={{ left: 8, right: 20, top: 6, bottom: 0 }} barCategoryGap="34%"><CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} horizontal={false} /><XAxis type="number" tick={chartTick} tickLine={false} axisLine={{ stroke: "var(--line)" }} tickFormatter={chartMoney} /><YAxis type="category" dataKey="name" width={108} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={compactAssetLabel} /><Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "var(--tag)" }} formatter={(value) => [formatValuation(Number(value), valuationCurrency), "资产"]} /><Bar dataKey="value" fill="var(--chart-primary)" radius={0} maxBarSize={12} /></BarChart></ResponsiveContainer></div> : <ChartEmpty text="暂无可展示的资产余额" /> : <HiddenMoney />}</section>;
 }
 
 function LiabilitiesTrend({ rows, visible, valuationCurrency }: { rows: ChartRow[]; visible: boolean; valuationCurrency: string }) {
-  return <section className="card p-4"><h2 className="font-serif text-2xl">负债趋势</h2>{visible ? <div className="ledger-chart mt-4 h-72"><ResponsiveContainer width="100%" height="100%"><AreaChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} tickFormatter={(value) => chartMoney(Number(value))} /><Tooltip formatter={(value) => formatValuation(Number(value), valuationCurrency)} /><Area type="monotone" dataKey="负债" stroke="var(--chart-secondary)" fill="var(--chart-fill)" /></AreaChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+  return <section className="card overflow-hidden"><ChartHeader title="负债趋势" detail={`${rows.length} 个时间点`} />{visible ? <div className="ledger-chart h-72 px-2 pb-3 pt-2"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} /><XAxis dataKey="date" minTickGap={18} tick={chartTick} tickLine={false} axisLine={{ stroke: "var(--line)" }} /><YAxis width={56} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={(value) => chartMoney(Number(value))} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => [formatValuation(Number(value), valuationCurrency), "负债"]} /><Line type="linear" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
 }
 
 function chartMoney(value: number) {
@@ -124,12 +115,27 @@ function chartMoney(value: number) {
 
 function NetWorthChart({ rows, visible, mode, canUseMonthEnd, valuationCurrency, onModeChange }: { rows: ChartRow[]; visible: boolean; mode: ViewMode; canUseMonthEnd: boolean; valuationCurrency: string; onModeChange: (mode: ViewMode) => void }) {
   const effectiveMode = mode === "month-end" && canUseMonthEnd ? "month-end" : "daily";
-  return <section className="card mt-6 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-2xl">净资产变化</h2><p className="mt-1 text-sm text-olive">日视图看本期波动，月末视图看跨月趋势；负债在上方独立缩放。</p></div><div className="flex rounded-xl border border-line bg-panel p-1 text-sm"><button className={`rounded px-3 py-1 ${effectiveMode === "daily" ? "bg-brand text-paper" : "text-olive"}`} onClick={() => onModeChange("daily")}>日视图</button><button className={`rounded px-3 py-1 ${effectiveMode === "month-end" ? "bg-brand text-paper" : "text-olive"} disabled:cursor-not-allowed disabled:opacity-45`} onClick={() => onModeChange("month-end")} disabled={!canUseMonthEnd}>月末视图</button></div></div>{visible ? <div className="ledger-chart mt-4 h-72 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" /><XAxis dataKey="date" minTickGap={18} /><YAxis width={56} domain={["dataMin", "dataMax"]} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name]} /><Legend /><Line type="monotone" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={3} dot={effectiveMode === "month-end"} /><Line type="monotone" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+  return <section className="card mt-6 overflow-hidden"><div className="flex flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-semibold tracking-[-0.012em] text-ink">净资产变化</h2><p className="mt-1 text-xs text-stone">日视图看本期波动，月末视图看跨月趋势；负债在上方独立缩放。</p></div><div className="flex border border-line bg-panel p-0.5 text-xs"><button className={`px-3 py-1.5 ${effectiveMode === "daily" ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`} onClick={() => onModeChange("daily")}>日视图</button><button className={`px-3 py-1.5 ${effectiveMode === "month-end" ? "bg-brand text-paper" : "text-olive hover:bg-tag"} disabled:cursor-not-allowed disabled:opacity-45`} onClick={() => onModeChange("month-end")} disabled={!canUseMonthEnd}>月末视图</button></div></div>{visible ? <div className="ledger-chart h-72 min-w-0 px-2 pb-3 pt-2"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} /><XAxis dataKey="date" minTickGap={18} tick={chartTick} tickLine={false} axisLine={{ stroke: "var(--line)" }} /><YAxis width={56} domain={["dataMin", "dataMax"]} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), name]} /><Legend /><Line type="linear" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /><Line type="linear" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /></LineChart></ResponsiveContainer></div> : <HiddenMoney />}</section>;
+}
+
+function ChartHeader({ title, detail }: { title: string; detail: string }) {
+  return <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line px-4 py-2"><h2 className="text-sm font-semibold tracking-[-0.012em] text-ink">{title}</h2><span className="text-[10px] tabular-nums text-stone">{detail}</span></div>;
+}
+
+function ChartEmpty({ text }: { text: string }) {
+  return <div className="grid h-72 place-items-center px-4 text-sm text-stone">{text}</div>;
 }
 
 function HiddenMoney() {
-  return <div className="mt-4 rounded-xl border border-line bg-panel p-6 text-center text-sm text-stone">此图包含具体金额，已隐藏。点击上方“显示金额”后查看。</div>;
+  return <div className="grid h-72 place-items-center px-6 text-center text-sm text-stone">此图包含具体金额，已隐藏。点击上方“显示金额”后查看。</div>;
 }
+
+function compactAssetLabel(value: string) {
+  return value.length > 14 ? `${value.slice(0, 13)}…` : value;
+}
+
+const chartTick = { fill: "var(--stone)", fontSize: 11 };
+const chartTooltipStyle = { background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink)", boxShadow: "0 10px 28px oklch(0.20 0.012 255 / 0.14)" };
 
 function formatDelta(value: number | null | undefined, valuationCurrency: string) {
   if (value == null) return "暂无数据";
