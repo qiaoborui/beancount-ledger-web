@@ -312,7 +312,7 @@ function ThemeMenu({ themeMode, resolvedTheme, open, onOpenChange, onThemeModeCh
         <ActiveIcon className="h-4 w-4 text-brand" /> {!compact && <span className="hidden lg:inline">{activeOption.label}</span>}
       </button>
       {open && (
-        <div className={`absolute right-0 z-50 w-36 rounded-md border border-line bg-panel p-1.5 text-sm shadow-lg ${placement === "top" ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]"}`} role="menu">
+        <div className={`absolute z-50 w-36 rounded-md border border-line bg-panel p-1.5 text-sm shadow-lg ${placement === "top" ? "bottom-[calc(100%+0.5rem)] left-0" : "right-0 top-[calc(100%+0.5rem)]"}`} role="menu">
           {themeOptions.map((option) => {
             const Icon = option.icon;
             const active = themeMode === option.value;

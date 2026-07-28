@@ -877,7 +877,7 @@ html[data-theme="dark"] .home-daily-chart-line {
 
 .desktop-sidebar {
   width: 15rem;
-  background: color-mix(in srgb, var(--paper) 82%, black);
+  background: color-mix(in srgb, var(--panel) 72%, var(--paper));
   transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms ease-out;
 }
 
@@ -1137,14 +1137,13 @@ html[data-theme="dark"] .workspace-context-row strong {
   letter-spacing: -0.018em;
 }
 
-html[data-theme="dark"] .home-secondary-flow {
-  background: var(--paper);
-}
-
-html[data-theme="dark"] .home-daily-chart-grid,
-html[data-theme="dark"] .ledger-chart .recharts-cartesian-grid line {
+html[data-theme="dark"] .home-daily-chart-grid {
   stroke: var(--chart-grid);
   stroke-dasharray: 5 5;
+}
+
+html[data-theme="dark"] .ledger-chart .recharts-cartesian-grid line {
+  stroke: var(--chart-grid);
 }
 
 html[data-theme="dark"] .ledger-chart .recharts-cartesian-axis-line,
