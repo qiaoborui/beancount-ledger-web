@@ -116,7 +116,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   const trigger = (
     <button
       type="button"
-      className={`flex h-12 min-w-0 flex-1 items-center gap-3 rounded-lg border bg-panel px-3 text-left transition-colors active:scale-[0.98] md:h-14 md:min-w-72 md:flex-none md:px-3.5 ${desktopOpen || mobileOpen ? "border-brand shadow-[0_0_0_3px_var(--focus-ring)]" : "border-line hover:bg-tag"}`}
+      className={`flex h-12 min-w-0 flex-1 items-center gap-3 bg-panel px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:h-14 md:min-w-72 md:flex-none md:px-3.5 ${desktopOpen || mobileOpen ? "bg-tag shadow-[inset_0_0_0_1px_var(--brand)]" : "hover:bg-tag active:bg-tag"}`}
       onClick={openPicker}
       aria-haspopup="dialog"
       aria-expanded={desktopOpen || mobileOpen}
@@ -164,14 +164,16 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   );
 
   return (
-    <div ref={containerRef} className="relative flex w-full min-w-0 items-center gap-2 md:w-auto md:gap-2.5">
-      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-      {trigger}
-      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
-        <ChevronRight className="h-4 w-4" />
-      </button>
+    <div ref={containerRef} className="relative w-full min-w-0 md:w-auto">
+      <div data-time-range-control="segmented" className="flex w-full min-w-0 overflow-hidden rounded-lg border border-lineSoft bg-panel">
+        <button type="button" className="grid h-12 w-10 shrink-0 place-items-center border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        {trigger}
+        <button type="button" className="grid h-12 w-10 shrink-0 place-items-center border-l border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
 
       {desktopOpen && (
         <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 hidden w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label="选择时间范围">
