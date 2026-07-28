@@ -7,7 +7,7 @@ related_targets:
   - "server/internal/app/home_report.go"
 ---
 
-# Surface Brief: Financial Brief Home
+# Surface Brief: Financial Overview Home
 
 ## Mode
 
@@ -15,36 +15,29 @@ Operate
 
 ## Purpose
 
-Turn the selected period into one continuous financial brief: first judge the result, then locate spending drivers, then inspect the accounts carrying the movement.
+Help the user judge the selected period in seconds, identify what deserves attention, and move to the correct specialist workspace without turning Home into another analytics dashboard.
 
 ## Information Order
 
-1. Period status: net income, expense, income, transaction count, and budget availability.
-2. Cash-flow evidence: period and cumulative trends, followed by same-period year-over-year comparison.
-3. Spending drivers: category distribution, ranking, selected-category comparison, and expense calendar heatmap.
-4. Funds control: primary payment accounts and selected account balance movement.
-
-## Data Contract
-
-- `GET /api/ledger/home-report` supplies current and previous-year period summaries from one ledger snapshot.
-- Sensitive report data loads only after the existing unlock path succeeds.
-- The selected global time range controls the report; the root route defaults to the current calendar year.
+1. Current-period result: net income, expense, income, transaction count, and budget state.
+2. One canonical same-period comparison trajectory with income, expense, and net-income modes.
+3. Prioritized review signals for budget, category concentration, payment concentration, and record activity.
+4. Explicit handoffs to Income and Spending Analysis, Assets and Liabilities, and the Transaction Ledger.
 
 ## Interaction
 
-- Privacy control hides every sensitive amount and chart consistently.
-- Comparison mode switches among income, expense, and net income.
-- Category ranking drills into the existing transaction route.
-- Category and account selectors update their attached trend charts without opening overlays.
+- Privacy control hides every amount, ratio, comparison, chart, and tooltip consistently.
+- The comparison switch changes the single trajectory rather than adding more charts.
+- Review signals and destination rows route to the workspace that owns the question.
 
 ## Responsive Behavior
 
-- Desktop keeps paired charts and five-column metric rails.
-- Tablet stacks paired workfields while preserving shared borders.
-- Mobile turns each chapter into a linear sequence and allows horizontal heatmap scrolling without shrinking touch targets.
+- Desktop pairs the trajectory with the review queue.
+- Tablet and mobile stack the chart, signals, and destinations in decision order.
+- Amount rails preserve fixed numeric anchors and never truncate values.
 
-## Constraints
+## Exclusions
 
+- No category distribution, category trend, calendar heatmap, payment-account chart, account-balance chart, or net-worth chart on Home.
 - No detached KPI cards, decorative category palette, persistent shadows, or oversized empty chart regions.
-- Section numbers are functional report chapters rather than decorative eyebrows.
-- Empty, loading, locked, and failed states remain compact and actionable.
+- Home summarizes and routes; it does not become the place for full diagnosis.

@@ -19,9 +19,9 @@ type LedgerNavItem = {
 };
 
 export const ledgerNavItems: LedgerNavItem[] = [
-  { href: "/", label: "财务简报", icon: Home, mobilePrimary: true, group: "observe" },
-  { href: "/dashboard", label: "分析看板", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
-  { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false, group: "observe" },
+  { href: "/", label: "财务概览", icon: Home, mobilePrimary: true, group: "observe" },
+  { href: "/dashboard", label: "收支分析", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
+  { href: "/net-worth", label: "资产负债", icon: Landmark, mobilePrimary: false, group: "observe" },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false, group: "observe" },
   { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false, group: "observe" },
   { href: "/transactions", label: "交易账本", icon: List, mobilePrimary: true, group: "record" },

@@ -116,15 +116,15 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   const trigger = (
     <button
       type="button"
-      className={`flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-panel px-2.5 text-left transition-colors active:scale-[0.98] md:min-w-60 md:flex-none ${desktopOpen || mobileOpen ? "border-brand shadow-[0_0_0_3px_var(--focus-ring)]" : "border-line hover:bg-tag"}`}
+      className={`flex h-12 min-w-0 flex-1 items-center gap-3 rounded-lg border bg-panel px-3 text-left transition-colors active:scale-[0.98] md:h-14 md:min-w-72 md:flex-none md:px-3.5 ${desktopOpen || mobileOpen ? "border-brand shadow-[0_0_0_3px_var(--focus-ring)]" : "border-line hover:bg-tag"}`}
       onClick={openPicker}
       aria-haspopup="dialog"
       aria-expanded={desktopOpen || mobileOpen}
     >
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-tag text-brand"><CalendarDays className="h-4 w-4" /></span>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-tag text-brand md:h-9 md:w-9"><CalendarDays className="h-4 w-4" /></span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-ink">{formatTimeRangePickerLabel(range)}</span>
-        <span className="mt-0.5 block truncate text-[11px] tabular-nums text-stone">{formatTimeRangeDateSpan(range)}</span>
+        <span className="block truncate text-sm font-semibold tracking-[-0.012em] text-ink md:text-[15px]">{formatTimeRangePickerLabel(range)}</span>
+        <span className="mt-1 block truncate text-[11px] tabular-nums text-stone md:text-xs">{formatTimeRangeDateSpan(range)}</span>
       </span>
       <ChevronDown className={`h-4 w-4 shrink-0 text-brand transition-transform ${desktopOpen ? "rotate-180" : ""}`} />
     </button>
@@ -132,12 +132,12 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
 
   const pickerBody = (
     <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] md:gap-0">
-      <div className="min-w-0 md:border-r md:border-line md:bg-paper md:p-4">
+      <div className="min-w-0 md:border-r md:border-line md:bg-paper md:p-5">
         <PresetSection label="滚动范围" presets={rollingPresets} selected={draftRange.preset} onSelect={selectPreset} />
         <PresetSection className="mt-4" label="自然周期" presets={calendarPresets} selected={draftRange.preset} onSelect={selectPreset} />
       </div>
-      <div className="min-w-0 md:p-5">
-        <h3 className="font-serif text-lg font-semibold">自定义日期</h3>
+      <div className="min-w-0 md:p-6">
+        <h3 className="text-lg font-semibold tracking-[-0.018em]">自定义日期</h3>
         <p className="mt-1 text-xs leading-5 text-stone">选择固定起止日期，结束日期会包含当天。</p>
         <label className="mt-4 block text-xs font-semibold text-stone" htmlFor="time-range-start">开始日期</label>
         <input
@@ -164,19 +164,19 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   );
 
   return (
-    <div ref={containerRef} className="relative flex w-full min-w-0 items-center gap-1.5 md:w-auto">
-      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-xl border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
+    <div ref={containerRef} className="relative flex w-full min-w-0 items-center gap-2 md:w-auto md:gap-2.5">
+      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
         <ChevronLeft className="h-4 w-4" />
       </button>
       {trigger}
-      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-xl border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
+      <button type="button" className="grid h-12 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-brand transition-colors hover:bg-tag active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 md:h-14 md:w-12" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
         <ChevronRight className="h-4 w-4" />
       </button>
 
       {desktopOpen && (
-        <div className="absolute right-0 top-[calc(100%+0.625rem)] z-50 hidden w-[min(42rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label="选择时间范围">
-          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-            <h2 className="font-serif text-lg font-semibold">选择时间范围</h2>
+        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 hidden w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label="选择时间范围">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <h2 className="text-lg font-semibold tracking-[-0.018em]">选择时间范围</h2>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-tag px-2.5 py-1 text-[11px] font-semibold text-brand">
               <span className="h-1.5 w-1.5 rounded-full bg-brandLight" />{formatTimeRangePickerLabel(draftRange)}
             </span>
@@ -216,7 +216,7 @@ function PresetSection({ label, presets, selected, onSelect, className = "" }: {
             <button
               key={preset.key}
               type="button"
-              className={`flex min-h-10 min-w-0 items-center justify-between gap-2 rounded-xl px-3 text-left text-sm transition-colors active:scale-[0.98] ${preset.key === "all" ? "col-span-2 md:col-span-1" : ""} ${active ? "bg-brand text-paper" : "border border-line bg-panel text-warm hover:bg-tag md:border-transparent md:bg-transparent"}`}
+              className={`flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-lg px-3.5 text-left text-sm transition-colors active:scale-[0.98] ${preset.key === "all" ? "col-span-2 md:col-span-1" : ""} ${active ? "bg-brand text-paper" : "border border-line bg-panel text-warm hover:bg-tag md:border-transparent md:bg-transparent"}`}
               onClick={() => onSelect(preset.key)}
               aria-pressed={active}
             >

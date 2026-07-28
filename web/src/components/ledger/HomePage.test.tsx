@@ -68,7 +68,7 @@ describe("HomePage privacy", () => {
       />,
     );
 
-    expect(html).toContain("解锁并显示金额后查看完整财务简报");
+    expect(html).toContain("解锁并显示金额后查看周期轨迹");
     expect(html).not.toContain("¥1,234.56");
     expect(html).not.toContain("¥78.90");
   });
@@ -95,7 +95,7 @@ describe("HomePage privacy", () => {
 });
 
 describe("HomePage layout", () => {
-  it("renders the three-part financial brief from the reference structure", () => {
+  it("renders a decision brief with explicit handoffs instead of duplicate analysis", () => {
     const html = renderToString(
       <HomeReportWorkspace
         report={report}
@@ -109,15 +109,16 @@ describe("HomePage layout", () => {
       />,
     );
 
-    expect(html).toContain('data-home-section="status"');
-    expect(html).toContain('data-home-section="spending"');
-    expect(html).toContain('data-home-section="funds"');
-    expect(html).toContain("本年状态");
-    expect(html).toContain("年度收支同比");
-    expect(html).toContain("支出分类分布");
-    expect(html).toContain("支出热力图");
-    expect(html).toContain("主要资金出口");
-    expect(html).toContain("账户余额走势");
+    expect(html).toContain('data-home-section="position"');
+    expect(html).toContain('data-home-section="pulse"');
+    expect(html).toContain('data-home-section="handoff"');
+    expect(html).toContain("本年结论");
+    expect(html).toContain("年度周期轨迹");
+    expect(html).toContain("待核查事项");
+    expect(html).toContain("收支分析");
+    expect(html).toContain("资产负债");
+    expect(html).not.toContain("支出热力图");
+    expect(html).not.toContain("账户余额走势");
   });
 
   it("renders complete position amounts without truncation classes", () => {
@@ -137,5 +138,22 @@ describe("HomePage layout", () => {
     expect(html).toContain("¥1,155.66");
     expect(html).toContain('data-home-position-value="true"');
     expect(html).not.toMatch(/data-home-position-value="true"[^>]*truncate/);
+  });
+
+  it("reduces position type size for exceptionally long amounts", () => {
+    const html = renderToString(
+      <HomeReportWorkspace
+        report={{ ...report, current: { ...report.current, kpis: { ...report.current.kpis, net: 123456789012345 } } }}
+        summary={summary}
+        timeRange={timeRange}
+        valuationCurrency="CNY"
+        privacySettings={privacySettings}
+        sensitiveUnlocked
+        expenseAnalytics={expenseAnalytics}
+        onPrivacyChange={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("text-[0.78rem]");
   });
 });

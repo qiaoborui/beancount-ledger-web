@@ -1,4 +1,4 @@
-# Surface Brief: Analysis and Reconciliation Workbench
+# Surface Brief: Income and Spending Analysis
 
 ## Mode
 
@@ -6,39 +6,30 @@ Operate
 
 ## Purpose
 
-Support structured analysis of spending, anomalies, cash flow, net worth, and account movement without forcing the user through a wall of independent charts.
+Explain why spending changed inside the selected time and filter scope, then connect every finding to supporting transactions.
 
 ## Structure
 
-- A compact query strip combines filters, visibility, range context, and active conditions.
-- A persistent status rail summarizes the current scope, anomaly count, and hidden-sensitive state.
-- Analysis is organized into working rows with stable columns rather than card grids.
-- Each working row has one primary visual and one evidence table or inspection region.
-- The inspection bench can pin a category, payee, payment account, anomaly, or time point for comparison.
-
-## Hierarchy
-
-1. Scope and financial position.
-2. Spending rhythm and weekday behavior.
-3. Category, payee, and payment-source evidence.
-4. Anomalies and trend changes.
-5. Private asset, cash-flow, net-worth, and account-balance analysis.
+- A compact query strip owns all filters and active conditions.
+- A scope rail summarizes filtered expense, active-day average, active days, maximum transaction, and anomaly count.
+- Consumption Rhythm contains daily and weekday evidence only.
+- Attribution and Review contains category trend, category ranking, payees, payment accounts, and high-value transactions.
 
 ## Interaction
 
-- Filters are deterministic and visible; hidden filter state is summarized in the query strip.
-- Chart points and ranking rows drill into the existing transaction routes.
-- Fullscreen chart view remains available but is secondary to the working layout.
-- Pinned inspection items preserve their source label and can be released or replaced.
+- Filters are deterministic, visible, and reflected in every metric and chart.
+- Chart points, rankings, payees, accounts, and anomalies drill into the transaction route.
+- Fullscreen chart view remains available for dense analysis.
+- One privacy control hides every monetary value without hiding the analytical structure.
 
 ## Responsive Behavior
 
-- Desktop: two-column working rows plus a narrow inspection bench where useful.
-- Tablet: each working row becomes primary visual followed by evidence.
-- Mobile: filters move into the existing sheet pattern; charts shorten; rankings become compact lists.
+- Desktop uses a continuous 12-column evidence grid.
+- Tablet stacks the primary visual before its ranked evidence.
+- Mobile preserves filter access, shortens charts, and keeps drilldown rows touch-sized.
 
 ## Exclusions
 
-- No repeated rounded chart cards.
-- No rainbow series palette; use distinguishable monochrome values, line styles, and direct labels.
-- No decorative dashboard slogans or oversized section headings.
+- No headline income, savings-rate, asset, liability, net-worth, or account-balance analysis.
+- No cash-flow summary already owned by Home.
+- No repeated rounded chart cards or rainbow series palette.

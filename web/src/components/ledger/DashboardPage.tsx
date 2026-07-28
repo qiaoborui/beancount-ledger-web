@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, RefreshCw, SlidersHorizontal, X } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { readJson } from "@/lib/clientFetch";
 import { formatCompactValuation, formatValuation } from "@/lib/money";
@@ -15,14 +15,11 @@ import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { ResponsiveValueRow } from "./shared";
 
 const COLORS = [
-  "var(--chart-palette-1)",
-  "var(--chart-palette-2)",
-  "var(--chart-palette-3)",
-  "var(--chart-palette-4)",
-  "var(--chart-palette-5)",
-  "var(--chart-palette-6)",
   "var(--chart-primary)",
-  "var(--chart-secondary)",
+  "var(--ink)",
+  "var(--stone)",
+  "oklch(var(--color-brand) / .62)",
+  "oklch(var(--color-brand) / .38)",
 ];
 
 const dashboardSummaryCache = new Map<string, DashboardSummary>();
@@ -35,22 +32,17 @@ type DashboardPanelId =
   | "payeeRank"
   | "paymentAccounts"
   | "anomalies"
-  | "categoryTrend"
-  | "privateKpis"
-  | "cashflow"
-  | "netWorth"
-  | "accountTrend";
+  | "categoryTrend";
 
-export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleVisible, onSensitiveLocked, onOpenTransactions }: { timeRange: TimeRange; valuationCurrency: string; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void; onOpenTransactions: (href: string) => void }) {
+export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleVisible, onSensitiveLocked, onOpenTransactions }: { timeRange: TimeRange; valuationCurrency: string; visible: boolean; onToggleVisible: () => void; onSensitiveLocked: () => void; onOpenTransactions: (href: string) => void }) {
   const router = useBrowserRouter();
   const { pathname, search } = useBrowserLocation();
-  const filters = useMemo(() => parseDashboardFiltersFromSearch(search), [search]);
+  const filters = useMemo(() => ({ ...parseDashboardFiltersFromSearch(search), type: [] }), [search]);
   const searchKey = useMemo(() => new URLSearchParams(search).toString(), [search]);
   const canonicalSearch = useMemo(() => dashboardFiltersToSearchParams(filters, new URLSearchParams(search)).toString(), [filters, search]);
   const { data, loading, error, reload } = useDashboardSummary(timeRange, filters, valuationCurrency, onSensitiveLocked);
   const { collapsedRows, toggleRow } = useDashboardRowCollapse();
   const [viewPanelId, setViewPanelId] = useState<DashboardPanelId | null>(null);
-  const [overviewVisible, setOverviewVisible] = useState(false);
   const mask = (value: string) => visible ? value : "••••••";
   const replaceFilters = useCallback((nextFilters: DashboardFilterState) => {
     const query = dashboardFiltersToSearchParams(nextFilters, new URLSearchParams(search)).toString();
@@ -81,21 +73,16 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [viewPanelId]);
 
-  useEffect(() => {
-    if (!visible) setOverviewVisible(false);
-  }, [visible]);
-
-  if (loading && !data) return <DashboardStatusCard title="正在加载趋势看板" detail="正在读取当前时间范围、筛选条件和敏感资产数据。" icon={<RefreshCw className="h-4 w-4 animate-spin text-brand" />} />;
-  if (error && !data) return <DashboardStatusCard title="看板加载失败" detail={error} icon={<AlertTriangle className="h-4 w-4 amount-danger" />} actionLabel="重试" onAction={reload} />;
-  if (!data) return <DashboardStatusCard title="暂无看板数据" detail="服务端暂时没有返回可展示的汇总数据。" actionLabel="重新加载" onAction={reload} />;
+  if (loading && !data) return <DashboardStatusCard title="正在加载收支分析" detail="正在读取当前时间范围、筛选条件和支出维度。" icon={<RefreshCw className="h-4 w-4 animate-spin text-brand" />} />;
+  if (error && !data) return <DashboardStatusCard title="收支分析加载失败" detail={error} icon={<AlertTriangle className="h-4 w-4 amount-danger" />} actionLabel="重试" onAction={reload} />;
+  if (!data) return <DashboardStatusCard title="暂无分析数据" detail="服务端暂时没有返回可展示的交易汇总。" actionLabel="重新加载" onAction={reload} />;
 
   const compact = (value: number) => formatCompactValuation(value, data.currency);
   const maxExpense = data.anomalies[0]?.amount ?? 0;
   const topCategory = data.categorySeries[0];
   const topCategoryText = topCategory ? `${topCategory.label} · ${mask(compact(topCategory.total / 100))}` : "暂无";
-  const privateSummary = visible
-    ? `${compact(data.kpis.income / 100)} 收入 · ${compact(data.kpis.netWorth / 100)} 净资产`
-    : "金额已隐藏";
+  const activeExpenseDays = data.dailyExpenseSeries.length;
+  const averageExpense = activeExpenseDays ? data.kpis.expense / activeExpenseDays : 0;
   const panels: Record<DashboardPanelId, DashboardPanelDefinition> = {
     dailyExpense: {
       title: "每日支出节奏",
@@ -132,59 +119,48 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
       subtitle: `${data.categorySeries.length} 个 Top 分类`,
       render: () => visible ? <CategoryTrendChart data={data} /> : <HiddenChart />,
     },
-    privateKpis: {
-      title: "资产 KPI",
-      subtitle: "敏感",
-      render: () => <PrivateKpis data={data} visible={visible} />,
-    },
-    cashflow: {
-      title: "收入与结余",
-      subtitle: cashflowSubtitle(data, visible),
-      render: () => visible ? <CashflowChart data={data} /> : <HiddenChart compact />,
-    },
-    netWorth: {
-      title: "净资产趋势",
-      subtitle: data.netWorthSeries.length ? `${data.netWorthSeries[0].date} ~ ${data.netWorthSeries.at(-1)?.date}` : "暂无",
-      render: () => visible ? <NetWorthChart data={data} /> : <HiddenChart compact />,
-    },
-    accountTrend: {
-      title: "账户余额趋势",
-      subtitle: `${data.accountBalanceSeries.length} 个主要账户`,
-      render: () => visible ? <AccountTrendChart data={data} /> : <HiddenChart />,
-    },
   };
   const viewPanel = viewPanelId ? panels[viewPanelId] : null;
 
   return <div className="dashboard-workbench">
     <DashboardFilterBar data={data} filters={filters} onChange={setFilter} onClear={clearFilter} onClearAll={clearFilters} />
-    {loading && <DashboardNotice tone="loading" title="正在刷新看板" detail="当前图表先保留，上方筛选或时间范围的数据回来后会自动更新。" />}
+    {loading && <DashboardNotice tone="loading" title="正在刷新分析" detail="当前图表先保留，上方筛选或时间范围的数据回来后会自动更新。" />}
     {error && <DashboardNotice tone="error" title="后台刷新失败" detail={error} actionLabel="重试" onAction={reload} />}
     {dashboardEmpty ? <DashboardEmptyState filtered={activeFilters} onClearFilters={clearFilters} onRetry={reload} /> : <>
 
-    <DashboardOverview data={data} visible={overviewVisible} onToggleVisible={() => setOverviewVisible((value) => !value)} />
-
-    <DashboardInlineRow rowId="monitor" title="消费监控" subtitle="支出、商户和付款来源优先展示" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {data.anomalies.length} 笔高额</RowSummary>}>
+    <DashboardInlineRow rowId="monitor" title="分析范围" subtitle="所有指标都只针对当前时间和筛选条件" collapsed={collapsedRows.monitor} onToggle={toggleRow} summary={<RowSummary>{mask(compact(data.kpis.expense / 100))} 支出 · {activeExpenseDays} 个活跃日</RowSummary>}>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-line overflow-hidden border-y border-line sm:grid-cols-3 xl:grid-cols-5 xl:divide-y-0">
-          <Kpi label="本期支出" value={mask(compact(data.kpis.expense / 100))} tone="text-warm" />
+          <Kpi label="筛选后支出" value={mask(compact(data.kpis.expense / 100))} tone="text-warm" />
+          <Kpi label="活跃日均" value={mask(compact(averageExpense / 100))} tone="text-warm" />
+          <Kpi label="支出活跃日" value={`${activeExpenseDays} 天`} tone="text-warm" />
           <Kpi label="最大单笔" value={mask(compact(maxExpense / 100))} tone="text-warm" />
           <Kpi label="高额支出" value={`${data.anomalies.length} 笔`} tone={data.anomalies.length ? "amount-danger" : "text-warm"} />
-          <Kpi label="Top 分类" value={topCategoryText} tone="text-warm" />
-          <Kpi label="结余" value={mask(compact(data.kpis.net / 100))} tone={tone(data.kpis.net)} />
         </div>
-        <button className="h-10 shrink-0 self-end rounded-md border border-line bg-panel px-2.5 text-sm text-olive hover:bg-tag md:h-8 lg:self-auto" onClick={onToggleVisible} aria-label={visible ? "隐藏看板金额" : "显示看板金额"} title={visible ? "隐藏看板金额" : "显示看板金额"}>
+        <button className="h-10 shrink-0 self-end rounded-md border border-line bg-panel px-2.5 text-sm text-olive hover:bg-tag md:h-8 lg:self-auto" onClick={onToggleVisible} aria-label={visible ? "隐藏分析金额" : "显示分析金额"} title={visible ? "隐藏分析金额" : "显示分析金额"}>
           {visible ? <EyeOff className="inline h-4 w-4 text-brand" /> : <Eye className="inline h-4 w-4 text-brand" />} <span className="ml-1">{visible ? "隐藏金额" : "显示金额"}</span>
         </button>
       </div>
     </DashboardInlineRow>
 
-    <DashboardRow rowId="spending" title="支出作战室" subtitle="先看每天花了多少，再看花给谁、花在哪" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.topPayees.length} 个商户</RowSummary>}>
+    <DashboardRow rowId="spending" title="消费节奏" subtitle="只解释支出在什么时候发生，不重复首页的周期结论" collapsed={collapsedRows.spending} onToggle={toggleRow} summary={<RowSummary>{data.dailyExpenseSeries.length} 个支出日 · {data.weekdayExpense.length} 个星期桶</RowSummary>}>
     <div className="dashboard-panel-grid">
       <Panel panelId="dailyExpense" className="xl:col-span-7" onView={setViewPanelId} title={panels.dailyExpense.title} subtitle={panels.dailyExpense.subtitle}>
         {panels.dailyExpense.render()}
       </Panel>
       <Panel panelId="weekdayExpense" className="xl:col-span-5" onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
         {panels.weekdayExpense.render()}
+      </Panel>
+    </div>
+    </DashboardRow>
+
+    <DashboardRow rowId="risk" title="归因与核查" subtitle="把支出拆到分类、商户、付款账户和异常流水" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{topCategoryText} · {data.anomalies.length} 笔高额</RowSummary>}>
+    <div className="dashboard-panel-grid">
+      <Panel panelId="categoryTrend" className="xl:col-span-8" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
+        {panels.categoryTrend.render()}
+      </Panel>
+      <Panel panelId="anomalies" className="xl:col-span-4" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
+        {panels.anomalies.render()}
       </Panel>
       <Panel panelId="categoryRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
         {panels.categoryRank.render()}
@@ -194,34 +170,6 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
       </Panel>
       <Panel panelId="paymentAccounts" className="xl:col-span-4" onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
         {panels.paymentAccounts.render()}
-      </Panel>
-    </div>
-    </DashboardRow>
-
-    <DashboardRow rowId="risk" title="异常与趋势" subtitle="看高额支出和分类变化" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{data.anomalies.length} 笔高额 · {trendPointCount(data.categorySeries)} 个趋势点</RowSummary>}>
-    <div className="dashboard-panel-grid">
-      <Panel panelId="anomalies" className="xl:col-span-4" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
-        {panels.anomalies.render()}
-      </Panel>
-      <Panel panelId="categoryTrend" className="xl:col-span-8" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
-        {panels.categoryTrend.render()}
-      </Panel>
-    </div>
-    </DashboardRow>
-
-    <DashboardRow rowId="private" title="资产与收入" collapsed={collapsedRows.private} onToggle={toggleRow} summary={<RowSummary>{privateSummary}</RowSummary>}>
-    <div className="dashboard-panel-grid">
-      <Panel panelId="privateKpis" className="xl:col-span-4" onView={setViewPanelId} title={panels.privateKpis.title} subtitle={panels.privateKpis.subtitle}>
-        {panels.privateKpis.render()}
-      </Panel>
-      <Panel panelId="cashflow" className="xl:col-span-4" onView={setViewPanelId} title={panels.cashflow.title} subtitle={panels.cashflow.subtitle}>
-        {panels.cashflow.render()}
-      </Panel>
-      <Panel panelId="netWorth" className="xl:col-span-4" onView={setViewPanelId} title={panels.netWorth.title} subtitle={panels.netWorth.subtitle}>
-        {panels.netWorth.render()}
-      </Panel>
-      <Panel panelId="accountTrend" className="xl:col-span-12" onView={setViewPanelId} title={panels.accountTrend.title} subtitle={panels.accountTrend.subtitle}>
-        {panels.accountTrend.render()}
       </Panel>
     </div>
     </DashboardRow>
@@ -240,10 +188,9 @@ const DEFAULT_COLLAPSED_ROWS: Record<DashboardRowId, boolean> = {
   monitor: false,
   spending: false,
   risk: false,
-  private: true,
 };
 
-type DashboardRowId = "monitor" | "spending" | "risk" | "private";
+type DashboardRowId = "monitor" | "spending" | "risk";
 
 function useDashboardRowCollapse() {
   const [collapsedRows, setCollapsedRows] = useState(DEFAULT_COLLAPSED_ROWS);
@@ -302,7 +249,7 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
           setData(null);
           return;
         }
-        setError(err instanceof Error ? err.message : "看板加载失败");
+        setError(err instanceof Error ? err.message : "收支分析加载失败");
       } finally {
         if (active) setLoading(false);
       }
@@ -344,13 +291,13 @@ function DashboardStatusCard({ title, detail, icon, actionLabel, onAction }: { t
   return <section className="border-b border-line bg-panel p-4">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-start gap-3">
-        {icon && <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-panel">{icon}</span>}
+        {icon && <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-panel">{icon}</span>}
         <div className="min-w-0">
-          <h2 className="font-serif text-lg font-semibold text-warm">{title}</h2>
+          <h2 className="text-lg font-semibold tracking-[-0.018em] text-warm">{title}</h2>
           <p className="mt-1 text-sm text-stone">{detail}</p>
         </div>
       </div>
-      {actionLabel && onAction && <button type="button" className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onAction}>
+      {actionLabel && onAction && <button type="button" className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onAction}>
         <RefreshCw className="h-4 w-4 text-brand" />
         {actionLabel}
       </button>}
@@ -359,14 +306,14 @@ function DashboardStatusCard({ title, detail, icon, actionLabel, onAction }: { t
 }
 
 function DashboardNotice({ tone, title, detail, actionLabel, onAction }: { tone: "loading" | "error"; title: string; detail: string; actionLabel?: string; onAction?: () => void }) {
-  return <section className={`rounded-lg border border-line px-3 py-2 ${tone === "error" ? "bg-panel" : "bg-panel/80"}`}>
+  return <section className={`border-b border-line px-3 py-2 ${tone === "error" ? "bg-panel" : "bg-panel/80"}`}>
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-2 text-sm">
         {tone === "loading" ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-brand" /> : <AlertTriangle className="h-4 w-4 shrink-0 amount-danger" />}
         <span className="font-medium text-olive">{title}</span>
         <span className="min-w-0 text-stone">{detail}</span>
       </div>
-      {actionLabel && onAction && <button type="button" className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 text-xs text-olive hover:bg-tag" onClick={onAction}>
+      {actionLabel && onAction && <button type="button" className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-2.5 text-xs text-olive hover:bg-tag" onClick={onAction}>
         <RefreshCw className="h-3.5 w-3.5 text-brand" />
         {actionLabel}
       </button>}
@@ -377,7 +324,7 @@ function DashboardNotice({ tone, title, detail, actionLabel, onAction }: { tone:
 function DashboardEmptyState({ filtered, onClearFilters, onRetry }: { filtered: boolean; onClearFilters: () => void; onRetry: () => void }) {
   return <section className="border-b border-line bg-panel p-5">
     <div className="mx-auto max-w-xl text-center">
-      <h2 className="font-serif text-xl font-semibold text-warm">{filtered ? "没有匹配当前筛选的交易" : "当前时间范围暂无看板数据"}</h2>
+      <h2 className="text-xl font-semibold tracking-[-0.018em] text-warm">{filtered ? "没有匹配当前筛选的交易" : "当前时间范围暂无分析数据"}</h2>
       <p className="mt-2 text-sm text-stone">
         {filtered ? "可以放宽分类、账户、商户、标签或金额条件，再查看趋势和排行。" : "这个时间范围还没有可汇总的收入、支出或资产记录。"}
       </p>
@@ -393,14 +340,9 @@ function DashboardEmptyState({ filtered, onClearFilters, onRetry }: { filtered: 
 }
 
 function isDashboardEmpty(data: DashboardSummary) {
-  return data.kpis.income === 0
-    && data.kpis.expense === 0
-    && data.kpis.net === 0
-    && data.netWorthSeries.length === 0
-    && data.cashflowSeries.length === 0
+  return data.kpis.expense === 0
     && data.dailyExpenseSeries.length === 0
     && data.categorySeries.length === 0
-    && data.accountBalanceSeries.length === 0
     && data.anomalies.length === 0
     && data.topPayees.length === 0
     && data.topPaymentAccounts.length === 0
@@ -428,8 +370,7 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
       </div>}
     </div>
     {expanded && <>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
-        <MultiFilterSelect label="类型" value={filters.type} onChange={(value) => onChange("type", value)} options={[{ value: "expense", label: "支出", count: 0 }, { value: "income", label: "收入", count: 0 }, { value: "transfer", label: "转账", count: 0 }]} />
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
         <MultiFilterSelect label="商户" value={filters.payee} onChange={(value) => onChange("payee", value)} options={data.filterOptions.payees} />
@@ -462,7 +403,7 @@ function MultiFilterSelect({ label, value, options, onChange }: { label: string;
         <span className="min-w-0 truncate">{value.length ? `${value.length} 项` : "全部"}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />
       </summary>
-      <div className="absolute z-30 mt-1 max-h-72 w-72 overflow-auto rounded-md border border-line bg-paper p-2 shadow-lg">
+      <div className="absolute inset-x-0 z-30 mt-1 max-h-72 overflow-auto rounded-md border border-line bg-paper p-2 shadow-lg">
         {options.length ? options.map((option, index) => {
           const optionId = `dashboard-filter-${Array.from(label).map((char) => char.charCodeAt(0).toString(36)).join("-")}-${index}`;
           return <div key={option.value} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-tag">
@@ -488,7 +429,6 @@ function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState
   const add = (key: DashboardFilterKey, label: string, value: string) => {
     if (value.trim()) chips.push({ key, label: `${label}: ${value}` });
   };
-  if (filters.type.length) chips.push({ key: "type", label: `类型: ${filters.type.map(typeLabel).join(" / ")}` });
   if (filters.category.length) chips.push({ key: "category", label: `分类: ${filters.category.map((value) => optionLabel(data.filterOptions.categories, value)).join(" / ")}` });
   if (filters.account.length) chips.push({ key: "account", label: `账户: ${filters.account.map((value) => optionLabel(data.filterOptions.accounts, value)).join(" / ")}` });
   if (filters.payee.length) chips.push({ key: "payee", label: `商户: ${filters.payee.join(" / ")}` });
@@ -505,13 +445,6 @@ function optionLabel(options: DashboardFilterOption[], value: string) {
 
 function filterOptionLabel(option: DashboardFilterOption) {
   return isLedgerAccount(option.value) ? formatAccountOptionLabel(option.value, option.label, option.alias) : option.label;
-}
-
-function typeLabel(value: string) {
-  if (value === "expense") return "支出";
-  if (value === "income") return "收入";
-  if (value === "transfer") return "转账";
-  return value;
 }
 
 function DashboardRow({ rowId, title, subtitle, collapsed, onToggle, summary, children }: { rowId: DashboardRowId; title: string; subtitle?: string; collapsed: boolean; onToggle: (rowId: DashboardRowId) => void; summary: ReactNode; children: ReactNode }) {
@@ -560,30 +493,6 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: strin
   return <div className="min-w-0 px-2 py-2 text-left"><div className="ledger-label truncate">{label}</div><div className={`mt-0.5 truncate text-sm font-semibold tabular-nums ${tone}`}>{value}</div></div>;
 }
 
-function DashboardOverview({ data, visible, onToggleVisible }: { data: DashboardSummary; visible: boolean; onToggleVisible: () => void }) {
-  const mask = (value: string) => visible ? value : "••••••";
-  const toggleLabel = visible ? "隐藏首行金额" : "显示首行金额";
-  return <section className="grid overflow-hidden border-b border-line bg-panel p-0 sm:grid-cols-2 xl:grid-cols-4">
-    <OverviewMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="text-warm" detail={`${data.cashflowSeries.length} 个趋势点`} action={<button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-paper text-stone hover:bg-tag hover:text-brand" onClick={onToggleVisible} title={toggleLabel} aria-label={toggleLabel} aria-pressed={visible}>{visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button>} />
-    <OverviewMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="text-warm" detail={`${data.dailyExpenseSeries.length} 个支出日`} />
-    <OverviewMetric label="结余" value={mask(formatCompactValuation(data.kpis.net / 100, data.currency))} tone={tone(data.kpis.net)} detail={visible ? ratioLabel(data.kpis.savingsRate) : "金额已隐藏"} />
-    <OverviewMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} detail={data.netWorthSeries.at(-1)?.date ?? "暂无"} />
-  </section>;
-}
-
-function OverviewMetric({ label, value, tone, detail, action }: { label: string; value: string; tone: string; detail: string; action?: ReactNode }) {
-  return <div className="min-w-0 border-b border-line px-3 py-2.5 odd:border-r sm:[&:nth-last-child(-n+2)]:border-b-0 md:px-4 xl:border-b-0 xl:border-r xl:odd:border-r xl:last:border-r-0">
-    <div className="flex items-center justify-between gap-2">
-      <span className="ledger-label">{label}</span>
-      <span className="flex min-w-0 items-center justify-end gap-1.5">
-        <span className="ledger-label min-w-0 truncate text-right">{detail}</span>
-        {action}
-      </span>
-    </div>
-    <div className={`mt-1 truncate text-base font-semibold tracking-[-0.012em] tabular-nums ${tone}`}>{value}</div>
-  </div>;
-}
-
 function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinition; onClose: () => void }) {
   const viewStyle = {
     "--dashboard-chart-height": "min(68dvh, 720px)",
@@ -600,7 +509,7 @@ function DashboardPanelView({ panel, onClose }: { panel: DashboardPanelDefinitio
     <section className="dashboard-panel-view card mx-auto flex h-[calc(100dvh-1.5rem)] max-w-7xl flex-col p-4 sm:h-[calc(100dvh-2.5rem)] sm:p-5" style={viewStyle} onClick={(event) => event.stopPropagation()}>
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line pb-3">
         <div className="min-w-0">
-          <h2 className="truncate font-serif text-xl font-semibold">{panel.title}</h2>
+          <h2 className="truncate text-xl font-semibold tracking-[-0.018em]">{panel.title}</h2>
           {panel.subtitle && <p className="mt-1 truncate text-sm text-stone">{panel.subtitle}</p>}
         </div>
         <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag hover:text-brand" onClick={onClose} title="关闭" aria-label="关闭全屏面板">
@@ -669,44 +578,8 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
   </ChartBox>;
 }
 
-function NetWorthChart({ data }: { data: DashboardSummary }) {
-  const rows = data.netWorthSeries.map((row) => ({ month: row.date, 净资产: row.netWorth / 100, 资产: row.assets / 100, 负债: row.liabilities / 100 }));
-  return <ChartBox empty={!rows.length} compact>
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-        <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
-        <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
-        <YAxis width={58} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} domain={["dataMin", "dataMax"]} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), name]} />
-        <Legend />
-        <Line type="linear" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
-        <Line type="linear" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
-        <Line type="linear" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
-      </LineChart>
-    </ResponsiveContainer>
-  </ChartBox>;
-}
-
-function CashflowChart({ data }: { data: DashboardSummary }) {
-  const rows = data.cashflowSeries.map((row) => ({ month: row.month, 收入: row.income / 100, 支出: row.expense / 100, 结余: row.net / 100 }));
-  return <ChartBox empty={!rows.length} compact>
-    <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="28%">
-        <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
-        <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
-        <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), name]} />
-        <Legend />
-        <Bar dataKey="收入" fill="var(--chart-primary)" radius={0} maxBarSize={16} />
-        <Bar dataKey="支出" fill="var(--chart-secondary)" radius={0} maxBarSize={16} />
-        <Line type="linear" dataKey="结余" stroke="var(--chart-palette-1)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  </ChartBox>;
-}
-
 function CategoryTrendChart({ data }: { data: DashboardSummary }) {
-  const chartSeries = useMemo(() => data.categorySeries.slice(0, 8), [data.categorySeries]);
+  const chartSeries = useMemo(() => data.categorySeries.slice(0, 5), [data.categorySeries]);
   const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
   const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
   return <ChartBox empty={!rows.length}>
@@ -720,37 +593,12 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
             <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), labelForSeries(chartSeries, String(name))]} />
             {visibleSeries.map((series) => {
               const index = chartSeries.findIndex((item) => item.account === series.account);
-              return <Line key={series.account} type="linear" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />;
+              return <Line key={series.account} type="linear" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={index === 0 ? 1.8 : 1.35} strokeDasharray={index === 1 ? "6 3" : index === 3 ? "2 3" : undefined} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />;
             })}
           </LineChart>
         </ResponsiveContainer>
       </div>
       <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} expandOnWideScreens />
-    </div>
-  </ChartBox>;
-}
-
-function AccountTrendChart({ data }: { data: DashboardSummary }) {
-  const chartSeries = data.accountBalanceSeries;
-  const { focusedAccount, visibleSeries, toggleFocus } = useFocusedSeries(chartSeries);
-  const rows = useMemo(() => seriesRows(chartSeries), [chartSeries]);
-  return <ChartBox empty={!rows.length}>
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-            <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
-            <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
-            <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), labelForSeries(chartSeries, String(name))]} />
-            {visibleSeries.map((series) => {
-              const index = chartSeries.findIndex((item) => item.account === series.account);
-              return <Line key={series.account} type="linear" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />;
-            })}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} />
     </div>
   </ChartBox>;
 }
@@ -797,7 +645,7 @@ function CategoryRank({ rows, currency, visible, onOpenTransactions }: { rows: D
   return <div className="mt-3 space-y-2.5">
     {rows.slice(0, 8).map((row, index) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ category: row.account }))}>
       <ResponsiveValueRow label={formatAccountOptionLabel(row.account, row.label, row.alias)} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.total / 100, currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.total / 100, currency) : "金额已隐藏"} />
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line"><div className="h-full" style={{ width: `${row.total / maxValue * 100}%`, background: COLORS[index % COLORS.length] }} /></div>
+      <div className="mt-1 h-1 overflow-hidden bg-line"><div className="h-full bg-brand" style={{ width: visible ? `${row.total / maxValue * 100}%` : "0%", opacity: Math.max(0.35, 1 - index * 0.09) }} /></div>
     </button>)}
   </div>;
 }
@@ -809,7 +657,7 @@ function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSumma
     {data.topPayees.slice(0, 8).map((row) => <button key={row.payee} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.payee }))}>
       <ResponsiveValueRow label={row.payee} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.amount / 100, data.currency) : "金额已隐藏"} />
       <div className="mt-1 flex items-center gap-2">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line"><div className="h-full bg-[var(--chart-secondary)]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
+        <div className="h-1 flex-1 overflow-hidden bg-line"><div className="h-full bg-[var(--chart-secondary)]" style={{ width: visible ? `${row.amount / maxValue * 100}%` : "0%" }} /></div>
         <span className="w-10 text-right text-xs text-stone">{row.txCount} 笔</span>
       </div>
     </button>)}
@@ -818,7 +666,7 @@ function PayeeList({ data, visible, onOpenTransactions }: { data: DashboardSumma
 
 function AnomalyList({ rows, currency, visible, onSelectCategory }: { rows: DashboardSummary["anomalies"]; currency: string; visible: boolean; onSelectCategory: (account: string, mode?: "exact" | "prefix") => void }) {
   if (!rows.length) return <EmptyPanel text="暂无高额支出" />;
-  return <div className="mt-3 divide-y divide-line overflow-hidden rounded-md border border-line bg-panel">
+  return <div className="mt-3 divide-y divide-line border-y border-line bg-panel">
     {rows.slice(0, 8).map((row) => <button key={`${row.source}:${row.account}`} className="w-full p-2.5 text-left hover:bg-tag" onClick={() => onSelectCategory(row.account, "prefix")}>
       <ResponsiveValueRow label={row.payee || row.narration || row.account} labelClassName="truncate text-sm font-medium text-olive" value={visible ? formatCompactValuation(row.amount / 100, currency) : "••••••"} valueClassName="font-semibold amount-danger" valueTitle={visible ? formatCompactValuation(row.amount / 100, currency) : "金额已隐藏"} detail={`${row.date} · ${row.account.replace(/^Expenses:/, "")}`} detailClassName="truncate text-xs text-stone" />
     </button>)}
@@ -832,25 +680,9 @@ function PaymentAccounts({ data, visible, onOpenTransactions }: { data: Dashboar
   return <div className="mt-3 space-y-2.5">
     {rows.map((row) => <button key={row.account} className="w-full text-left" onClick={() => onOpenTransactions(transactionHref({ q: row.account }))}>
       <ResponsiveValueRow label={formatAccountOptionLabel(row.account, row.label, row.alias)} labelClassName="truncate text-sm text-olive" value={visible ? formatCompactValuation(row.amount / 100, data.currency) : "••••••"} valueClassName="text-sm font-semibold text-warm" valueTitle={visible ? formatCompactValuation(row.amount / 100, data.currency) : "金额已隐藏"} />
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line"><div className="h-full bg-[var(--chart-tertiary)]" style={{ width: `${row.amount / maxValue * 100}%` }} /></div>
+      <div className="mt-1 h-1 overflow-hidden bg-line"><div className="h-full bg-[var(--chart-tertiary)]" style={{ width: visible ? `${row.amount / maxValue * 100}%` : "0%" }} /></div>
     </button>)}
   </div>;
-}
-
-function PrivateKpis({ data, visible }: { data: DashboardSummary; visible: boolean }) {
-  const mask = (value: string) => visible ? value : "••••••";
-  return <div className="mt-3 grid grid-cols-2 gap-2">
-    <SmallMetric label="资产" value={mask(formatCompactValuation(data.kpis.assets / 100, data.currency))} tone="text-warm" />
-    <SmallMetric label="负债" value={mask(formatCompactValuation(data.kpis.liabilities / 100, data.currency))} tone="text-warm" />
-    <SmallMetric label="净资产" value={mask(formatCompactValuation(data.kpis.netWorth / 100, data.currency))} tone={tone(data.kpis.netWorth)} />
-    <SmallMetric label="收入" value={mask(formatCompactValuation(data.kpis.income / 100, data.currency))} tone="text-warm" />
-    <SmallMetric label="支出" value={mask(formatCompactValuation(data.kpis.expense / 100, data.currency))} tone="text-warm" />
-    <SmallMetric label="结余率" value={visible ? ratioLabel(data.kpis.savingsRate) : "••••••"} tone={tone(data.kpis.net)} />
-  </div>;
-}
-
-function SmallMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="rounded-md border border-line bg-panel p-2.5"><div className="ledger-kicker truncate">{label}</div><div className={`mt-1 truncate text-sm font-semibold tabular-nums ${tone}`}>{value}</div></div>;
 }
 
 function ChartBox({ empty, compact = false, children }: { empty: boolean; compact?: boolean; children: ReactNode }) {
@@ -863,11 +695,11 @@ function ChartBox({ empty, compact = false, children }: { empty: boolean; compac
 }
 
 function HiddenChart({ compact = false }: { compact?: boolean }) {
-  return <div className={`dashboard-chart-canvas mt-3 grid place-items-center rounded-md border border-line bg-panel text-sm text-stone ${compact ? "dashboard-chart-canvas-compact" : ""}`}>金额已隐藏</div>;
+  return <div className={`dashboard-chart-canvas mt-3 grid place-items-center border border-line bg-panel text-sm text-stone ${compact ? "dashboard-chart-canvas-compact" : ""}`}>金额已隐藏</div>;
 }
 
 function EmptyPanel({ text, compact = false }: { text: string; compact?: boolean }) {
-  return <div className={`mt-3 grid place-items-center rounded-md border border-line bg-panel p-4 text-center text-sm text-stone ${compact ? "min-h-28" : "min-h-36"}`}>{text}</div>;
+  return <div className={`mt-3 grid place-items-center border border-line bg-panel p-4 text-center text-sm text-stone ${compact ? "min-h-28" : "min-h-36"}`}>{text}</div>;
 }
 
 function AnnotationStrip({ annotations, currency, showFullDates, onOpenTransactions }: { annotations: DashboardSummary["annotations"]; currency: string; showFullDates: boolean; onOpenTransactions: (href: string) => void }) {
@@ -934,10 +766,6 @@ function dashboardDateLabel(value: string, showFullDate: boolean) {
   return showFullDate ? value : value.slice(5);
 }
 
-function trendPointCount(series: { values: { month: string }[] }[]) {
-  return bucketLabels(series).length;
-}
-
 function labelForSeries(series: { account: string; alias?: string | null; label: string }[], account: string) {
   const row = series.find((item) => item.account === account);
   return row ? formatAccountOptionLabel(row.account, row.label, row.alias) : account;
@@ -947,20 +775,4 @@ const tooltipStyle = { background: "var(--ivory)", border: "1px solid var(--line
 
 function compactChartMoney(value: number) {
   return new Intl.NumberFormat("zh-CN", { notation: "compact", compactDisplay: "short", maximumFractionDigits: 1 }).format(value);
-}
-
-function ratioLabel(value: number | null) {
-  if (value == null) return "暂无";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function tone(value: number) {
-  return value < 0 ? "amount-danger" : "text-warm";
-}
-
-function cashflowSubtitle(data: DashboardSummary, visible: boolean) {
-  if (!visible) return "金额已隐藏";
-  if (!data.cashflowSeries.length) return "暂无";
-  const latest = data.cashflowSeries.at(-1);
-  return latest ? `${latest.month} 结余 ${formatCompactValuation(latest.net / 100, data.currency)}` : "暂无";
 }

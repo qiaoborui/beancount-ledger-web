@@ -125,7 +125,7 @@ The hierarchy is compact and fixed. Headings identify working regions rather tha
 
 Desktop uses a 240px navigation rail, a full-width scrollable workspace, and optional inspection regions attached to the data they explain. The global desktop top bar is removed; page context and time controls occupy a single compact local command row.
 
-The home surface is a three-chapter financial brief: period status with five aligned metrics and dual cash-flow trends, spending drivers with comparison and calendar evidence, then funds control with payment-account and balance movement views. Each chapter uses full-width workfields and shared rules rather than detached cards. Dashboard surfaces use continuous 12-column grids with shared borders rather than detached cards. Transaction rows preserve fixed date, description, amount, account, and metadata columns.
+The three primary financial surfaces have separate jobs. Home is a short decision brief with current position, one comparison trajectory, prioritized review signals, and explicit handoffs. Dashboard is a filter-driven income and spending analysis workspace for rhythm, categories, payees, payment sources, and anomalous transactions; it never repeats asset or net-worth analysis. Net worth is a balance-sheet workspace for current assets, liabilities, concentration, allocation, and one canonical wealth trend. All three use full-width workfields and shared rules rather than detached cards. Transaction rows preserve fixed date, description, amount, account, and metadata columns.
 
 At widths below 768px, the desktop rail becomes a mobile header and configurable bottom navigation. Horizontal workbench regions stack into ordered sections, while controls retain touch-sized targets.
 
