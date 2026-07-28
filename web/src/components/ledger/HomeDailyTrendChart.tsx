@@ -16,8 +16,8 @@ type ChartPoint = {
 };
 
 const chartWidth = 960;
-const chartHeight = 330;
-const margin = { top: 18, right: 28, bottom: 58, left: 54 };
+const chartHeight = 300;
+const margin = { top: 14, right: 24, bottom: 48, left: 62 };
 const plotWidth = chartWidth - margin.left - margin.right;
 const plotHeight = chartHeight - margin.top - margin.bottom;
 const plotBottom = margin.top + plotHeight;
@@ -138,7 +138,7 @@ function buildChartModel(rows: DayRow[], mode: ChartMode) {
   const maxRaw = rawPoints.reduce((max, point) => Math.max(max, point.income, point.expense, point.net, baselineValue), baselineValue);
   const minRaw = rawPoints.reduce((min, point) => Math.min(min, point.net, baselineValue), baselineValue);
   const maxValue = niceMax(maxRaw);
-  const minValue = niceMin(minRaw, maxValue);
+  const minValue = mode === "daily" ? niceDailyMin(minRaw, maxValue) : niceMin(minRaw, maxValue);
   const count = Math.max(rawPoints.length, 1);
   const step = plotWidth / count;
   const points: ChartPoint[] = rawPoints.map((point, index) => {
@@ -214,6 +214,12 @@ function niceMin(value: number, max: number) {
   const absoluteMax = Math.max(Math.abs(value), max);
   const nice = niceMax(absoluteMax);
   return -nice;
+}
+
+function niceDailyMin(value: number, max: number) {
+  if (!Number.isFinite(value) || value >= 0) return 0;
+  const bounded = Math.max(Math.abs(value), max * 0.28);
+  return -niceMax(bounded);
 }
 
 function buildTicks(min: number, max: number) {

@@ -19,12 +19,12 @@ type LedgerNavItem = {
 };
 
 export const ledgerNavItems: LedgerNavItem[] = [
-  { href: "/", label: "总览", icon: Home, mobilePrimary: true, group: "observe" },
-  { href: "/dashboard", label: "看板", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
+  { href: "/", label: "财务简报", icon: Home, mobilePrimary: true, group: "observe" },
+  { href: "/dashboard", label: "分析看板", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
   { href: "/net-worth", label: "净资产", icon: Landmark, mobilePrimary: false, group: "observe" },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false, group: "observe" },
   { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false, group: "observe" },
-  { href: "/transactions", label: "流水", icon: List, mobilePrimary: true, group: "record" },
+  { href: "/transactions", label: "交易账本", icon: List, mobilePrimary: true, group: "record" },
   { href: "/imports", label: "导入", icon: FileUp, mobilePrimary: false, group: "record" },
   { href: "/editor", label: "编辑", icon: FileCode2, mobilePrimary: false, group: "record" },
   { href: "/accounts", label: "账户", icon: BookOpen, mobilePrimary: true, group: "manage" },
@@ -34,9 +34,9 @@ export const ledgerNavItems: LedgerNavItem[] = [
 ];
 
 const navGroups: { id: LedgerNavGroup; label: string }[] = [
-  { id: "observe", label: "观察" },
-  { id: "record", label: "记录" },
-  { id: "manage", label: "管理" },
+  { id: "observe", label: "了解现状" },
+  { id: "record", label: "记录与整理" },
+  { id: "manage", label: "口径与账户" },
 ];
 
 const sidebarCollapsedKey = "ledger_sidebar_collapsed";
@@ -210,8 +210,8 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
             <ClientNavLink href="/" onClick={(event) => handleNavClick(event, "/")} className="desktop-sidebar-brand-link flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
               <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-brand text-primary-foreground"><Activity className="h-3.5 w-3.5" /></span>
               <span className="desktop-sidebar-brand-copy min-w-0 leading-tight">
-                <span className="block truncate text-[13px] font-semibold tracking-[-0.012em]">Ledger</span>
-                <span className="block truncate text-[9px] font-medium tracking-[0.06em] text-stone">财务核对工作台</span>
+                <span className="block truncate text-sm font-semibold tracking-[-0.012em]">Ledger</span>
+                <span className="block truncate text-[11px] font-medium text-stone">私人财务控制台</span>
               </span>
             </ClientNavLink>
             <button type="button" onClick={toggleSidebarCollapsed} className="desktop-sidebar-toggle grid h-7 w-7 shrink-0 place-items-center rounded-md text-stone hover:bg-tag hover:text-ink" aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}>
@@ -266,14 +266,14 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
 }
 
 function GroupedNavigation({ pathname, mobileTabHrefs = [], collapsed = false, onNavigate }: { pathname: string; mobileTabHrefs?: LedgerNavHref[]; collapsed?: boolean; onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: LedgerNavHref) => void }) {
-  return <nav className="space-y-3">
+  return <nav className="space-y-5">
     {navGroups.map((group) => <div key={group.id} className="desktop-nav-group">
-      <div className="desktop-nav-group-label mb-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-stone">{group.label}</div>
-      <div className="space-y-0.5">
+      <div className="desktop-nav-group-label mb-2 px-2 text-[11px] font-semibold text-stone">{group.label}</div>
+      <div className="space-y-1">
         {ledgerNavItems.filter((item) => item.group === group.id).map((item) => {
           const Icon = item.icon;
           const active = isActivePath(pathname, item.href);
-          return <ClientNavLink key={item.href} href={item.href} title={collapsed ? item.label : undefined} onClick={(event) => onNavigate(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-md text-[13px] font-medium ${active ? "desktop-sidebar-link-active bg-tag text-ink" : "text-olive hover:bg-paper hover:text-ink"}`}>
+          return <ClientNavLink key={item.href} href={item.href} title={collapsed ? item.label : undefined} onClick={(event) => onNavigate(event, item.href)} className={`desktop-sidebar-link flex items-center rounded-md text-[14px] font-semibold ${active ? "desktop-sidebar-link-active bg-tag text-ink" : "text-olive hover:bg-paper hover:text-ink"}`}>
             <Icon className={`h-4 w-4 shrink-0 ${active ? "text-brand" : "text-stone"}`} />
             <span className="desktop-sidebar-link-label min-w-0">{item.label}</span>
             {!collapsed && mobileTabHrefs.length > 0 && !mobileTabHrefs.includes(item.href) && <span className="ml-auto text-[10px] text-stone">更多</span>}

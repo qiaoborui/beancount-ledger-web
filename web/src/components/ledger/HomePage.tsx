@@ -35,6 +35,11 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
   const lastSevenExpense = sumExpense(dayRows.slice(-7));
   const previousSevenExpense = sumExpense(dayRows.slice(-14, -7));
   const weeklyExpenseDelta = previousSevenExpense > 0 ? (lastSevenExpense - previousSevenExpense) / previousSevenExpense : null;
+  const peakExpenseDay = dayRows.reduce<[string, { income: number; expense: number }] | null>((best, row) => {
+    if (!best || row[1].expense > best[1].expense) return row;
+    return best;
+  }, null);
+  const topCategory = topCategories[0];
 
   return <div className="home-dashboard home-console">
     <section className="border-b border-line bg-panel">
@@ -59,46 +64,53 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       </div>
     </section>
 
-    <section className="grid border-b border-line xl:grid-cols-2 xl:items-start">
-      <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
-        <WorkbenchHeading title="日收支趋势" detail="收入、支出与净收入以同一坐标展示。" meta={`${dayRows.length} 天`} />
-        <div className="h-[22rem] min-w-0 px-4 pb-6 pt-3 md:h-[25rem] md:px-6 xl:px-8">
-          <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="daily" />
+    <section className="grid border-b border-line xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch">
+      <div className="grid min-w-0 border-b border-line xl:grid-cols-2 xl:border-b-0 xl:border-r">
+        <div className="flex min-w-0 flex-col border-b border-line xl:border-b-0 xl:border-r">
+          <WorkbenchHeading title="日收支趋势" detail="收入、支出与净收入以同一坐标展示。" meta={`${dayRows.length} 天`} />
+          <div className="h-[18rem] min-w-0 px-4 pb-5 pt-3 md:h-[19.5rem] md:px-6 xl:h-auto xl:min-h-[20rem] xl:flex-1 xl:px-8">
+            <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="daily" />
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-col">
+          <WorkbenchHeading title="累计收支趋势" detail="本期累计收入、支出与结余走势。" meta={latestDate} />
+          <div className="h-[18rem] min-w-0 px-4 pb-5 pt-3 md:h-[19.5rem] md:px-6 xl:h-auto xl:min-h-[20rem] xl:flex-1 xl:px-8">
+            <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="cumulative" />
+          </div>
         </div>
       </div>
 
-      <div className="min-w-0">
-        <WorkbenchHeading title="累计收支趋势" detail="本期累计收入、支出与结余走势。" meta={latestDate} />
-        <div className="h-[22rem] min-w-0 px-4 pb-6 pt-3 md:h-[25rem] md:px-6 xl:px-8">
-          <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="cumulative" />
+      <aside className="min-w-0 bg-panel">
+        <WorkbenchHeading title="检查台" detail="把本期最该看的线索放在同一列。" meta={`${topCategories.length} 类`} />
+        <div className="divide-y divide-line">
+          <InspectionRow label="最大支出日" value={peakExpenseDay ? mask(formatValuation(peakExpenseDay[1].expense / 100, displayCurrency), false) : "暂无"} detail={peakExpenseDay?.[0] ?? "当前周期暂无支出"} />
+          <InspectionRow label="Top 分类" value={topCategory ? mask(formatValuation(topCategory.amount / 100, displayCurrency), false) : "暂无"} detail={topCategory ? `${formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias)} · ${formatPercent(topCategory.share)}` : "暂无分类集中度"} />
+          <InspectionRow label="近 7 日变化" value={weeklyExpenseDelta == null ? "暂无" : formatSignedPercent(weeklyExpenseDelta)} detail={weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3 ? "需要检查近期消费节奏" : "没有明显上冲"} alert={weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3} />
         </div>
-      </div>
-    </section>
-
-    <section className="border-b border-line bg-panel">
-      <WorkbenchHeading title="支出分类账" detail="按本期支出金额排序，优先检查高集中分类。" meta={`${topCategories.length} 类`} />
-      <div className="divide-y divide-line">
-        {topCategories.length ? topCategories.map((row, index) => {
-          const content = <>
-            <span className="w-7 shrink-0 text-xs tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-ink">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
-              <span className="mt-2 block h-1.5 overflow-hidden bg-line"><span className="block h-full bg-ink" style={{ width: `${Math.max(3, Math.min(100, (row.share ?? 0) * 100))}%` }} /></span>
-            </span>
-            <span className="shrink-0 text-right">
-              <span className="block text-sm font-semibold tabular-nums text-ink">{showAmounts ? formatValuation(row.amount / 100, displayCurrency) : "••••••"}</span>
-              <span className="mt-1 block text-xs tabular-nums text-stone">{row.txCount} 笔 · {formatPercent(row.share)}</span>
-            </span>
-          </>;
-          return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-3 px-4 py-4 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-6 xl:px-8" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-3 px-4 py-4 md:px-6 xl:px-8">{content}</div>;
-        }) : <EmptyRail text="本期没有可分析的支出分类。" />}
-      </div>
+        <div className="border-t border-line">
+          {topCategories.length ? topCategories.slice(0, 5).map((row, index) => {
+            const content = <>
+              <span className="w-6 shrink-0 text-[11px] tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium text-ink">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
+                <span className="mt-2 block h-1 overflow-hidden bg-line"><span className="block h-full bg-ink" style={{ width: `${Math.max(3, Math.min(100, (row.share ?? 0) * 100))}%` }} /></span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-[13px] font-semibold tabular-nums text-ink">{showAmounts ? formatValuation(row.amount / 100, displayCurrency) : "••••••"}</span>
+                <span className="mt-1 block text-[11px] tabular-nums text-stone">{row.txCount} 笔</span>
+              </span>
+            </>;
+            return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-2.5 px-4 py-3 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-2.5 px-4 py-3">{content}</div>;
+          }) : <EmptyRail text="本期没有可分析的支出分类。" />}
+        </div>
+      </aside>
     </section>
   </div>;
 }
 
 function PositionMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: string; alert?: boolean; primary?: boolean }) {
-  return <div className={`min-w-0 border-b border-r border-line px-4 py-5 last:border-r-0 md:border-b-0 md:px-5 xl:px-8 ${primary ? "col-span-2 md:col-span-1" : ""}`}>
+  return <div className={`min-w-0 border-b border-r border-line px-4 py-4 last:border-r-0 md:border-b-0 md:px-5 xl:px-8 ${primary ? "col-span-2 md:col-span-1" : ""}`}>
     <div className="text-xs font-medium text-stone">{label}</div>
     <div className={`mt-2 truncate font-semibold tracking-[-0.025em] tabular-nums ${primary ? "text-[2rem] leading-none xl:text-[2.25rem]" : "text-[1.55rem] leading-tight xl:text-[1.75rem]"} ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
     <div className="mt-2 truncate text-xs text-stone">{detail}</div>
@@ -106,12 +118,20 @@ function PositionMetric({ label, value, detail, alert = false, primary = false }
 }
 
 function WorkbenchHeading({ title, detail, meta }: { title: string; detail: string; meta: string }) {
-  return <div className="flex min-h-[5.25rem] items-start justify-between gap-4 border-b border-line px-4 py-4 md:px-6 xl:px-8">
+  return <div className="flex min-h-[4.25rem] items-start justify-between gap-4 border-b border-line px-4 py-3.5 md:px-6 xl:px-8">
     <div className="min-w-0">
       <h3 className="text-base font-semibold tracking-[-0.015em] text-ink">{title}</h3>
       <p className="mt-1.5 truncate text-xs text-stone">{detail}</p>
     </div>
     <span className="shrink-0 text-xs tabular-nums text-stone">{meta}</span>
+  </div>;
+}
+
+function InspectionRow({ label, value, detail, alert = false }: { label: string; value: string; detail: string; alert?: boolean }) {
+  return <div className="px-4 py-3.5">
+    <div className="text-[11px] font-semibold text-stone">{label}</div>
+    <div className={`mt-1 truncate text-lg font-semibold tracking-[-0.018em] tabular-nums ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
+    <div className="mt-1 truncate text-xs text-stone">{detail}</div>
   </div>;
 }
 

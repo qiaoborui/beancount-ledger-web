@@ -141,12 +141,12 @@ export function writePrivacySettings(settings: PrivacySettings) {
 }
 
 export function readThemeMode(): ThemeMode {
-  if (typeof window === "undefined") return "system";
+  if (typeof window === "undefined") return "dark";
   try {
     const raw = localStorage.getItem(themeModeKey);
-    return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+    return raw === "light" || raw === "dark" || raw === "system" ? raw : "dark";
   } catch {
-    return "system";
+    return "dark";
   }
 }
 

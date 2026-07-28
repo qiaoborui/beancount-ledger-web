@@ -1,15 +1,15 @@
 ---
 name: Beancount Ledger Web
-description: A compact monochrome reconciliation console for private Beancount ledgers.
+description: A dark-first monochrome financial control room for private Beancount ledgers.
 colors:
-  operational-ink: "oklch(15% 0 0)"
-  decisive-black: "oklch(20% 0 0)"
-  console-white: "oklch(100% 0 0)"
-  workspace-white: "oklch(99.5% 0 0)"
-  utility-gray: "oklch(95.5% 0 0)"
-  divider-gray: "oklch(89% 0 0)"
-  secondary-text: "oklch(47% 0 0)"
-  risk-red: "oklch(58% 0.16 29)"
+  control-black: "oklch(10.5% 0 0)"
+  console-black: "oklch(13.5% 0 0)"
+  panel-charcoal: "oklch(16.5% 0 0)"
+  rail-charcoal: "oklch(12% 0 0)"
+  divider-steel: "oklch(27% 0 0)"
+  primary-text: "oklch(92% 0 0)"
+  secondary-text: "oklch(62% 0 0)"
+  risk-red: "oklch(70% 0.15 29)"
 typography:
   headline:
     fontFamily: "Manrope, Noto Sans SC, PingFang SC, sans-serif"
@@ -51,36 +51,36 @@ spacing:
 
 ## Overview
 
-**Creative North Star: "The Reconciliation Console"**
+**Creative North Star: "The Financial Control Room"**
 
-Beancount Ledger Web is a private financial operations console rather than a generic analytics dashboard. The interface turns an auditable text ledger into a precise working surface: stable columns, explicit states, dense tables, compact controls, and direct movement from financial position to supporting evidence.
+Beancount Ledger Web is a private financial operations console rather than a generic analytics dashboard. The interface turns an auditable text ledger into a precise dark working surface: stable columns, explicit states, dense tables, compact controls, and direct movement from financial position to supporting evidence.
 
 The visual language is contemporary and quiet. It borrows the certainty and alignment of banking operations software without CRT styling, terminal cosplay, decorative color, or paper metaphors. Desktop screens prioritize density and horizontal comparison; mobile screens preserve the same hierarchy as focused sequential sections.
 
 **Key Characteristics:**
 
-- White, black, and cool neutral gray surfaces.
+- Near-black, charcoal, and cool neutral gray surfaces.
 - Semantic red reserved for anomalies, failures, and destructive actions.
 - Flat continuous work areas divided by one-pixel rules.
 - Tabular figures and persistent numeric alignment.
-- Compact desktop navigation with a central ledger workspace and inspection bench.
+- Persistent desktop navigation with a central ledger workspace and inspection bench.
 - Structural mobile reflow rather than scaled-down desktop composition.
 
 ## Colors
 
-The palette is intentionally achromatic. Value, weight, spacing, and position carry hierarchy; color does not classify routine financial data.
+The palette is intentionally achromatic and dark-first. Value, weight, spacing, and position carry hierarchy; color does not classify routine financial data.
 
 ### Primary
 
-- **Operational Ink** (`operational-ink`): Primary text, amounts, chart emphasis, and high-priority controls.
-- **Decisive Black** (`decisive-black`): Selected states and primary actions.
+- **Primary Text** (`primary-text`): Primary text, amounts, chart emphasis, and high-priority controls.
+- **Control Black** (`control-black`): Application background and selected-control grounding.
 
 ### Neutral
 
-- **Console White** (`console-white`): Main data surfaces.
-- **Workspace White** (`workspace-white`): App background and quiet work areas.
-- **Utility Gray** (`utility-gray`): Navigation selection, tool strips, inspection benches, and inactive controls.
-- **Divider Gray** (`divider-gray`): One-pixel table, panel, and section rules.
+- **Console Black** (`console-black`): Main working surface.
+- **Panel Charcoal** (`panel-charcoal`): Tool strips, inspection benches, menus, and secondary panels.
+- **Rail Charcoal** (`rail-charcoal`): Persistent navigation surface.
+- **Divider Steel** (`divider-steel`): One-pixel table, panel, and section rules.
 - **Secondary Text** (`secondary-text`): Labels, timestamps, metadata, and supporting explanations.
 
 ### Tertiary
@@ -114,9 +114,9 @@ The hierarchy is compact and fixed. Headings identify working regions rather tha
 
 ## Layout
 
-Desktop uses a compact 176px navigation rail, a full-width scrollable workspace, and optional inspection regions attached to the data they explain. The global desktop top bar is removed; page context and time controls occupy a single compact local row.
+Desktop uses a 240px navigation rail, a full-width scrollable workspace, and optional inspection regions attached to the data they explain. The global desktop top bar is removed; page context and time controls occupy a single compact local command row.
 
-The home surface follows a fixed sequence: period position strip, daily trend, ranked expense ledger, anomaly inspection bench, then recent transactions. Dashboard surfaces use continuous 12-column grids with shared borders rather than detached cards. Transaction rows preserve fixed date, description, amount, account, and metadata columns.
+The home surface follows a fixed sequence: period position strip, dual trend workfield, anomaly/category inspection bench, then recent transactions only after the first screen. Dashboard surfaces use continuous 12-column grids with shared borders rather than detached cards. Transaction rows preserve fixed date, description, amount, account, and metadata columns.
 
 At widths below 768px, the desktop rail becomes a mobile header and configurable bottom navigation. Horizontal workbench regions stack into ordered sections, while controls retain touch-sized targets.
 
@@ -134,9 +134,9 @@ Dense workbench controls use 4–6px corners. Larger 12–16px radii are reserve
 
 ### Navigation Rail
 
-- 176px expanded and 56px collapsed.
-- Utility-gray background with one-pixel right rule.
-- Active items use a quiet gray band and a small black state dot.
+- 240px expanded and 56px collapsed.
+- Rail-charcoal background with one-pixel right rule.
+- Active items use a quiet charcoal band and a small light state dot.
 - Brand, theme, and privacy controls live inside the rail; no desktop global header is added.
 
 ### Context Row

@@ -1,4 +1,11 @@
-# Surface Brief: Financial Position Console
+---
+version: 1
+slug: "web-src-components-ledger-homepage-tsx"
+primary_target: "web/src/components/ledger/HomePage.tsx"
+related_targets: []
+---
+
+# Surface Brief: Financial Control Room Home
 
 ## Mode
 
@@ -6,40 +13,40 @@ Operate
 
 ## Purpose
 
-Answer three questions within the first desktop viewport: What is my current position? What changed? What requires inspection? Then provide direct evidence through categories, accounts, and recent transactions.
+Answer three questions in the first desktop viewport: What is the current period position, what changed over time, and what requires inspection. Transactions remain available after the first screen as evidence, not as the opening content.
 
 ## First Viewport
 
-- The page header and time controls occupy one compact command row; no duplicated global page title.
-- A single financial-position band aligns net result, income, expense, daily pace, and concentration on shared columns.
-- The primary trend occupies the central working field rather than a card.
-- A narrow inspection bench contains the strongest anomaly, largest category, and recent change evidence. Bench items can link to their transaction or category context.
-- Recent transactions begin within or immediately after the first viewport at common desktop heights.
+- The compact command row provides page context, sync/privacy state, and time controls without a duplicate global header.
+- A five-cell position strip carries net result, income, expense, daily pace, and recent seven-day movement.
+- The main working field uses two adjacent monochrome charts: daily rhythm and cumulative position.
+- A right inspection bench summarizes the largest spend day, top category, weekly change, and top category ledger rows.
+- Recent transactions start below the opening workfield.
 
 ## Information Order
 
 1. Net position and period context.
-2. Income-versus-expense relationship and savings rate.
-3. Daily trend and meaningful deviation.
-4. Top categories and recent activity.
-5. Transaction evidence.
+2. Income-versus-expense relationship and spending pace.
+3. Daily and cumulative trend evidence.
+4. Inspection bench for anomalies and category concentration.
+5. Transaction evidence after scroll.
 
 ## Interaction
 
-- Privacy control changes all sensitive values consistently.
-- Selecting a category or anomaly opens its existing drilldown path.
-- Desktop rows use keyboard-focusable, table-like interaction.
-- The inspection bench remains visible while the main working field scrolls when space allows.
+- Privacy control changes sensitive values consistently.
+- Category rows drill into the existing transaction route.
+- Desktop rows remain table-like and keyboard focusable.
+- The inspection bench is structurally attached to the chart workfield.
 
 ## Responsive Behavior
 
-- Desktop: navigation rail + main field + inspection bench.
-- Tablet: inspection bench moves below the trend but keeps compact table rows.
-- Mobile: summary becomes a short hierarchy; trend, bench, and transaction evidence stack in that order with 44px controls.
+- Desktop: navigation rail, position strip, dual chart workfield, right inspection bench.
+- Tablet: charts and inspection bench stack while preserving compact rows.
+- Mobile: metrics, charts, inspection, and transaction evidence become sequential touch-sized sections.
 
 ## Exclusions
 
 - No KPI card grid.
 - No decorative category colors.
-- No oversized balance hero.
-- No full-width duplicate title bar.
+- No duplicate desktop top bar.
+- No recent transaction table in the first home viewport.

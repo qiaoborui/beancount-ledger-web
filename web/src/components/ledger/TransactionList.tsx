@@ -322,6 +322,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const [drawerTxn, setDrawerTxn] = useState<Txn | null>(null);
   const [activeTxnKey, setActiveTxnKey] = useState<string | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [filterViews, setFilterViews] = useState<StoredFilterViews>(() => loadFilterViews());
@@ -443,10 +444,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const renderFilterControls = (idPrefix: string) => (
     <>
       <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(180px,260px)_minmax(180px,260px)]">
-        {setSearchQuery && <Input id={idPrefix === "desktop" ? "transaction-search-input" : `${idPrefix}-transaction-search-input`} className="h-10 rounded-xl bg-paper text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
+        {setSearchQuery && <Input id={idPrefix === "desktop" ? "transaction-search-input" : `${idPrefix}-transaction-search-input`} className="h-9 rounded-md bg-paper text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
         {setCategoryQuery && (
           <Select value={categories.includes(categoryQuery ?? "") ? categoryQuery : ALL_FILTER_VALUE} onValueChange={(value) => setCategoryQuery(value === ALL_FILTER_VALUE ? "" : value)}>
-            <SelectTrigger className="h-10 w-full rounded-xl bg-paper text-sm">
+            <SelectTrigger className="h-9 w-full rounded-md bg-paper text-sm">
               <SelectValue placeholder="全部分类" />
             </SelectTrigger>
             <SelectContent className="max-h-80">
@@ -457,7 +458,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         )}
         {setMetadataQuery && (
           <Select value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ALL_FILTER_VALUE} onValueChange={(value) => setMetadataQuery(value === ALL_FILTER_VALUE ? "" : value)}>
-            <SelectTrigger className="h-10 w-full rounded-xl bg-paper text-sm">
+            <SelectTrigger className="h-9 w-full rounded-md bg-paper text-sm">
               <SelectValue placeholder="全部 metadata" />
             </SelectTrigger>
             <SelectContent className="max-h-80">
@@ -469,10 +470,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
-          <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
-          {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-xl bg-paper text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
+          <span className="rounded-md bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+          {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} label={accountOptionLabel(category)} />)}</datalist>
-          {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-xl bg-paper text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
+          {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-metadata-options`}>{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -481,7 +482,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               const option = filterViewOptions.find((item) => item.value === value);
               if (option) restoreFilterView(option.view);
             }}>
-              <SelectTrigger className="h-8 w-[180px] rounded-xl bg-paper text-xs">
+              <SelectTrigger className="h-8 w-[180px] rounded-md bg-paper text-xs">
                 <SelectValue placeholder="恢复视图" />
               </SelectTrigger>
               <SelectContent className="max-h-80">
@@ -490,7 +491,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               </SelectContent>
             </Select>
           )}
-          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-xl bg-paper text-stone" onClick={saveCurrentFilterView}>保存当前</Button>}
+          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={saveCurrentFilterView}>保存当前</Button>}
           {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
@@ -499,25 +500,25 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>前缀</button>
             <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>精确</button>
           </div>}
-          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-xl bg-paper text-stone" onClick={clearFilters}>清空筛选</Button>}
+          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={clearFilters}>清空筛选</Button>}
         </div>
       </div>
     </>
   );
 
-  return <section className={searchable ? "" : "border-b border-line"}>
+  return <section className={searchable ? "transaction-workbench" : "border-b border-line"}>
     <div className="min-w-0">
       {searchable && (
         <>
           <div className="mb-3 flex items-center gap-2 lg:hidden">
-            <Button type="button" variant="outline" className="flex-1 rounded-xl bg-panel text-warm shadow-sm" onClick={() => setMobileFiltersOpen(true)}>
+            <Button type="button" variant="outline" className="flex-1 rounded-md bg-panel text-warm shadow-sm" onClick={() => setMobileFiltersOpen(true)}>
               <SlidersHorizontal className="h-4 w-4 text-brand" />
               筛选{activeFilterCount ? ` · ${activeFilterCount}` : ""}
             </Button>
-            {hasFilters && <Button type="button" variant="outline" className="rounded-xl bg-paper text-stone" onClick={clearFilters}>清空</Button>}
+            {hasFilters && <Button type="button" variant="outline" className="rounded-md bg-paper text-stone" onClick={clearFilters}>清空</Button>}
           </div>
           <div className="mb-3 flex items-center justify-between gap-3 text-xs text-stone lg:hidden">
-            <span className="rounded-full bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+            <span className="rounded-md bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
             {hasFilters && <span className="truncate text-right">已应用筛选</span>}
           </div>
           <div className="hidden border-b border-line bg-panel px-3 py-3 lg:block md:px-4">
@@ -534,7 +535,8 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
 
       {rows.length > 0 && (
-        <>
+        <div className={searchable ? "xl:grid xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start" : ""}>
+          <div className="min-w-0">
           <div
             className="hidden overflow-hidden bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand lg:block"
             tabIndex={0}
@@ -573,16 +575,91 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <div className="lg:hidden">
             {pageRows.map((txn) => {
               const key = transactionKey(txn);
-              return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); }} />;
+              return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); setDrawerTxn(txn); }} />;
             })}
           </div>
-        </>
+          {pager}
+          </div>
+          {searchable && <TransactionInspector txn={selected ?? pageRows[0]} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
+        </div>
       )}
-
-      {pager}
     </div>
     {searchable && <MobileSheet open={mobileFiltersOpen} title="筛选流水" onClose={() => setMobileFiltersOpen(false)} footer={<div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className="h-11 bg-panel" onClick={clearFilters} disabled={!hasFilters}>清空筛选</Button><Button type="button" className="h-11" onClick={() => setMobileFiltersOpen(false)}>完成</Button></div>}>{renderFilterControls("mobile")}</MobileSheet>}
-    {selected && <TransactionDrawer key={`${selected.source.file}:${selected.source.line}:sheet`} txn={selected} accounts={accounts} onClose={() => setSelected(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setSelected(null); }} onReverse={(source, date) => { onReverse?.(source, date); setSelected(null); }} />}
+    {drawerTxn && <TransactionDrawer key={`${drawerTxn.source.file}:${drawerTxn.source.line}:sheet`} txn={drawerTxn} accounts={accounts} onClose={() => setDrawerTxn(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setDrawerTxn(null); }} onReverse={(source, date) => { onReverse?.(source, date); setDrawerTxn(null); }} />}
+  </section>;
+}
+
+function TransactionInspector({ txn, visibleRows, totalRows, onOpenDetails }: { txn?: Txn | null; visibleRows: number; totalRows: number; onOpenDetails: (txn: Txn) => void }) {
+  if (!txn) return <aside className="transaction-inspector hidden border-l border-line bg-panel xl:block">
+    <div className="sticky top-[3.25rem] p-4 text-sm text-stone">选择一行流水查看检查台。</div>
+  </aside>;
+  const primary = primaryPosting(txn);
+  const categoryRows = categoryAccounts(txn);
+  const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
+  const meta = metadataPairs(txn);
+  const pending = pendingLabel(txn);
+  return <aside className="transaction-inspector hidden border-l border-line bg-panel xl:block">
+    <div className="sticky top-[3.25rem] max-h-[calc(100dvh-3.25rem)] overflow-y-auto">
+      <div className="border-b border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold tracking-[-0.012em] text-ink">交易检查台</h3>
+            <p className="mt-1 text-[11px] tabular-nums text-stone">本页 {visibleRows} / {totalRows} 笔</p>
+          </div>
+          <button type="button" className="h-7 shrink-0 rounded-md border border-line bg-paper px-2 text-xs text-olive hover:bg-tag hover:text-ink" onClick={() => onOpenDetails(txn)}>编辑</button>
+        </div>
+      </div>
+
+      <div className="divide-y divide-line">
+        <section className="px-4 py-4">
+          <div className="text-[11px] font-semibold text-stone">交易对象</div>
+          <div className="mt-1 truncate text-lg font-semibold tracking-[-0.018em] text-ink" title={txn.payee}>{txn.payee || "无收付款方"}</div>
+          <div className="mt-1 text-sm leading-5 text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {pending && <span className="rounded-md border border-line bg-tag px-2 py-1 text-[11px] text-ink">{pending}</span>}
+            <span className="rounded-md border border-line bg-tag px-2 py-1 text-[11px] tabular-nums text-stone">{txn.date}</span>
+          </div>
+        </section>
+
+        <InspectorMetric label="主金额" value={primary ? fmtTxnAmount(primary.amount, primary.currency) : "—"} tone={primary ? amountColor(primary.amount) : "text-stone"} detail={primary?.account ?? "没有可识别主 posting"} />
+        <InspectorMetric label="分类" value={categoryRows.map(shortAccount).join(" / ") || "未分类"} tone="text-ink" detail={categoryRows.join(" · ") || "没有 Expenses / Income 分类"} />
+        <InspectorMetric label="支付账户" value={paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无"} tone="text-ink" detail={paymentAccounts.map((posting) => posting.account).join(" · ") || "没有资产或负债账户"} />
+
+        <section className="px-4 py-3.5">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h4 className="text-[11px] font-semibold text-stone">Posting 明细</h4>
+            <span className="text-[11px] tabular-nums text-stone">{txn.postings.length} 条</span>
+          </div>
+          <div className="divide-y divide-line border-y border-line">
+            {txn.postings.map((posting, index) => <div key={`${posting.account}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-2.5">
+              <span className="min-w-0 truncate text-xs text-olive" title={posting.account}>{posting.account}</span>
+              <span className={`shrink-0 text-right text-xs tabular-nums ${amountColor(posting.amount)}`}>{fmtPostingAmount(posting.amount, posting.currency)}</span>
+            </div>)}
+          </div>
+        </section>
+
+        <section className="px-4 py-3.5">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h4 className="text-[11px] font-semibold text-stone">来源与标签</h4>
+            <span className="text-[11px] tabular-nums text-stone">{meta.length + (txn.tags?.length ?? 0)} 项</span>
+          </div>
+          <div className="text-xs leading-5 text-stone [overflow-wrap:anywhere]">{sourceLabel(txn)}</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {meta.slice(0, 6).map(([key, value]) => <span key={`${key}:${String(value)}`} className="ledger-chip rounded-md px-2 py-1 text-[11px]">{key}: {String(value)}</span>)}
+            {(txn.tags ?? []).slice(0, 4).map((tag) => <span key={tag} className="ledger-chip rounded-md px-2 py-1 text-[11px]">#{tag}</span>)}
+            {!meta.length && !txn.tags?.length && <span className="text-xs text-stone">无 metadata 或 tag</span>}
+          </div>
+        </section>
+      </div>
+    </div>
+  </aside>;
+}
+
+function InspectorMetric({ label, value, tone, detail }: { label: string; value: string; tone: string; detail: string }) {
+  return <section className="px-4 py-3.5">
+    <div className="text-[11px] font-semibold text-stone">{label}</div>
+    <div className={`mt-1 truncate text-base font-semibold tracking-[-0.014em] tabular-nums ${tone}`} title={value}>{value}</div>
+    <div className="mt-1 truncate text-xs text-stone" title={detail}>{detail}</div>
   </section>;
 }
 

@@ -693,11 +693,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-      <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-3 md:px-4 md:py-2.5 xl:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2 md:px-4 xl:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="w-full min-w-0 md:w-auto md:flex-1">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-              <strong className="block truncate text-base font-semibold tracking-[-0.015em] text-ink md:text-[15px]">{header.title}</strong>
+              <strong className="block truncate text-sm font-semibold tracking-[-0.015em] text-ink">{header.title}</strong>
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone">
               {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={() => {
@@ -705,7 +705,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
                 if (conflict) setConflictOperationId(conflict.id);
                 else void syncPendingWrites({ userInitiated: true });
               }} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
-              <span>{lastSyncedAt ? `本地优先 · ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} 已同步` : "下拉可刷新"}</span>
+              <span>{lastSyncedAt ? `同步 ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "下拉可刷新"}</span>
               {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={`索引来源: ${indexInfo.source ?? ""}`}>PG 索引 · {indexInfo.gitSHA.slice(0, 7)}</span>}
               {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
@@ -748,7 +748,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要解锁后查看。"))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {page === "home" && (homeSecondaryReady ? (
-        <section className="home-secondary-flow border-t border-line bg-panel pt-8 md:pt-12">
+        <section className="home-secondary-flow border-t border-line bg-panel pt-3 md:pt-6">
           <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
             <LazyTransactionList
               txns={projectedTxns}
@@ -767,7 +767,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             />
           </Suspense>
         </section>
-      ) : <section className="home-secondary-flow border-t border-line bg-panel pt-8 md:pt-12"><RouteFallback label="流水列表稍后加载…" /></section>)}
+      ) : <section className="home-secondary-flow border-t border-line bg-panel pt-3 md:pt-6"><RouteFallback label="流水列表稍后加载…" /></section>)}
       {page === "transactions" && (
         <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
           <LazyTransactionList
