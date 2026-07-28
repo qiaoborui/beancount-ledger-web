@@ -68,14 +68,14 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       <div className="grid min-w-0 border-b border-line xl:grid-cols-2 xl:border-b-0 xl:border-r">
         <div className="flex min-w-0 flex-col border-b border-line xl:border-b-0 xl:border-r">
           <WorkbenchHeading title="日收支趋势" detail="收入、支出与净收入以同一坐标展示。" meta={`${dayRows.length} 天`} />
-          <div className="h-[18rem] min-w-0 px-4 pb-5 pt-3 md:h-[19.5rem] md:px-6 xl:h-auto xl:min-h-[20rem] xl:flex-1 xl:px-8">
+          <div className="home-trend-canvas min-w-0 px-4 pb-5 pt-3 md:px-6 xl:px-8">
             <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="daily" />
           </div>
         </div>
 
         <div className="flex min-w-0 flex-col">
           <WorkbenchHeading title="累计收支趋势" detail="本期累计收入、支出与结余走势。" meta={latestDate} />
-          <div className="h-[18rem] min-w-0 px-4 pb-5 pt-3 md:h-[19.5rem] md:px-6 xl:h-auto xl:min-h-[20rem] xl:flex-1 xl:px-8">
+          <div className="home-trend-canvas min-w-0 px-4 pb-5 pt-3 md:px-6 xl:px-8">
             <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="cumulative" />
           </div>
         </div>
