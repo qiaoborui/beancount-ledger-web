@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import { ApiResponseError } from "@/lib/clientFetch";
-import { appendImportPosting, createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, importActionFeedback, importEntryHasReviewError, importFlowForEntry, latestImportDocumentsByProvider, removeImportPosting, reviewableGmailPendingImports, summarizeImportPostings, updateImportPosting } from "./ImportPage";
+import { appendImportPosting, createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, ImportPage, importActionFeedback, importEntryHasReviewError, importFlowForEntry, latestImportDocumentsByProvider, removeImportPosting, reviewableGmailPendingImports, summarizeImportPostings, updateImportPosting } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
+
+describe("ImportPage layout", () => {
+  it("uses a continuous workbench instead of stacked cards", () => {
+    const html = renderToStaticMarkup(createElement(ImportPage, { showToast: vi.fn() }));
+
+    expect(html).toContain('data-import-automation-strip="true"');
+    expect(html).toContain('data-import-workbench="true"');
+    expect(html).toContain('data-import-history="true"');
+    expect(html).not.toContain('data-slot="card"');
+  });
+});
 
 function entry(patch: Partial<ImportEntryInput>): ImportEntryInput {
   return {

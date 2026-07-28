@@ -1,7 +1,10 @@
 ---
 name: Beancount Ledger Web
-description: A dark-first monochrome financial control room for private Beancount ledgers.
+description: A restrained financial control room with cool light workspaces, dark console surfaces, and a single cobalt functional accent.
 colors:
+  light-canvas: "oklch(96.5% 0.008 255)"
+  light-panel: "oklch(99.5% 0.003 255)"
+  cobalt-action: "oklch(43% 0.16 255)"
   control-black: "oklch(10.5% 0 0)"
   console-black: "oklch(13.5% 0 0)"
   panel-charcoal: "oklch(16.5% 0 0)"
@@ -53,14 +56,15 @@ spacing:
 
 **Creative North Star: "The Financial Control Room"**
 
-Beancount Ledger Web is a private financial operations console rather than a generic analytics dashboard. The interface turns an auditable text ledger into a precise dark working surface: stable columns, explicit states, dense tables, compact controls, and direct movement from financial position to supporting evidence.
+Beancount Ledger Web is a private financial operations console rather than a generic analytics dashboard. The interface turns an auditable text ledger into a precise working surface across both themes: stable columns, explicit states, dense tables, compact controls, and direct movement from financial position to supporting evidence.
 
-The visual language is contemporary and quiet. It borrows the certainty and alignment of banking operations software without CRT styling, terminal cosplay, decorative color, or paper metaphors. Desktop screens prioritize density and horizontal comparison; mobile screens preserve the same hierarchy as focused sequential sections.
+The visual language is contemporary and quiet. Light mode uses a cool off-white canvas, near-white working panels, dark ink typography, and one deep cobalt functional accent. Dark mode keeps its near-black console character. Desktop screens prioritize density and horizontal comparison; mobile screens preserve the same hierarchy as focused sequential sections.
 
 **Key Characteristics:**
 
-- Near-black, charcoal, and cool neutral gray surfaces.
-- Semantic red reserved for anomalies, failures, and destructive actions.
+- Cool off-white canvas and near-white panels in light mode; near-black and charcoal surfaces in dark mode.
+- Deep cobalt reserved for navigation, primary actions, selection, links, progress, focus, and the leading chart series.
+- Green, amber, and red reserved for success, warning, and destructive or failed states.
 - Flat continuous work areas divided by one-pixel rules.
 - Tabular figures and persistent numeric alignment.
 - Persistent desktop navigation with a central ledger workspace and inspection bench.
@@ -68,16 +72,19 @@ The visual language is contemporary and quiet. It borrows the certainty and alig
 
 ## Colors
 
-The palette is intentionally achromatic and dark-first. Value, weight, spacing, and position carry hierarchy; color does not classify routine financial data.
+The palette is neutral-first rather than achromatic. Value, weight, spacing, and position still carry hierarchy, while a single cobalt accent makes interactive priority and selection immediately legible.
 
 ### Primary
 
-- **Primary Text** (`primary-text`): Primary text, amounts, chart emphasis, and high-priority controls.
-- **Control Black** (`control-black`): Application background and selected-control grounding.
+- **Cobalt Action** (`cobalt-action`): Primary actions, active navigation, selected rows, links, focus, progress, and the leading chart series in light mode.
+- **Primary Text** (`primary-text`): Primary text, amounts, and high-priority information.
+- **Control Black** (`control-black`): Dark-mode application background and selected-control grounding.
 
 ### Neutral
 
-- **Console Black** (`console-black`): Main working surface.
+- **Light Canvas** (`light-canvas`): Light-mode application background, visibly separated from the working surface.
+- **Light Panel** (`light-panel`): Light-mode tables, forms, charts, and continuous work areas.
+- **Console Black** (`console-black`): Dark-mode main working surface.
 - **Panel Charcoal** (`panel-charcoal`): Tool strips, inspection benches, menus, and secondary panels.
 - **Rail Charcoal** (`rail-charcoal`): Persistent navigation surface.
 - **Divider Steel** (`divider-steel`): One-pixel table, panel, and section rules.
@@ -85,9 +92,11 @@ The palette is intentionally achromatic and dark-first. Value, weight, spacing, 
 
 ### Tertiary
 
-- **Risk Red** (`risk-red`): Genuine anomalies, validation failures, destructive actions, negative alerts, and states requiring attention.
+- **Semantic Green**: Successful writes, healthy connections, and completed operations.
+- **Semantic Amber**: Review warnings, incomplete data, and conditions requiring attention.
+- **Risk Red** (`risk-red`): Genuine anomalies, validation failures, destructive actions, and failed operations.
 
-**The Achromatic Rule.** Categories, accounts, income, and ordinary expenses never receive decorative colors.
+**The Functional Color Rule.** Color must identify interaction priority, selection, a chart series, or a semantic state. Categories and accounts never receive arbitrary decorative colors.
 
 **The Red Means Action Rule.** Every red mark must identify a problem, risk, failure, destructive outcome, or negative alert.
 
@@ -166,7 +175,7 @@ Dense workbench controls use 4–6px corners. Larger 12–16px radii are reserve
 ### Buttons and Inputs
 
 - Desktop controls are generally 28–36px high with 4–6px corners.
-- Primary actions use decisive black with white text.
+- Primary actions use deep cobalt with white text in light mode and decisive light-on-dark contrast in dark mode.
 - Secondary actions use white surfaces, divider borders, and gray hover bands.
 - Focus uses a visible inset or external neutral ring; destructive actions use risk red.
 
@@ -182,7 +191,7 @@ Dense workbench controls use 4–6px corners. Larger 12–16px radii are reserve
 
 ### Don't
 
-- Don't use brown, bronze, bone, orange, or multicolor category palettes.
+- Don't use brown, bronze, bone, or a different decorative color for every category or account.
 - Don't construct pages from repeated rounded KPI cards.
 - Don't add a duplicate desktop top bar or repeated English eyebrow labels.
 - Don't simulate CRT terminals, scanlines, phosphor glow, or hacker aesthetics.
