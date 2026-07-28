@@ -33,7 +33,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
   const canUseMonthEnd = monthEndChart.length > 1;
   const chartRows = viewMode === "month-end" && canUseMonthEnd ? monthEndChart : rows;
 
-  return <>
+  return <div className="ledger-workbench">
     <section className="card p-3 md:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid flex-1 grid-cols-3 divide-x divide-line text-center">
@@ -56,7 +56,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
     <AssetAllocation accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} />
     <section className="mt-6 grid gap-6 xl:grid-cols-2"><AssetComposition accounts={accounts} balances={valuationBalances} visible={visible} valuationCurrency={displayCurrency} /><LiabilitiesTrend rows={rows} visible={visible} valuationCurrency={displayCurrency} /></section>
     <NetWorthChart rows={chartRows} visible={visible} mode={viewMode} canUseMonthEnd={canUseMonthEnd} valuationCurrency={displayCurrency} onModeChange={setViewMode} />
-  </>;
+  </div>;
 }
 
 function valuationByAccount(rows: AccountBalance[]): Record<string, number> {
@@ -69,7 +69,7 @@ function valuationByAccount(rows: AccountBalance[]): Record<string, number> {
 }
 
 function InsightCard({ label, value, tone, detail }: { label: string; value: string; tone: string; detail?: string }) {
-  return <div className="rounded-2xl border border-line bg-panel p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</div>;
+  return <div className="border border-line bg-panel p-3"><div className="text-[11px] font-semibold text-stone">{label}</div><div className={`mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>{detail && <div className="mt-0.5 text-xs text-stone">{detail}</div>}</div>;
 }
 
 function AssetAllocation({ accounts, balances, visible, valuationCurrency }: { accounts: AccountView[]; balances: Record<string, number>; visible: boolean; valuationCurrency: string }) {

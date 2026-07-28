@@ -72,34 +72,34 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
     writeAccountGroupOrder(next);
   }
 
-  return <section className="card relative mt-6 p-4">
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+  return <section className="relative border-b border-line bg-panel">
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 lg:flex-row lg:items-start lg:justify-between md:px-6 xl:px-8">
       <div>
         <h2 className="font-serif text-2xl">账户余额</h2>
         <p className="mt-1 text-sm text-stone">按账户前缀和机构折叠；拖拽分组可调整常用顺序。</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-xl border border-line bg-panel p-1">
+        <div className="flex rounded-md border border-line bg-paper p-1">
           {statusFilters.map((filter) => (
             <button
               key={filter.key}
-              className={`h-8 rounded-lg px-2.5 text-xs transition ${statusFilter === filter.key ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`}
+              className={`h-8 rounded px-2.5 text-xs transition ${statusFilter === filter.key ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`}
               onClick={() => setStatusFilter(filter.key)}
             >
               {filter.label}
             </button>
           ))}
         </div>
-        {onToggleAll && <button className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-panel px-3 text-sm text-olive hover:bg-tag" onClick={onToggleAll} title={allVisible ? "隐藏所有账户余额" : "显示所有账户余额"}>{allVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{allVisible ? "全部隐藏" : "全部显示"}</span></button>}
+        {onToggleAll && <button className="inline-flex h-10 items-center gap-1.5 rounded-md border border-line bg-paper px-3 text-sm text-olive hover:bg-tag" onClick={onToggleAll} title={allVisible ? "隐藏所有账户余额" : "显示所有账户余额"}>{allVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{allVisible ? "全部隐藏" : "全部显示"}</span></button>}
       </div>
     </div>
 
     {rows.length ? groups.length ? <>
-      <div className="mt-4 space-y-3">
+      <div className="divide-y divide-line">
         {groups.map((group, index) => {
           const open = openGroups[group.key] ?? false;
           const dragging = draggedGroupKey === group.key;
-          return <div key={group.key} className={`@container overflow-hidden rounded-xl border border-line bg-panel transition-colors ${dragging ? "border-brand bg-brand/5" : ""}`}>
+          return <div key={group.key} className={`@container bg-panel transition-colors ${dragging ? "bg-brand/5" : ""}`}>
             <div
               role="button"
               tabIndex={0}
@@ -129,7 +129,7 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
             >
               <span className="flex min-w-0 items-center gap-3">
                 <GripVertical className="hidden h-4 w-4 shrink-0 text-stone xl:block" aria-hidden="true" />
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">{institutionInitial(group.label)}</span>
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-tag text-ink">{institutionInitial(group.label)}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-lg font-semibold text-warm">{group.label}</span>
                   <span className="mt-0.5 block truncate text-xs text-stone">{group.path} · {group.rows.length} 个账户 · {group.currencies.length > 1 ? `${group.currencies.length} 个币种` : group.currencies[0] ?? "无币种"}</span>
@@ -212,8 +212,8 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
         onToggleAccount={onToggleAccount}
         onClose={() => setMobileAccount(null)}
       />
-    </> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">当前筛选下没有账户。</p> : <p className="mt-4 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}
-    {!full && <p className="mt-3 text-xs text-stone">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}
+    </> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">当前筛选下没有账户。</p> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">暂无有流水且余额不为 0 的账户。</p>}
+    {!full && <p className="border-t border-line px-4 py-3 text-xs text-stone md:px-6 xl:px-8">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}
   </section>;
 }
 
