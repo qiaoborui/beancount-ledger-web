@@ -55,7 +55,7 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5">
+      <div className="home-position-grid grid gap-px bg-line">
         <PositionMetric label="本期结余" value={mask(formatValuation(net / 100, displayCurrency))} detail={savingsRate == null ? "暂无储蓄率" : `储蓄率 ${formatPercent(savingsRate)}`} alert={net < 0} primary />
         <PositionMetric label="收入" value={mask(formatValuation(income / 100, displayCurrency))} detail={`${dayRows.length} 个记账日`} />
         <PositionMetric label="支出" value={mask(formatValuation(expense / 100, displayCurrency), false)} detail={expenseRatio == null ? "暂无收入对照" : `收入占用 ${formatPercent(expenseRatio)}`} alert={expenseRatio != null && expenseRatio > 1} />
@@ -64,8 +64,8 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       </div>
     </section>
 
-    <section className="grid border-b border-line xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch">
-      <div className="grid min-w-0 border-b border-line xl:grid-cols-2 xl:border-b-0 xl:border-r">
+    <section className="border-b border-line">
+      <div data-home-chart-workfield className="grid min-w-0 border-b border-line xl:grid-cols-2">
         <div className="flex min-w-0 flex-col border-b border-line xl:border-b-0 xl:border-r">
           <WorkbenchHeading title="日收支趋势" detail="收入、支出与净收入以同一坐标展示。" meta={`${dayRows.length} 天`} />
           <div className="home-trend-canvas min-w-0 px-4 pb-5 pt-3 md:px-6 xl:px-8">
@@ -81,14 +81,18 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
         </div>
       </div>
 
-      <aside className="min-w-0 bg-panel">
-        <WorkbenchHeading title="检查台" detail="把本期最该看的线索放在同一列。" meta={`${topCategories.length} 类`} />
-        <div className="divide-y divide-line">
+      <aside data-home-inspection-strip className="min-w-0 bg-panel">
+        <WorkbenchHeading title="检查台" detail="把本期最该看的线索横向对齐。" meta="3 项" />
+        <div className="grid gap-px bg-line md:grid-cols-3">
           <InspectionRow label="最大支出日" value={peakExpenseDay ? mask(formatValuation(peakExpenseDay[1].expense / 100, displayCurrency), false) : "暂无"} detail={peakExpenseDay?.[0] ?? "当前周期暂无支出"} />
           <InspectionRow label="Top 分类" value={topCategory ? mask(formatValuation(topCategory.amount / 100, displayCurrency), false) : "暂无"} detail={topCategory ? `${formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias)} · ${formatPercent(topCategory.share)}` : "暂无分类集中度"} />
           <InspectionRow label="近 7 日变化" value={weeklyExpenseDelta == null ? "暂无" : formatSignedPercent(weeklyExpenseDelta)} detail={weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3 ? "需要检查近期消费节奏" : "没有明显上冲"} alert={weeklyExpenseDelta != null && weeklyExpenseDelta > 0.3} />
         </div>
-        <div className="border-t border-line">
+      </aside>
+
+      <div data-home-category-strip className="bg-panel">
+        <WorkbenchHeading title="重点分类" detail="按本期支出占比排列，点击直接核查流水。" meta={`${topCategories.length} 类`} />
+        <div className="grid gap-px bg-line md:grid-cols-2 xl:grid-cols-5">
           {topCategories.length ? topCategories.slice(0, 5).map((row, index) => {
             const content = <>
               <span className="w-6 shrink-0 text-[11px] tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
@@ -101,18 +105,18 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
                 <span className="mt-1 block text-[11px] tabular-nums text-stone">{row.txCount} 笔</span>
               </span>
             </>;
-            return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-2.5 px-4 py-3 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-2.5 px-4 py-3">{content}</div>;
+            return onSelectCategory ? <button key={row.account} type="button" className="flex min-w-0 items-center gap-2.5 bg-panel px-4 py-3 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex min-w-0 items-center gap-2.5 bg-panel px-4 py-3">{content}</div>;
           }) : <EmptyRail text="本期没有可分析的支出分类。" />}
         </div>
-      </aside>
+      </div>
     </section>
   </div>;
 }
 
 function PositionMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: string; alert?: boolean; primary?: boolean }) {
-  return <div className={`min-w-0 border-b border-r border-line px-4 py-4 last:border-r-0 md:border-b-0 md:px-5 xl:px-8 ${primary ? "col-span-2 md:col-span-1" : ""}`}>
+  return <div className={`min-w-0 bg-panel px-4 py-4 md:px-5 xl:px-6 ${primary ? "col-span-2 md:col-span-1" : ""}`}>
     <div className="text-xs font-medium text-stone">{label}</div>
-    <div className={`mt-2 truncate font-semibold tracking-[-0.025em] tabular-nums ${primary ? "text-[2rem] leading-none xl:text-[2.25rem]" : "text-[1.55rem] leading-tight xl:text-[1.75rem]"} ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
+    <div data-home-position-value="true" className={`home-position-value mt-2 font-semibold tabular-nums ${primary ? "home-position-value-primary" : ""} ${alert ? "amount-danger" : "text-ink"}`} title={value}>{value}</div>
     <div className="mt-2 truncate text-xs text-stone">{detail}</div>
   </div>;
 }
@@ -128,10 +132,10 @@ function WorkbenchHeading({ title, detail, meta }: { title: string; detail: stri
 }
 
 function InspectionRow({ label, value, detail, alert = false }: { label: string; value: string; detail: string; alert?: boolean }) {
-  return <div className="px-4 py-3.5">
+  return <div className="min-w-0 bg-panel px-4 py-3.5 md:px-6 xl:px-8">
     <div className="text-[11px] font-semibold text-stone">{label}</div>
-    <div className={`mt-1 truncate text-lg font-semibold tracking-[-0.018em] tabular-nums ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
-    <div className="mt-1 truncate text-xs text-stone">{detail}</div>
+    <div className={`mt-1 whitespace-nowrap text-lg font-semibold tracking-[-0.018em] tabular-nums ${alert ? "amount-danger" : "text-ink"}`}>{value}</div>
+    <div className="mt-1 text-xs leading-5 text-stone">{detail}</div>
   </div>;
 }
 

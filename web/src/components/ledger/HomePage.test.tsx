@@ -47,7 +47,7 @@ describe("HomePage privacy", () => {
 });
 
 describe("HomePage layout", () => {
-  it("uses a dual-chart workfield with an inspection bench on desktop", () => {
+  it("uses a dual-chart workfield followed by compact inspection and category strips", () => {
     const html = renderToString(
       <HomePage
         summary={summary}
@@ -59,12 +59,31 @@ describe("HomePage layout", () => {
       />,
     );
 
-    expect(html).toContain("xl:grid-cols-[minmax(0,1fr)_24rem]");
+    expect(html).toContain('data-home-chart-workfield="true"');
+    expect(html).toContain('data-home-inspection-strip="true"');
+    expect(html).toContain('data-home-category-strip="true"');
     expect(html).toContain("xl:grid-cols-2");
     expect(html).toContain("日收支趋势");
     expect(html).toContain("累计收支趋势");
     expect(html).not.toContain("home-structure-chart");
     expect(html).toContain("检查台");
     expect(html).toContain("最大支出日");
+  });
+
+  it("renders complete position amounts without truncation classes", () => {
+    const html = renderToString(
+      <HomePage
+        summary={summary}
+        valuationCurrency="CNY"
+        privacySettings={privacySettings}
+        sensitiveUnlocked
+        expenseAnalytics={expenseAnalytics}
+        onPrivacyChange={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("¥1,155.66");
+    expect(html).toContain('data-home-position-value="true"');
+    expect(html).not.toMatch(/data-home-position-value="true"[^>]*truncate/);
   });
 });
