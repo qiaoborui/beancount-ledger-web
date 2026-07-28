@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, RefreshCw, SlidersHorizontal, X } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
 import { readJson } from "@/lib/clientFetch";
 import { formatCompactValuation, formatValuation } from "@/lib/money";
@@ -713,16 +713,16 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
+          <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
             <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
             <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
             <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
             <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), labelForSeries(chartSeries, String(name))]} />
             {visibleSeries.map((series) => {
               const index = chartSeries.findIndex((item) => item.account === series.account);
-              return <Area key={series.account} type="linear" dataKey={series.account} stackId={focusedAccount ? undefined : "expense"} stroke={COLORS[index % COLORS.length]} strokeWidth={1.25} fill={COLORS[index % COLORS.length]} fillOpacity={0.18} activeDot={{ r: 3, strokeWidth: 0 }} />;
+              return <Line key={series.account} type="linear" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />;
             })}
-          </AreaChart>
+          </LineChart>
         </ResponsiveContainer>
       </div>
       <InteractiveLegend series={chartSeries} focusedAccount={focusedAccount} onToggle={toggleFocus} expandOnWideScreens />
