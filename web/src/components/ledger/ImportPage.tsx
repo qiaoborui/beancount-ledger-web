@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -670,10 +669,9 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   }
 
   return (
-    <div className="mx-auto min-w-0 max-w-[1220px] space-y-5 overflow-hidden">
-      <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-        <CardContent className="space-y-4 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-w-0 overflow-hidden bg-panel">
+      <section data-import-automation-strip="true" className="border border-line bg-panel md:border-x-0">
+          <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 font-medium text-ink"><Mail className="h-4 w-4 text-brand" />Gmail 自动账单</div>
               <div className="mt-1 text-sm text-stone">
@@ -697,14 +695,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               )}
             </div>
           </div>
-          {gmailStatus?.lastError ? <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><span>{gmailStatus.lastError}</span></Alert> : null}
+          {gmailStatus?.lastError ? <Alert variant="destructive" className="mx-4 mb-3 sm:mx-5"><AlertTriangle className="h-4 w-4" /><span>{gmailStatus.lastError}</span></Alert> : null}
           {reviewablePendingImports.length > 0 ? (
-            <div className="grid gap-2">
+            <div className="divide-y divide-line border-t border-line">
               {reviewablePendingImports.map((item) => {
                 const actions = gmailPendingImportActions(item.status);
                 return (
-                  <div key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-line bg-paper p-3 sm:flex-row sm:items-center">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--selected-bg)] text-brand"><Inbox className="h-5 w-5" /></div>
+                  <div key={item.id} className="flex min-w-0 flex-col gap-3 bg-panel px-4 py-3 sm:flex-row sm:items-center sm:px-5">
+                    <Inbox className="h-5 w-5 shrink-0 text-brand" />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
@@ -722,19 +720,21 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 );
               })}
             </div>
-          ) : gmailStatus?.connected ? <div className="rounded-2xl border border-dashed border-line px-4 py-5 text-center text-sm text-stone">当前没有待 Review 的 Gmail 账单</div> : null}
-        </CardContent>
-      </Card>
+          ) : gmailStatus?.connected ? <div className="border-t border-line px-4 py-3 text-sm text-stone sm:px-5">当前没有待 Review 的 Gmail 账单</div> : null}
+      </section>
 
-      <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-        <CardContent className="grid min-w-0 items-start gap-4 bg-paper/45 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(260px,380px)_minmax(0,1fr)] xl:grid-cols-[minmax(280px,400px)_minmax(0,1fr)]">
-          <div className="min-w-0">
+      <section data-import-workbench="true" className="grid min-w-0 border-b border-line lg:grid-cols-[minmax(280px,0.82fr)_minmax(0,1.18fr)]">
+          <div className="min-w-0 border-x border-line lg:border-x-0 lg:border-r">
+            <div className="border-b border-line px-4 py-3 sm:px-5">
+              <div className="text-sm font-semibold text-ink">选择账单文件</div>
+              <div className="mt-1 text-xs leading-5 text-stone">支持支付宝、微信、招商银行、建设银行及自动识别。</div>
+            </div>
             <div
               role="button"
               tabIndex={0}
               className={cn(
-                "group flex min-h-44 min-w-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-panel p-4 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] sm:min-h-52 sm:p-5 lg:min-h-[22rem] lg:w-full",
-                dragActive ? "border-brand bg-[var(--selected-bg)]" : "hover:border-brand/60 hover:bg-panel",
+                "group m-4 flex min-h-44 min-w-0 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-line bg-paper/70 p-4 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] sm:min-h-52 sm:p-5 lg:min-h-[19rem]",
+                dragActive ? "border-brand bg-[var(--selected-bg)]" : "hover:border-brand/60 hover:bg-tag/45",
               )}
               onClick={() => inputRef.current?.click()}
               onKeyDown={(event) => {
@@ -753,14 +753,12 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               }}
             >
               <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf,.eml,.html,.htm,.zip" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
-              <div className="grid h-14 w-14 place-items-center rounded-2xl border border-line bg-panel text-brand shadow-sm transition group-hover:scale-105">
-                <UploadCloud className="h-7 w-7" />
-              </div>
+              <UploadCloud className="h-9 w-9 text-brand transition group-hover:-translate-y-0.5" />
               <div className="mt-4 text-base font-medium leading-6 text-ink">拖拽账单到这里，或点击选择文件</div>
               <div className="mt-1 max-w-full break-words text-sm text-stone">当前模式：{selectedProvider.label} · {selectedProvider.accept}</div>
               <div className="mt-1 text-xs leading-5 text-stone">支持普通 ZIP 和经典 ZipCrypto 加密压缩包</div>
               {file ? (
-                <div className="mt-5 flex w-full max-w-full items-center gap-3 rounded-2xl border border-line bg-panel px-3 py-3 text-left text-sm sm:w-auto sm:px-4">
+                <div className="mt-5 flex w-full max-w-md items-center gap-3 border-t border-line pt-3 text-left text-sm">
                   <FileSpreadsheet className="h-5 w-5 shrink-0 text-brand" />
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-2 break-all font-medium leading-5 text-warm">{file.name}</div>
@@ -770,7 +768,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               ) : null}
             </div>
             {isZipUpload ? (
-              <Label className="mt-4 block w-full text-left">
+              <Label className="block w-full border-t border-line px-4 py-4 text-left sm:px-5">
                 <span className="mb-2 block text-sm font-medium text-ink">压缩包密码（可选）</span>
                 <Input
                   type="password"
@@ -778,7 +776,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                   maxLength={256}
                   autoComplete="off"
                   placeholder="输入账单压缩包密码"
-                  className="h-10 rounded-xl bg-panel"
+                  className="h-10 bg-panel"
                   onChange={(event) => setArchivePassword(event.target.value)}
                 />
                 <span className="mt-1 block text-xs leading-5 text-stone">留空时会尝试服务端已配置密码和六位数字密码。</span>
@@ -786,9 +784,9 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             ) : null}
           </div>
 
-          <div className="grid min-w-0 max-w-full gap-3 overflow-hidden">
-            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]">
-              <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper">
+          <div className="min-w-0 max-w-full overflow-hidden border-x border-line lg:border-x-0">
+            <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]">
+              <div className="min-w-0 max-w-full overflow-hidden border-b border-line xl:border-r">
                 <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                   <span className="min-w-0 flex-1 overflow-hidden">
                     <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
@@ -801,14 +799,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                     当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
                   </div>
                 ) : providerOpen ? (
-                  <div className="grid min-w-0 gap-2 border-t border-line p-3">
+                  <div className="divide-y divide-line border-t border-line">
                     {providerChoices.map((choice) => (
                       <button
                         key={choice.value}
                         type="button"
                         className={cn(
-                          "min-w-0 rounded-2xl border p-3 text-left transition",
-                          providerOverride === choice.value ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-line bg-panel text-olive hover:bg-paper",
+                          "min-w-0 px-4 py-3 text-left transition",
+                          providerOverride === choice.value ? "bg-[var(--selected-bg)] text-ink" : "bg-panel text-olive hover:bg-paper",
                         )}
                         onClick={() => {
                           setProviderOverride(choice.value);
@@ -826,8 +824,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 ) : null}
               </div>
 
-              <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-panel p-3">
-                <div className="mb-3 flex min-w-0 items-center justify-between gap-3 px-1 text-xs text-stone">
+              <div className="min-w-0 max-w-full overflow-hidden border-b border-line bg-panel p-4">
+                <div className="mb-3 flex min-w-0 items-center justify-between gap-3 text-xs text-stone">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-ink">
                       {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
@@ -851,8 +849,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               onRefresh={() => void loadImportDocuments(true)}
             />
 
-            <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-4">
-              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
+            <div className="min-w-0 max-w-full overflow-hidden bg-panel">
+              <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
                   <span className="block text-sm font-medium text-ink">高级选项</span>
                   <span className="mt-1 block truncate text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
@@ -860,11 +858,11 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 {advancedOpen ? <ChevronUp className="h-4 w-4 text-stone" /> : <ChevronDown className="h-4 w-4 text-stone" />}
               </button>
               {advancedOpen ? (
-                <div className="mt-4 space-y-4">
+                <div className="space-y-4 border-t border-line px-4 py-4">
                   <Label className="block">
                     <span className="mb-2 block">账单来源覆盖</span>
                     <Select value={providerOverride} onValueChange={(value) => setProviderOverride(value as ProviderOverride)}>
-                      <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-panel text-sm text-ink">
+                      <SelectTrigger className="h-10 w-full min-w-0 bg-panel text-sm text-ink">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -872,7 +870,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                       </SelectContent>
                     </Select>
                   </Label>
-                  <div className="flex items-start gap-3 rounded-2xl border border-line bg-panel p-3 text-sm">
+                  <div className="flex items-start gap-3 border-t border-line pt-4 text-sm">
                     <Checkbox id="alipay-fund-rounding" className="mt-1" checked={alipayFundRounding} onCheckedChange={(value) => setAlipayFundRounding(value === true)} />
                     <label htmlFor="alipay-fund-rounding" className="cursor-pointer">
                       <span className="font-medium text-warm">支付宝基金 9.99 → 10.00 补差</span>
@@ -882,14 +880,11 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </div>
               ) : null}
             </div>
-
           </div>
-        </CardContent>
-      </Card>
+      </section>
 
       {preview ? (
-        <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-          <CardContent className="flex min-w-0 flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+        <section data-import-preview-summary="true" className="flex min-w-0 flex-col gap-4 border-x border-b border-line bg-panel px-4 py-4 sm:px-5 md:border-x-0 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
@@ -920,8 +915,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 {hasCommitted ? "查看结果" : "继续审核"}
               </Button>
             </div>
-          </CardContent>
-        </Card>
+        </section>
       ) : null}
 
       {preview ? (
@@ -1005,12 +999,12 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                   </div>
                   <div className="mt-1 hidden text-xs leading-5 text-stone sm:block">{preview.providerDetection.reason}</div>
                 </div>
-                <div className="hidden grid-cols-[auto_auto] items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-stone sm:grid">
+                <div className="hidden grid-cols-[auto_auto] items-center gap-3 border-l border-line pl-3 text-sm text-stone sm:grid">
                   <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
                   <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
                 </div>
               </div>
-              <div className="mt-4 hidden min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid sm:grid-cols-4 xl:mt-3">
+              <div className="mt-4 hidden min-w-0 grid-cols-2 gap-px overflow-hidden border border-line bg-line sm:grid sm:grid-cols-4 xl:mt-3">
                 <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
                 <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
                 <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
@@ -1046,8 +1040,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </Alert>
               ) : null}
 
-              <div className="grid min-w-0 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.72fr)_minmax(560px,1.28fr)] xl:items-stretch xl:overflow-hidden 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(680px,1.3fr)]">
-                <section className="hidden min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
+              <div className="grid min-w-0 gap-px border border-line bg-line xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.72fr)_minmax(560px,1.28fr)] xl:items-stretch xl:overflow-hidden 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(680px,1.3fr)]">
+                <section className="hidden min-w-0 overflow-hidden bg-panel xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink">候选交易</div>
@@ -1111,7 +1105,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </section>
 
                 {selectedEntry ? (
-                  <aside ref={reviewDetailRef} className="order-1 min-w-0 scroll-mt-3 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:order-2 xl:min-h-0 xl:overflow-y-auto">
+                  <aside ref={reviewDetailRef} className="order-1 min-w-0 scroll-mt-3 overflow-hidden bg-panel xl:order-2 xl:min-h-0 xl:overflow-y-auto">
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -1142,16 +1136,16 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                         onPostingRemove={(index) => removePosting(selectedEntry.id, index)}
                       />
 
-                      <details open className="rounded-xl border border-line bg-paper px-3 py-2.5">
+                      <details open className="border-t border-line pt-3">
                         <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
                         <div className="mt-3 grid gap-2">
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">note</span>
-                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" disabled={committing || hasCommitted} />
+                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" disabled={committing || hasCommitted} />
                           </Label>
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">purpose</span>
-                            <Input className="h-10 border-line bg-panel shadow-sm" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" disabled={committing || hasCommitted} />
+                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" disabled={committing || hasCommitted} />
                           </Label>
                         </div>
                       </details>
@@ -1171,7 +1165,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 ) : null}
 
                 {entries.length > 0 ? (
-                  <details className="order-2 min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-sm xl:hidden">
+                  <details className="order-2 min-w-0 overflow-hidden border border-line bg-panel xl:hidden">
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-paper px-3 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
                       <span>候选交易</span>
                       <span className="rounded-full bg-tag px-2 py-1 text-xs font-normal text-stone">{entries.length} 待写入</span>
@@ -1204,7 +1198,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 ) : null}
               </div>
 
-              <div className="shrink-0 overflow-hidden rounded-xl border border-line bg-panel">
+              <div className="shrink-0 overflow-hidden border border-line bg-panel">
                 <Button variant="ghost" className="flex h-11 w-full justify-start rounded-none px-3 text-stone" onClick={() => setRawOpen((value) => !value)}>
                   {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   查看原始输出 / dedup 报告
@@ -1254,8 +1248,8 @@ function LastImportByProviderPanel({
 }) {
   const providers = providerChoices.filter((choice): choice is ProviderChoice & { value: Provider } => isProvider(choice.value));
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-line bg-paper p-3">
-      <div className="flex min-w-0 items-center justify-between gap-3">
+    <section className="min-w-0 max-w-full overflow-hidden border-b border-line bg-panel">
+      <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <CalendarClock className="h-4 w-4 shrink-0 text-brand" />
@@ -1267,11 +1261,11 @@ function LastImportByProviderPanel({
         </Button>
       </div>
 
-      <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid min-w-0 grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-3 xl:grid-cols-5">
         {providers.map((provider) => {
           const document = latestByProvider[provider.value];
           return (
-            <div key={provider.value} className="min-w-0 rounded-xl border border-line bg-panel px-3 py-2" title={document ? `${provider.label}: ${formatImportDocumentRange(document)} · ${document.name}` : `${provider.label}: 暂无记录`}>
+            <div key={provider.value} className="min-w-0 bg-panel px-3 py-2.5" title={document ? `${provider.label}: ${formatImportDocumentRange(document)} · ${document.name}` : `${provider.label}: 暂无记录`}>
               <div className="truncate text-xs leading-5 text-stone">{provider.label}</div>
               <div className={cn("mt-0.5 truncate text-sm font-medium tabular-nums", document ? "text-brand" : "text-stone")}>
                 {document ? document.dateEnd || document.dateStart || "未知日期" : "暂无记录"}
@@ -1280,7 +1274,7 @@ function LastImportByProviderPanel({
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1299,8 +1293,7 @@ function ImportHistoryPanel({
 }) {
   const totalSize = documents.reduce((sum, document) => sum + document.size, 0);
   return (
-    <Card className="min-w-0 overflow-hidden border-line bg-panel shadow-sm">
-      <CardContent className="p-0">
+    <section data-import-history="true" className="min-w-0 overflow-hidden border-x border-b border-line bg-panel md:border-x-0">
         <div className="flex min-w-0 flex-col gap-3 border-b border-line bg-paper px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
@@ -1331,9 +1324,7 @@ function ImportHistoryPanel({
               return (
                 <article key={document.path} className="grid min-w-0 gap-3 px-4 py-3 transition hover:bg-paper sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
                   <div className="flex min-w-0 items-start gap-3">
-                    <div className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-paper text-brand">
-                      <FileText className="h-5 w-5" />
-                    </div>
+                    <FileText className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="min-w-0 break-all text-sm font-medium leading-5 text-ink">{document.name}</span>
@@ -1368,8 +1359,7 @@ function ImportHistoryPanel({
             })}
           </div>
         )}
-      </CardContent>
-    </Card>
+    </section>
   );
 }
 
@@ -1517,8 +1507,8 @@ function ImportEntryEditor({
     { label: "订单号", value: entry.orderId || "-" },
   ];
   return (
-    <div className="grid min-w-0 gap-3 sm:gap-4">
-      <section className="rounded-xl border border-brand/25 bg-[var(--selected-bg)] p-3 sm:p-4">
+    <div className="min-w-0 divide-y divide-line border-y border-line">
+      <section className="bg-[var(--selected-bg)] p-3 sm:p-4">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-brand">{flow.kind}</div>
@@ -1536,14 +1526,12 @@ function ImportEntryEditor({
         </div>
         <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-t border-brand/15 pt-3">
           <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
-          <span className="grid h-8 w-8 place-items-center rounded-full border border-brand/25 bg-panel text-brand" aria-hidden="true">
-            <ArrowRight className="h-4 w-4" />
-          </span>
+          <ArrowRight className="h-4 w-4 text-brand" aria-hidden="true" />
           <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-paper p-3 sm:p-4">
+      <section className="bg-panel p-3 sm:p-4">
         <div className="mb-3">
           <div className="text-sm font-medium text-ink">交易信息</div>
           <div className="mt-0.5 hidden text-xs text-stone sm:block">日期、状态、收付款方和账本标题都可以在审核时修正。</div>
@@ -1556,7 +1544,7 @@ function ImportEntryEditor({
           <Label className="block min-w-0">
             <span className="mb-1.5 block text-xs text-stone">状态</span>
             <Select value={entry.flag} onValueChange={(value) => onEntryChange({ flag: value as ImportEntry["flag"] })} disabled={disabled}>
-              <SelectTrigger className="h-10 w-full min-w-0 rounded-xl bg-panel"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 w-full min-w-0 bg-panel"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="*">* 已确认</SelectItem><SelectItem value="!">! 待确认</SelectItem></SelectContent>
             </Select>
           </Label>
@@ -1571,13 +1559,13 @@ function ImportEntryEditor({
         </Label>
       </section>
 
-      <section className="rounded-xl border border-line bg-panel/60 p-3 sm:p-4">
+      <section className="bg-paper/55 p-3 sm:p-4">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-medium text-ink">分录明细</div>
             <div className="mt-0.5 hidden text-xs leading-5 text-stone sm:block">每一行都是一条 Beancount posting，可编辑来源账户、目标账户并添加拆分账户。</div>
           </div>
-          <Button type="button" variant="outline" className="h-9 shrink-0 rounded-xl bg-paper px-3" onClick={onPostingAdd} disabled={disabled}>
+          <Button type="button" variant="outline" className="h-9 shrink-0 bg-panel px-3" onClick={onPostingAdd} disabled={disabled}>
             <Plus className="h-4 w-4" />
             添加账户
           </Button>
@@ -1592,12 +1580,12 @@ function ImportEntryEditor({
           {entry.postings.some((posting) => posting.priceKind || posting.priceAmount || posting.priceCurrency) ? <span className="text-stone">带价格的多币种分录以写入前校验为准</span> : null}
         </div>
 
-        <div className="mt-3 grid min-w-0 gap-3">
+        <div className="mt-3 min-w-0 divide-y divide-line border-y border-line">
           {entry.postings.map((posting, index) => {
             const role = posting.account === entry.categoryAccount ? "主分类" : posting.account === entry.fundingAccount ? "来源账户" : isCategoryPosting(posting.account) ? "拆分分类" : `账户 ${index + 1}`;
             const hasPrice = Boolean(posting.priceKind || posting.priceAmount || posting.priceCurrency);
             return (
-              <div key={`${index}-${posting.account}`} className="min-w-0 rounded-xl border border-line bg-paper p-3">
+              <div key={`${index}-${posting.account}`} className="min-w-0 bg-panel py-3 first:pt-0 last:pb-0">
                 <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tag font-mono text-[11px] text-stone">{index + 1}</span>
@@ -1611,7 +1599,7 @@ function ImportEntryEditor({
                   <Label className="col-span-2 block min-w-0 lg:col-span-1">
                     <span className="mb-1.5 block text-xs text-stone">账户</span>
                     <Select value={posting.account || undefined} onValueChange={(value) => onPostingChange(index, { account: value })} disabled={disabled}>
-                      <SelectTrigger className={cn("h-10 w-full min-w-0 rounded-xl bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder="选择账户" /></SelectTrigger>
+                      <SelectTrigger className={cn("h-10 w-full min-w-0 bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder="选择账户" /></SelectTrigger>
                       <SelectContent className="max-h-80">
                         {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
                       </SelectContent>
@@ -1632,7 +1620,7 @@ function ImportEntryEditor({
                     <Label className="block min-w-0">
                       <span className="mb-1.5 block text-xs text-stone">类型</span>
                       <Select value={posting.priceKind ?? "none"} onValueChange={(value) => onPostingChange(index, value === "none" ? { priceKind: undefined, priceAmount: undefined, priceCurrency: undefined } : { priceKind: value as ImportPosting["priceKind"] })} disabled={disabled}>
-                        <SelectTrigger className="h-9 w-full min-w-0 rounded-xl bg-panel"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-9 w-full min-w-0 bg-panel"><SelectValue /></SelectTrigger>
                         <SelectContent><SelectItem value="none">无</SelectItem><SelectItem value="unit">单价 @</SelectItem><SelectItem value="total">总价 @@</SelectItem></SelectContent>
                       </Select>
                     </Label>
@@ -1652,7 +1640,7 @@ function ImportEntryEditor({
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-paper p-3">
+      <section className="bg-panel p-3">
         <div className="grid min-w-0 gap-2 text-xs leading-5 text-stone sm:grid-cols-2">
           {metaItems.map((item) => (
             <div key={item.label} className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
@@ -1688,7 +1676,7 @@ function ReviewMetric({ label, value, detail, tone = "default" }: { label: strin
 
 function CommitResultDetails({ result }: { result: CommitResult }) {
   return (
-    <div className="mt-4 space-y-2 rounded-2xl border border-line bg-paper p-4 text-sm text-olive">
+    <div className="mt-4 space-y-2 border-t border-line pt-4 text-sm text-olive">
       <div>写入交易：{result.count} 条</div>
       {result.outputFile ? <div className="break-all">导入文件：{result.outputFile}</div> : null}
       {result.includeFile ? <div className="break-all">月份 include：{result.includeFile}</div> : null}
