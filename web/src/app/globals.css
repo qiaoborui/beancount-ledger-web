@@ -1006,35 +1006,6 @@ html[data-theme="dark"] .home-daily-chart-line {
   min-height: 3.25rem;
 }
 
-.workspace-time-control > div {
-  width: 100%;
-  gap: 0.25rem;
-}
-
-.workspace-time-control button {
-  border-radius: var(--radius-sm);
-}
-
-@media (min-width: 768px) {
-  .workspace-time-control > div {
-    width: auto;
-  }
-
-  .workspace-time-control button {
-    height: 2.25rem;
-  }
-
-  .workspace-time-control button:nth-child(2) {
-    min-width: 12.5rem;
-  }
-
-  .workspace-time-control button:nth-child(2) > span:first-child {
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: var(--radius-xs);
-  }
-}
-
 @keyframes app-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }

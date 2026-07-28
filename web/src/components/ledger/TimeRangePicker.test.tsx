@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TimeRangePicker } from "./TimeRangePicker";
+
+const globalCss = readFileSync(fileURLToPath(new URL("../../app/globals.css", import.meta.url)), "utf8");
 
 describe("TimeRangePicker layout", () => {
   it("groups the spacious picker inside one visible segmented boundary", () => {
@@ -20,5 +24,9 @@ describe("TimeRangePicker layout", () => {
     expect(html).toMatch(/h-full[^>]*border-r[^>]*aria-label="上一时间段"/);
     expect(html).toMatch(/h-full[^>]*border-l[^>]*aria-label="下一时间段"/);
     expect(html).not.toContain("md:gap-2.5");
+  });
+
+  it("does not let workspace styles override picker button geometry", () => {
+    expect(globalCss).not.toMatch(/\.workspace-time-control\s+button/);
   });
 });
