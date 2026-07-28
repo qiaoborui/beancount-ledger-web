@@ -30,9 +30,7 @@ describe("HomePage privacy", () => {
         valuationCurrency="CNY"
         privacySettings={privacySettings}
         sensitiveUnlocked={false}
-        creditCards={[]}
         expenseAnalytics={[]}
-        accountStatuses={[]}
         onPrivacyChange={vi.fn()}
       />,
     );
@@ -44,21 +42,20 @@ describe("HomePage privacy", () => {
 });
 
 describe("HomePage layout", () => {
-  it("uses a dense three-column insight layout on desktop", () => {
+  it("uses a simplified two-column insight layout on desktop", () => {
     const html = renderToString(
       <HomePage
         summary={summary}
         valuationCurrency="CNY"
         privacySettings={privacySettings}
         sensitiveUnlocked={false}
-        creditCards={[]}
         expenseAnalytics={[]}
-        accountStatuses={[]}
         onPrivacyChange={vi.fn()}
       />,
     );
 
-    expect(html).toContain("xl:grid-cols-[minmax(0,6fr)_minmax(17rem,3fr)_minmax(17rem,3fr)]");
+    expect(html).toContain("xl:grid-cols-[minmax(0,8fr)_minmax(21rem,4fr)]");
     expect(html).toContain("xl:items-start");
+    expect(html).not.toContain("检查台");
   });
 });

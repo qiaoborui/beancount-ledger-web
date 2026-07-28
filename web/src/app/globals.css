@@ -433,7 +433,7 @@ button.card:active, a.card:active { transform: scale(0.992); }
 .home-daily-chart-grid {
   stroke: var(--chart-grid);
   stroke-width: 1;
-  stroke-dasharray: 3 4;
+  stroke-dasharray: 5 5;
 }
 
 .home-daily-chart-baseline {
@@ -450,32 +450,53 @@ button.card:active, a.card:active { transform: scale(0.992); }
   pointer-events: none;
 }
 
-.home-daily-chart-bar {
-  fill: var(--chart-secondary);
-  opacity: 0.66;
-  transition: fill 160ms ease, opacity 160ms ease;
+.home-daily-chart-area {
+  fill: url("#home-daily-chart-income-fill");
+  pointer-events: none;
 }
 
-.home-daily-chart-bar-active {
-  fill: var(--chart-primary);
-  opacity: 0.92;
+.home-daily-chart-fill-strong {
+  stop-color: var(--chart-primary);
+  stop-opacity: 0.18;
+}
+
+.home-daily-chart-fill-clear {
+  stop-color: var(--chart-primary);
+  stop-opacity: 0.02;
 }
 
 .home-daily-chart-line {
   fill: none;
-  stroke: var(--chart-primary);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2;
+  stroke-width: 2.35;
+  filter: drop-shadow(0 8px 14px oklch(0.20 0 0 / 0.08));
+}
+
+.home-daily-chart-line-income {
+  stroke: var(--chart-primary);
+}
+
+.home-daily-chart-line-expense {
+  stroke: var(--chart-secondary);
+  stroke-dasharray: 6 6;
+}
+
+.home-daily-chart-line-net {
+  stroke: var(--chart-tertiary);
+  stroke-dasharray: 2 4;
 }
 
 .home-daily-chart-dot {
   fill: var(--chart-primary);
   stroke: var(--ivory);
   stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
 
 .home-daily-chart-dot-active {
+  opacity: 1;
   stroke-width: 2;
 }
 
@@ -503,25 +524,56 @@ button.card:active, a.card:active { transform: scale(0.992); }
   pointer-events: none;
 }
 
+.home-daily-chart-legend {
+  position: absolute;
+  bottom: 0.35rem;
+  left: 50%;
+  display: flex;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 1rem;
+  color: var(--stone);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.home-daily-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.home-daily-chart-legend-key {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.35rem;
+  border-radius: 999px;
+}
+
+.home-daily-chart-legend-income {
+  background: var(--chart-primary);
+}
+
+.home-daily-chart-legend-expense {
+  background: var(--chart-secondary);
+}
+
+.home-daily-chart-legend-net {
+  background: var(--chart-tertiary);
+}
+
 html[data-theme="dark"] .home-daily-chart-tooltip {
   box-shadow: 0 14px 36px oklch(0 0 0 / 0.42);
 }
 
-html[data-theme="dark"] .home-daily-chart-bar {
-  opacity: 0.72;
-}
-
-html[data-theme="dark"] .home-daily-chart-bar-active {
-  opacity: 0.96;
+html[data-theme="dark"] .home-daily-chart-line {
+  filter: drop-shadow(0 10px 18px oklch(0 0 0 / 0.22));
 }
 
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme]) .home-daily-chart-bar {
-    opacity: 0.72;
-  }
-
-  html:not([data-theme]) .home-daily-chart-bar-active {
-    opacity: 0.96;
+  html:not([data-theme]) .home-daily-chart-line {
+    filter: drop-shadow(0 10px 18px oklch(0 0 0 / 0.22));
   }
 }
 .dashboard-panel-grid {

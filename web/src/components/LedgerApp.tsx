@@ -730,7 +730,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>
       </div>
 
-      {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} creditCards={creditCards} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} accountStatuses={accountStatuses} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
+      {page === "home" && <HomePage summary={summary} valuationCurrency={dataValuationCurrency} privacySettings={unlockedPrivacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSelectCategory={openCategoryTransactions} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onSelectCategory={openCategoryTransactions} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("趋势看板已隐藏", "此页会展示净资产、收入、账户余额和大额支出，需要解锁后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} incomeStatement={incomeStatement} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("净资产已隐藏", "此页会展示净资产、账户余额和资产配置，需要解锁后查看。"))}
@@ -748,24 +748,26 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要解锁后查看。"))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {page === "home" && (homeSecondaryReady ? (
-        <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
-          <LazyTransactionList
-            txns={projectedTxns}
-            accounts={accounts}
-            searchable={false}
-            categoryQuery=""
-            metadataQuery=""
-            searchQuery=""
-            matchMode="prefix"
-            viewMode={txnViewMode}
-            setViewMode={setTxnViewMode}
-            onUpdate={guardedUpdateTransaction}
-            onDelete={guardedDeleteTransaction}
-            onReverse={guardedReverseTransaction}
-            showToast={showToast}
-          />
-        </Suspense>
-      ) : <RouteFallback label="流水列表稍后加载…" />)}
+        <section className="home-secondary-flow border-t border-line bg-panel pt-8 md:pt-12">
+          <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
+            <LazyTransactionList
+              txns={projectedTxns}
+              accounts={accounts}
+              searchable={false}
+              categoryQuery=""
+              metadataQuery=""
+              searchQuery=""
+              matchMode="prefix"
+              viewMode={txnViewMode}
+              setViewMode={setTxnViewMode}
+              onUpdate={guardedUpdateTransaction}
+              onDelete={guardedDeleteTransaction}
+              onReverse={guardedReverseTransaction}
+              showToast={showToast}
+            />
+          </Suspense>
+        </section>
+      ) : <section className="home-secondary-flow border-t border-line bg-panel pt-8 md:pt-12"><RouteFallback label="流水列表稍后加载…" /></section>)}
       {page === "transactions" && (
         <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
           <LazyTransactionList
