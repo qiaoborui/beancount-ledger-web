@@ -640,13 +640,13 @@ function DailyExpenseChart({ data, onOpenTransactions }: { data: DashboardSummar
           const payload = state?.activePayload?.[0]?.payload as { fullDate?: string } | undefined;
           if (payload?.fullDate) onOpenTransactions(transactionHref({ q: payload.fullDate }));
         }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+          <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={10} />
           <YAxis yAxisId="money" width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
           <YAxis yAxisId="count" orientation="right" width={36} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} />
           <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatValuation(Number(value), data.currency), name]} />
-          <Bar yAxisId="money" dataKey="支出" fill="var(--chart-secondary)" radius={[3, 3, 0, 0]} maxBarSize={18} />
-          <Line yAxisId="count" type="monotone" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={2} dot={{ r: 2 }} />
+          <Bar yAxisId="money" dataKey="支出" fill="var(--chart-secondary)" radius={0} maxBarSize={16} />
+          <Line yAxisId="count" type="linear" dataKey="笔数" stroke="var(--chart-primary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
         </ComposedChart>
       </ResponsiveContainer>
     </ChartBox>
@@ -659,11 +659,11 @@ function WeekdayExpenseChart({ data }: { data: DashboardSummary }) {
   return <ChartBox empty={!rows.some((row) => row.支出 > 0)}>
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="30%">
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
         <XAxis dataKey="weekday" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
         <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
         <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === "笔数" ? [Number(value), "笔数"] : [formatValuation(Number(value), data.currency), name]} />
-        <Bar dataKey="支出" fill="var(--chart-tertiary)" radius={[4, 4, 0, 0]} maxBarSize={34} />
+        <Bar dataKey="支出" fill="var(--chart-tertiary)" radius={0} maxBarSize={28} />
       </BarChart>
     </ResponsiveContainer>
   </ChartBox>;
@@ -674,14 +674,14 @@ function NetWorthChart({ data }: { data: DashboardSummary }) {
   return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
         <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
         <YAxis width={58} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} domain={["dataMin", "dataMax"]} />
         <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), name]} />
         <Legend />
-        <Line type="monotone" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={3} dot={{ r: 3 }} />
-        <Line type="monotone" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={2} dot={false} />
-        <Line type="monotone" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={2} dot={false} />
+        <Line type="linear" dataKey="净资产" stroke="var(--chart-primary)" strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+        <Line type="linear" dataKey="资产" stroke="var(--chart-tertiary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+        <Line type="linear" dataKey="负债" stroke="var(--chart-secondary)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
       </LineChart>
     </ResponsiveContainer>
   </ChartBox>;
@@ -692,14 +692,14 @@ function CashflowChart({ data }: { data: DashboardSummary }) {
   return <ChartBox empty={!rows.length} compact>
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }} barCategoryGap="28%">
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
         <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
         <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
         <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), name]} />
         <Legend />
-        <Bar dataKey="收入" fill="var(--chart-primary)" radius={[3, 3, 0, 0]} maxBarSize={18} />
-        <Bar dataKey="支出" fill="var(--chart-secondary)" radius={[3, 3, 0, 0]} maxBarSize={18} />
-        <Line type="monotone" dataKey="结余" stroke="var(--chart-palette-1)" strokeWidth={2} dot={{ r: 2 }} />
+        <Bar dataKey="收入" fill="var(--chart-primary)" radius={0} maxBarSize={16} />
+        <Bar dataKey="支出" fill="var(--chart-secondary)" radius={0} maxBarSize={16} />
+        <Line type="linear" dataKey="结余" stroke="var(--chart-palette-1)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
       </ComposedChart>
     </ResponsiveContainer>
   </ChartBox>;
@@ -714,13 +714,13 @@ function CategoryTrendChart({ data }: { data: DashboardSummary }) {
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+            <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
             <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
             <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
             <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), labelForSeries(chartSeries, String(name))]} />
             {visibleSeries.map((series) => {
               const index = chartSeries.findIndex((item) => item.account === series.account);
-              return <Area key={series.account} type="monotone" dataKey={series.account} stackId={focusedAccount ? undefined : "expense"} stroke={COLORS[index % COLORS.length]} fill={COLORS[index % COLORS.length]} fillOpacity={0.72} />;
+              return <Area key={series.account} type="linear" dataKey={series.account} stackId={focusedAccount ? undefined : "expense"} stroke={COLORS[index % COLORS.length]} strokeWidth={1.25} fill={COLORS[index % COLORS.length]} fillOpacity={0.18} activeDot={{ r: 3, strokeWidth: 0 }} />;
             })}
           </AreaChart>
         </ResponsiveContainer>
@@ -739,13 +739,13 @@ function AccountTrendChart({ data }: { data: DashboardSummary }) {
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ left: 8, right: 16, top: 14, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+            <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
             <XAxis dataKey="month" tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={14} />
             <YAxis width={56} tick={{ fill: "var(--stone)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactChartMoney} />
             <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => [formatValuation(Number(value), data.currency), labelForSeries(chartSeries, String(name))]} />
             {visibleSeries.map((series) => {
               const index = chartSeries.findIndex((item) => item.account === series.account);
-              return <Line key={series.account} type="monotone" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />;
+              return <Line key={series.account} type="linear" dataKey={series.account} stroke={COLORS[index % COLORS.length]} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />;
             })}
           </LineChart>
         </ResponsiveContainer>
@@ -943,7 +943,7 @@ function labelForSeries(series: { account: string; alias?: string | null; label:
   return row ? formatAccountOptionLabel(row.account, row.label, row.alias) : account;
 }
 
-const tooltipStyle = { background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--ink)", boxShadow: "var(--float-shadow)" };
+const tooltipStyle = { background: "var(--ivory)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink)", boxShadow: "0 10px 28px oklch(0.20 0.012 255 / 0.14)" };
 
 function compactChartMoney(value: number) {
   return new Intl.NumberFormat("zh-CN", { notation: "compact", compactDisplay: "short", maximumFractionDigits: 1 }).format(value);

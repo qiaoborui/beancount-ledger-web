@@ -370,8 +370,8 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       setActiveTxnKey(null);
       return;
     }
-    if (!activeTxnKey || !pageRows.some((txn) => transactionKey(txn) === activeTxnKey)) {
-      setActiveTxnKey(transactionKey(pageRows[0]));
+    if (activeTxnKey && !pageRows.some((txn) => transactionKey(txn) === activeTxnKey)) {
+      setActiveTxnKey(null);
     }
   }, [activeTxnKey, pageRows]);
 
@@ -424,8 +424,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
-      const currentIndex = activeIndex >= 0 ? activeIndex : 0;
-      const nextIndex = Math.min(pageRows.length - 1, Math.max(0, currentIndex + direction));
+      const nextIndex = activeIndex >= 0
+        ? Math.min(pageRows.length - 1, Math.max(0, activeIndex + direction))
+        : direction > 0 ? 0 : pageRows.length - 1;
       const nextKey = transactionKey(pageRows[nextIndex]);
       setActiveTxnKey(nextKey);
       focusDesktopRow(nextKey);
@@ -580,7 +581,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           </div>
           {pager}
           </div>
-          {searchable && <TransactionInspector txn={selected ?? pageRows[0]} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
+          {searchable && <TransactionInspector txn={selected} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
         </div>
       )}
     </div>
