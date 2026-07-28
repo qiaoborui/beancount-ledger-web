@@ -1,7 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { HomePage } from "./HomePage";
-import type { PrivacySettings, Summary } from "./types";
+import type { ExpenseCategoryAnalytics, PrivacySettings, Summary } from "./types";
 
 const summary: Summary = {
   currency: "CNY",
@@ -22,6 +22,11 @@ const privacySettings: PrivacySettings = {
   valuationCurrency: "CNY",
 };
 
+const expenseAnalytics: ExpenseCategoryAnalytics[] = [
+  { account: "Expenses:Food", label: "餐饮", amount: 5600, txCount: 4, share: 0.71, previousAmount: 0, changeRatio: null, topPayees: [] },
+  { account: "Expenses:Transport", label: "交通", amount: 2290, txCount: 2, share: 0.29, previousAmount: 0, changeRatio: null, topPayees: [] },
+];
+
 describe("HomePage privacy", () => {
   it("does not prepare the daily income chart before sensitive data is unlocked", () => {
     const html = renderToString(
@@ -30,7 +35,7 @@ describe("HomePage privacy", () => {
         valuationCurrency="CNY"
         privacySettings={privacySettings}
         sensitiveUnlocked={false}
-        expenseAnalytics={[]}
+        expenseAnalytics={expenseAnalytics}
         onPrivacyChange={vi.fn()}
       />,
     );
@@ -49,12 +54,14 @@ describe("HomePage layout", () => {
         valuationCurrency="CNY"
         privacySettings={privacySettings}
         sensitiveUnlocked={false}
-        expenseAnalytics={[]}
+        expenseAnalytics={expenseAnalytics}
         onPrivacyChange={vi.fn()}
       />,
     );
 
     expect(html).toContain("xl:grid-cols-[minmax(0,8fr)_minmax(21rem,4fr)]");
+    expect(html).toContain("本期支出结构图");
+    expect(html).toContain("home-structure-chart");
     expect(html).toContain("xl:items-start");
     expect(html).not.toContain("检查台");
   });

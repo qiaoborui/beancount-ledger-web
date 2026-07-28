@@ -563,6 +563,51 @@ button.card:active, a.card:active { transform: scale(0.992); }
   background: var(--chart-tertiary);
 }
 
+.home-structure-chart {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-structure-grid {
+  position: absolute;
+  inset: 1.25rem 2rem;
+  z-index: -1;
+  background-image: linear-gradient(90deg, transparent 0 24%, var(--chart-grid) 24% calc(24% + 1px), transparent calc(24% + 1px) 49%, var(--chart-grid) 49% calc(49% + 1px), transparent calc(49% + 1px) 74%, var(--chart-grid) 74% calc(74% + 1px), transparent calc(74% + 1px));
+  opacity: 0.72;
+}
+
+.home-structure-row {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0;
+}
+
+button.home-structure-row {
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+button.home-structure-row:hover {
+  background: color-mix(in srgb, oklch(var(--color-tag)) 56%, transparent);
+}
+
+.home-structure-track {
+  display: block;
+  height: 0.625rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.home-structure-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--chart-primary), var(--chart-secondary));
+}
+
 html[data-theme="dark"] .home-daily-chart-tooltip {
   box-shadow: 0 14px 36px oklch(0 0 0 / 0.42);
 }
