@@ -2,6 +2,7 @@ import { useMemo, useState, type PointerEvent } from "react";
 import { formatValuation } from "@/lib/money";
 
 type DayRow = [string, { income: number; expense: number }];
+type ChartMode = "daily" | "cumulative";
 
 type ChartPoint = {
   date: string;
@@ -22,10 +23,16 @@ const plotHeight = chartHeight - margin.top - margin.bottom;
 const plotBottom = margin.top + plotHeight;
 const baselineValue = 0;
 
-export function HomeDailyTrendChart({ rows, valuationCurrency }: { rows: DayRow[]; valuationCurrency: string }) {
+export function HomeDailyTrendChart({ rows, valuationCurrency, mode = "daily" }: { rows: DayRow[]; valuationCurrency: string; mode?: ChartMode }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const model = useMemo(() => buildChartModel(rows), [rows]);
+  const model = useMemo(() => buildChartModel(rows, mode), [rows, mode]);
   const activePoint = activeIndex == null ? null : model.points[activeIndex] ?? null;
+  const chartCopy = mode === "cumulative"
+    ? { title: "累计收支趋势", desc: "平滑折线表示本期累计收入、累计支出和累计净额。", income: "累计收入", expense: "累计支出", net: "累计净额" }
+    : { title: "日收支节奏", desc: "平滑折线表示每日收入、每日支出和每日净收入。", income: "收入", expense: "支出", net: "净收入" };
+  const titleId = `home-${mode}-chart-title`;
+  const descId = `home-${mode}-chart-desc`;
+  const fillId = `home-${mode}-chart-income-fill`;
 
   function updateActivePoint(event: PointerEvent<SVGRectElement>) {
     if (!model.points.length) return;
@@ -39,15 +46,15 @@ export function HomeDailyTrendChart({ rows, valuationCurrency }: { rows: DayRow[
     setActiveIndex(nearest.index);
   }
 
-  return <div className="home-daily-chart relative h-full min-w-0" data-active={activePoint ? "true" : "false"}>
-    <svg className="h-full w-full" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-labelledby="home-daily-chart-title home-daily-chart-desc" preserveAspectRatio="none">
-      <title id="home-daily-chart-title">日收支节奏</title>
-      <desc id="home-daily-chart-desc">柱形表示每日支出，折线表示每日收入。</desc>
+  return <div className="home-daily-chart relative h-full min-w-0" data-active={activePoint ? "true" : "false"} data-mode={mode}>
+    <svg className="h-full w-full" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-labelledby={`${titleId} ${descId}`} preserveAspectRatio="none">
+      <title id={titleId}>{chartCopy.title}</title>
+      <desc id={descId}>{chartCopy.desc}</desc>
 
       <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} className="home-daily-chart-plot" />
 
       <defs>
-        <linearGradient id="home-daily-chart-income-fill" x1="0" x2="0" y1="0" y2="1">
+        <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" className="home-daily-chart-fill-strong" />
           <stop offset="100%" className="home-daily-chart-fill-clear" />
         </linearGradient>
@@ -68,7 +75,7 @@ export function HomeDailyTrendChart({ rows, valuationCurrency }: { rows: DayRow[
         return point ? <text key={`${point.date}-${label}`} x={point.positionX} y={chartHeight - 10} textAnchor="middle" className="home-daily-chart-axis-label">{label}</text> : null;
       })}
 
-      {model.incomeAreaPath && <path d={model.incomeAreaPath} className="home-daily-chart-area" />}
+      {model.incomeAreaPath && <path d={model.incomeAreaPath} className="home-daily-chart-area" style={{ fill: `url(#${fillId})` }} />}
       {model.incomeLinePath && <path d={model.incomeLinePath} className="home-daily-chart-line home-daily-chart-line-income" vectorEffect="non-scaling-stroke" />}
       {model.expenseLinePath && <path d={model.expenseLinePath} className="home-daily-chart-line home-daily-chart-line-expense" vectorEffect="non-scaling-stroke" />}
       {model.netLinePath && <path d={model.netLinePath} className="home-daily-chart-line home-daily-chart-line-net" vectorEffect="non-scaling-stroke" />}
@@ -100,26 +107,33 @@ export function HomeDailyTrendChart({ rows, valuationCurrency }: { rows: DayRow[
       />
     </svg>
     <div className="home-daily-chart-legend">
-      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-income" />收入</span>
-      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-expense" />支出</span>
-      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-net" />净收入</span>
+      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-income" />{chartCopy.income}</span>
+      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-expense" />{chartCopy.expense}</span>
+      <span><i className="home-daily-chart-legend-key home-daily-chart-legend-net" />{chartCopy.net}</span>
     </div>
     {activePoint && <div className="home-daily-chart-tooltip" style={{ left: `${activePoint.positionX / chartWidth * 100}%`, top: `${Math.max(8, activePoint.incomeY / chartHeight * 100)}%` }}>
       <div className="text-[10px] tabular-nums text-stone">{activePoint.date}</div>
       <div className="mt-1 grid gap-0.5 text-xs tabular-nums text-ink">
-        <span>支出 {formatValuation(activePoint.expense, valuationCurrency)}</span>
-        <span>收入 {formatValuation(activePoint.income, valuationCurrency)}</span>
-        <span>净收入 {formatValuation(activePoint.net, valuationCurrency)}</span>
+        <span>{chartCopy.expense} {formatValuation(activePoint.expense, valuationCurrency)}</span>
+        <span>{chartCopy.income} {formatValuation(activePoint.income, valuationCurrency)}</span>
+        <span>{chartCopy.net} {formatValuation(activePoint.net, valuationCurrency)}</span>
       </div>
     </div>}
   </div>;
 }
 
-function buildChartModel(rows: DayRow[]) {
+function buildChartModel(rows: DayRow[], mode: ChartMode) {
+  let cumulativeIncome = 0;
+  let cumulativeExpense = 0;
   const rawPoints = rows.map(([date, value]) => {
-    const income = value.income / 100;
-    const expense = value.expense / 100;
-    return { date, income, expense, net: income - expense };
+    const dailyIncome = value.income / 100;
+    const dailyExpense = value.expense / 100;
+    if (mode === "cumulative") {
+      cumulativeIncome += dailyIncome;
+      cumulativeExpense += dailyExpense;
+      return { date, income: cumulativeIncome, expense: cumulativeExpense, net: cumulativeIncome - cumulativeExpense };
+    }
+    return { date, income: dailyIncome, expense: dailyExpense, net: dailyIncome - dailyExpense };
   });
   const maxRaw = rawPoints.reduce((max, point) => Math.max(max, point.income, point.expense, point.net, baselineValue), baselineValue);
   const minRaw = rawPoints.reduce((min, point) => Math.min(min, point.net, baselineValue), baselineValue);

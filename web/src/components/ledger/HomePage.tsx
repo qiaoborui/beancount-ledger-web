@@ -59,33 +59,39 @@ export function HomePage({ summary, valuationCurrency, privacySettings, sensitiv
       </div>
     </section>
 
-    <section className="grid border-b border-line xl:grid-cols-[minmax(0,8fr)_minmax(21rem,4fr)] xl:items-start">
+    <section className="grid border-b border-line xl:grid-cols-2 xl:items-start">
       <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
         <WorkbenchHeading title="日收支趋势" detail="收入、支出与净收入以同一坐标展示。" meta={`${dayRows.length} 天`} />
         <div className="h-[22rem] min-w-0 px-4 pb-6 pt-3 md:h-[25rem] md:px-6 xl:px-8">
-          <DailyTrend rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} />
+          <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="daily" />
         </div>
       </div>
 
-      <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
-        <WorkbenchHeading title="支出结构" detail="最大分类与其他高频入口的相对占比。" meta={`${topCategories.length} 类`} />
-        <ExpenseStructureChart rows={topCategories.slice(0, 5)} showAmounts={showAmounts} valuationCurrency={displayCurrency} onSelectCategory={onSelectCategory} />
-        <div className="divide-y divide-line">
-          {topCategories.length ? topCategories.map((row, index) => {
-            const content = <>
-              <span className="w-7 shrink-0 text-xs tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-ink">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
-                <span className="mt-2 block h-1.5 overflow-hidden bg-line"><span className="block h-full bg-ink" style={{ width: `${Math.max(3, Math.min(100, (row.share ?? 0) * 100))}%` }} /></span>
-              </span>
-              <span className="shrink-0 text-right">
-                <span className="block text-sm font-semibold tabular-nums text-ink">{showAmounts ? formatValuation(row.amount / 100, displayCurrency) : "••••••"}</span>
-                <span className="mt-1 block text-xs tabular-nums text-stone">{row.txCount} 笔 · {formatPercent(row.share)}</span>
-              </span>
-            </>;
-            return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-3 px-4 py-4 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-6 xl:px-8" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-3 px-4 py-4 md:px-6 xl:px-8">{content}</div>;
-          }) : <EmptyRail text="本期没有可分析的支出分类。" />}
+      <div className="min-w-0">
+        <WorkbenchHeading title="累计收支趋势" detail="本期累计收入、支出与结余走势。" meta={latestDate} />
+        <div className="h-[22rem] min-w-0 px-4 pb-6 pt-3 md:h-[25rem] md:px-6 xl:px-8">
+          <HomeTrendChart rows={dayRows} showAmounts={canShowSensitive} valuationCurrency={displayCurrency} mode="cumulative" />
         </div>
+      </div>
+    </section>
+
+    <section className="border-b border-line bg-panel">
+      <WorkbenchHeading title="支出分类账" detail="按本期支出金额排序，优先检查高集中分类。" meta={`${topCategories.length} 类`} />
+      <div className="divide-y divide-line">
+        {topCategories.length ? topCategories.map((row, index) => {
+          const content = <>
+            <span className="w-7 shrink-0 text-xs tabular-nums text-stone">{String(index + 1).padStart(2, "0")}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-ink">{formatAccountOptionLabel(row.account, row.label, row.alias)}</span>
+              <span className="mt-2 block h-1.5 overflow-hidden bg-line"><span className="block h-full bg-ink" style={{ width: `${Math.max(3, Math.min(100, (row.share ?? 0) * 100))}%` }} /></span>
+            </span>
+            <span className="shrink-0 text-right">
+              <span className="block text-sm font-semibold tabular-nums text-ink">{showAmounts ? formatValuation(row.amount / 100, displayCurrency) : "••••••"}</span>
+              <span className="mt-1 block text-xs tabular-nums text-stone">{row.txCount} 笔 · {formatPercent(row.share)}</span>
+            </span>
+          </>;
+          return onSelectCategory ? <button key={row.account} type="button" className="flex w-full items-center gap-3 px-4 py-4 text-left hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-6 xl:px-8" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="flex items-center gap-3 px-4 py-4 md:px-6 xl:px-8">{content}</div>;
+        }) : <EmptyRail text="本期没有可分析的支出分类。" />}
       </div>
     </section>
   </div>;
@@ -109,40 +115,12 @@ function WorkbenchHeading({ title, detail, meta }: { title: string; detail: stri
   </div>;
 }
 
-function ExpenseStructureChart({ rows, showAmounts, valuationCurrency, onSelectCategory }: { rows: ExpenseCategoryAnalytics[]; showAmounts: boolean; valuationCurrency: string; onSelectCategory?: (account: string, mode?: "exact" | "prefix") => void }) {
-  const maxAmount = Math.max(...rows.map((row) => Math.abs(row.amount)), 1);
-  if (!rows.length) return <EmptyRail text="本期没有可视化的支出结构。" />;
-  return <div className="home-structure-chart border-b border-line px-4 py-5 md:px-6 xl:px-8" role="img" aria-label="本期支出结构图">
-    <div className="home-structure-grid" aria-hidden="true" />
-    <div className="grid gap-3">
-      {rows.map((row, index) => {
-        const ratio = Math.max(0.04, Math.min(1, Math.abs(row.amount) / maxAmount));
-        const label = formatAccountOptionLabel(row.account, row.label, row.alias);
-        const content = <>
-          <span className="flex items-baseline justify-between gap-3">
-            <span className="min-w-0 truncate text-xs font-medium text-ink">{label}</span>
-            <span className="shrink-0 text-xs tabular-nums text-stone">{formatPercent(row.share)}</span>
-          </span>
-          <span className="home-structure-track mt-2">
-            <span className="home-structure-bar" style={{ width: `${ratio * 100}%` }} />
-          </span>
-          <span className="mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums text-stone">
-            <span>{String(index + 1).padStart(2, "0")} · {row.txCount} 笔</span>
-            <span>{showAmounts ? formatValuation(row.amount / 100, valuationCurrency) : "••••••"}</span>
-          </span>
-        </>;
-        return onSelectCategory ? <button key={row.account} type="button" className="home-structure-row text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand" onClick={() => onSelectCategory(row.account, "prefix")}>{content}</button> : <div key={row.account} className="home-structure-row">{content}</div>;
-      })}
-    </div>
-  </div>;
-}
-
-function DailyTrend({ rows, showAmounts, valuationCurrency }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string }) {
+function HomeTrendChart({ rows, showAmounts, valuationCurrency, mode }: { rows: [string, { income: number; expense: number }][]; showAmounts: boolean; valuationCurrency: string; mode: "daily" | "cumulative" }) {
   const ready = useDeferredChartReady(showAmounts && rows.length > 0);
   if (!showAmounts) return <div className="grid h-full place-items-center text-sm text-stone">金额已隐藏</div>;
   if (!rows.length) return <div className="grid h-full place-items-center text-sm text-stone">当前周期暂无日收支数据</div>;
   if (!ready) return <div className="grid h-full place-items-center text-sm text-stone">正在准备趋势图…</div>;
-  return <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone">正在准备趋势图…</div>}><LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} /></Suspense>;
+  return <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone">正在准备趋势图…</div>}><LazyHomeDailyTrendChart rows={rows} valuationCurrency={valuationCurrency} mode={mode} /></Suspense>;
 }
 
 function EmptyRail({ text }: { text: string }) {

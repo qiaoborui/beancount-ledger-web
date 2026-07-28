@@ -59,9 +59,10 @@ describe("HomePage layout", () => {
       />,
     );
 
-    expect(html).toContain("xl:grid-cols-[minmax(0,8fr)_minmax(21rem,4fr)]");
-    expect(html).toContain("本期支出结构图");
-    expect(html).toContain("home-structure-chart");
+    expect(html).toContain("xl:grid-cols-2");
+    expect(html).toContain("日收支趋势");
+    expect(html).toContain("累计收支趋势");
+    expect(html).not.toContain("home-structure-chart");
     expect(html).toContain("xl:items-start");
     expect(html).not.toContain("检查台");
   });
