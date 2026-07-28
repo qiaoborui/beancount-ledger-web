@@ -150,6 +150,15 @@ func (s *Server) dashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, BuildDashboardSummaryWithFiltersInCurrency(snapshot, start, end, parseDashboardFilters(c), c.Query("valuationCurrency")))
 }
 
+func (s *Server) homeReport(c *gin.Context) {
+	snapshot, ok := s.snapshot(c, true)
+	if !ok {
+		return
+	}
+	start, end := parseTimeParams(c)
+	c.JSON(http.StatusOK, BuildHomeReportInCurrency(snapshot, start, end, c.Query("valuationCurrency")))
+}
+
 func (s *Server) investments(c *gin.Context) {
 	snapshot, ok := s.snapshot(c, true)
 	if !ok {

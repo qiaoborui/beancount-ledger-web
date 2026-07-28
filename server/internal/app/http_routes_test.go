@@ -357,6 +357,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/balances":               true,
 		"GET /api/ledger/income-statement":       true,
 		"GET /api/ledger/dashboard":              true,
+		"GET /api/ledger/home-report":            true,
 		"GET /api/ledger/investments":            true,
 		"GET /api/ledger/accounts":               true,
 		"POST /api/ledger/accounts":              true,
