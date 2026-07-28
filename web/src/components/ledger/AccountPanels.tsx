@@ -350,7 +350,7 @@ function shortAccountPath(account: string) {
 }
 
 function BalanceMetric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-line bg-paper p-3"><div className="ledger-label">{label}</div><div className="mt-1 font-semibold tabular-nums text-olive">{value}</div></div>;
+  return <div className="min-w-0 bg-panel p-3"><div className="ledger-label">{label}</div><div className="mt-1 truncate font-semibold tabular-nums text-olive" title={value}>{value}</div></div>;
 }
 
 function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, onToggleAccount, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; onClose: () => void }) {
@@ -388,33 +388,33 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
 
 function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, inline, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; inline?: boolean; onClose?: () => void }) {
   if (!row) {
-    return <aside className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
+    return <aside className="border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
   }
-  return <aside className={compact || inline ? "" : "rounded-xl border border-line bg-panel p-4"}>
+  return <aside className={compact || inline ? "" : "border border-line bg-panel p-4"}>
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h3 className="truncate text-xl font-semibold text-warm">{row.label}</h3>
         <p className="mt-1 break-all text-xs text-stone">{row.account}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {onToggleAccount && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
-        {onClose && <button className="rounded-xl border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title="关闭账户详情"><X className="h-4 w-4" /></button>}
+        {onToggleAccount && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+        {onClose && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title="关闭账户详情"><X className="h-4 w-4" /></button>}
       </div>
     </div>
-    <div className={`mt-5 grid gap-3 ${compact || inline ? "grid-cols-3" : "grid-cols-1 2xl:grid-cols-3"}`}>
+    <div className={`mt-5 grid overflow-hidden border-y border-line divide-line ${compact || inline ? "grid-cols-3 divide-x" : "grid-cols-1 divide-y 2xl:grid-cols-3 2xl:divide-x 2xl:divide-y-0"}`}>
       <BalanceMetric label="余额" value={formatRowAmount(row, visible)} />
       <BalanceMetric label="状态" value={status ? statusTitle(status) : "未检查"} />
       <BalanceMetric label="币种" value={row.currency || "多币种"} />
     </div>
-    <div className="relative mt-4 min-h-24 overflow-hidden rounded-xl border border-line bg-paper p-3">
+    <div className="relative min-h-24 overflow-hidden border-b border-line bg-panel p-3">
       <AccountSparkline points={points} liability={row.account.startsWith("Liabilities")} />
       <div className="relative z-10 text-xs text-stone">最近活动</div>
       <div className="relative z-10 mt-2 text-sm font-medium text-olive">{lastActivity ?? "暂无近期活动"}</div>
       <div className="relative z-10 mt-1 text-xs text-stone">{row.active === false ? "账户已关闭" : "账户启用中"}</div>
     </div>
     <div className="mt-4 grid grid-cols-2 gap-3">
-      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-line bg-paper text-sm font-medium text-olive hover:bg-tag"><ListChecks className="h-4 w-4" />流水</ClientNavLink>
-      <ClientNavLink href="/reconcile" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand text-sm font-medium text-paper hover:bg-brand-light"><ListChecks className="h-4 w-4" />对账</ClientNavLink>
+      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-paper text-sm font-medium text-olive hover:bg-tag"><ListChecks className="h-4 w-4" />流水</ClientNavLink>
+      <ClientNavLink href="/reconcile" className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand text-sm font-medium text-paper hover:bg-brand-light"><ListChecks className="h-4 w-4" />对账</ClientNavLink>
     </div>
   </aside>;
 }
@@ -465,11 +465,42 @@ export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAcc
   const totalRepayments = cards.reduce((sum, card) => sum + card.periodRepayments, 0);
   const billing = cards[0];
   const summaryMask = (value: string) => summaryVisible ? value : "••••••";
-  return <section className="card mt-6 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-3"><h2 className="font-serif text-2xl">信用卡视图</h2><button className="shrink-0 rounded-xl border border-line px-2 py-1 text-olive hover:bg-tag" onClick={onToggleSummaryVisible} title={summaryVisible ? "隐藏信用卡汇总" : "显示信用卡汇总"}>{summaryVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div><p className="mt-1 text-sm text-olive">账单周期 {billing.billCycleStart.slice(5)} ~ {billing.billCycleEnd.slice(5)}；{billing.statementDate.slice(5)} 出账，最晚 {billing.dueDate.slice(5)} 还款。</p></div><div className="rounded-2xl border border-line bg-panel px-4 py-3 text-right"><div className="text-xs text-stone">总未还</div><div className="amount-expense text-xl font-semibold">{summaryMask(formatValuation(totalOutstanding / 100, valuationCurrency))}</div></div></div><div className="mt-4 grid gap-3 sm:grid-cols-4"><CreditSummary label="账单周期消费" value={summaryMask(formatValuation(totalBillCycleSpend / 100, valuationCurrency))} /><CreditSummary label="当前范围刷卡" value={summaryMask(formatValuation(totalSpend / 100, valuationCurrency))} /><CreditSummary label="当前范围还款" value={summaryMask(formatValuation(totalRepayments / 100, valuationCurrency))} /><CreditSummary label="卡片数量" value={`${cards.length}`} /></div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{cards.map((card) => { const cardVisible = visibleAccountMap[card.account] ?? visible; const cardMask = (value: string) => cardVisible ? value : "••••••"; const st = statuses.find((item) => item.account === card.account); return <div key={card.account} className="rounded-2xl border border-line bg-panel p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2 text-sm font-medium text-olive">{st && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(st.status)}`} title={statusTitle(st)} />}{card.label}</div><div className="mt-1 truncate text-xs text-stone">{card.account}</div></div>{onToggleAccount && <button className="shrink-0 rounded-xl border border-line px-2 py-1 text-olive hover:bg-tag" onClick={() => onToggleAccount(card.account)} title={cardVisible ? "隐藏该信用卡金额" : "显示该信用卡金额"}>{cardVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}</div><div className="amount-expense mt-3 text-2xl font-semibold">{cardMask(formatCompactValuation(card.outstanding / 100, valuationCurrency))}</div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><CreditSummary label="账单周期消费" value={cardMask(formatValuation(card.billCycleSpend / 100, valuationCurrency))} /><CreditSummary label="当前范围刷卡" value={cardMask(formatValuation(card.periodSpend / 100, valuationCurrency))} /><CreditSummary label="最晚还款" value={card.dueDate.slice(5)} /><CreditSummary label="最近活动" value={card.lastActivityDate?.slice(5) ?? "—"} /></div></div>; })}</div></section>;
+  return <section className="mt-px border-b border-line bg-panel">
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8">
+      <div>
+        <div className="flex items-center gap-3"><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">信用卡视图</h2><button className="shrink-0 rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={onToggleSummaryVisible} title={summaryVisible ? "隐藏信用卡汇总" : "显示信用卡汇总"}>{summaryVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+        <p className="mt-1 text-sm text-stone">账单周期 {billing.billCycleStart.slice(5)} ~ {billing.billCycleEnd.slice(5)}；{billing.statementDate.slice(5)} 出账，最晚 {billing.dueDate.slice(5)} 还款。</p>
+      </div>
+      <div className="text-left sm:text-right"><div className="ledger-label">总未还</div><div className="amount-expense mt-1 text-xl font-semibold">{summaryMask(formatValuation(totalOutstanding / 100, valuationCurrency))}</div></div>
+    </div>
+    <div className="grid gap-px bg-line sm:grid-cols-4">
+      <CreditSummary label="账单周期消费" value={summaryMask(formatValuation(totalBillCycleSpend / 100, valuationCurrency))} />
+      <CreditSummary label="当前范围刷卡" value={summaryMask(formatValuation(totalSpend / 100, valuationCurrency))} />
+      <CreditSummary label="当前范围还款" value={summaryMask(formatValuation(totalRepayments / 100, valuationCurrency))} />
+      <CreditSummary label="卡片数量" value={`${cards.length}`} />
+    </div>
+    <div className="divide-y divide-line">{cards.map((card) => {
+      const cardVisible = visibleAccountMap[card.account] ?? visible;
+      const cardMask = (value: string) => cardVisible ? value : "••••••";
+      const st = statuses.find((item) => item.account === card.account);
+      return <div key={card.account} className="@container">
+        <div className="flex items-start justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
+          <div className="min-w-0"><div className="flex items-center gap-2 text-sm font-medium text-ink">{st && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(st.status)}`} title={statusTitle(st)} />}{card.label}</div><div className="mt-1 truncate text-xs text-stone">{card.account}</div></div>
+          <div className="flex shrink-0 items-start gap-3"><div className="text-right"><div className="ledger-label">未还金额</div><div className="amount-expense mt-1 text-lg font-semibold">{cardMask(formatCompactValuation(card.outstanding / 100, valuationCurrency))}</div></div>{onToggleAccount && <button className="rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={() => onToggleAccount(card.account)} title={cardVisible ? "隐藏该信用卡金额" : "显示该信用卡金额"}>{cardVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}</div>
+        </div>
+        <div className="grid gap-px border-t border-line bg-line @sm:grid-cols-4">
+          <CreditSummary label="账单周期消费" value={cardMask(formatValuation(card.billCycleSpend / 100, valuationCurrency))} />
+          <CreditSummary label="当前范围刷卡" value={cardMask(formatValuation(card.periodSpend / 100, valuationCurrency))} />
+          <CreditSummary label="最晚还款" value={card.dueDate.slice(5)} />
+          <CreditSummary label="最近活动" value={card.lastActivityDate?.slice(5) ?? "—"} />
+        </div>
+      </div>;
+    })}</div>
+  </section>;
 }
 
 function CreditSummary({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0 rounded-xl border border-line bg-panel p-3"><div className="text-xs text-stone">{label}</div><div className="mt-1 min-w-0 truncate font-medium text-olive" title={value}>{value}</div></div>;
+  return <div className="min-w-0 bg-panel px-4 py-3"><div className="ledger-label">{label}</div><div className="mt-1 min-w-0 truncate font-medium text-olive" title={value}>{value}</div></div>;
 }
 
 export function AccountManager({ accounts, onAdded, showToast }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
@@ -501,7 +532,12 @@ export function AccountManager({ accounts, onAdded, showToast }: { accounts: Acc
       setSubmitting(false);
     }
   }
-  return <section className="card p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="font-serif text-2xl">账户管理</h2><p className="mt-2 text-sm text-olive">这里管理账户定义和分组；余额集中在下方“账户余额”里并默认隐藏。</p></div><Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-olive" onPointerEnter={() => void loadAccountAgentChat()} onFocus={() => void loadAccountAgentChat()} onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button></div><div className="mt-4 grid gap-3 sm:grid-cols-[150px_1fr_1fr_110px_auto]"><Input className="h-12 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-12 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-12 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-12 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-12 px-4" disabled={submitting} onClick={submit}>{submitting ? "新增中…" : "新增账户"}</Button></div>{visibleGroups.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{visibleGroups.map((group) => <div key={group.key} className="rounded-xl border border-line bg-panel p-3"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="mt-2 space-y-2">{group.rows.map((a) => <div key={a.account} className="text-sm"><div className="flex items-center gap-2"><strong>{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></div>)}</div> : <p className="mt-5 rounded-xl border border-line bg-panel p-4 text-sm text-stone">暂无有流水且余额不为 0 的账户。</p>}{agentOpen && <Suspense fallback={null}><LazyAccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} showToast={showToast} /></Suspense>}</section>;
+  return <section className="border-b border-line bg-panel">
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8"><div><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">账户管理</h2><p className="mt-1 text-sm text-stone">管理账户定义和分组；余额集中在账户余额区并默认隐藏。</p></div><Button type="button" variant="outline" className="shrink-0 rounded-md bg-panel text-olive" onPointerEnter={() => void loadAccountAgentChat()} onFocus={() => void loadAccountAgentChat()} onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button></div>
+    <div className="grid gap-3 border-b border-line px-4 py-4 sm:grid-cols-[150px_1fr_1fr_110px_auto] md:px-6 xl:px-8"><Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-11 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-11 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-11 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-11 px-4" disabled={submitting} onClick={submit}>{submitting ? "新增中…" : "新增账户"}</Button></div>
+    {visibleGroups.length ? <div className="divide-y divide-line">{visibleGroups.map((group) => <section key={group.key} className="grid gap-3 px-4 py-4 md:grid-cols-[12rem_minmax(0,1fr)] md:px-6 xl:px-8"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="divide-y divide-line border-y border-line">{group.rows.map((a) => <div key={a.account} className="min-w-0 px-3 py-2.5 text-sm"><div className="flex min-w-0 items-center gap-2"><strong className="truncate">{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></section>)}</div> : <p className="px-4 py-5 text-sm text-stone md:px-6 xl:px-8">暂无有流水且余额不为 0 的账户。</p>}
+    {agentOpen && <Suspense fallback={null}><LazyAccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} showToast={showToast} /></Suspense>}
+  </section>;
 }
 
 // ── 账户状态指示器 ──

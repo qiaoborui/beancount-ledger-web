@@ -173,12 +173,72 @@ function shortAccount(account: string): string {
   return idx >= 0 ? account.slice(idx + 1) : account;
 }
 
-/** 从一笔交易中提取最关键的金额（优先支出/收入，其次资产变动） */
-function primaryPosting(t: Txn): Txn["postings"][number] | null {
-  const cat = t.postings.find((p) => p.account.startsWith("Expenses:") || p.account.startsWith("Income:"));
-  if (cat) return cat;
-  const asset = t.postings.find((p) => p.account.startsWith("Assets:") || p.account.startsWith("Liabilities:"));
-  return asset ?? null;
+export type TransactionDisplayAmount = {
+  account: string;
+  amount: number;
+  currency: string;
+  direction: "outflow" | "inflow" | "transfer";
+};
+
+export function transactionDisplayAmount(txn: Txn, accounts: AccountView[] = []): TransactionDisplayAmount | null {
+  const groupByAccount = new Map(accounts.map((account) => [account.account, account.group]));
+  const categories = txn.postings.filter((posting) => posting.account.startsWith("Expenses:") || posting.account.startsWith("Income:"));
+  const financial = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
+  const settlement = financial.filter((posting) => {
+    const group = groupByAccount.get(posting.account);
+    return group === "cash" || group === "credit" || group === "liability" || group === "receivable";
+  });
+  const touchesWealth = financial.some((posting) => groupByAccount.get(posting.account) === "wealth");
+  const complex = categories.length > 1 || touchesWealth;
+
+  if (!complex && categories.length === 1) {
+    const posting = categories[0];
+    return {
+      account: posting.account,
+      amount: Math.abs(posting.amount),
+      currency: posting.currency ?? "CNY",
+      direction: posting.amount > 0 ? "outflow" : "inflow",
+    };
+  }
+
+  const settlementPosting = [...settlement].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0];
+  if (settlementPosting) {
+    const isAsset = settlementPosting.account.startsWith("Assets:");
+    const expenseTotal = categories.filter((posting) => posting.account.startsWith("Expenses:")).reduce((sum, posting) => sum + posting.amount, 0);
+    const incomeTotal = categories.filter((posting) => posting.account.startsWith("Income:")).reduce((sum, posting) => sum + posting.amount, 0);
+    const direction = categories.length === 0
+      ? "transfer"
+      : isAsset
+      ? settlementPosting.amount > 0 ? "inflow" : "outflow"
+      : expenseTotal > 0 ? "outflow" : incomeTotal < 0 ? "inflow" : "transfer";
+    return {
+      account: settlementPosting.account,
+      amount: Math.abs(settlementPosting.amount),
+      currency: settlementPosting.currency ?? "CNY",
+      direction,
+    };
+  }
+
+  if (categories.length) {
+    const posting = [...categories].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0];
+    const sameCurrency = categories.every((candidate) => (candidate.currency ?? "CNY") === (posting.currency ?? "CNY"));
+    const amount = sameCurrency ? categories.reduce((sum, candidate) => sum + candidate.amount, 0) : posting.amount;
+    return {
+      account: posting.account,
+      amount: Math.abs(amount),
+      currency: posting.currency ?? "CNY",
+      direction: amount > 0 ? "outflow" : "inflow",
+    };
+  }
+
+  const posting = [...financial].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0] ?? txn.postings[0];
+  if (!posting) return null;
+  return {
+    account: posting.account,
+    amount: Math.abs(posting.amount),
+    currency: posting.currency ?? "CNY",
+    direction: "transfer",
+  };
 }
 
 /** 金额颜色：支出(借方)=expense红，收入(贷方)=income绿，零或其他=品牌色 */
@@ -188,10 +248,15 @@ function amountColor(amount: number): string {
   return "amount-gold";
 }
 
-/** 格式化流水主金额：支出显示为负，收入显示为正 */
-function fmtTxnAmount(amount: number, currency?: string): string {
-  const sign = amount <= 0 ? "+" : "-";
-  return `${sign}${formatMoney(Math.abs(amount) / 100, currency ?? "CNY")}`;
+function transactionAmountColor(display: TransactionDisplayAmount): string {
+  if (display.direction === "outflow") return "amount-expense";
+  if (display.direction === "inflow") return "amount-income";
+  return "amount-gold";
+}
+
+function fmtTxnAmount(display: TransactionDisplayAmount): string {
+  const sign = display.direction === "outflow" ? "-" : display.direction === "inflow" ? "+" : "";
+  return `${sign}${formatMoney(display.amount / 100, display.currency)}`;
 }
 
 /** 格式化 posting 金额（带符号，正=借/支出方向，负=贷/收入方向） */
@@ -240,9 +305,8 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   );
 }
 
-function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
-  const primary = primaryPosting(txn);
-  const amt = primary?.amount ?? null;
+function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
+  const displayAmount = transactionDisplayAmount(txn, accounts);
   const pending = pendingLabel(txn);
   return (
     <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
@@ -252,9 +316,9 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
           {pending && <span className="mt-1 inline-block rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>}
         labelClassName="truncate"
-        value={amt != null ? fmtTxnAmount(amt, primary?.currency) : null}
-        valueClassName={amt != null ? `text-base font-semibold ${amountColor(amt)}` : "hidden"}
-        valueTitle={amt != null ? fmtTxnAmount(amt, primary?.currency) : undefined}
+        value={displayAmount ? fmtTxnAmount(displayAmount) : null}
+        valueClassName={displayAmount ? `text-base font-semibold ${transactionAmountColor(displayAmount)}` : "hidden"}
+        valueTitle={displayAmount ? fmtTxnAmount(displayAmount) : undefined}
       />
       <div className="mt-1 text-sm leading-5 text-warm [overflow-wrap:anywhere]">{txn.narration}</div>
       {viewMode === "full" ? (
@@ -273,9 +337,8 @@ function TransactionCard({ txn, selected, viewMode, onSelect }: { txn: Txn; sele
   );
 }
 
-function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
-  const primary = primaryPosting(txn);
-  const amt = primary?.amount ?? null;
+function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
+  const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
   const meta = metadataPairs(txn);
@@ -300,7 +363,7 @@ function TransactionTableRow({ txn, selected, viewMode, onSelect, rowRef, rowId 
         <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || "无说明"}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
-      <div className={`text-right text-[13px] font-semibold tabular-nums ${amt == null ? "text-stone" : amountColor(amt)}`}>{amt == null ? "—" : fmtTxnAmount(amt, primary?.currency)}</div>
+      <div className={`text-right text-[13px] font-semibold tabular-nums ${displayAmount ? transactionAmountColor(displayAmount) : "text-stone"}`}>{displayAmount ? fmtTxnAmount(displayAmount) : "—"}</div>
       <div className="min-w-0">
         <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || "未分类"}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
@@ -562,6 +625,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
                     rowId={desktopRowId(txn)}
                     rowRef={setDesktopRowRef(key)}
                     txn={txn}
+                    accounts={accounts}
                     selected={Boolean(selectedMatches(txn))}
                     viewMode={viewMode}
                     onSelect={() => {
@@ -576,12 +640,12 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <div className="lg:hidden">
             {pageRows.map((txn) => {
               const key = transactionKey(txn);
-              return <TransactionCard key={key} txn={txn} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); setDrawerTxn(txn); }} />;
+              return <TransactionCard key={key} txn={txn} accounts={accounts} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); setDrawerTxn(txn); }} />;
             })}
           </div>
           {pager}
           </div>
-          {searchable && <TransactionInspector txn={selected} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
+          {searchable && <TransactionInspector txn={selected} accounts={accounts} visibleRows={pageRows.length} totalRows={rows.length} onOpenDetails={(txn) => setDrawerTxn(txn)} />}
         </div>
       )}
     </div>
@@ -590,11 +654,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   </section>;
 }
 
-function TransactionInspector({ txn, visibleRows, totalRows, onOpenDetails }: { txn?: Txn | null; visibleRows: number; totalRows: number; onOpenDetails: (txn: Txn) => void }) {
+function TransactionInspector({ txn, accounts, visibleRows, totalRows, onOpenDetails }: { txn?: Txn | null; accounts: AccountView[]; visibleRows: number; totalRows: number; onOpenDetails: (txn: Txn) => void }) {
   if (!txn) return <aside className="transaction-inspector hidden border-l border-line bg-panel xl:block">
     <div className="sticky top-[3.25rem] p-4 text-sm text-stone">选择一行流水查看检查台。</div>
   </aside>;
-  const primary = primaryPosting(txn);
+  const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
   const meta = metadataPairs(txn);
@@ -622,7 +686,7 @@ function TransactionInspector({ txn, visibleRows, totalRows, onOpenDetails }: { 
           </div>
         </section>
 
-        <InspectorMetric label="主金额" value={primary ? fmtTxnAmount(primary.amount, primary.currency) : "—"} tone={primary ? amountColor(primary.amount) : "text-stone"} detail={primary?.account ?? "没有可识别主 posting"} />
+        <InspectorMetric label="主金额" value={displayAmount ? fmtTxnAmount(displayAmount) : "—"} tone={displayAmount ? transactionAmountColor(displayAmount) : "text-stone"} detail={displayAmount?.account ?? "没有可识别主 posting"} />
         <InspectorMetric label="分类" value={categoryRows.map(shortAccount).join(" / ") || "未分类"} tone="text-ink" detail={categoryRows.join(" · ") || "没有 Expenses / Income 分类"} />
         <InspectorMetric label="支付账户" value={paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无"} tone="text-ink" detail={paymentAccounts.map((posting) => posting.account).join(" · ") || "没有资产或负债账户"} />
 
@@ -722,7 +786,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const accountOptions = useMemo(() => accounts.filter((account) => account.active || postings.some((posting) => posting.account === account.account)), [accounts, postings]);
   const optionLabel = (account: AccountView) => formatAccountOptionLabel(account);
   const reverseDate = new Date().toISOString().slice(0, 10);
-  const primary = primaryPosting(txn);
+  const displayAmount = transactionDisplayAmount(txn, accounts);
   const pending = pendingLabel(txn);
   const pendingAppend = txn.pending?.kind === "append";
   const resetForm = () => {
@@ -888,9 +952,9 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
             <MetadataBadges txn={txn} />
           </div>
-          {primary && <div className="min-w-0 border-t border-line pt-3 text-left @sm:shrink-0 @sm:border-l @sm:border-t-0 @sm:pl-4 @sm:pt-0 @sm:text-right">
+          {displayAmount && <div className="min-w-0 border-t border-line pt-3 text-left @sm:shrink-0 @sm:border-l @sm:border-t-0 @sm:pl-4 @sm:pt-0 @sm:text-right">
             <div className="text-[11px] text-stone">主金额</div>
-            <div className={`mt-0.5 truncate text-lg font-semibold ${amountColor(primary.amount)}`} title={fmtTxnAmount(primary.amount, primary.currency)}>{fmtTxnAmount(primary.amount, primary.currency)}</div>
+            <div className={`mt-0.5 truncate text-lg font-semibold ${transactionAmountColor(displayAmount)}`} title={fmtTxnAmount(displayAmount)}>{fmtTxnAmount(displayAmount)}</div>
           </div>}
         </div>
       </section>
