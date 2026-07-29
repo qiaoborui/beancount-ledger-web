@@ -20,7 +20,7 @@ export function AppSkeleton() {
   return <div className="min-h-dvh bg-paper p-6"><div className="mx-auto max-w-4xl animate-pulse space-y-6"><div className="h-12 rounded-2xl bg-line" /><div className="grid grid-cols-3 gap-3"><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /></div><div className="h-72 rounded-2xl bg-line" /></div></div>;
 }
 
-export function LoginScreen({ password, setPassword, passkeyRegistered, toastText, onLogin, onPasskeyLogin }: { password: string; setPassword: (value: string) => void; passkeyRegistered: boolean; toastText?: string; onLogin: () => void; onPasskeyLogin: () => void }) {
+export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyLoading, toastText, onLogin, onPasskeyLogin }: { password: string; setPassword: (value: string) => void; passkeyRegistered: boolean; passkeyLoading?: boolean; toastText?: string; onLogin: () => void; onPasskeyLogin: () => void }) {
   const [endpointSettings, setEndpointSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
   const [showEndpointSettings, setShowEndpointSettings] = useState(false);
   const [draftEndpointUrl, setDraftEndpointUrl] = useState("");
@@ -123,7 +123,7 @@ export function LoginScreen({ password, setPassword, passkeyRegistered, toastTex
       </div>
       <Input type="password" className="mt-6 h-12 rounded-xl bg-panel" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
       <Button className="mt-4 h-12 w-full rounded-xl" onClick={onLogin}>密码登录</Button>
-      {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" onClick={onPasskeyLogin}>使用 Face ID / Passkey 登录</Button>}
+      {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" disabled={passkeyLoading} onClick={onPasskeyLogin}>{passkeyLoading ? "正在唤起 Face ID…" : "使用 Face ID / Passkey 登录"}</Button>}
       {toastText && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{toastText}</p>}
     </div>
   </div>;
@@ -188,7 +188,7 @@ export function SensitiveUnlockPanel({
       <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} />
     ) : (
       <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-        {passkeyRegistered && <Button className="h-12 rounded-xl px-5" onClick={onUnlock}>使用 Face ID / Passkey 查看</Button>}
+        {passkeyRegistered && <Button className="h-12 rounded-xl px-5" disabled={unlocking} onClick={onUnlock}>{unlocking ? "正在唤起 Face ID…" : "使用 Face ID / Passkey 查看"}</Button>}
         {!passkeyRegistered && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式，可以使用主密码解锁。</p>}
       </div>
     )}
@@ -230,13 +230,13 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
         <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
         <button type="button" className="h-14 rounded-xl bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
       </div>
-      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>改用 Face ID / Passkey</button>}
+      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
     </div>;
   }
   return <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
     <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-12 rounded-xl bg-panel text-center" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
     <Button className="h-12 rounded-xl px-5" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "快速解锁"}</Button>
-    {passkeyRegistered && <Button variant="outline" className="h-12 rounded-xl bg-paper text-warm" disabled={unlocking} onClick={onPasskeyUnlock}>改用 Face ID / Passkey</Button>}
+    {passkeyRegistered && <Button variant="outline" className="h-12 rounded-xl bg-paper text-warm" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</Button>}
   </div>;
 }
 

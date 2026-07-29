@@ -295,7 +295,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     showToast,
   });
 
-  const { login, loginWithPassword, loginWithPasskey, loginWithQuickUnlock, registerPasskey } = useLedgerAuth({
+  const { login, loginWithPassword, preparePasskeyLogin, loginWithPasskey, loginWithQuickUnlock, registerPasskey } = useLedgerAuth({
     password,
     setPassword,
     setAuthed,
@@ -305,6 +305,22 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     showToast,
     clearToast,
   });
+
+  const unlockPasskeySensitive = async () => {
+    setUnlocking(true);
+    try {
+      await loginWithPasskey();
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!online || !hasPasskey || unlocked) return;
+    void preparePasskeyLogin().catch(() => {
+      // The click path retries and reports a useful error if preloading fails.
+    });
+  }, [hasPasskey, online, showUnlockModal, unlocked]);
 
   useEffect(() => {
     const handleEndpointChange = () => {
@@ -496,9 +512,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }, [page, router, timeRange]);
 
   if (authed === null && !online && hasKnownLedgerAuthentication()) return <AppSkeleton />;
-  if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
+  if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (authed === null) return <AppSkeleton />;
-  if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} toastText={toast?.text} onLogin={login} onPasskeyLogin={loginWithPasskey} />;
+  if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
 
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
@@ -565,7 +581,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       quickUnlockMode={quickUnlockMode}
       passkeyRegistered={hasPasskey}
       onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
-      onUnlock={loginWithPasskey}
+      onUnlock={() => { void unlockPasskeySensitive(); }}
       onPasswordUnlock={(inputPassword) => { void unlockPasswordSensitive(inputPassword); }}
       unlocking={unlocking}
     />
@@ -669,7 +685,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               quickUnlockMode={quickUnlockMode}
               passkeyRegistered={hasPasskey}
               onQuickUnlock={(secret) => { void unlockQuickSensitive(secret); }}
-              onUnlock={loginWithPasskey}
+              onUnlock={() => { void unlockPasskeySensitive(); }}
               onPasswordUnlock={(inputPassword) => { void unlockPasswordSensitive(inputPassword); }}
               unlocking={unlocking}
               autoFocusInput

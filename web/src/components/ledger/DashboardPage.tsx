@@ -148,7 +148,7 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
       <Panel panelId="dailyExpense" className="xl:col-span-7" onView={setViewPanelId} title={panels.dailyExpense.title} subtitle={panels.dailyExpense.subtitle}>
         {panels.dailyExpense.render()}
       </Panel>
-      <Panel panelId="weekdayExpense" className="xl:col-span-5" onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
+      <Panel panelId="weekdayExpense" className="dashboard-panel-end xl:col-span-5" onView={setViewPanelId} title={panels.weekdayExpense.title} subtitle={panels.weekdayExpense.subtitle}>
         {panels.weekdayExpense.render()}
       </Panel>
     </div>
@@ -156,19 +156,19 @@ export function DashboardPage({ timeRange, valuationCurrency, visible, onToggleV
 
     <DashboardRow rowId="risk" title="归因与核查" subtitle="把支出拆到分类、商户、付款账户和异常流水" collapsed={collapsedRows.risk} onToggle={toggleRow} summary={<RowSummary>{topCategoryText} · {data.anomalies.length} 笔高额</RowSummary>}>
     <div className="dashboard-panel-grid">
-      <Panel panelId="categoryTrend" className="xl:col-span-8" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
+      <Panel panelId="categoryTrend" className="dashboard-panel-end xl:col-span-12" onView={setViewPanelId} title={panels.categoryTrend.title} subtitle={panels.categoryTrend.subtitle}>
         {panels.categoryTrend.render()}
       </Panel>
-      <Panel panelId="anomalies" className="xl:col-span-4" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
+      <Panel panelId="anomalies" className="xl:col-span-6" onView={setViewPanelId} title={panels.anomalies.title} subtitle={panels.anomalies.subtitle}>
         {panels.anomalies.render()}
       </Panel>
-      <Panel panelId="categoryRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
+      <Panel panelId="categoryRank" className="dashboard-panel-end xl:col-span-6" onView={setViewPanelId} title={panels.categoryRank.title} subtitle={panels.categoryRank.subtitle}>
         {panels.categoryRank.render()}
       </Panel>
-      <Panel panelId="payeeRank" className="xl:col-span-4" onView={setViewPanelId} title={panels.payeeRank.title} subtitle={panels.payeeRank.subtitle}>
+      <Panel panelId="payeeRank" className="xl:col-span-6" onView={setViewPanelId} title={panels.payeeRank.title} subtitle={panels.payeeRank.subtitle}>
         {panels.payeeRank.render()}
       </Panel>
-      <Panel panelId="paymentAccounts" className="xl:col-span-4" onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
+      <Panel panelId="paymentAccounts" className="dashboard-panel-end xl:col-span-6" onView={setViewPanelId} title={panels.paymentAccounts.title} subtitle={panels.paymentAccounts.subtitle}>
         {panels.paymentAccounts.render()}
       </Panel>
     </div>

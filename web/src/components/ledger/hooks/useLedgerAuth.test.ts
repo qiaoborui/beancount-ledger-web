@@ -92,6 +92,21 @@ describe("createLedgerAuthActions", () => {
     expect(args.clearToast).toHaveBeenCalled();
   });
 
+  it("uses prefetched passkey options so the user click can open the browser prompt immediately", async () => {
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    await actions.preparePasskeyLogin();
+    const login = actions.loginWithPasskey();
+
+    expect(vi.mocked(startAuthentication)).toHaveBeenCalledTimes(1);
+    await login;
+
+    const urls = vi.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.endsWith("/api/passkey/login/options"))).toHaveLength(1);
+    expect(args.showToast).not.toHaveBeenCalledWith("info", "正在唤起 Face ID...");
+  });
+
   it("uses an explicit main password to unlock an existing session", async () => {
     const args = authArgs();
     const actions = createLedgerAuthActions(args);
