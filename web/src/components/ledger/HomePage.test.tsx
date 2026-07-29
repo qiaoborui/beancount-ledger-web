@@ -46,7 +46,6 @@ const report: HomeReport = {
     cashflowSeries: [{ month: "1月", income: 100000, expense: 6000, net: 94000 }],
     categorySeries: [{ account: "Expenses:Food", label: "餐饮", total: 4200, values: [{ month: "1月", value: 4200 }] }],
   },
-  budget: { configured: true, amount: 120000, currency: "CNY" },
   dailyExpenseSeries: [{ date: "2026-01-08", weekday: "周四", amount: 5600, txCount: 2 }],
   accountBalanceSeries: [{ account: "Assets:Cash", label: "现金", group: "cash", values: [{ month: "1月", value: 115566 }] }],
   topPaymentAccounts: [{ account: "Assets:Cash", label: "现金", amount: 7890, txCount: 6 }],
@@ -117,6 +116,10 @@ describe("HomePage layout", () => {
     expect(html).toContain("待核查事项");
     expect(html).toContain("收支分析");
     expect(html).toContain("资产负债");
+    expect(html).toContain("支出结构");
+    expect(html).toContain("付款来源");
+    expect(html).toContain("记录覆盖");
+    expect(html).not.toContain(String.fromCodePoint(0x9884, 0x7b97));
     expect(html).not.toContain("支出热力图");
     expect(html).not.toContain("账户余额走势");
   });
