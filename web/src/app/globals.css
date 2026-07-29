@@ -669,9 +669,7 @@ html[data-theme="dark"] .home-daily-chart-line {
     border-right: 1px solid var(--line);
   }
 
-  .dashboard-panel-shell:nth-child(2),
-  .dashboard-panel-shell:nth-child(5),
-  .dashboard-panel-shell:last-child {
+  .dashboard-panel-shell.dashboard-panel-end {
     border-right: 0;
   }
 }

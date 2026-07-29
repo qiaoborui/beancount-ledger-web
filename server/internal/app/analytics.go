@@ -437,23 +437,36 @@ func summarizePaymentAccountsWithPriceIndex(txns []Transaction, start, end strin
 		amount int
 		txns   map[string]bool
 	}
+	type paymentOutflow struct {
+		account string
+		amount  int
+	}
 	rows := map[string]acc{}
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
 			continue
 		}
-		hasExpense := false
+		expense := 0
 		for _, posting := range txn.Postings {
 			if strings.HasPrefix(posting.Account, "Expenses:") {
-				hasExpense = true
+				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
-		if !hasExpense {
+		if expense <= 0 {
 			continue
 		}
-		id := txn.Source.File + ":" + formatInt(txn.Source.Line)
+
+		outflowsByAccount := map[string]int{}
 		for _, posting := range txn.Postings {
 			if !(strings.HasPrefix(posting.Account, "Assets:") || strings.HasPrefix(posting.Account, "Liabilities:")) {
+				continue
+			}
+			account := accounts[posting.Account]
+			group := account.Group
+			if group == "" {
+				group = accountGroup(posting.Account, account.Metadata, account.Alias)
+			}
+			if group != "cash" && group != "credit" && group != "liability" {
 				continue
 			}
 			outflow := -posting.Amount
@@ -464,13 +477,42 @@ func summarizePaymentAccountsWithPriceIndex(txns []Transaction, start, end strin
 			if !ok {
 				continue
 			}
-			row := rows[posting.Account]
+			outflowsByAccount[posting.Account] += outflow
+		}
+		if len(outflowsByAccount) == 0 {
+			continue
+		}
+
+		outflows := make([]paymentOutflow, 0, len(outflowsByAccount))
+		totalOutflow := 0
+		for account, amount := range outflowsByAccount {
+			outflows = append(outflows, paymentOutflow{account: account, amount: amount})
+			totalOutflow += amount
+		}
+		sort.Slice(outflows, func(i, j int) bool { return outflows[i].account < outflows[j].account })
+
+		id := txn.Source.File + ":" + formatInt(txn.Source.Line)
+		remainingExpense := min(expense, totalOutflow)
+		for index, outflow := range outflows {
+			amount := outflow.amount
+			if totalOutflow > expense {
+				if index == len(outflows)-1 {
+					amount = remainingExpense
+				} else {
+					amount = int(int64(outflow.amount) * int64(expense) / int64(totalOutflow))
+				}
+			}
+			if amount <= 0 {
+				continue
+			}
+			remainingExpense -= amount
+			row := rows[outflow.account]
 			if row.txns == nil {
 				row.txns = map[string]bool{}
 			}
-			row.amount += outflow
+			row.amount += amount
 			row.txns[id] = true
-			rows[posting.Account] = row
+			rows[outflow.account] = row
 		}
 	}
 	out := []AccountAnalytics{}

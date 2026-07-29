@@ -21,9 +21,32 @@ type LedgerAuthArgs = {
 type LedgerAuthInFlight = {
   login: Promise<void> | null;
   passkeyLogin: Promise<void> | null;
+  passkeyOptions: PreparedPasskeyLogin | null;
+  passkeyOptionsRequest: Promise<void> | null;
+  passkeyOptionsRequestEndpointId: string | null;
   quickUnlock: Promise<void> | null;
   passkeyRegistration: Promise<void> | null;
 };
+
+type PreparedPasskeyLogin = {
+  endpointId: string;
+  options: PublicKeyCredentialRequestOptionsJSON;
+  preparedAt: number;
+};
+
+const passkeyOptionsMaxAgeMs = 8 * 60 * 1000;
+
+function emptyLedgerAuthInFlight(): LedgerAuthInFlight {
+  return {
+    login: null,
+    passkeyLogin: null,
+    passkeyOptions: null,
+    passkeyOptionsRequest: null,
+    passkeyOptionsRequestEndpointId: null,
+    quickUnlock: null,
+    passkeyRegistration: null,
+  };
+}
 
 function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuthed: (authenticated: boolean) => void, endpointId = apiEndpointAuthScope()) {
   sessionStorage.removeItem("ledger_locked_at");
@@ -44,7 +67,7 @@ function refreshAfterAuth(load: LedgerAuthLoad, showToast: LedgerAuthArgs["showT
   }
 }
 
-export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = { login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null }) {
+export function createLedgerAuthActions({ password, setPassword, setAuthed, setUnlocked, setPasskeyRegistered, load, showToast, clearToast }: LedgerAuthArgs, inFlight: LedgerAuthInFlight = emptyLedgerAuthInFlight()) {
   async function loginWithPassword(inputPassword: string) {
     if (inFlight.login) return inFlight.login;
     inFlight.login = (async () => {
@@ -79,14 +102,52 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
+  function preparedPasskeyOptions(endpointId: string) {
+    const prepared = inFlight.passkeyOptions;
+    if (!prepared || prepared.endpointId !== endpointId || Date.now() - prepared.preparedAt >= passkeyOptionsMaxAgeMs) {
+      inFlight.passkeyOptions = null;
+      return null;
+    }
+    return prepared.options;
+  }
+
+  async function preparePasskeyLogin() {
+    const endpointId = apiEndpointAuthScope();
+    if (preparedPasskeyOptions(endpointId)) return;
+    if (inFlight.passkeyOptionsRequest && inFlight.passkeyOptionsRequestEndpointId === endpointId) {
+      return inFlight.passkeyOptionsRequest;
+    }
+    inFlight.passkeyOptionsRequestEndpointId = endpointId;
+    const request = (async () => {
+      const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST" });
+      if (options.error) throw new Error(options.error);
+      if (apiEndpointAuthScope() === endpointId) {
+        inFlight.passkeyOptions = { endpointId, options, preparedAt: Date.now() };
+      }
+    })();
+    inFlight.passkeyOptionsRequest = request;
+    try {
+      await request;
+    } finally {
+      if (inFlight.passkeyOptionsRequest === request) {
+        inFlight.passkeyOptionsRequest = null;
+        inFlight.passkeyOptionsRequestEndpointId = null;
+      }
+    }
+  }
+
   async function loginWithPasskey() {
     if (inFlight.passkeyLogin) return inFlight.passkeyLogin;
     inFlight.passkeyLogin = (async () => {
       const endpointId = apiEndpointAuthScope();
-      showToast("info", "正在唤起 Face ID...");
       try {
-        const options = await fetchJson<PublicKeyCredentialRequestOptionsJSON & { error?: string }>("/api/passkey/login/options", { method: "POST" });
-        if (options.error) throw new Error(options.error);
+        let options = preparedPasskeyOptions(endpointId);
+        if (!options) {
+          await preparePasskeyLogin();
+          options = preparedPasskeyOptions(endpointId);
+        }
+        if (!options) throw new Error("Face ID 登录准备失败，请重试");
+        inFlight.passkeyOptions = null;
         const response = await startAuthentication({ optionsJSON: options });
         const verify = await apiFetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
         const data = await readJson<{ error?: string }>(verify);
@@ -150,10 +211,10 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
-  return { password, setPassword, login, loginWithPassword, loginWithPasskey, loginWithQuickUnlock, registerPasskey };
+  return { password, setPassword, login, loginWithPassword, preparePasskeyLogin, loginWithPasskey, loginWithQuickUnlock, registerPasskey };
 }
 
 export function useLedgerAuth(args: LedgerAuthArgs) {
-  const inFlightRef = useRef<LedgerAuthInFlight>({ login: null, passkeyLogin: null, quickUnlock: null, passkeyRegistration: null });
+  const inFlightRef = useRef<LedgerAuthInFlight>(emptyLedgerAuthInFlight());
   return createLedgerAuthActions(args, inFlightRef.current);
 }

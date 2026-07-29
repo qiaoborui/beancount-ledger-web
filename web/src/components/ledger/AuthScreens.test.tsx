@@ -56,4 +56,14 @@ describe("LoginScreen", () => {
     expect(html).toContain("Face ID / Passkey");
     expect(html).toContain("或使用主密码");
   });
+
+  it("shows one in-progress Face ID action instead of inviting repeated clicks", () => {
+    const loginHtml = renderToStaticMarkup(<LoginScreen password="" setPassword={() => {}} passkeyRegistered passkeyLoading onLogin={() => {}} onPasskeyLogin={() => {}} />);
+    const unlockHtml = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered onUnlock={() => {}} unlocking />);
+
+    expect(loginHtml).toContain("正在唤起 Face ID");
+    expect(loginHtml).toContain("disabled");
+    expect(unlockHtml).toContain("正在唤起 Face ID");
+    expect(unlockHtml).toContain("disabled");
+  });
 });
