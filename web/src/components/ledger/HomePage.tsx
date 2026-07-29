@@ -58,7 +58,6 @@ export function HomeReportWorkspace({ report, summary, timeRange, valuationCurre
   const mask = (value: string) => canShowSensitive ? value : "••••••";
   const chartState = { show: canShowSensitive, loading, error, hasReport: Boolean(report), onReload };
 
-  const budgetSignal = homeBudgetSignal(report, current.expense, canShowSensitive);
   const categorySignal = topCategory ? {
     headline: formatAccountOptionLabel(topCategory.account, topCategory.label, topCategory.alias),
     value: canShowSensitive ? percentageOf(topCategory.total, current.expense) : "••••••",
@@ -79,16 +78,15 @@ export function HomeReportWorkspace({ report, summary, timeRange, valuationCurre
         action={<button type="button" className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line text-stone hover:bg-tag hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" onClick={() => onPrivacyChange("showHomeSummaryAmounts", !showAmounts)} title={showAmounts ? "隐藏首页金额" : "显示首页金额"} aria-label={showAmounts ? "隐藏首页金额" : "显示首页金额"}>{showAmounts ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
       />
 
-      <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-5">
-        <ReportMetric label={`${periodScope}净收入`} value={mask(formatValuation(current.net / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.net, previous.net)} alert={canShowSensitive && current.net < 0} primary />
-        <ReportMetric label={`${periodScope}支出`} value={mask(formatValuation(current.expense / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.expense, previous.expense)} />
+      <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-4">
+        <ReportMetric label={`${periodScope}净收入`} value={mask(formatValuation(current.net / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.net, previous.net)} alert={canShowSensitive && current.net < 0} />
         <ReportMetric label={`${periodScope}收入`} value={mask(formatValuation(current.income / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.income, previous.income)} />
+        <ReportMetric label={`${periodScope}支出`} value={mask(formatValuation(current.expense / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.expense, previous.expense)} />
         <ReportMetric label="交易笔数" value={canShowSensitive ? String(current.transactionCount) : "••••••"} detail={!canShowSensitive ? "同比 ••••••" : reportReady ? comparisonCountCopy(current.transactionCount, previous.transactionCount) : "等待同比数据"} />
-        <ReportMetric label={`${periodScope}预算`} value={budgetSignal.metric} detail={budgetSignal.metricDetail} />
       </div>
     </section>
 
-    <section data-home-section="pulse" className="grid border-b border-line xl:grid-cols-[minmax(0,1.65fr)_minmax(20rem,0.85fr)]">
+    <section data-home-section="pulse" className="grid border-b border-line xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.8fr)]">
       <div className="min-w-0 border-b border-line xl:border-b-0 xl:border-r">
         <ReportPanel title={`${periodScope}周期轨迹`} detail={`用一张图对照 ${currentLabel} 与 ${previousLabel} 的同周期变化。`} action={<MetricSwitch value={comparisonMetric} onChange={setComparisonMetric} />}>
           <ChartViewport {...chartState} hasData={Boolean(report?.current.cashflowSeries.length)} pointCount={report?.current.cashflowSeries.length ?? 0}>
@@ -98,12 +96,11 @@ export function HomeReportWorkspace({ report, summary, timeRange, valuationCurre
       </div>
 
       <div className="min-w-0">
-        <ReportPanel title="待核查事项" detail="这里只给出需要关注的信号，详细解释交给对应工作区。">
+        <ReportPanel title="待核查事项" detail="从实际流水中提取需要关注的信号，详细解释交给对应工作区。">
           <div className="divide-y divide-line">
-            <DecisionSignal label="预算执行" headline={budgetSignal.headline} value={budgetSignal.value} detail={budgetSignal.detail} href="/dashboard" action="分析支出" />
-            <DecisionSignal label="支出集中" headline={categorySignal.headline} value={categorySignal.value} detail={categorySignal.detail} href="/dashboard" action="查看归因" />
-            <DecisionSignal label="付款集中" headline={paymentSignal.headline} value={paymentSignal.value} detail={paymentSignal.detail} href="/transactions" action="核对流水" />
-            <DecisionSignal label="记录活跃度" headline={`${canShowSensitive ? activeExpenseDays : "••••••"} 个支出日`} value={canShowSensitive ? `${current.transactionCount} 笔` : "••••••"} detail="用于判断本期数据密度，不在首页展开日历分析" href="/dashboard" action="查看节奏" />
+            <DecisionSignal label="支出结构" headline={categorySignal.headline} value={categorySignal.value} detail={categorySignal.detail} href="/dashboard" action="查看归因" />
+            <DecisionSignal label="付款来源" headline={paymentSignal.headline} value={paymentSignal.value} detail={paymentSignal.detail} href="/transactions" action="核对流水" />
+            <DecisionSignal label="记录覆盖" headline={`${canShowSensitive ? activeExpenseDays : "••••••"} 个支出日`} value={canShowSensitive ? `${current.transactionCount} 笔` : "••••••"} detail="用于判断本期数据密度，不在首页展开日历分析" href="/dashboard" action="查看节奏" />
           </div>
         </ReportPanel>
       </div>
@@ -127,8 +124,8 @@ function ReportSectionIntro({ title, detail, meta, action }: { title: string; de
   </div>;
 }
 
-function ReportMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: string; alert?: boolean; primary?: boolean }) {
-  return <div className={`min-w-0 bg-panel px-4 py-4 md:px-5 xl:px-6 ${primary ? "sm:col-span-2 xl:col-span-1" : ""}`}><div className="text-[11px] font-semibold text-stone">{label}</div><div data-home-position-value="true" className={`mt-2 max-w-full whitespace-nowrap font-semibold tracking-[-0.03em] tabular-nums ${amountSizeClass(value)} ${alert ? "amount-danger" : "text-ink"}`} title={value}>{value}</div><div className="mt-3 text-xs text-stone">{detail}</div></div>;
+function ReportMetric({ label, value, detail, alert = false }: { label: string; value: string; detail: string; alert?: boolean }) {
+  return <div className="min-w-0 bg-panel px-4 py-4 md:px-5 xl:px-6"><div className="text-[11px] font-semibold text-stone">{label}</div><div data-home-position-value="true" className={`mt-2 max-w-full whitespace-nowrap font-semibold tracking-[-0.03em] tabular-nums ${amountSizeClass(value)} ${alert ? "amount-danger" : "text-ink"}`} title={value}>{value}</div><div className="mt-3 text-xs text-stone">{detail}</div></div>;
 }
 
 function ReportPanel({ title, detail, action, children }: { title: string; detail: string; action?: ReactNode; children: ReactNode }) {
@@ -212,18 +209,4 @@ function amountSizeClass(value: string) {
   if (value.length > 16) return "text-sm sm:text-base";
   if (value.length > 12) return "text-base sm:text-lg";
   return "text-[clamp(1.15rem,2vw,1.75rem)]";
-}
-
-function homeBudgetSignal(report: HomeReport | null, expense: number, show: boolean) {
-  if (!report) return { metric: "等待数据", metricDetail: "正在读取预算配置", headline: "预算尚未读取", value: "--", detail: "等待财务简报数据" };
-  if (!report.budget.configured) return { metric: "无预算", metricDetail: "暂无预算配置", headline: "未配置预算", value: "--", detail: "可继续分析实际支出，不伪造预算结论" };
-  const ratio = report.budget.amount > 0 ? expense / report.budget.amount : 0;
-  const remaining = report.budget.amount - expense;
-  return {
-    metric: show ? formatValuation(report.budget.amount / 100, report.budget.currency) : "••••••",
-    metricDetail: show ? `已使用 ${(ratio * 100).toFixed(0)}%` : "预算进度已隐藏",
-    headline: ratio > 1 ? "预算已超出" : ratio > 0.8 ? "预算接近上限" : "预算仍有余量",
-    value: show ? `${(ratio * 100).toFixed(0)}%` : "••••••",
-    detail: show ? `${remaining >= 0 ? "剩余" : "超出"} ${formatValuation(Math.abs(remaining) / 100, report.budget.currency)}` : "预算金额已隐藏",
-  };
 }
