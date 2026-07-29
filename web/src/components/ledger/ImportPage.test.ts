@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiResponseError } from "@/lib/clientFetch";
-import { appendImportPosting, createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, ImportPage, importActionFeedback, importEntryHasReviewError, importFlowForEntry, latestImportDocumentsByProvider, removeImportPosting, reviewableGmailPendingImports, summarizeImportPostings, updateImportPosting } from "./ImportPage";
+import { appendImportPosting, CommitResultDetails, createImportPreviewForm, gmailPendingImportActions, gmailPendingRetryURL, ImportPage, importActionFeedback, importEntryHasReviewError, importFlowForEntry, latestImportDocumentsByProvider, removeImportPosting, reviewableGmailPendingImports, summarizeImportPostings, updateImportPosting } from "./ImportPage";
 
 type ImportEntryInput = Parameters<typeof importFlowForEntry>[0];
 type ImportDocumentInput = Parameters<typeof latestImportDocumentsByProvider>[0][number];
@@ -15,6 +15,23 @@ describe("ImportPage layout", () => {
     expect(html).toContain('data-import-workbench="true"');
     expect(html).toContain('data-import-history="true"');
     expect(html).not.toContain('data-slot="card"');
+  });
+
+  it("keeps successful import paths inside a dedicated result layout", () => {
+    const html = renderToStaticMarkup(createElement(CommitResultDetails, {
+      result: {
+        ok: true,
+        count: 5,
+        outputFile: "transactions/2026/imports/2026-07-27_2026-07-29-wechat.bean",
+        includeFile: "transactions/2026/07.bean",
+        documentFile: "transactions/2026/documents/imports/2026-07-27_2026-07-29-wechat.xlsx",
+      },
+    }));
+
+    expect(html).toContain('data-import-success-details="true"');
+    expect(html).toContain("写入交易");
+    expect(html).toContain("5 条");
+    expect(html).toContain("break-all");
   });
 });
 
