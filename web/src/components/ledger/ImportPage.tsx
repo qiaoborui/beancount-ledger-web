@@ -20,6 +20,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -267,7 +276,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [entries, setEntries] = useState<ImportEntry[]>([]);
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
-  const [resultOpen, setResultOpen] = useState(false);
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
@@ -385,7 +394,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setCommitResult(null);
-    setResultOpen(false);
+    setSuccessDialogOpen(false);
     setReviewOpen(false);
     setDraftSavedAt(null);
     setActivePendingId("");
@@ -400,7 +409,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setCommitResult(null);
-    setResultOpen(false);
+    setSuccessDialogOpen(false);
     setReviewOpen(false);
     setRawOpen(false);
     setDraftSavedAt(null);
@@ -419,7 +428,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setCommitResult(null);
-    setResultOpen(false);
+    setSuccessDialogOpen(false);
     try {
       const form = createImportPreviewForm(providerOverride, file, alipayFundRounding, archivePassword);
       setArchivePassword("");
@@ -440,7 +449,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     if (!preview) return;
     setCommitting(true);
     setCommitResult(null);
-    setResultOpen(false);
+    setSuccessDialogOpen(false);
     try {
       const data = await fetchJson<CommitResult>("/api/ledger/imports/commit", {
         method: "POST",
@@ -448,8 +457,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
         body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
       }, undefined, { kind: "write" });
       setCommitResult(data);
-      setResultOpen(true);
-      setReviewOpen(true);
+      setReviewOpen(false);
+      setSuccessDialogOpen(true);
       writeImportDraft(null);
       setDraftSavedAt(null);
       void loadImportDocuments();
@@ -584,7 +593,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       setEntries(data.preview.entries);
       setSelectedEntryId(data.preview.entries[0]?.id ?? "");
       setCommitResult(null);
-      setResultOpen(false);
+      setSuccessDialogOpen(false);
       setDraftSavedAt(Date.now());
       setActivePendingId(item.id);
       setReviewOpen(true);
@@ -910,7 +919,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                   丢弃草稿
                 </Button>
               )}
-              <Button onClick={() => setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
+              <Button onClick={() => hasCommitted ? setSuccessDialogOpen(true) : setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
                 {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                 {hasCommitted ? "查看结果" : "继续审核"}
               </Button>
@@ -1013,22 +1022,6 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-2 sm:gap-3 sm:px-5 sm:py-3 xl:min-h-0 xl:overflow-hidden xl:py-3">
-              {commitResult?.ok ? (
-                <Alert className="border-brand/30 bg-[var(--selected-bg)] text-olive">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="font-medium text-brand"><CheckCircle className="mr-2 inline h-4 w-4" />{(commitResult.count ?? 0) > 0 ? `已写入 ${commitResult.count} 条交易` : "已归档账单"}</div>
-                      <div className="mt-1 text-stone">账单已经写入 ledger，并会随本次写入自动提交。</div>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setResultOpen((open) => !open)}>
-                      {resultOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      {resultOpen ? "收起结果" : "查看写入结果"}
-                    </Button>
-                  </div>
-                  {resultOpen ? <CommitResultDetails result={commitResult} /> : null}
-                </Alert>
-              ) : null}
-
               {preview.warnings.length > 0 ? (
                 <Alert className="grid-cols-1 space-y-2 xl:max-h-24 xl:overflow-y-auto xl:pr-3">
                   {preview.warnings.map((warning) => (
@@ -1213,6 +1206,15 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             </div>
           </div>
         </MobileSheet>
+      ) : null}
+
+      {commitResult?.ok ? (
+        <ImportSuccessDialog
+          open={successDialogOpen}
+          result={commitResult}
+          onOpenChange={setSuccessDialogOpen}
+          onImportAnother={clearImportState}
+        />
       ) : null}
 
       <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments(true)} />
@@ -1674,14 +1676,73 @@ function ReviewMetric({ label, value, detail, tone = "default" }: { label: strin
   );
 }
 
-function CommitResultDetails({ result }: { result: CommitResult }) {
+function ImportSuccessDialog({
+  open,
+  result,
+  onOpenChange,
+  onImportAnother,
+}: {
+  open: boolean;
+  result: CommitResult;
+  onOpenChange: (open: boolean) => void;
+  onImportAnother: () => void;
+}) {
+  const count = result.count ?? 0;
   return (
-    <div className="mt-4 space-y-2 border-t border-line pt-4 text-sm text-olive">
-      <div>写入交易：{result.count} 条</div>
-      {result.outputFile ? <div className="break-all">导入文件：{result.outputFile}</div> : null}
-      {result.includeFile ? <div className="break-all">月份 include：{result.includeFile}</div> : null}
-      {result.documentFile ? <div className="break-all">原始账单 document：{result.documentFile}</div> : null}
-      <div className="text-stone">写入会自动提交到账本仓库；读模型会在索引更新后同步最新结果。</div>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="gap-0 overflow-hidden border-line bg-panel p-0 sm:max-w-xl">
+        <div className="px-5 pb-5 pt-6 sm:px-6 sm:pb-6">
+          <div className="flex items-start gap-4">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--selected-bg)] text-brand">
+              <CheckCircle className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <DialogHeader className="min-w-0 flex-1 text-left">
+              <DialogTitle className="font-serif text-2xl font-medium leading-tight text-ink">导入成功</DialogTitle>
+              <DialogDescription className="text-sm leading-6 text-stone">
+                {count > 0 ? `已写入 ${count} 条交易，账单文件也已归档。` : "账单文件已归档，本次没有新增交易。"}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <CommitResultDetails result={result} />
+
+          <div className="mt-4 rounded-xl bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
+            写入结果已自动提交到账本仓库，读模型会在索引更新后同步最新数据。
+          </div>
+        </div>
+        <DialogFooter className="grid grid-cols-2 gap-2 border-t border-line bg-paper px-5 py-4 sm:grid-cols-2 sm:px-6">
+          <Button type="button" variant="outline" onClick={onImportAnother}>
+            <FileUp className="h-4 w-4" />
+            导入新账单
+          </Button>
+          <DialogClose asChild>
+            <Button type="button">完成</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function CommitResultDetails({ result }: { result: CommitResult }) {
+  const rows = [
+    result.outputFile ? { label: "导入文件", value: result.outputFile } : null,
+    result.includeFile ? { label: "月份 include", value: result.includeFile } : null,
+    result.documentFile ? { label: "原始账单", value: result.documentFile } : null,
+  ].filter((row): row is { label: string; value: string } => row !== null);
+
+  return (
+    <dl data-import-success-details="true" className="mt-5 max-h-64 divide-y divide-line overflow-y-auto border-y border-line text-sm">
+      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-3">
+        <dt className="text-stone">写入交易</dt>
+        <dd className="text-right font-medium tabular-nums text-ink">{result.count ?? 0} 条</dd>
+      </div>
+      {rows.map((row) => (
+        <div key={row.label} className="grid min-w-0 gap-1 py-3 sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-3">
+          <dt className="text-stone">{row.label}</dt>
+          <dd className="min-w-0 break-all font-mono text-xs leading-5 text-olive sm:text-right">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
