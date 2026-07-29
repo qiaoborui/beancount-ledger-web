@@ -101,21 +101,21 @@
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --color-paper: 0.095 0 0;
-  --color-panel: 0.125 0 0;
-  --color-sand: 0.17 0 0;
-  --color-brand: 0.92 0 0;
-  --color-brand-light: 0.78 0 0;
-  --color-ink: 0.93 0 0;
-  --color-warm: 0.82 0 0;
-  --color-olive: 0.70 0 0;
-  --color-stone: 0.59 0 0;
-  --color-line: 0.245 0 0;
-  --color-line-soft: 0.33 0 0;
-  --color-tag: 0.18 0 0;
-  --color-income: 0.86 0 0;
-  --color-expense: 0.77 0 0;
-  --color-gold: 0.70 0 0;
+  --color-paper: 0.105 0.012 255;
+  --color-panel: 0.145 0.014 255;
+  --color-sand: 0.19 0.018 255;
+  --color-brand: 0.58 0.16 255;
+  --color-brand-light: 0.72 0.13 255;
+  --color-ink: 0.94 0.008 255;
+  --color-warm: 0.84 0.015 255;
+  --color-olive: 0.72 0.022 255;
+  --color-stone: 0.63 0.022 255;
+  --color-line: 0.28 0.018 255;
+  --color-line-soft: 0.36 0.022 255;
+  --color-tag: 0.205 0.035 255;
+  --color-income: 0.75 0.12 205;
+  --color-expense: 0.77 0.12 52;
+  --color-gold: 0.80 0.12 82;
   --color-background: var(--color-paper);
   --color-foreground: var(--color-ink);
   --color-primary: var(--color-brand);
@@ -130,31 +130,31 @@ html[data-theme="dark"] {
   --color-card-foreground: var(--color-ink);
   --color-popover: var(--color-panel);
   --color-popover-foreground: var(--color-ink);
-  --color-destructive: 0.72 0.14 29;
+  --color-destructive: 0.72 0.16 29;
   --color-border: var(--color-line);
   --color-input: var(--color-line);
   --color-ring: var(--color-brand-light);
 
-  --danger: oklch(0.72 0.14 29);
-  --success: oklch(0.78 0 0);
-  --warning: oklch(0.72 0 0);
-  --selected-bg: oklch(var(--color-brand) / 0.10);
+  --danger: oklch(0.72 0.16 29);
+  --success: oklch(0.74 0.13 154);
+  --warning: oklch(0.78 0.13 82);
+  --selected-bg: oklch(var(--color-brand) / 0.16);
   --body-gradient: var(--paper);
-  --focus-ring: oklch(var(--color-brand-light) / 0.26);
+  --focus-ring: oklch(var(--color-brand-light) / 0.32);
   --paper-shadow: none;
   --float-shadow: 0 18px 52px oklch(0.08 0.006 255 / 0.52);
   --overlay: oklch(0.08 0.006 255 / 0.72);
-  --chart-grid: oklch(0.25 0 0);
-  --chart-primary: oklch(0.93 0 0);
-  --chart-secondary: oklch(0.66 0 0);
-  --chart-tertiary: oklch(0.48 0 0);
-  --chart-fill: oklch(0.44 0 0 / 0.30);
-  --chart-palette-1: oklch(0.94 0 0);
-  --chart-palette-2: oklch(0.82 0 0);
-  --chart-palette-3: oklch(0.72 0 0);
-  --chart-palette-4: oklch(0.62 0 0);
-  --chart-palette-5: oklch(0.52 0 0);
-  --chart-palette-6: oklch(0.42 0 0);
+  --chart-grid: oklch(0.27 0.015 255);
+  --chart-primary: oklch(var(--color-brand-light));
+  --chart-secondary: oklch(var(--color-expense));
+  --chart-tertiary: oklch(var(--color-income));
+  --chart-fill: oklch(var(--color-brand) / 0.24);
+  --chart-palette-1: oklch(0.68 0.15 255);
+  --chart-palette-2: oklch(0.74 0.11 205);
+  --chart-palette-3: oklch(0.78 0.12 82);
+  --chart-palette-4: oklch(0.70 0.12 305);
+  --chart-palette-5: oklch(0.72 0.13 20);
+  --chart-palette-6: oklch(0.64 0.06 255);
   --ledger-code-bg: oklch(0.12 0.007 255);
   --ledger-code-fg: oklch(0.94 0.006 255);
   --ledger-code-muted: oklch(0.94 0.006 255 / 0.40);
@@ -175,21 +175,21 @@ html[data-theme="dark"] {
 @media (prefers-color-scheme: dark) {
   html:not([data-theme]) {
     color-scheme: dark;
-    --color-paper: 0.095 0 0;
-    --color-panel: 0.125 0 0;
-    --color-sand: 0.17 0 0;
-    --color-brand: 0.92 0 0;
-    --color-brand-light: 0.78 0 0;
-    --color-ink: 0.93 0 0;
-    --color-warm: 0.82 0 0;
-    --color-olive: 0.70 0 0;
-    --color-stone: 0.59 0 0;
-    --color-line: 0.245 0 0;
-    --color-line-soft: 0.33 0 0;
-    --color-tag: 0.18 0 0;
-    --color-income: 0.86 0 0;
-    --color-expense: 0.77 0 0;
-    --color-gold: 0.70 0 0;
+    --color-paper: 0.105 0.012 255;
+    --color-panel: 0.145 0.014 255;
+    --color-sand: 0.19 0.018 255;
+    --color-brand: 0.58 0.16 255;
+    --color-brand-light: 0.72 0.13 255;
+    --color-ink: 0.94 0.008 255;
+    --color-warm: 0.84 0.015 255;
+    --color-olive: 0.72 0.022 255;
+    --color-stone: 0.63 0.022 255;
+    --color-line: 0.28 0.018 255;
+    --color-line-soft: 0.36 0.022 255;
+    --color-tag: 0.205 0.035 255;
+    --color-income: 0.75 0.12 205;
+    --color-expense: 0.77 0.12 52;
+    --color-gold: 0.80 0.12 82;
     --color-background: var(--color-paper);
     --color-foreground: var(--color-ink);
     --color-primary: var(--color-brand);
@@ -204,30 +204,30 @@ html[data-theme="dark"] {
     --color-card-foreground: var(--color-ink);
     --color-popover: var(--color-panel);
     --color-popover-foreground: var(--color-ink);
-    --color-destructive: 0.72 0.14 29;
+    --color-destructive: 0.72 0.16 29;
     --color-border: var(--color-line);
     --color-input: var(--color-line);
     --color-ring: var(--color-brand-light);
-    --danger: oklch(0.72 0.14 29);
-    --success: oklch(0.78 0 0);
-    --warning: oklch(0.72 0 0);
-    --selected-bg: oklch(var(--color-brand) / 0.10);
+    --danger: oklch(0.72 0.16 29);
+    --success: oklch(0.74 0.13 154);
+    --warning: oklch(0.78 0.13 82);
+    --selected-bg: oklch(var(--color-brand) / 0.16);
     --body-gradient: var(--paper);
-    --focus-ring: oklch(var(--color-brand-light) / 0.26);
+    --focus-ring: oklch(var(--color-brand-light) / 0.32);
     --paper-shadow: none;
     --float-shadow: 0 18px 52px oklch(0.08 0.006 255 / 0.52);
     --overlay: oklch(0.08 0.006 255 / 0.72);
-    --chart-grid: oklch(0.25 0 0);
-    --chart-primary: oklch(0.93 0 0);
-    --chart-secondary: oklch(0.66 0 0);
-    --chart-tertiary: oklch(0.48 0 0);
-    --chart-fill: oklch(0.44 0 0 / 0.30);
-    --chart-palette-1: oklch(0.94 0 0);
-    --chart-palette-2: oklch(0.82 0 0);
-    --chart-palette-3: oklch(0.72 0 0);
-    --chart-palette-4: oklch(0.62 0 0);
-    --chart-palette-5: oklch(0.52 0 0);
-    --chart-palette-6: oklch(0.42 0 0);
+    --chart-grid: oklch(0.27 0.015 255);
+    --chart-primary: oklch(var(--color-brand-light));
+    --chart-secondary: oklch(var(--color-expense));
+    --chart-tertiary: oklch(var(--color-income));
+    --chart-fill: oklch(var(--color-brand) / 0.24);
+    --chart-palette-1: oklch(0.68 0.15 255);
+    --chart-palette-2: oklch(0.74 0.11 205);
+    --chart-palette-3: oklch(0.78 0.12 82);
+    --chart-palette-4: oklch(0.70 0.12 305);
+    --chart-palette-5: oklch(0.72 0.13 20);
+    --chart-palette-6: oklch(0.64 0.06 255);
     --ledger-code-bg: oklch(0.12 0.007 255);
     --ledger-code-fg: oklch(0.94 0.006 255);
     --ledger-code-muted: oklch(0.94 0.006 255 / 0.40);
@@ -1057,18 +1057,18 @@ html[data-theme="dark"] .desktop-sidebar-link {
 }
 
 html[data-theme="dark"] .desktop-sidebar-link-active {
-  background: color-mix(in srgb, var(--line) 44%, transparent);
-  color: var(--ink);
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: oklch(var(--color-brand-light));
 }
 
 html[data-theme="dark"] .desktop-sidebar-link-active::after {
-  background: var(--ink);
+  background: var(--brand);
   box-shadow: none;
 }
 
 html[data-theme="dark"] .desktop-sidebar-link:hover,
 html[data-theme="dark"] .mobile-bottom-tab:hover {
-  background: color-mix(in srgb, var(--line) 28%, transparent);
+  background: color-mix(in srgb, var(--brand) 9%, transparent);
 }
 
 html[data-theme="dark"] .card,
@@ -1148,12 +1148,6 @@ html[data-theme="dark"] .dashboard-panel-body {
   background: var(--ivory);
 }
 
-html[data-theme="dark"] .amount-expense,
-html[data-theme="dark"] .amount-income,
-html[data-theme="dark"] .amount-gold {
-  color: var(--ink);
-}
-
 html[data-theme="dark"] .amount-danger {
   color: var(--danger);
 }
@@ -1169,8 +1163,8 @@ html[data-theme="dark"] .amount-danger {
     height: 2.25rem;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
-    background: var(--ink);
-    color: var(--paper);
+    background: var(--brand);
+    color: oklch(var(--color-primary-foreground));
     box-shadow: none;
   }
 }
