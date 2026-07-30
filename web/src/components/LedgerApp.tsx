@@ -15,9 +15,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
-import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel } from "@/lib/timeRange";
+import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel, timeRangeToParams } from "@/lib/timeRange";
 import type { TimeRange } from "@/lib/timeRange";
 import { apiEndpointSettingsChangeEvent, apiFetch, apiSensitiveDataLockedEvent, readApiEndpointSettings } from "@/lib/apiEndpoints";
+import { fetchJson } from "@/lib/clientFetch";
 import { defaultMobileTabHrefs, readMobileTabHrefs, writeMobileTabHrefs } from "./ledger/storage";
 import { useEntryActions } from "./ledger/hooks/useEntryActions";
 import { useLedgerAuth } from "./ledger/hooks/useLedgerAuth";
@@ -65,7 +66,7 @@ import {
   preloadOfflineCoreRoutes,
   preloadLedgerRoute,
 } from "./ledger/routePreload";
-import type { LedgerNavHref, LedgerPage } from "./ledger/types";
+import type { LedgerNavHref, LedgerPage, Txn } from "./ledger/types";
 
 const LazyNetWorthPage = lazy(() => loadNetWorthPage().then((mod) => ({ default: mod.NetWorthPage })));
 
@@ -190,6 +191,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [txnSearchQuery, setTxnSearchQuery] = useState(initialSearchQuery);
   const [categoryMatchMode, setCategoryMatchMode] = useState<"exact" | "prefix">(initialMatchMode);
   const [txnViewMode, setTxnViewMode] = useState<"compact" | "full">("compact");
+  const [serverSearchTxns, setServerSearchTxns] = useState<Txn[] | null>(null);
+  const [serverSearchLoading, setServerSearchLoading] = useState(false);
+  const [serverSearchError, setServerSearchError] = useState("");
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [conflictOperationId, setConflictOperationId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -347,9 +351,40 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const dataValuationCurrency = summary?.currency ?? incomeStatement?.valuationCurrency ?? valuationCurrency;
   const incomeStatementCurrency = incomeStatement?.valuationCurrency ?? dataValuationCurrency;
   const projectedTxns = useMemo(() => applyPendingLedgerOperations(txns, pendingOperations, timeRange), [pendingOperations, timeRange, txns]);
+  const transactionDslQuery = txnSearchQuery.trim();
+  const transactionServerSearchActive = Boolean(transactionDslQuery);
+  const transactionListTxns = useMemo(() => applyPendingLedgerOperations(transactionServerSearchActive ? (serverSearchTxns ?? []) : txns, pendingOperations, timeRange), [pendingOperations, serverSearchTxns, timeRange, transactionServerSearchActive, txns]);
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
   useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => { void pushPreloadedRoute("/accounts"); } });
+
+  useEffect(() => {
+    if (page !== "transactions" || !transactionDslQuery || !authed) {
+      setServerSearchTxns(null);
+      setServerSearchLoading(false);
+      setServerSearchError("");
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams(timeRangeToParams(timeRange));
+    params.set("q", transactionDslQuery);
+    setServerSearchLoading(true);
+    setServerSearchError("");
+    void fetchJson<{ transactions: Txn[] }>(`/api/ledger/transactions?${params.toString()}`, { signal: controller.signal }, undefined, { kind: "read" })
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setServerSearchTxns(payload.transactions ?? []);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setServerSearchTxns([]);
+        setServerSearchError(error instanceof Error ? error.message : "查询失败");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setServerSearchLoading(false);
+      });
+    return () => controller.abort();
+  }, [authed, page, timeRange, transactionDslQuery, unlocked]);
 
   function pushPreloadedRoute(href: string, options?: { scroll?: boolean }) {
     const preload = preloadLedgerRoute(href);
@@ -767,7 +802,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "transactions" && (
         <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
           <LazyTransactionList
-            txns={projectedTxns}
+            txns={transactionListTxns}
             accounts={accounts}
             searchable={page === "transactions"}
             categoryQuery={page === "transactions" ? txnCategoryQuery : ""}
@@ -776,6 +811,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             setMetadataQuery={page === "transactions" ? setTxnMetadataQuery : undefined}
             searchQuery={page === "transactions" ? txnSearchQuery : ""}
             setSearchQuery={page === "transactions" ? setTxnSearchQuery : undefined}
+            serverFilteredSearch={transactionServerSearchActive}
+            serverSearchLoading={serverSearchLoading}
+            serverSearchError={serverSearchError}
             matchMode={page === "transactions" ? categoryMatchMode : "prefix"}
             setMatchMode={page === "transactions" ? setCategoryMatchMode : undefined}
             viewMode={txnViewMode}

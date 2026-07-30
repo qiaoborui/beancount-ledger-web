@@ -8,7 +8,7 @@ type LedgerQueryPort interface {
 	Bootstrap(string, string, bool, ...string) (BootstrapResult, error)
 	BootstrapLite(string, string, bool, ...string) (BootstrapResult, error)
 	Summary(string, string, bool, ...string) (SummaryQueryResult, error)
-	Transactions(string, string, bool) (TransactionQueryResult, error)
+	Transactions(string, string, bool, string) (TransactionQueryResult, error)
 	Balances(context.Context) (map[string]int, []BalanceAssertion, error)
 	IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error)
 }
