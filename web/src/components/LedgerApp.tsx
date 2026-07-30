@@ -50,7 +50,6 @@ import { TimeRangePicker } from "./ledger/TimeRangePicker";
 import {
   loadAccountDetailPage,
   loadAccountPanels,
-  loadAiBookkeepingChat,
   loadBQLQueryPage,
   loadCommandPalette,
   loadCurrencyPage,
@@ -60,6 +59,7 @@ import {
   loadIncomeStatementPage,
   loadInvestmentsPage,
   loadLedgerEditorPage,
+  loadLedgerAgentWorkspace,
   loadNetWorthPage,
   loadQuickActionsSheet,
   loadReconcilePage,
@@ -69,6 +69,7 @@ import {
   preloadLedgerRoute,
 } from "./ledger/routePreload";
 import type { LedgerNavHref, LedgerPage, Txn } from "./ledger/types";
+import type { LedgerAgentRequest } from "./ledger/LedgerAgentWorkspace";
 
 const LazyNetWorthPage = lazy(() => loadNetWorthPage().then((mod) => ({ default: mod.NetWorthPage })));
 
@@ -78,7 +79,7 @@ const LazyInvestmentsPage = lazy(() => loadInvestmentsPage().then((mod) => ({ de
 const LazyDashboardPage = lazy(() => loadDashboardPage().then((mod) => ({ default: mod.DashboardPage })));
 const LazyBQLQueryPage = lazy(() => loadBQLQueryPage().then((mod) => ({ default: mod.BQLQueryPage })));
 
-const LazyAiBookkeepingChat = lazy(() => loadAiBookkeepingChat().then((mod) => ({ default: mod.AiBookkeepingChat })));
+const LazyLedgerAgentWorkspace = lazy(() => loadLedgerAgentWorkspace().then((mod) => ({ default: mod.LedgerAgentWorkspace })));
 
 const LazyCommandPalette = lazy(() => loadCommandPalette().then((mod) => ({ default: mod.CommandPalette })));
 const LazyEntryModal = lazy(() => loadEntryModal().then((mod) => ({ default: mod.EntryModal })));
@@ -115,8 +116,8 @@ function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备 BQL 查询…</section>}><LazyBQLQueryPage {...props} /></Suspense>;
 }
 
-function AiBookkeepingChat(props: ComponentProps<typeof LazyAiBookkeepingChat>) {
-  return <Suspense fallback={null}><LazyAiBookkeepingChat {...props} /></Suspense>;
+function LedgerAgentWorkspace(props: ComponentProps<typeof LazyLedgerAgentWorkspace>) {
+  return <Suspense fallback={null}><LazyLedgerAgentWorkspace {...props} /></Suspense>;
 }
 
 function RouteFallback({ label }: { label: string }) {
@@ -205,8 +206,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [conflictOperationId, setConflictOperationId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
-  const [aiOpenSignal, setAiOpenSignal] = useState(0);
-  const [aiChatMounted, setAiChatMounted] = useState(false);
+  const [agentRequest, setAgentRequest] = useState<LedgerAgentRequest | null>(null);
+  const [agentBQLQuery, setAgentBQLQuery] = useState<{ id: number; query: string } | null>(null);
   const [indexInfo, setIndexInfo] = useState<LedgerIndexInfo | null>(null);
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
@@ -488,8 +489,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     haptic(8);
     if (shortcutAction === "quick-entry" || shortcutAction === "new-entry") setEntryOpen(true);
     if (shortcutAction === "ai-entry") {
-      setAiChatMounted(true);
-      setAiOpenSignal((value) => value + 1);
+      openAgent();
     }
     if (shortcutAction === "quick-actions") {
       void loadQuickActionsSheet();
@@ -664,10 +664,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     setEntryOpen(true);
   }
 
-  function openAiEntry() {
-    void loadAiBookkeepingChat();
-    setAiChatMounted(true);
-    setAiOpenSignal((value) => value + 1);
+  function openAgent(prompt?: string, autoSubmit = false) {
+    void loadLedgerAgentWorkspace();
+    setAgentRequest({ id: Date.now(), prompt, autoSubmit });
+  }
+
+  function applyAgentBQL(query: string) {
+    setAgentBQLQuery({ id: Date.now(), query });
+    void pushPreloadedRoute("/query");
   }
 
   function openQuickActions() {
@@ -703,7 +707,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const commandActions: CommandAction[] = [
     { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
-    { id: "ai-entry", label: "AI 记账助理", detail: "用自然语言生成预览", keywords: ["ai", "chat"], run: openAiEntry },
+    { id: "ai-entry", label: "账本 Agent", detail: "查询、生成 BQL 或创建待确认操作", keywords: ["ai", "agent", "chat"], run: () => openAgent() },
     { id: "search-transactions", label: "搜索流水", detail: "跳到流水页并聚焦搜索框", shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
     { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
     { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
@@ -753,7 +757,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         </div>,
         document.body
       )}
-      {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={openAiEntry} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={() => void syncPendingWrites({ userInitiated: true })} /></Suspense>}
+      {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={() => openAgent()} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={() => void syncPendingWrites({ userInitiated: true })} /></Suspense>}
       <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
@@ -805,7 +809,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
-      {page === "query" && (unlocked ? <BQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
+      {page === "query" && (unlocked ? <BQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={(prompt) => openAgent(prompt, true)} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("资产负债已隐藏", "此页会展示资产、负债、账户结构和净资产变化，需要解锁后查看。"))}
       {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
@@ -813,7 +817,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "accounts" && (() => {
         const detailAccount = accountFromPathname(pathname);
         if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要解锁后查看。");
-        return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} /></></Suspense>;
+        return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} onOpenAgent={(prompt) => openAgent(prompt, true)} /></></Suspense>;
       })()}
       {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} showToast={showToast} /></Suspense>}
       {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} showToast={showToast} /></Suspense>}
@@ -848,7 +852,15 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       )}
       </div>
 
-      {aiChatMounted && <AiBookkeepingChat load={load} showToast={showToast} openSignal={aiOpenSignal} />}
+      <LedgerAgentWorkspace
+        key={activeApiEndpointIdRef.current}
+        request={agentRequest}
+        context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }}
+        onApplyBQL={applyAgentBQL}
+        onNavigate={(path) => { void pushPreloadedRoute(path); }}
+        onChanged={() => load(true)}
+        showToast={showToast}
+      />
 
       {entryOpen && <Suspense fallback={null}><LazyEntryModal onClose={() => setEntryOpen(false)}><LazyEntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></LazyEntryModal></Suspense>}
       <AlertDialog open={Boolean(pendingConflict)} onOpenChange={(open) => !open && setConflictOperationId(null)}>

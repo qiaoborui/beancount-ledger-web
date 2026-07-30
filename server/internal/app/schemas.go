@@ -68,20 +68,6 @@ type AIParseRequest struct {
 	Input string `json:"input"`
 }
 
-type AIChatRequest struct {
-	Message      string        `json:"message"`
-	Messages     []ChatMessage `json:"messages"`
-	DraftEntries []LedgerEntry `json:"draftEntries"`
-	Stream       bool          `json:"stream"`
-}
-
-type AIAccountChatRequest struct {
-	Message         string             `json:"message"`
-	Messages        []ChatMessage      `json:"messages"`
-	DraftOperations []AccountOperation `json:"draftOperations"`
-	Stream          bool               `json:"stream"`
-}
-
 type ImportCommitRequest struct {
 	ImportID string        `json:"importId"`
 	Provider string        `json:"provider"`
@@ -202,30 +188,6 @@ func (r AccountOperationsRequest) Validate() error {
 func (r AIParseRequest) Validate() error {
 	if strings.TrimSpace(r.Input) == "" {
 		return fmt.Errorf("input is required")
-	}
-	return nil
-}
-
-func (r AIChatRequest) Validate() error {
-	if strings.TrimSpace(r.Message) == "" {
-		return fmt.Errorf("message is required")
-	}
-	for i, entry := range r.DraftEntries {
-		if err := entry.Validate(); err != nil {
-			return fmt.Errorf("draftEntries[%d]: %w", i, err)
-		}
-	}
-	return nil
-}
-
-func (r AIAccountChatRequest) Validate() error {
-	if strings.TrimSpace(r.Message) == "" {
-		return fmt.Errorf("message is required")
-	}
-	for i, operation := range r.DraftOperations {
-		if err := operation.Validate(); err != nil {
-			return fmt.Errorf("draftOperations[%d]: %w", i, err)
-		}
 	}
 	return nil
 }

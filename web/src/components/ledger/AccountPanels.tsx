@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ClientNavLink } from "./ClientNavLink";
 import { Bot, ChevronDown, Eye, EyeOff, GripVertical, ListChecks, Pencil, X } from "lucide-react";
@@ -10,9 +10,6 @@ import { Input } from "@/components/ui/input";
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { ResponsiveValueRow } from "./shared";
 import type { AccountGroup, AccountStatus, AccountView, CreditCardAnalytics, Txn } from "./types";
-
-const loadAccountAgentChat = () => import("./AccountAgentChat");
-const LazyAccountAgentChat = lazy(() => loadAccountAgentChat().then((mod) => ({ default: mod.AccountAgentChat })));
 
 type BalanceRow = { account: string; label: string; value: number; currency?: string; active?: boolean; group?: AccountGroup; valuation?: boolean };
 type BalanceStatusFilter = "all" | "issue" | "yellow" | "grey";
@@ -503,13 +500,12 @@ function CreditSummary({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0 bg-panel px-4 py-3"><div className="ledger-label">{label}</div><div className="mt-1 min-w-0 truncate font-medium text-olive" title={value}>{value}</div></div>;
 }
 
-export function AccountManager({ accounts, onAdded, showToast }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
+export function AccountManager({ accounts, onAdded, showToast, onOpenAgent }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; onOpenAgent?: (prompt: string) => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [account, setAccount] = useState("");
   const [alias, setAlias] = useState("");
   const [currency, setCurrency] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
   const groups: { key: AccountGroup; label: string }[] = [{ key: "cash", label: "现金账户" }, { key: "credit", label: "信用卡" }, { key: "liability", label: "其他负债" }, { key: "wealth", label: "理财账户" }, { key: "receivable", label: "应收应付" }, { key: "expense", label: "支出分类" }, { key: "income", label: "收入分类" }, { key: "equity", label: "权益" }, { key: "other", label: "其他" }];
   const visibleGroups = groups.map((group) => ({ ...group, rows: accounts.filter((account) => account.group === group.key) })).filter((group) => group.rows.length > 0);
   async function submit() {
@@ -533,10 +529,9 @@ export function AccountManager({ accounts, onAdded, showToast }: { accounts: Acc
     }
   }
   return <section className="border-b border-line bg-panel">
-    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8"><div><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">账户管理</h2><p className="mt-1 text-sm text-stone">管理账户定义和分组；余额集中在账户余额区并默认隐藏。</p></div><Button type="button" variant="outline" className="shrink-0 rounded-md bg-panel text-olive" onPointerEnter={() => void loadAccountAgentChat()} onFocus={() => void loadAccountAgentChat()} onClick={() => setAgentOpen(true)}><Bot className="h-4 w-4 text-brand" /><span>编辑账户</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button></div>
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8"><div><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">账户管理</h2><p className="mt-1 text-sm text-stone">管理账户定义和分组；余额集中在账户余额区并默认隐藏。</p></div>{onOpenAgent && <Button type="button" variant="outline" className="shrink-0 rounded-md bg-panel text-olive" onClick={() => onOpenAgent("帮我创建、调整或关闭账户。请先读取现有账户并生成待确认草稿。") }><Bot className="h-4 w-4 text-brand" /><span>AI 编辑</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button>}</div>
     <div className="grid gap-3 border-b border-line px-4 py-4 sm:grid-cols-[150px_1fr_1fr_110px_auto] md:px-6 xl:px-8"><Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-11 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-11 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-11 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-11 px-4" disabled={submitting} onClick={submit}>{submitting ? "新增中…" : "新增账户"}</Button></div>
     {visibleGroups.length ? <div className="divide-y divide-line">{visibleGroups.map((group) => <section key={group.key} className="grid gap-3 px-4 py-4 md:grid-cols-[12rem_minmax(0,1fr)] md:px-6 xl:px-8"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="divide-y divide-line border-y border-line">{group.rows.map((a) => <div key={a.account} className="min-w-0 px-3 py-2.5 text-sm"><div className="flex min-w-0 items-center gap-2"><strong className="truncate">{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></section>)}</div> : <p className="px-4 py-5 text-sm text-stone md:px-6 xl:px-8">暂无有流水且余额不为 0 的账户。</p>}
-    {agentOpen && <Suspense fallback={null}><LazyAccountAgentChat open={agentOpen} onClose={() => setAgentOpen(false)} onChanged={onAdded} showToast={showToast} /></Suspense>}
   </section>;
 }
 

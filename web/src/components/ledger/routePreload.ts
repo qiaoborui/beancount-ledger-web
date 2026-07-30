@@ -5,7 +5,7 @@ export const loadBQLQueryPage = () => import("./BQLQueryPage");
 export const loadNetWorthPage = () => import("./NetWorthPage");
 export const loadInvestmentsPage = () => import("./InvestmentsPage");
 export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
-export const loadAiBookkeepingChat = () => import("./AiBookkeepingChat");
+export const loadLedgerAgentWorkspace = () => import("./LedgerAgentWorkspace");
 export const loadCommandPalette = () => import("./CommandPalette");
 export const loadEntryModal = () => import("./EntryModal");
 export const loadQuickActionsSheet = () => import("./QuickActionsSheet");

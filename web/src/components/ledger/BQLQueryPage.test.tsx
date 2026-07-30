@@ -12,4 +12,10 @@ describe("BQLQueryPage", () => {
     expect(source).not.toContain("dark: false");
     expect(source).not.toContain('theme="light"');
   });
+
+  it("connects the editor to the global Agent", () => {
+    expect(source).toContain("onOpenAgent");
+    expect(source).toContain("agentQuery");
+    expect(source).toContain("AI 生成");
+  });
 });
