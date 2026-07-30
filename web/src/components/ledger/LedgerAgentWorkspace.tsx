@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Ban, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, ExternalLink, LoaderCircle, PanelRight, Play, Send, ShieldCheck, Trash2, X } from "lucide-react";
+import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, Play, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
@@ -51,6 +50,8 @@ function nextID() {
 
 export function LedgerAgentWorkspace({
   request,
+  open: controlledOpen,
+  onOpenChange,
   context,
   onApplyBQL,
   onNavigate,
@@ -58,6 +59,8 @@ export function LedgerAgentWorkspace({
   showToast,
 }: {
   request?: LedgerAgentRequest | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   context: AgentContext;
   onApplyBQL: (query: string) => void;
   onNavigate: (path: string) => void;
@@ -65,8 +68,7 @@ export function LedgerAgentWorkspace({
   showToast: (kind: "info" | "success" | "error", text: string) => void;
 }) {
   const stored = useMemo(() => readStoredAgent(), []);
-  const [open, setOpen] = useState(false);
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
   const [sessionId, setSessionId] = useState(stored.sessionId);
   const [timeline, setTimeline] = useState<TimelineItem[]>(stored.messages);
@@ -79,22 +81,21 @@ export function LedgerAgentWorkspace({
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const open = controlledOpen ?? uncontrolledOpen;
+
+  function setOpen(next: boolean) {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  }
 
   useEffect(() => {
     writeStoredAgent({ approvalPolicy, sessionId, messages: timeline.filter((item): item is MessageItem => item.kind === "message").slice(-40) });
   }, [approvalPolicy, sessionId, timeline]);
 
   useEffect(() => {
-    document.body.classList.toggle("ledger-agent-dock-expanded", open && !dockCollapsed);
-    document.body.classList.toggle("ledger-agent-dock-collapsed", true);
-    return () => document.body.classList.remove("ledger-agent-dock-expanded", "ledger-agent-dock-collapsed");
-  }, [dockCollapsed, open]);
-
-  useEffect(() => {
     if (!request || request.id === requestRef.current) return;
     requestRef.current = request.id;
     setOpen(true);
-    setDockCollapsed(false);
     const prompt = request.prompt?.trim() ?? "";
     if (!prompt) {
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -214,9 +215,8 @@ export function LedgerAgentWorkspace({
     void sendMessage(input);
   }
 
-  const shell = (
-    <>
-    {open && <section className={`fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:w-[430px] md:border-l md:border-line md:shadow-xl ${dockCollapsed ? "md:hidden" : ""}`}
+  const panel = (className: string) => (
+    <section className={className}
       aria-label="全局账本 Agent"
     >
       <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
@@ -228,7 +228,6 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title="折叠侧栏" aria-label="折叠侧栏" onClick={() => setDockCollapsed(true)}><PanelRight className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新对话" aria-label="新对话" onClick={resetConversation} disabled={busy}><Trash2 className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
         </div>
@@ -282,16 +281,15 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
       </footer>
-    </section>}
-    <aside className="fixed inset-y-0 right-0 z-[89] hidden w-14 flex-col items-center border-l border-line bg-panel py-3 shadow-sm md:flex" aria-label="账本 Agent 侧栏">
-      <button type="button" className="grid h-9 w-9 place-items-center rounded-md bg-brand text-paper hover:bg-brand/90" onClick={() => { setOpen(true); setDockCollapsed(false); }} aria-label="展开账本 Agent" title="展开账本 Agent"><Bot className="h-4 w-4" /></button>
-      {open && <button type="button" className="mt-2 grid h-8 w-8 place-items-center rounded-md text-stone hover:bg-tag hover:text-ink" onClick={() => setDockCollapsed((current) => !current)} aria-label={dockCollapsed ? "展开账本 Agent" : "折叠账本 Agent"} title={dockCollapsed ? "展开账本 Agent" : "折叠账本 Agent"}>{dockCollapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}
-    </aside>
-    {!open && <button type="button" className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[70] grid h-11 w-11 place-items-center rounded-md border border-line bg-brand text-paper shadow-lg hover:bg-brand/90 md:hidden" onClick={() => setOpen(true)} aria-label="打开账本 Agent" title="账本 Agent"><Bot className="h-5 w-5" /></button>}
-    </>
+    </section>
   );
 
-  return createPortal(shell, document.body);
+  return <>
+    <aside className="ledger-agent-dock hidden min-w-0 md:block" data-open={open ? "true" : "false"} aria-label="账本 Agent 侧栏">
+      {open && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper")}
+    </aside>
+    {open && panel("fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:hidden")}
+  </>;
 }
 
 function MessageBubble({ item }: { item: MessageItem }) {

@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
-import { RefreshCw, WifiOff, X } from "lucide-react";
+import { Bot, RefreshCw, WifiOff, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -206,6 +206,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [conflictOperationId, setConflictOperationId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [agentRequest, setAgentRequest] = useState<LedgerAgentRequest | null>(null);
   const [agentBQLQuery, setAgentBQLQuery] = useState<{ id: number; query: string } | null>(null);
   const [indexInfo, setIndexInfo] = useState<LedgerIndexInfo | null>(null);
@@ -666,6 +667,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   function openAgent(prompt?: string, autoSubmit = false) {
     void loadLedgerAgentWorkspace();
+    setAgentOpen(true);
     setAgentRequest({ id: Date.now(), prompt, autoSubmit });
   }
 
@@ -769,6 +771,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
+      <div className="ledger-workspace-frame min-w-0 max-w-full">
+      <div className="ledger-workspace-content min-w-0 max-w-full">
       <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2.5 md:px-4 md:py-3 xl:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3.5">
           <div className="w-full min-w-0 md:w-auto md:flex-1">
@@ -802,7 +806,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               </form>
             )}
           </div>
-          {canShowTimeControls && <div className="workspace-time-control w-full md:w-auto md:shrink-0"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
+          <div className="workspace-controls flex w-full min-w-0 items-stretch gap-2 md:w-auto md:shrink-0">
+            {canShowTimeControls && <div className="workspace-time-control min-w-0 flex-1 md:flex-none"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
+            <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => { void loadLedgerAgentWorkspace(); setAgentOpen((current) => !current); }} aria-label={agentOpen ? "收起账本 Agent" : "打开账本 Agent"} aria-pressed={agentOpen} title={agentOpen ? "收起账本 Agent" : "打开账本 Agent"}><Bot className="h-5 w-5" /></button>
+          </div>
         </div>
       </div>
 
@@ -855,12 +862,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       <LedgerAgentWorkspace
         key={activeApiEndpointIdRef.current}
         request={agentRequest}
+        open={agentOpen}
+        onOpenChange={setAgentOpen}
         context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }}
         onApplyBQL={applyAgentBQL}
         onNavigate={(path) => { void pushPreloadedRoute(path); }}
         onChanged={() => load(true)}
         showToast={showToast}
       />
+      </div>
+      </div>
 
       {entryOpen && <Suspense fallback={null}><LazyEntryModal onClose={() => setEntryOpen(false)}><LazyEntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></LazyEntryModal></Suspense>}
       <AlertDialog open={Boolean(pendingConflict)} onOpenChange={(open) => !open && setConflictOperationId(null)}>
