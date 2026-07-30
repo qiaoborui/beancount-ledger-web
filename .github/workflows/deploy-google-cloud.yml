@@ -25,6 +25,7 @@ env:
   ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'beancount-ledger-web' }}
   CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE || 'beancount-ledger-web' }}
   ZIP_WORKER_SERVICE: ${{ vars.GCP_ZIP_WORKER_SERVICE || 'beancount-ledger-zip-worker' }}
+  DEEPSEEK_SECRET_NAME: ${{ vars.GCP_DEEPSEEK_SECRET }}
 
 jobs:
   deploy:
@@ -79,6 +80,18 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Initialize DeepSeek secret
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [[ -z "${DEEPSEEK_SECRET_NAME}" || -z "${DEEPSEEK_API_KEY}" ]]; then
+            echo "::error::GCP_DEEPSEEK_SECRET and DEEPSEEK_API_KEY are required"
+            exit 1
+          fi
+          printf '%s' "${DEEPSEEK_API_KEY}" | gcloud secrets versions add "${DEEPSEEK_SECRET_NAME}" \
+            --project="${GCP_PROJECT_ID}" \
+            --data-file=-
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
@@ -217,6 +230,10 @@ jobs:
               exit 1
             fi
           done
+
+          if [[ -n "${DEEPSEEK_SECRET_NAME}" && ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",DEEPSEEK_API_KEY="* ]]; then
+            CLOUD_RUN_SECRET_MAPPINGS="${CLOUD_RUN_SECRET_MAPPINGS},DEEPSEEK_API_KEY=${DEEPSEEK_SECRET_NAME}:latest"
+          fi
 
           if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
             echo "::error::PUBLIC_ORIGIN must use HTTPS"
