@@ -29,18 +29,27 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
   }, [accountBalances]);
 
   const balanceAccounts = useMemo(() => accounts.filter((account) => isBalanceAccount(account, balancesByAccount) && !["expense", "income", "equity"].includes(account.group)), [accounts, balancesByAccount]);
-  const accountPageAccounts = useMemo(() => accounts.filter((account) => isVisibleAccountPageAccount(account, balances, balancesByAccount)), [accounts, balances, balancesByAccount]);
+  const accountPageAccounts = useMemo(() => {
+    if (page !== "accounts") return [];
+    return accounts.filter((account) => isVisibleAccountPageAccount(account, balances, balancesByAccount));
+  }, [accounts, balances, balancesByAccount, page]);
 
-  const visibleBalances = balanceAccounts
-    .filter((account) => page === "accounts" ? isVisibleAccountPageAccount(account, balances, balancesByAccount) : balances[account.account] !== undefined || balancesByAccount.has(account.account))
-    .map((item) => accountBalanceDisplayRow(item, balances[item.account], balancesByAccount.get(item.account) ?? [], valuationCurrency));
+  const visibleBalances = useMemo(() => {
+    if (page !== "accounts") return [];
+    return balanceAccounts
+      .filter((account) => isVisibleAccountPageAccount(account, balances, balancesByAccount))
+      .map((item) => accountBalanceDisplayRow(item, balances[item.account], balancesByAccount.get(item.account) ?? [], valuationCurrency));
+  }, [balanceAccounts, balances, balancesByAccount, page, valuationCurrency]);
 
-  const netWorthChart = netWorthRows.map((row) => ({
-    date: row.date.slice(5),
-    资产: row.assets / 100,
-    负债: row.liabilities / 100,
-    净资产: row.netWorth / 100,
-  }));
+  const netWorthChart = useMemo(() => {
+    if (page !== "net-worth") return [];
+    return netWorthRows.map((row) => ({
+      date: row.date.slice(5),
+      资产: row.assets / 100,
+      负债: row.liabilities / 100,
+      净资产: row.netWorth / 100,
+    }));
+  }, [netWorthRows, page]);
 
   return { chart, accountLabelMap, accountPageAccounts, balanceAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart };
 }

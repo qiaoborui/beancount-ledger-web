@@ -32,6 +32,27 @@ const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
 };
 
 const routePreloads = new Map<LedgerPage, Promise<unknown>>();
+const accountDetailPreloads = new Map<string, Promise<unknown>>();
+
+function cachedPreload<K extends string>(cache: Map<K, Promise<unknown>>, key: K, load: () => Promise<unknown>, label: string) {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const preload: Promise<unknown> = load().catch((error) => {
+    cache.delete(key);
+    console.warn(`${label} preload failed`, error);
+  });
+  cache.set(key, preload);
+  return preload;
+}
+
+function runWhenIdle(callback: () => void, timeout = 3000) {
+  if (typeof window === "undefined") return;
+  if (window.requestIdleCallback) {
+    window.requestIdleCallback(callback, { timeout });
+    return;
+  }
+  window.setTimeout(callback, 0);
+}
 
 function pageFromHref(href: string): LedgerPage {
   const pathname = (() => {
@@ -57,26 +78,33 @@ function pageFromHref(href: string): LedgerPage {
 }
 
 export function preloadLedgerRoute(href: string) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return undefined;
   const page = pageFromHref(href);
-  if (routePreloads.has(page)) return;
-  const load = routeLoaders[page];
-  if (!load) return;
-  routePreloads.set(page, load().catch((error) => {
-    routePreloads.delete(page);
-    console.warn("Ledger route preload failed", error);
-  }));
+  const preloads: Promise<unknown>[] = [];
   if (page === "accounts" && href.includes("/accounts/")) {
-    void loadAccountDetailPage().catch((error) => {
-      console.warn("Ledger account detail preload failed", error);
-    });
+    preloads.push(cachedPreload(accountDetailPreloads, href, loadAccountDetailPage, "Ledger account detail"));
   }
+  const load = routeLoaders[page];
+  if (load) preloads.push(cachedPreload(routePreloads, page, load, "Ledger route"));
+  if (preloads.length === 0) return undefined;
+  if (preloads.length === 1) return preloads[0];
+  return Promise.all(preloads);
+}
+
+function preloadRoutesIncrementally(hrefs: string[], index = 0) {
+  if (index >= hrefs.length) return;
+  runWhenIdle(() => {
+    preloadLedgerRoute(hrefs[index]);
+    window.setTimeout(() => preloadRoutesIncrementally(hrefs, index + 1), 180);
+  });
 }
 
 export function preloadOfflineCoreRoutes() {
   if (typeof window === "undefined") return;
-  const coreRoutes = ["/transactions", "/accounts", "/settings"];
-  for (const href of coreRoutes) preloadLedgerRoute(href);
+  const coreRoutes = ["/transactions", "/accounts", "/dashboard", "/net-worth", "/income-statement", "/settings"];
+  const secondaryRoutes = ["/imports", "/reconcile", "/currencies", "/investments", "/editor"];
+  preloadRoutesIncrementally(coreRoutes);
+  window.setTimeout(() => preloadRoutesIncrementally(secondaryRoutes), 1500);
   void loadEntryModal().catch((error) => {
     console.warn("Ledger entry preload failed", error);
   });
