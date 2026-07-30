@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -139,16 +138,9 @@ type AgentModelClient interface {
 type openAICompatibleAgentClient struct{}
 
 func (openAICompatibleAgentClient) Complete(ctx context.Context, system string, messages []agentModelMessage, tools []agentToolSpec) (agentModelResult, error) {
-	provider := strings.ToLower(env("LEDGER_AI_PROVIDER", "deepseek"))
-	apiKey, baseURL, model := os.Getenv("DEEPSEEK_API_KEY"), env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"), env("DEEPSEEK_MODEL", "deepseek-chat")
-	if provider != "deepseek" {
-		apiKey, baseURL, model = os.Getenv("OPENAI_API_KEY"), env("OPENAI_BASE_URL", "https://api.openai.com/v1"), env("OPENAI_MODEL", "gpt-4.1-mini")
-	}
-	if apiKey == "" {
-		if provider == "deepseek" {
-			return agentModelResult{}, errors.New("DEEPSEEK_API_KEY is not configured")
-		}
-		return agentModelResult{}, errors.New("OPENAI_API_KEY is not configured")
+	provider, err := resolveAIProviderConfig()
+	if err != nil {
+		return agentModelResult{}, err
 	}
 
 	wireMessages := make([]agentModelMessage, 0, len(messages)+1)
@@ -166,7 +158,7 @@ func (openAICompatibleAgentClient) Complete(ctx context.Context, system string, 
 		})
 	}
 	body := map[string]any{
-		"model":       model,
+		"model":       provider.model,
 		"messages":    wireMessages,
 		"tools":       wireTools,
 		"tool_choice": "auto",
@@ -176,11 +168,11 @@ func (openAICompatibleAgentClient) Complete(ctx context.Context, system string, 
 	if err != nil {
 		return agentModelResult{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(provider.baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return agentModelResult{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+provider.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := (&http.Client{Timeout: 90 * time.Second}).Do(req)
 	if err != nil {

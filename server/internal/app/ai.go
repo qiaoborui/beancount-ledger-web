@@ -47,19 +47,12 @@ func parserPrompt(today string, accounts []string) string {
 }
 
 func runStructuredAI(system, input string) (string, error) {
-	provider := strings.ToLower(env("LEDGER_AI_PROVIDER", "deepseek"))
-	apiKey, baseURL, model := os.Getenv("DEEPSEEK_API_KEY"), env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"), env("DEEPSEEK_MODEL", "deepseek-chat")
-	if provider != "deepseek" {
-		apiKey, baseURL, model = os.Getenv("OPENAI_API_KEY"), env("OPENAI_BASE_URL", "https://api.openai.com/v1"), env("OPENAI_MODEL", "gpt-4.1-mini")
-	}
-	if apiKey == "" {
-		if provider == "deepseek" {
-			return "", errors.New("DEEPSEEK_API_KEY is not configured")
-		}
-		return "", errors.New("OPENAI_API_KEY is not configured")
+	provider, err := resolveAIProviderConfig()
+	if err != nil {
+		return "", err
 	}
 	body := map[string]any{
-		"model": model,
+		"model": provider.model,
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": input},
@@ -71,11 +64,11 @@ func runStructuredAI(system, input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(provider.baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+provider.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
 	if err != nil {
@@ -100,6 +93,46 @@ func runStructuredAI(system, input string) (string, error) {
 		return "", errors.New("AI returned empty content")
 	}
 	return parsed.Choices[0].Message.Content, nil
+}
+
+type aiProviderConfig struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func resolveAIProviderConfig() (aiProviderConfig, error) {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("LEDGER_AI_PROVIDER")))
+	if provider == "" {
+		switch {
+		case strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")) != "":
+			provider = "deepseek"
+		case strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "":
+			provider = "openai"
+		default:
+			return aiProviderConfig{}, errors.New("AI provider is not configured: set DEEPSEEK_API_KEY or OPENAI_API_KEY")
+		}
+	}
+	if provider == "deepseek" {
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if strings.TrimSpace(apiKey) == "" {
+			return aiProviderConfig{}, errors.New("DEEPSEEK_API_KEY is not configured")
+		}
+		return aiProviderConfig{
+			apiKey:  apiKey,
+			baseURL: env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+			model:   env("DEEPSEEK_MODEL", "deepseek-chat"),
+		}, nil
+	}
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if strings.TrimSpace(apiKey) == "" {
+		return aiProviderConfig{}, errors.New("OPENAI_API_KEY is not configured")
+	}
+	return aiProviderConfig{
+		apiKey:  apiKey,
+		baseURL: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		model:   env("OPENAI_MODEL", "gpt-4.1-mini"),
+	}, nil
 }
 
 func activeAccounts(accounts []Account) []string {
