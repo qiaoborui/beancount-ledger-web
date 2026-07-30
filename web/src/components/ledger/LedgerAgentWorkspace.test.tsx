@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { normalizeBQLChartValue, restoreTimeline } from "./LedgerAgentWorkspace";
+import { normalizeBQLChartValue, restoreSessions, restoreTimeline } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
@@ -19,6 +19,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('artifact.type === "chart"');
     expect(source).toContain("MessageResponse");
     expect(source).toContain('approvalPolicy === "always"');
+    expect(source).toContain("全屏查看会话");
+    expect(source).toContain("会话历史");
   });
 
   it("converts BQL money values from minor units before charting", () => {
@@ -38,5 +40,16 @@ describe("LedgerAgentWorkspace", () => {
     expect(timeline[1]).toMatchObject({ kind: "tool", tool: { output: { rowCount: 3 } } });
     expect(timeline[2]).toMatchObject({ kind: "artifact", artifact: { type: "table" } });
     expect(timeline[3]).toMatchObject({ kind: "approval", resolved: true });
+  });
+
+  it("restores independently switchable Agent sessions", () => {
+    const sessions = restoreSessions([
+      { id: "session-1", serverSessionId: "server-1", createdAt: 1, updatedAt: 2, timeline: [{ kind: "message", id: "message-1", role: "user", content: "第一段对话" }] },
+      { id: "session-2", serverSessionId: "server-2", createdAt: 3, updatedAt: 4, timeline: [{ kind: "tool", id: "tool-1", tool: { id: "tool-1", name: "run_bql", title: "运行 BQL", status: "completed", output: { rowCount: 2 } } }] },
+    ]);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).toMatchObject({ id: "session-1", serverSessionId: "server-1", timeline: [{ kind: "message" }] });
+    expect(sessions[1]).toMatchObject({ id: "session-2", serverSessionId: "server-2", timeline: [{ kind: "tool" }] });
   });
 });

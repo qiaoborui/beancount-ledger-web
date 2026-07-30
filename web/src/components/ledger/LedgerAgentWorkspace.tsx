@@ -2,7 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, Play, Send, ShieldCheck, Trash2, X } from "lucide-react";
+import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
@@ -32,7 +32,9 @@ type ToolItem = { kind: "tool"; id: string; tool: AgentToolEvent };
 type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
 type ApprovalItem = { kind: "approval"; id: string; approval: AgentApproval; resolved?: boolean };
 type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
+type AgentSession = { id: string; serverSessionId: string; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
 const MAX_STORED_TIMELINE_ITEMS = 80;
+const MAX_STORED_SESSIONS = 30;
 
 type BQLColumn = { name: string; type: string };
 type BQLResult = { columns: BQLColumn[]; rows: unknown[][]; query: string; warnings?: string[]; valuationCurrency: string; rowCount: number };
@@ -48,6 +50,20 @@ const chartColors = ["var(--chart-palette-1, var(--chart-primary))", "var(--char
 
 function nextID() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = ""): AgentSession {
+  const now = Date.now();
+  return { id: nextID(), serverSessionId, createdAt: now, updatedAt: now, timeline };
+}
+
+function sessionLabel(session: AgentSession) {
+  const firstPrompt = session.timeline.find((item): item is MessageItem => item.kind === "message" && item.role === "user");
+  return firstPrompt?.content.trim() || "新对话";
+}
+
+function sessionTime(session: AgentSession) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(session.updatedAt);
 }
 
 export function LedgerAgentWorkspace({
@@ -72,8 +88,9 @@ export function LedgerAgentWorkspace({
   const stored = useMemo(() => readStoredAgent(), []);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
-  const [sessionId, setSessionId] = useState(stored.sessionId);
-  const [timeline, setTimeline] = useState<TimelineItem[]>(stored.messages);
+  const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
+  const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
+  const [desktopFullscreen, setDesktopFullscreen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("就绪");
@@ -82,18 +99,49 @@ export function LedgerAgentWorkspace({
   const requestRef = useRef(0);
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const desktopScrollRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
   const mobileScrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
+  const sessionId = activeSession.serverSessionId;
+  const timeline = activeSession.timeline;
 
   function setOpen(next: boolean) {
     setUncontrolledOpen(next);
     onOpenChange?.(next);
   }
 
+  function updateActiveSession(update: (session: AgentSession) => AgentSession) {
+    setSessions((current) => current.map((session) => session.id === activeSession.id ? update(session) : session));
+  }
+
+  function updateTimeline(update: (timeline: TimelineItem[]) => TimelineItem[]) {
+    updateActiveSession((session) => ({ ...session, timeline: update(session.timeline).slice(-MAX_STORED_TIMELINE_ITEMS), updatedAt: Date.now() }));
+  }
+
+  function createSession() {
+    if (busy) return;
+    const session = createAgentSession();
+    setSessions((current) => [session, ...current].slice(0, MAX_STORED_SESSIONS));
+    setActiveSessionId(session.id);
+    setInput("");
+    setStreamingText("");
+    setStatus("就绪");
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function selectSession(sessionId: string) {
+    if (busy || sessionId === activeSession.id) return;
+    setActiveSessionId(sessionId);
+    setInput("");
+    setStreamingText("");
+    setStatus("就绪");
+  }
+
   useEffect(() => {
-    writeStoredAgent({ approvalPolicy, sessionId, timeline: timeline.slice(-MAX_STORED_TIMELINE_ITEMS) });
-  }, [approvalPolicy, sessionId, timeline]);
+    writeStoredAgent({ approvalPolicy, activeSessionId, sessions });
+  }, [activeSessionId, approvalPolicy, sessions]);
 
   useEffect(() => {
     if (!request || request.id === requestRef.current) return;
@@ -115,18 +163,22 @@ export function LedgerAgentWorkspace({
   useEffect(() => {
     if (!open) return;
     requestAnimationFrame(() => {
-      const scrollRef = window.matchMedia("(min-width: 768px)").matches ? desktopScrollRef : mobileScrollRef;
+      const scrollRef = window.matchMedia("(min-width: 768px)").matches ? (desktopFullscreen ? fullscreenScrollRef : desktopScrollRef) : mobileScrollRef;
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     });
-  }, [open, timeline, streamingText, status]);
+  }, [desktopFullscreen, open, timeline, streamingText, status]);
 
   useEffect(() => {
-    if (!open || window.matchMedia("(min-width: 768px)").matches) return;
+    if (!open || (!desktopFullscreen && window.matchMedia("(min-width: 768px)").matches)) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
+  }, [desktopFullscreen, open]);
+
+  useEffect(() => {
+    if (!open) setDesktopFullscreen(false);
   }, [open]);
 
   const conversation = timeline.filter((item): item is MessageItem => item.kind === "message");
@@ -141,7 +193,7 @@ export function LedgerAgentWorkspace({
     setInput("");
     setStreamingText("");
     setStatus("正在连接 Agent");
-    setTimeline((current) => [...current, { kind: "message", id: nextID(), role: "user", content: prompt }]);
+    updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "user", content: prompt }]);
     try {
       const response = await apiFetch("/api/ai/agent/turn", {
         method: "POST",
@@ -152,7 +204,7 @@ export function LedgerAgentWorkspace({
       finishTurn(final);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Agent 请求失败";
-      setTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: `处理失败：${message}` }]);
+      updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: `处理失败：${message}` }]);
       setStatus("处理失败");
       showToast("error", message);
     } finally {
@@ -168,16 +220,16 @@ export function LedgerAgentWorkspace({
       onMessageDelta: setStreamingText,
       onStatus: setStatus,
       onTool: upsertTool,
-      onArtifact: (artifact) => setTimeline((current) => [...current, { kind: "artifact", id: artifact.id, artifact }]),
-      onApproval: (approval) => setTimeline((current) => [...current, { kind: "approval", id: approval.id, approval }]),
+      onArtifact: (artifact) => updateTimeline((current) => [...current, { kind: "artifact", id: artifact.id, artifact }]),
+      onApproval: (approval) => updateTimeline((current) => [...current, { kind: "approval", id: approval.id, approval }]),
     });
   }
 
   function finishTurn(final: AgentFinal) {
-    setSessionId(final.sessionId);
+    updateActiveSession((session) => ({ ...session, serverSessionId: final.sessionId, updatedAt: Date.now() }));
     setStatus(final.pendingApprovalId ? "等待确认" : "就绪");
     if (final.message.trim()) {
-      setTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: final.message.trim() }]);
+      updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: final.message.trim() }]);
     }
     if (final.refreshLedger) {
       showToast("success", "账本已更新");
@@ -186,7 +238,7 @@ export function LedgerAgentWorkspace({
   }
 
   function upsertTool(tool: AgentToolEvent) {
-    setTimeline((current) => {
+    updateTimeline((current) => {
       const index = current.findIndex((item) => item.kind === "tool" && item.tool.id === tool.id);
       if (index < 0) return [...current, { kind: "tool", id: tool.id, tool }];
       return current.map((item, itemIndex) => itemIndex === index && item.kind === "tool" ? { ...item, tool: { ...item.tool, ...tool } } : item);
@@ -197,7 +249,7 @@ export function LedgerAgentWorkspace({
     if (busy) return;
     setBusy(true);
     setStatus(approved ? "正在执行已确认操作" : "正在取消操作");
-    setTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: true } : item));
+    updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: true } : item));
     try {
       const response = await apiFetch("/api/ai/agent/approval", {
         method: "POST",
@@ -208,22 +260,13 @@ export function LedgerAgentWorkspace({
       finishTurn(final);
     } catch (error) {
       const message = error instanceof Error ? error.message : "审批处理失败";
-      setTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: false } : item));
+      updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: false } : item));
       setStatus("审批失败");
       showToast("error", message);
     } finally {
       setBusy(false);
       setStreamingText("");
     }
-  }
-
-  function resetConversation() {
-    if (busy) return;
-    setSessionId("");
-    setTimeline([]);
-    setInput("");
-    setStreamingText("");
-    setStatus("就绪");
   }
 
   function handleSubmit() {
@@ -243,20 +286,11 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新对话" aria-label="新对话" onClick={resetConversation} disabled={busy}><Trash2 className="h-4 w-4" /></button>
+          <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>
+          <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
         </div>
       </header>
-
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-paper px-3 py-2.5 md:px-4">
-        <ShieldCheck className="h-4 w-4 shrink-0 text-brand" />
-        <span className="text-xs font-medium text-ink">审批策略</span>
-        <div className="ml-auto flex min-w-0 rounded-md border border-line bg-panel p-0.5" role="tablist" aria-label="Agent 审批策略">
-          <button type="button" role="tab" aria-selected={approvalPolicy === "on-write"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "on-write" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("on-write")}>常规</button>
-          <button type="button" role="tab" aria-selected={approvalPolicy === "always"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "always" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("always")}>逐项确认</button>
-        </div>
-        <span className="basis-full text-[11px] leading-4 text-stone">{approvalPolicy === "always" ? "每个工具调用都要你确认" : "读取自动执行，账本写入始终确认"}</span>
-      </div>
 
       <div ref={scrollContainerRef} className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-4">
         {!hasConversation && <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-1">
@@ -275,6 +309,15 @@ export function LedgerAgentWorkspace({
       </div>
 
       <footer className="shrink-0 border-t border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-0.5">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-brand" />
+          <span className="text-xs font-medium text-ink">审批</span>
+          <div className="ml-auto flex min-w-0 rounded-md border border-line bg-paper p-0.5" role="tablist" aria-label="Agent 审批策略">
+            <button type="button" role="tab" aria-selected={approvalPolicy === "on-write"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "on-write" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("on-write")}>常规</button>
+            <button type="button" role="tab" aria-selected={approvalPolicy === "always"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "always" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("always")}>逐项确认</button>
+          </div>
+          <span className="basis-full text-[11px] leading-4 text-stone">{approvalPolicy === "always" ? "每个工具调用都要你确认" : "读取自动执行，账本写入始终确认"}</span>
+        </div>
         <div className="overflow-hidden rounded-md border border-line bg-paper focus-within:ring-2 focus-within:ring-brand/25">
           <textarea
             ref={textareaRef}
@@ -300,9 +343,27 @@ export function LedgerAgentWorkspace({
   );
 
   return <>
-    <aside className="ledger-agent-dock hidden min-w-0 md:block" data-open={open ? "true" : "false"} aria-label="账本 Agent 侧栏">
-      {open && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper", desktopScrollRef)}
+    <aside className={`ledger-agent-dock hidden min-w-0 ${desktopFullscreen ? "" : "md:block"}`} data-open={open && !desktopFullscreen ? "true" : "false"} aria-label="账本 Agent 侧栏">
+      {open && !desktopFullscreen && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper", desktopScrollRef)}
     </aside>
+    {open && desktopFullscreen && createPortal(
+      <section className="fixed inset-0 z-[100] hidden overflow-hidden bg-paper md:flex" aria-label="账本 Agent 全屏工作区">
+        <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel" aria-label="Agent 会话历史">
+          <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4">
+            <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div>
+            <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
+              <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
+              <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {session.timeline.length} 条记录</span>
+            </button>)}
+          </div>
+        </aside>
+        {panel("flex min-w-0 flex-1 flex-col overflow-hidden bg-paper", fullscreenScrollRef)}
+      </section>,
+      document.body
+    )}
     {open && createPortal(panel("fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:hidden", mobileScrollRef), document.body)}
   </>;
 }
@@ -423,19 +484,44 @@ function storageKey() {
   return `ledger.agent.workspace.v1:${apiEndpointLedgerScope()}`;
 }
 
-function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: TimelineItem[] } {
+function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] } {
   try {
     const raw = window.localStorage.getItem(storageKey());
-    if (!raw) return { approvalPolicy: "on-write", sessionId: "", messages: [] };
-    const value = JSON.parse(raw) as { approvalPolicy?: string; sessionId?: string; timeline?: unknown; messages?: unknown };
+    if (!raw) {
+      const session = createAgentSession();
+      return { approvalPolicy: "on-write", activeSessionId: session.id, sessions: [session] };
+    }
+    const value = JSON.parse(raw) as { approvalPolicy?: string; activeSessionId?: string; sessions?: unknown; sessionId?: string; timeline?: unknown; messages?: unknown };
+    const sessions = restoreSessions(value.sessions);
+    if (!sessions.length) sessions.push(createAgentSession(restoreTimeline(value.timeline ?? value.messages), typeof value.sessionId === "string" ? value.sessionId : ""));
+    const activeSessionId = typeof value.activeSessionId === "string" && sessions.some((session) => session.id === value.activeSessionId) ? value.activeSessionId : sessions[0].id;
     return {
       approvalPolicy: value.approvalPolicy === "always" ? "always" : "on-write",
-      sessionId: typeof value.sessionId === "string" ? value.sessionId : "",
-      messages: restoreTimeline(value.timeline ?? value.messages),
+      activeSessionId,
+      sessions,
     };
   } catch {
-    return { approvalPolicy: "on-write", sessionId: "", messages: [] };
+    const session = createAgentSession();
+    return { approvalPolicy: "on-write", activeSessionId: session.id, sessions: [session] };
   }
+}
+
+export function restoreSessions(value: unknown): AgentSession[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const session = item as Record<string, unknown>;
+    if (typeof session.id !== "string") return [];
+    const createdAt = typeof session.createdAt === "number" && Number.isFinite(session.createdAt) ? session.createdAt : Date.now();
+    const updatedAt = typeof session.updatedAt === "number" && Number.isFinite(session.updatedAt) ? session.updatedAt : createdAt;
+    return [{
+      id: session.id,
+      serverSessionId: typeof session.serverSessionId === "string" ? session.serverSessionId : "",
+      createdAt,
+      updatedAt,
+      timeline: restoreTimeline(session.timeline),
+    }];
+  }).slice(0, MAX_STORED_SESSIONS);
 }
 
 export function restoreTimeline(value: unknown): TimelineItem[] {
@@ -461,9 +547,12 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
   }).slice(-MAX_STORED_TIMELINE_ITEMS);
 }
 
-function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; sessionId: string; timeline: TimelineItem[] }) {
+function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] }) {
   try {
-    window.localStorage.setItem(storageKey(), JSON.stringify(value));
+    window.localStorage.setItem(storageKey(), JSON.stringify({
+      ...value,
+      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map((session) => ({ ...session, timeline: session.timeline.slice(-MAX_STORED_TIMELINE_ITEMS) })),
+    }));
   } catch {
     // Conversation persistence is optional.
   }
