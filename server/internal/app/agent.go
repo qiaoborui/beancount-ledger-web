@@ -461,7 +461,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "run_bql", Description: "运行只读 BQL，并返回可绘制为表格、柱状图、饼图或折线图的结果。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "run_bql", Description: "运行只读 BQL，并返回可绘制为表格、柱状图、饼图或折线图的结果。统计支出应过滤 account LIKE 'Expenses:%'，不要用 type 代替账户类别。", Parameters: objectSchema(map[string]any{
 				"query":             stringSchema("要运行的 BQL SQL"),
 				"valuationCurrency": stringSchema("折算币种，例如 CNY"),
 				"visualization":     enumSchema("auto", "table", "bar", "pie", "line"),
@@ -491,7 +491,14 @@ func (s *Server) agentTools() map[string]agentTool {
 				if input.Visualization != "" && input.Visualization != "table" {
 					artifacts = append(artifacts, AgentArtifact{ID: newAgentID("artifact"), Type: "chart", Title: "BQL 图表", Data: map[string]any{"kind": input.Visualization, "result": result}})
 				}
-				modelResult := map[string]any{"columns": result.Columns, "rows": headRows(result.Rows, 40), "rowCount": result.RowCount, "warnings": result.Warnings, "valuationCurrency": result.ValuationCurrency}
+				modelResult := map[string]any{
+					"columns":           result.Columns,
+					"rows":              bqlModelRows(result.Columns, headRows(result.Rows, 40)),
+					"rowCount":          result.RowCount,
+					"warnings":          result.Warnings,
+					"valuationCurrency": result.ValuationCurrency,
+					"moneyUnit":         "major",
+				}
 				clientResult := map[string]any{"rowCount": result.RowCount, "columns": result.Columns, "warnings": result.Warnings}
 				return agentToolExecution{ModelOutput: modelResult, ClientOutput: clientResult, Artifacts: artifacts}, nil
 			},
@@ -862,6 +869,48 @@ func bqlCapabilities() map[string]any {
 		"clauses":    []string{"WHERE with AND", "GROUP BY", "ORDER BY", "LIMIT"},
 		"operators":  []string{"=", "!=", ">", ">=", "<", "<=", "LIKE"},
 		"limits":     map[string]any{"default": bqlDefaultLimit, "max": bqlMaxLimit},
+		"fieldNotes": map[string]any{
+			"type":    "交易分类，值为 expense, income, transfer；postings 表的每条分录继承所属交易分类，不能用它代替账户类别",
+			"account": "账户路径；统计支出使用 account LIKE 'Expenses:%'，统计收入使用 account LIKE 'Income:%'",
+			"amount":  "原币金额",
+			"value":   "按 valuationCurrency 折算后的金额",
+		},
+		"examples": []string{
+			"SELECT month, sum(value) AS total_expense FROM postings WHERE account LIKE 'Expenses:%' GROUP BY month ORDER BY month",
+			"SELECT account, sum(value) AS total FROM postings WHERE account LIKE 'Expenses:%' GROUP BY account ORDER BY total DESC LIMIT 20",
+		},
+	}
+}
+
+func bqlModelRows(columns []BQLColumn, rows [][]any) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		item := make(map[string]any, len(columns))
+		for index, column := range columns {
+			if index >= len(row) {
+				continue
+			}
+			value := row[index]
+			if column.Type == "money" {
+				value = bqlMoneyForModel(value)
+			}
+			item[column.Name] = value
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func bqlMoneyForModel(value any) any {
+	switch amount := value.(type) {
+	case int:
+		return fromCents(amount)
+	case int64:
+		return fmt.Sprintf("%.2f", float64(amount)/100)
+	case float64:
+		return fmt.Sprintf("%.2f", amount/100)
+	default:
+		return value
 	}
 }
 
