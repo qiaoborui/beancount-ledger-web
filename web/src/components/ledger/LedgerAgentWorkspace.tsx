@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, Play, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
@@ -31,6 +32,7 @@ type ToolItem = { kind: "tool"; id: string; tool: AgentToolEvent };
 type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
 type ApprovalItem = { kind: "approval"; id: string; approval: AgentApproval; resolved?: boolean };
 type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
+const MAX_STORED_TIMELINE_ITEMS = 80;
 
 type BQLColumn = { name: string; type: string };
 type BQLResult = { columns: BQLColumn[]; rows: unknown[][]; query: string; warnings?: string[]; valuationCurrency: string; rowCount: number };
@@ -79,7 +81,8 @@ export function LedgerAgentWorkspace({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const requestRef = useRef(0);
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const desktopScrollRef = useRef<HTMLDivElement | null>(null);
+  const mobileScrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
 
@@ -89,7 +92,7 @@ export function LedgerAgentWorkspace({
   }
 
   useEffect(() => {
-    writeStoredAgent({ approvalPolicy, sessionId, messages: timeline.filter((item): item is MessageItem => item.kind === "message").slice(-40) });
+    writeStoredAgent({ approvalPolicy, sessionId, timeline: timeline.slice(-MAX_STORED_TIMELINE_ITEMS) });
   }, [approvalPolicy, sessionId, timeline]);
 
   useEffect(() => {
@@ -111,8 +114,20 @@ export function LedgerAgentWorkspace({
 
   useEffect(() => {
     if (!open) return;
-    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
+    requestAnimationFrame(() => {
+      const scrollRef = window.matchMedia("(min-width: 768px)").matches ? desktopScrollRef : mobileScrollRef;
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    });
   }, [open, timeline, streamingText, status]);
+
+  useEffect(() => {
+    if (!open || window.matchMedia("(min-width: 768px)").matches) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   const conversation = timeline.filter((item): item is MessageItem => item.kind === "message");
   const hasConversation = conversation.some((message) => message.role === "user");
@@ -215,7 +230,7 @@ export function LedgerAgentWorkspace({
     void sendMessage(input);
   }
 
-  const panel = (className: string) => (
+  const panel = (className: string, scrollContainerRef: RefObject<HTMLDivElement | null>) => (
     <section className={className}
       aria-label="全局账本 Agent"
     >
@@ -243,7 +258,7 @@ export function LedgerAgentWorkspace({
         <span className="basis-full text-[11px] leading-4 text-stone">{approvalPolicy === "always" ? "每个工具调用都要你确认" : "读取自动执行，账本写入始终确认"}</span>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-4">
+      <div ref={scrollContainerRef} className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-4">
         {!hasConversation && <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-1">
           {suggestions.map((suggestion) => <button key={suggestion} type="button" className="min-h-11 rounded-md border border-line bg-panel px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => void sendMessage(suggestion)} disabled={busy}>{suggestion}</button>)}
         </div>}
@@ -286,9 +301,9 @@ export function LedgerAgentWorkspace({
 
   return <>
     <aside className="ledger-agent-dock hidden min-w-0 md:block" data-open={open ? "true" : "false"} aria-label="账本 Agent 侧栏">
-      {open && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper")}
+      {open && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper", desktopScrollRef)}
     </aside>
-    {open && panel("fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:hidden")}
+    {open && createPortal(panel("fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:hidden", mobileScrollRef), document.body)}
   </>;
 }
 
@@ -408,22 +423,45 @@ function storageKey() {
   return `ledger.agent.workspace.v1:${apiEndpointLedgerScope()}`;
 }
 
-function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: MessageItem[] } {
+function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: TimelineItem[] } {
   try {
     const raw = window.localStorage.getItem(storageKey());
     if (!raw) return { approvalPolicy: "on-write", sessionId: "", messages: [] };
-    const value = JSON.parse(raw) as { approvalPolicy?: string; sessionId?: string; messages?: MessageItem[] };
+    const value = JSON.parse(raw) as { approvalPolicy?: string; sessionId?: string; timeline?: unknown; messages?: unknown };
     return {
       approvalPolicy: value.approvalPolicy === "always" ? "always" : "on-write",
       sessionId: typeof value.sessionId === "string" ? value.sessionId : "",
-      messages: Array.isArray(value.messages) ? value.messages.filter((item) => item?.kind === "message" && (item.role === "user" || item.role === "assistant") && typeof item.content === "string").slice(-40) : [],
+      messages: restoreTimeline(value.timeline ?? value.messages),
     };
   } catch {
     return { approvalPolicy: "on-write", sessionId: "", messages: [] };
   }
 }
 
-function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: MessageItem[] }) {
+export function restoreTimeline(value: unknown): TimelineItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is TimelineItem => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.id !== "string") return false;
+    if (candidate.kind === "message") return (candidate.role === "user" || candidate.role === "assistant") && typeof candidate.content === "string";
+    if (candidate.kind === "tool") {
+      const tool = candidate.tool;
+      return Boolean(tool && typeof tool === "object" && typeof (tool as Record<string, unknown>).id === "string" && typeof (tool as Record<string, unknown>).name === "string" && typeof (tool as Record<string, unknown>).title === "string" && ["running", "completed", "error"].includes(String((tool as Record<string, unknown>).status)));
+    }
+    if (candidate.kind === "artifact") {
+      const artifact = candidate.artifact;
+      return Boolean(artifact && typeof artifact === "object" && typeof (artifact as Record<string, unknown>).id === "string" && typeof (artifact as Record<string, unknown>).type === "string" && typeof (artifact as Record<string, unknown>).title === "string" && "data" in (artifact as Record<string, unknown>));
+    }
+    if (candidate.kind === "approval") {
+      const approval = candidate.approval;
+      return Boolean(approval && typeof approval === "object" && typeof (approval as Record<string, unknown>).id === "string" && typeof (approval as Record<string, unknown>).sessionId === "string" && typeof (approval as Record<string, unknown>).toolName === "string");
+    }
+    return false;
+  }).slice(-MAX_STORED_TIMELINE_ITEMS);
+}
+
+function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; sessionId: string; timeline: TimelineItem[] }) {
   try {
     window.localStorage.setItem(storageKey(), JSON.stringify(value));
   } catch {
