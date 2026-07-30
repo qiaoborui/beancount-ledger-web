@@ -12,7 +12,7 @@ Do not commit your real ledger, `.env` files, database dumps, or migration expor
 
 ## Data sent to AI providers
 
-If AI parsing is enabled, the server sends the user's input and the active account names to the configured AI provider. The provider does not need direct access to your ledger files, but account names and transaction text may still be sensitive.
+If AI parsing is enabled, the server sends the user's input and the active account names to the configured AI provider. When BQL query history is enabled, the server sends the successful BQL text to generate its title. BQL result rows, chart data, and ledger files stay on the application server. Account names, transaction text, and BQL text may still be sensitive.
 
 Disable AI by not configuring provider API keys.
 
@@ -26,6 +26,7 @@ The stateless `ledger-web` service stores runtime state in Postgres:
 - distributed locks and rate-limit buckets
 - import preview metadata and uploaded files
 - encrypted Gmail refresh token, mailbox history cursor, and pending bill-import metadata
+- saved BQL query text, generated or manually edited titles, and usage timestamps
 
 Gmail message bodies and attachments are read only for messages carrying the configured bill Label and matching the exact sender allowlist. Raw EML and import files remain in the runtime store while they await Review; committed source documents are archived in the private ledger repository through the existing import flow.
 
