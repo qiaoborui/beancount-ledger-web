@@ -370,6 +370,12 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
       </div>}
     </div>
     {expanded && <>
+      <div className="mt-3">
+        <label className="block min-w-0">
+          <span className="mb-1 block text-[11px] text-stone">查询</span>
+          <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="payee:星巴克 AND amount>30" value={filters.query} onChange={(event) => onChange("query", event.target.value)} />
+        </label>
+      </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
@@ -430,6 +436,7 @@ function activeFilterChips(data: DashboardSummary, filters: DashboardFilterState
     if (value.trim()) chips.push({ key, label: `${label}: ${value}` });
   };
   if (filters.category.length) chips.push({ key: "category", label: `分类: ${filters.category.map((value) => optionLabel(data.filterOptions.categories, value)).join(" / ")}` });
+  add("query", "查询", filters.query);
   if (filters.account.length) chips.push({ key: "account", label: `账户: ${filters.account.map((value) => optionLabel(data.filterOptions.accounts, value)).join(" / ")}` });
   if (filters.payee.length) chips.push({ key: "payee", label: `商户: ${filters.payee.join(" / ")}` });
   if (filters.tag.length) chips.push({ key: "tag", label: `标签: ${filters.tag.join(" / ")}` });

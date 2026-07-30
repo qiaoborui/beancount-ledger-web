@@ -4,9 +4,10 @@ import { DEFAULT_DASHBOARD_FILTERS, dashboardFiltersToApiQuery, dashboardFilters
 
 describe("dashboard filter query params", () => {
   it("parses comma and repeated array params into a stable filter state", () => {
-    const filters = parseDashboardFiltersFromSearch("?type=income,expense&type=expense&category=Expenses%3AFood&category=Expenses%3ATransport%2CExpenses%3AFood&payee= Cafe &minAmount=10&maxAmount=20");
+    const filters = parseDashboardFiltersFromSearch("?q=payee%3ACafe&type=income,expense&type=expense&category=Expenses%3AFood&category=Expenses%3ATransport%2CExpenses%3AFood&payee= Cafe &minAmount=10&maxAmount=20");
 
     expect(filters).toEqual({
+      query: "payee:Cafe",
       type: ["expense", "income"],
       category: ["Expenses:Food", "Expenses:Transport"],
       account: [],
@@ -22,10 +23,11 @@ describe("dashboard filter query params", () => {
       ...DEFAULT_DASHBOARD_FILTERS,
       category: ["Expenses:Transport", "Expenses:Food", "Expenses:Food"],
       type: ["income", "expense"],
+      query: "account:Expenses:Food",
       minAmount: " 10 ",
     }, new URLSearchParams("action=quick-entry&category=old&type=old"));
 
-    expect(params.toString()).toBe("action=quick-entry&type=expense%2Cincome&category=Expenses%3AFood%2CExpenses%3ATransport&minAmount=10");
+    expect(params.toString()).toBe("action=quick-entry&type=expense%2Cincome&category=Expenses%3AFood%2CExpenses%3ATransport&q=account%3AExpenses%3AFood&minAmount=10");
   });
 
   it("clears dashboard params without dropping non-dashboard query params", () => {
@@ -39,6 +41,7 @@ describe("dashboard filter query params", () => {
     const query = dashboardFiltersToApiQuery(timeRange, {
       ...DEFAULT_DASHBOARD_FILTERS,
       type: ["income", "expense"],
+      query: "payee:Cafe",
       category: ["Expenses:Food"],
       payee: ["Cafe"],
       tag: ["work"],
@@ -46,7 +49,7 @@ describe("dashboard filter query params", () => {
       maxAmount: "20",
     });
 
-    expect(query).toBe("start=2026-05-01&end=2026-06-01&type=expense%2Cincome&category=Expenses%3AFood&payee=Cafe&tag=work&minAmount=10&maxAmount=20&valuationCurrency=CNY");
+    expect(query).toBe("start=2026-05-01&end=2026-06-01&type=expense%2Cincome&category=Expenses%3AFood&payee=Cafe&tag=work&q=payee%3ACafe&minAmount=10&maxAmount=20&valuationCurrency=CNY");
   });
 
   it("detects active filters after normalization", () => {
