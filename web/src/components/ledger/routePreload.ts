@@ -32,6 +32,16 @@ const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
 };
 
 const routePreloads = new Map<LedgerPage, Promise<unknown>>();
+const accountDetailPreloads = new Map<string, Promise<unknown>>();
+
+function runWhenIdle(callback: () => void, timeout = 3000) {
+  if (typeof window === "undefined") return;
+  if (window.requestIdleCallback) {
+    window.requestIdleCallback(callback, { timeout });
+    return;
+  }
+  window.setTimeout(callback, 0);
+}
 
 function pageFromHref(href: string): LedgerPage {
   const pathname = (() => {
@@ -59,6 +69,12 @@ function pageFromHref(href: string): LedgerPage {
 export function preloadLedgerRoute(href: string) {
   if (typeof window === "undefined") return;
   const page = pageFromHref(href);
+  if (page === "accounts" && href.includes("/accounts/") && !accountDetailPreloads.has(href)) {
+    accountDetailPreloads.set(href, loadAccountDetailPage().catch((error) => {
+      accountDetailPreloads.delete(href);
+      console.warn("Ledger account detail preload failed", error);
+    }));
+  }
   if (routePreloads.has(page)) return;
   const load = routeLoaders[page];
   if (!load) return;
@@ -66,17 +82,22 @@ export function preloadLedgerRoute(href: string) {
     routePreloads.delete(page);
     console.warn("Ledger route preload failed", error);
   }));
-  if (page === "accounts" && href.includes("/accounts/")) {
-    void loadAccountDetailPage().catch((error) => {
-      console.warn("Ledger account detail preload failed", error);
-    });
-  }
+}
+
+function preloadRoutesIncrementally(hrefs: string[], index = 0) {
+  if (index >= hrefs.length) return;
+  runWhenIdle(() => {
+    preloadLedgerRoute(hrefs[index]);
+    window.setTimeout(() => preloadRoutesIncrementally(hrefs, index + 1), 180);
+  });
 }
 
 export function preloadOfflineCoreRoutes() {
   if (typeof window === "undefined") return;
-  const coreRoutes = ["/transactions", "/accounts", "/settings"];
-  for (const href of coreRoutes) preloadLedgerRoute(href);
+  const coreRoutes = ["/transactions", "/accounts", "/dashboard", "/net-worth", "/income-statement", "/settings"];
+  const secondaryRoutes = ["/imports", "/reconcile", "/currencies", "/investments", "/editor"];
+  preloadRoutesIncrementally(coreRoutes);
+  window.setTimeout(() => preloadRoutesIncrementally(secondaryRoutes), 1500);
   void loadEntryModal().catch((error) => {
     console.warn("Ledger entry preload failed", error);
   });
