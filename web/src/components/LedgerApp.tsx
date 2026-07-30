@@ -349,7 +349,21 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const projectedTxns = useMemo(() => applyPendingLedgerOperations(txns, pendingOperations, timeRange), [pendingOperations, timeRange, txns]);
   const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
-  useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => router.push("/accounts") });
+  useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => { void pushPreloadedRoute("/accounts"); } });
+
+  function pushPreloadedRoute(href: string, options?: { scroll?: boolean }) {
+    const preload = preloadLedgerRoute(href);
+    const navigate = () => {
+      startRouteTransition(() => {
+        router.push(href, options);
+      });
+    };
+    if (!preload) {
+      navigate();
+      return Promise.resolve();
+    }
+    return preload.finally(navigate).then(() => undefined);
+  }
 
   useEffect(() => {
     setMobileTabHrefs(readMobileTabHrefs());
@@ -438,17 +452,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     const params = new URLSearchParams();
     params.set("category", account);
     if (mode === "exact") params.set("mode", "exact");
-    preloadLedgerRoute("/transactions");
-    startRouteTransition(() => {
-      router.push(`/transactions?${params.toString()}`);
-    });
+    void pushPreloadedRoute(`/transactions?${params.toString()}`);
   }
 
   function openTransactionsHref(href: string) {
-    preloadLedgerRoute(href);
-    startRouteTransition(() => {
-      router.push(href);
-    });
+    void pushPreloadedRoute(href);
   }
 
   function applyTransactionQuickView(view: (typeof TRANSACTION_QUICK_VIEWS)[number]) {
@@ -466,17 +474,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (search) params.set("q", search);
     if (mode === "exact") params.set("mode", "exact");
     const query = params.toString();
-    preloadLedgerRoute("/transactions");
-    startRouteTransition(() => {
-      router.push(query ? `/transactions?${query}` : "/transactions");
-    });
+    void pushPreloadedRoute(query ? `/transactions?${query}` : "/transactions");
   }
 
   function focusTransactionSearch() {
     if (page !== "transactions") {
-      preloadLedgerRoute("/transactions");
-      startRouteTransition(() => router.push("/transactions"));
-      window.setTimeout(() => document.getElementById("transaction-search-input")?.focus(), 220);
+      void pushPreloadedRoute("/transactions").then(() => {
+        window.setTimeout(() => document.getElementById("transaction-search-input")?.focus(), 80);
+      });
       return;
     }
     document.getElementById("transaction-search-input")?.focus();
@@ -616,13 +621,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   }
 
   function openImportPage() {
-    preloadLedgerRoute("/imports");
-    router.push("/imports");
+    void pushPreloadedRoute("/imports");
   }
 
   function openReconcilePage() {
-    preloadLedgerRoute("/reconcile");
-    router.push("/reconcile");
+    void pushPreloadedRoute("/reconcile");
     if (!unlocked) unlockOnlineSensitive();
   }
 
@@ -650,7 +653,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
     { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
     { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
-    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { preloadLedgerRoute(item.href); router.push(item.href); } })),
+    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
   ];
 
@@ -699,7 +702,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {passkeyStatusLoaded && !hasPasskey && <PasskeyBanner onRegister={registerPasskey} />}
 
       <div
-        key={pathname}
         className={`app-page-transition app-pull-surface min-w-0 max-w-full [overflow-x:clip] ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
         style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
         onTouchStart={handleTouchStart}

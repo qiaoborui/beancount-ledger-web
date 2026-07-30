@@ -12,7 +12,8 @@ type ClientNavLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
 
 export function ClientNavLink({ href, children, prefetch = true, onClick, onPointerEnter, onFocus, onTouchStart, ...props }: ClientNavLinkProps) {
   const prefetchRoute = () => {
-    if (prefetch) preloadLedgerRoute(href);
+    if (prefetch) return preloadLedgerRoute(href);
+    return undefined;
   };
   return <a href={href} {...props} onPointerEnter={(event: PointerEvent<HTMLAnchorElement>) => {
     onPointerEnter?.(event);
@@ -27,7 +28,11 @@ export function ClientNavLink({ href, children, prefetch = true, onClick, onPoin
     onClick?.(event);
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    prefetchRoute();
-    navigate(href);
+    const preload = prefetchRoute();
+    if (!preload) {
+      navigate(href);
+      return;
+    }
+    void preload.finally(() => navigate(href));
   }}>{children}</a>;
 }
