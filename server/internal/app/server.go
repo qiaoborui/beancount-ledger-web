@@ -97,6 +97,11 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	ledger.POST("/transactions", s.reverseTransaction)
 	ledger.POST("/bql", noStore(), s.bql)
+	ledger.GET("/bql-history", noStore(), s.bqlHistory)
+	ledger.POST("/bql-history", noStore(), s.saveBQLHistory)
+	ledger.POST("/bql-history/:id/title", noStore(), s.generateBQLHistoryTitleHandler)
+	ledger.PATCH("/bql-history/:id", noStore(), s.renameBQLHistory)
+	ledger.DELETE("/bql-history/:id", noStore(), s.deleteBQLHistory)
 	ledger.PUT("/transactions", s.updateTransaction)
 	ledger.DELETE("/transactions", s.deleteTransaction)
 	ledger.POST("/accounts", s.appendAccount)

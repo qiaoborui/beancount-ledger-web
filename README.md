@@ -323,7 +323,7 @@ Ledger-side import files live under `$LEDGER_ROOT/imports/`. CMB checking import
 - Keep your real ledger in a private repository.
 - Do not commit `.env`, runtime files, API keys, or passkey stores.
 - Deploy behind HTTPS if using passkeys or exposing the app outside localhost.
-- AI providers receive the text you ask them to parse plus account names needed for validation. Do not send sensitive text to an AI provider you do not trust.
+- AI providers receive the text you ask them to parse plus account names needed for validation. Successful BQL queries also go to the configured provider to generate a query title; result rows stay in the app. Do not send sensitive text to an AI provider you do not trust.
 - Writes are previewed first and validated with `bean-check` before being kept.
 
 ## Scripts

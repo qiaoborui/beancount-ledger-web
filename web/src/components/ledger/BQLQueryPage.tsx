@@ -3,11 +3,11 @@
 import { sql } from "@codemirror/lang-sql";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { AlertTriangle, BarChart3, Clock, Database, LineChart as LineChartIcon, PieChart as PieChartIcon, Play, RefreshCw, Sparkles, Table2 } from "lucide-react";
+import { AlertTriangle, BarChart3, Clock, Database, LineChart as LineChartIcon, Pencil, PieChart as PieChartIcon, Play, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
-import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
+import { apiFetch } from "@/lib/apiEndpoints";
 import { readJson } from "@/lib/clientFetch";
 
 type BQLColumn = {
@@ -30,6 +30,16 @@ type BQLRun = {
   query: string;
   result?: BQLResult;
   error?: string;
+};
+
+type BQLHistoryRecord = {
+  id: string;
+  query: string;
+  title: string;
+  titleSource: "ai" | "fallback" | "manual";
+  createdAt: string;
+  lastRunAt: string;
+  runCount: number;
 };
 
 type BQLStatement = {
@@ -89,8 +99,6 @@ LIMIT 100`,
   },
 ];
 
-const recentsLimit = 8;
-const recentsKey = "ledger.bql.recents.v1";
 const chartColors = [
   "var(--chart-palette-1, var(--chart-primary))",
   "var(--chart-palette-2, var(--stone))",
@@ -156,19 +164,20 @@ const bqlEditorTheme = EditorView.theme({
 });
 
 export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent, agentQuery }: { valuationCurrency: string; onSensitiveLocked: () => void; onOpenAgent?: (prompt: string) => void; agentQuery?: { id: number; query: string } | null }) {
-  const [recents, setRecents] = useState<string[]>(() => readRecents());
-  const [query, setQuery] = useState(() => {
-    const initialRecents = readRecents();
-    return initialRecents[0] ?? defaultQuery;
-  });
+  const [query, setQuery] = useState(defaultQuery);
   const [runs, setRuns] = useState<BQLRun[]>([]);
   const [activeViews, setActiveViews] = useState<Record<string, ChartKind>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<BQLHistoryRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [editingHistoryID, setEditingHistoryID] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [historyMutationID, setHistoryMutationID] = useState<string | null>(null);
   const selectionRef = useRef<EditorSelection>({ from: 0, to: 0 });
   const editorExtensions = useMemo(() => [sql()], []);
   const statements = useMemo(() => splitBQLStatements(query), [query]);
-  const hasRecents = recents.length > 0;
   const canRun = statements.length > 0 && !loading;
   const preview = useMemo(() => summarizeRuns(runs), [runs]);
   const appliedAgentQueryRef = useRef(0);
@@ -178,6 +187,29 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
     appliedAgentQueryRef.current = agentQuery.id;
     useQuery(agentQuery.query);
   }, [agentQuery]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await apiFetch("/api/ledger/bql-history", undefined, { kind: "read" });
+        if (response.status === 401 || response.status === 423) {
+          onSensitiveLocked();
+          return;
+        }
+        const payload = await readJson<{ records: BQLHistoryRecord[]; error?: string }>(response);
+        if (!response.ok) throw new Error(payload.error || `请求失败：${response.status}`);
+        if (!cancelled) setHistory(sortHistory(payload.records));
+      } catch {
+        if (!cancelled) setHistoryError("查询历史暂时无法加载");
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onSensitiveLocked]);
 
   async function runAllQueries() {
     await executeStatements(statements, query.trim());
@@ -196,6 +228,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
     const nextRuns = selected.map((text, index) => ({ id: `${Date.now()}:${index}:${text.length}`, query: text }));
     setRuns(nextRuns);
     try {
+      let completed = true;
       for (const run of nextRuns) {
         try {
           const response = await apiFetch("/api/ledger/bql", {
@@ -204,6 +237,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
             body: JSON.stringify({ query: run.query, valuationCurrency }),
           }, { kind: "read" });
           if (response.status === 401 || response.status === 423) {
+            completed = false;
             onSensitiveLocked();
             return;
           }
@@ -211,10 +245,11 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
           if (!response.ok) throw new Error(payload.error || `请求失败：${response.status}`);
           updateRun(run.id, { result: payload });
         } catch (runError) {
+          completed = false;
           updateRun(run.id, { error: runError instanceof Error ? runError.message : "BQL 查询失败" });
         }
       }
-      rememberQuery(historyText);
+      if (completed) void rememberSuccessfulQuery(historyText);
     } finally {
       setLoading(false);
     }
@@ -224,14 +259,97 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
     setRuns((current) => current.map((run) => run.id === id ? { ...run, ...patch } : run));
   }
 
-  function rememberQuery(text: string) {
+  async function rememberSuccessfulQuery(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
-    setRecents((current) => {
-      const next = [trimmed, ...current.filter((item) => item !== trimmed)].slice(0, recentsLimit);
-      writeRecents(next);
-      return next;
-    });
+    try {
+      const response = await apiFetch("/api/ledger/bql-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: trimmed }),
+      }, { kind: "write" });
+      if (response.status === 401 || response.status === 423) {
+        onSensitiveLocked();
+        return;
+      }
+      const record = await readJson<BQLHistoryRecord & { error?: string }>(response);
+      if (!response.ok) throw new Error(record.error || `请求失败：${response.status}`);
+      setHistory((current) => sortHistory([record, ...current.filter((item) => item.id !== record.id)]));
+      setHistoryError("");
+      void generateHistoryTitle(record.id);
+    } catch {
+      setHistoryError("查询已完成，历史未同步");
+    }
+  }
+
+  async function generateHistoryTitle(id: string) {
+    try {
+      const response = await apiFetch(`/api/ledger/bql-history/${id}/title`, { method: "POST" }, { kind: "write" });
+      if (response.status === 401 || response.status === 423) {
+        onSensitiveLocked();
+        return;
+      }
+      const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
+      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      setHistory((current) => current.map((item) => item.id === next.id ? next : item));
+    } catch {
+      // The fallback title remains usable; the next successful run retries AI naming.
+    }
+  }
+
+  function runHistory(record: BQLHistoryRecord) {
+    useQuery(record.query);
+    void executeStatements(splitBQLStatements(record.query), record.query);
+  }
+
+  function beginRename(record: BQLHistoryRecord) {
+    setEditingHistoryID(record.id);
+    setEditingTitle(record.title);
+  }
+
+  async function saveHistoryTitle(record: BQLHistoryRecord) {
+    const title = editingTitle.trim();
+    if (!title) return;
+    setHistoryMutationID(record.id);
+    try {
+      const response = await apiFetch(`/api/ledger/bql-history/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      }, { kind: "write" });
+      if (response.status === 401 || response.status === 423) {
+        onSensitiveLocked();
+        return;
+      }
+      const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
+      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      setHistory((current) => current.map((item) => item.id === next.id ? next : item));
+      setEditingHistoryID(null);
+      setHistoryError("");
+    } catch {
+      setHistoryError("标题保存失败");
+    } finally {
+      setHistoryMutationID(null);
+    }
+  }
+
+  async function removeHistory(record: BQLHistoryRecord) {
+    setHistoryMutationID(record.id);
+    try {
+      const response = await apiFetch(`/api/ledger/bql-history/${record.id}`, { method: "DELETE" }, { kind: "write" });
+      if (response.status === 401 || response.status === 423) {
+        onSensitiveLocked();
+        return;
+      }
+      if (!response.ok) throw new Error(`请求失败：${response.status}`);
+      setHistory((current) => current.filter((item) => item.id !== record.id));
+      setEditingHistoryID((current) => current === record.id ? null : current);
+      setHistoryError("");
+    } catch {
+      setHistoryError("历史记录删除失败");
+    } finally {
+      setHistoryMutationID(null);
+    }
   }
 
   function useQuery(nextQuery: string) {
@@ -302,14 +420,29 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
           </div>
           <aside className="min-w-0 border-t border-line pt-3 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">
-              {hasRecents ? <Clock className="h-3 w-3" /> : null}
-              {hasRecents ? "最近查询" : "默认查询"}
+              <Clock className="h-3 w-3" />
+              {history.length > 0 ? "查询历史" : "示例查询"}
             </div>
+            {historyError && <div className="mt-2 text-xs text-warm">{historyError}</div>}
             <div className="mt-2 grid gap-2">
-              {(hasRecents ? recents.map((recent, index) => ({ label: `最近 ${index + 1}`, query: recent })) : examples).map((example, index) => <button key={`${example.label}:${example.query}:${index}`} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
+              {historyLoading && <div className="flex items-center gap-2 px-1 py-2 text-xs text-stone"><RefreshCw className="h-3.5 w-3.5 animate-spin" />加载查询历史</div>}
+              {!historyLoading && history.length === 0 && examples.map((example, index) => <button key={`${example.label}:${example.query}:${index}`} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
                 <span className="block truncate font-medium text-ink">{example.label}</span>
                 <span className="mt-1 block truncate font-mono text-[11px] text-stone">{example.query.replace(/\s+/g, " ")}</span>
               </button>)}
+              {!historyLoading && history.map((record) => <div key={record.id} className="min-w-0 rounded-md border border-line bg-paper px-3 py-2">
+                <div className="flex min-w-0 items-start gap-1">
+                  {editingHistoryID === record.id ? <input autoFocus value={editingTitle} maxLength={40} className="h-7 min-w-0 flex-1 border-b border-brand bg-transparent px-0 text-sm font-medium text-ink outline-none" onChange={(event) => setEditingTitle(event.target.value)} onBlur={() => void saveHistoryTitle(record)} onKeyDown={(event) => {
+                    if (event.key === "Enter") void saveHistoryTitle(record);
+                    if (event.key === "Escape") setEditingHistoryID(null);
+                  }} /> : <button type="button" className="min-w-0 flex-1 truncate text-left text-sm font-medium text-ink hover:text-brand" onClick={() => useQuery(record.query)} title={record.title}>{record.title}</button>}
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title="重命名" aria-label="重命名" disabled={historyMutationID === record.id} onClick={() => beginRename(record)}><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title="运行查询" aria-label="运行查询" disabled={loading || historyMutationID === record.id} onClick={() => runHistory(record)}><Play className="h-3.5 w-3.5" /></button>
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-warm disabled:opacity-40" title="删除" aria-label="删除" disabled={historyMutationID === record.id} onClick={() => void removeHistory(record)}><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+                <span className="mt-1 block truncate font-mono text-[11px] text-stone">{record.query.replace(/\s+/g, " ")}</span>
+                <span className="mt-1 block text-[11px] text-stone">{formatHistoryTime(record.lastRunAt)} · {record.runCount} 次</span>
+              </div>)}
             </div>
           </aside>
         </div>
@@ -560,26 +693,12 @@ function pushStatement(statements: BQLStatement[], raw: string, start: number, e
   statements.push({ text, start: start + Math.max(leading, 0), end: end - trailing });
 }
 
-function scopedRecentsKey() {
-  return `${recentsKey}:${apiEndpointLedgerScope()}`;
+function sortHistory(records: BQLHistoryRecord[]) {
+  return [...records].sort((left, right) => new Date(right.lastRunAt).getTime() - new Date(left.lastRunAt).getTime());
 }
 
-function readRecents() {
-  try {
-    const raw = window.localStorage.getItem(scopedRecentsKey());
-    if (!raw) return [];
-    const values = JSON.parse(raw);
-    if (!Array.isArray(values)) return [];
-    return values.filter((value): value is string => typeof value === "string" && value.trim() !== "").slice(0, recentsLimit);
-  } catch {
-    return [];
-  }
-}
-
-function writeRecents(values: string[]) {
-  try {
-    window.localStorage.setItem(scopedRecentsKey(), JSON.stringify(values.slice(0, recentsLimit)));
-  } catch {
-    // Ignore storage failures; recent queries are a convenience.
-  }
+function formatHistoryTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "刚刚运行";
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }

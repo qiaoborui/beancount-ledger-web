@@ -18,4 +18,12 @@ describe("BQLQueryPage", () => {
     expect(source).toContain("agentQuery");
     expect(source).toContain("AI 生成");
   });
+
+  it("syncs successful queries as named history instead of browser recents", () => {
+    expect(source).toContain('"/api/ledger/bql-history"');
+    expect(source).toContain("rememberSuccessfulQuery");
+    expect(source).toContain("if (completed) void rememberSuccessfulQuery(historyText)");
+    expect(source).toContain("查询历史");
+    expect(source).not.toContain("ledger.bql.recents.v1");
+  });
 });
