@@ -1,6 +1,7 @@
 import { timeRangeToParams, type TimeRange } from "@/lib/timeRange";
 
 export type DashboardFilterState = {
+  query: string;
   category: string[];
   account: string[];
   payee: string[];
@@ -11,6 +12,7 @@ export type DashboardFilterState = {
 };
 
 export const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
+  query: "",
   category: [],
   account: [],
   payee: [],
@@ -21,7 +23,7 @@ export const DEFAULT_DASHBOARD_FILTERS: DashboardFilterState = {
 };
 
 const ARRAY_FILTER_KEYS = ["type", "category", "account", "payee", "tag"] as const;
-const SCALAR_FILTER_KEYS = ["minAmount", "maxAmount"] as const;
+const SCALAR_FILTER_KEYS = ["query", "minAmount", "maxAmount"] as const;
 const DASHBOARD_FILTER_KEYS = [...ARRAY_FILTER_KEYS, ...SCALAR_FILTER_KEYS] as const;
 
 type ArrayFilterKey = (typeof ARRAY_FILTER_KEYS)[number];
@@ -30,6 +32,7 @@ type ScalarFilterKey = (typeof SCALAR_FILTER_KEYS)[number];
 export function normalizeDashboardFilters(filters: DashboardFilterState): DashboardFilterState {
   return {
     type: normalizeArray(filters.type),
+    query: filters.query.trim(),
     category: normalizeArray(filters.category),
     account: normalizeArray(filters.account),
     payee: normalizeArray(filters.payee),
@@ -43,6 +46,7 @@ export function parseDashboardFiltersFromSearch(search: string | URLSearchParams
   const params = typeof search === "string" ? new URLSearchParams(search) : search;
   return normalizeDashboardFilters({
     type: readArrayFilter(params, "type"),
+    query: params.get("q") ?? "",
     category: readArrayFilter(params, "category"),
     account: readArrayFilter(params, "account"),
     payee: readArrayFilter(params, "payee"),
@@ -56,13 +60,14 @@ export function dashboardFiltersToSearchParams(filters: DashboardFilterState, ba
   const params = new URLSearchParams(base?.toString() ?? "");
   const normalized = normalizeDashboardFilters(filters);
   for (const key of DASHBOARD_FILTER_KEYS) params.delete(key);
+  params.delete("q");
   for (const key of ARRAY_FILTER_KEYS) {
     const value = normalized[key].join(",");
     if (value) params.set(key, value);
   }
   for (const key of SCALAR_FILTER_KEYS) {
     const value = normalized[key];
-    if (value) params.set(key, value);
+    if (value) params.set(key === "query" ? "q" : key, value);
   }
   return params;
 }

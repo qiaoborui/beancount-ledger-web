@@ -32,6 +32,8 @@ type DashboardFilters struct {
 	Types      []string `json:"types,omitempty"`
 	MinAmount  *int     `json:"minAmount,omitempty"`
 	MaxAmount  *int     `json:"maxAmount,omitempty"`
+	Query      string   `json:"query,omitempty"`
+	query      *transactionQuery
 }
 
 type DashboardAnnotation struct {
@@ -206,16 +208,20 @@ func dashboardSeriesRange(start, end string, txns []Transaction) (string, string
 }
 
 func (f DashboardFilters) Empty() bool {
-	return len(f.Categories) == 0 && len(f.Accounts) == 0 && len(f.Payees) == 0 && len(f.Tags) == 0 && len(f.Types) == 0 && f.MinAmount == nil && f.MaxAmount == nil
+	return len(f.Categories) == 0 && len(f.Accounts) == 0 && len(f.Payees) == 0 && len(f.Tags) == 0 && len(f.Types) == 0 && f.MinAmount == nil && f.MaxAmount == nil && strings.TrimSpace(f.Query) == ""
 }
 
 func dashboardFilterTransactions(txns []Transaction, filters DashboardFilters, priceIndex PriceIndex, valuationCurrency string) []Transaction {
 	if filters.Empty() {
 		return txns
 	}
+	query := filters.query
+	if query == nil && strings.TrimSpace(filters.Query) != "" {
+		query = MustTransactionQuery(filters.Query)
+	}
 	out := []Transaction{}
 	for _, txn := range txns {
-		if dashboardTransactionMatches(txn, filters, priceIndex, valuationCurrency) {
+		if dashboardTransactionMatches(txn, filters, priceIndex, valuationCurrency) && (query == nil || query.Matches(txn)) {
 			out = append(out, txn)
 		}
 	}

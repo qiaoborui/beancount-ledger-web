@@ -9,7 +9,7 @@ import (
 func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
-	locked, err := service.Transactions("2026-05-01", "2026-06-01", false)
+	locked, err := service.Transactions("2026-05-01", "2026-06-01", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 		t.Fatalf("locked transaction query metadata changed: %#v", locked)
 	}
 
-	unlocked, err := service.Transactions("2026-05-01", "2026-06-01", true)
+	unlocked, err := service.Transactions("2026-05-01", "2026-06-01", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}

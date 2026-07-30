@@ -2000,7 +2000,7 @@ func (s fakeLedgerReadPorts) Summary(string, string, bool, ...string) (SummaryQu
 	return SummaryQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadPorts) Transactions(string, string, bool) (TransactionQueryResult, error) {
+func (s fakeLedgerReadPorts) Transactions(string, string, bool, string) (TransactionQueryResult, error) {
 	return TransactionQueryResult{}, errors.New("unused fake ledger read service method")
 }
 
