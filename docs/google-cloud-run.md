@@ -209,6 +209,7 @@ level so the workflow can evaluate its configuration gate:
 | `GCP_ARTIFACT_REPOSITORY` | Artifact Registry repository |
 | `GCP_CLOUD_RUN_SERVICE` | Cloud Run service name |
 | `GCP_ZIP_WORKER_SERVICE` | Private ZIP worker service name, normally `beancount-ledger-zip-worker` |
+| `GCP_DEEPSEEK_SECRET` | Optional Secret Manager secret containing the DeepSeek API key |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
 | `GCP_RUNTIME_SERVICE_ACCOUNT` | Runtime service-account email |
@@ -224,6 +225,10 @@ Store `CLOUD_RUN_SECRET_MAPPINGS` as a secret in the
 `google-cloud-production` environment. `CLOUD_RUN_EXTRA_ENV_VARS` carries
 optional public configuration as
 `KEY=VALUE|KEY=VALUE`. The pipe character is reserved as the separator. Example:
+
+When `GCP_DEEPSEEK_SECRET` is configured, the workflow automatically mounts its
+`latest` version as `DEEPSEEK_API_KEY`; do not duplicate that entry in
+`CLOUD_RUN_SECRET_MAPPINGS`.
 
 ```text
 LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com|GMAIL_OAUTH_REDIRECT_URL=https://beancount.borry.org/api/integrations/gmail/callback|GMAIL_PUBSUB_TOPIC=projects/beancount-502511/topics/ledger-gmail|GMAIL_PUBSUB_AUDIENCE=https://beancount.borry.org/api/integrations/gmail/pubsub|GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@beancount-502511.iam.gserviceaccount.com|GMAIL_LABEL=Ledger/Bills|GMAIL_ALLOWED_SENDERS=bill@example.com|CRON_OIDC_AUDIENCE=https://beancount.borry.org|CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@beancount-502511.iam.gserviceaccount.com
