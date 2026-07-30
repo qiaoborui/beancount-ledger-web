@@ -107,6 +107,22 @@ func (s *Server) transactions(c *gin.Context) {
 	c.JSON(http.StatusOK, payload)
 }
 
+func (s *Server) bql(c *gin.Context) {
+	if !requireSensitive(c) {
+		return
+	}
+	var input BQLRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	payload, err := s.queryPort.BQL(c.Request.Context(), input.Query, input.ValuationCurrency)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, payload)
+}
+
 func (s *Server) balances(c *gin.Context) {
 	if !requireSensitive(c) {
 		return

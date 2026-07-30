@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BookOpen, ChevronLeft, ChevronRight, Coins, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { Activity, BookOpen, ChevronLeft, ChevronRight, Coins, Database, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ClientNavLink } from "./ledger/ClientNavLink";
 import { haptic } from "./ledger/haptics";
@@ -21,6 +21,7 @@ type LedgerNavItem = {
 export const ledgerNavItems: LedgerNavItem[] = [
   { href: "/", label: "财务概览", icon: Home, mobilePrimary: true, group: "observe" },
   { href: "/dashboard", label: "收支分析", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
+  { href: "/query", label: "BQL 查询", icon: Database, mobilePrimary: false, group: "observe" },
   { href: "/net-worth", label: "资产负债", icon: Landmark, mobilePrimary: false, group: "observe" },
   { href: "/income-statement", label: "损益表", icon: TrendingUp, mobilePrimary: false, group: "observe" },
   { href: "/investments", label: "股票", icon: TrendingUp, mobilePrimary: false, group: "observe" },

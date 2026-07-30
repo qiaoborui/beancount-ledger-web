@@ -11,6 +11,7 @@ type LedgerQueryPort interface {
 	Transactions(string, string, bool, string) (TransactionQueryResult, error)
 	Balances(context.Context) (map[string]int, []BalanceAssertion, error)
 	IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error)
+	BQL(context.Context, string, string) (BQLResult, error)
 }
 
 // LedgerSnapshotPort isolates legacy consumers that still require raw snapshots.

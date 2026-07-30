@@ -1,6 +1,7 @@
 import type { LedgerPage } from "./types";
 
 export const loadDashboardPage = () => import("./DashboardPage");
+export const loadBQLQueryPage = () => import("./BQLQueryPage");
 export const loadNetWorthPage = () => import("./NetWorthPage");
 export const loadInvestmentsPage = () => import("./InvestmentsPage");
 export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
@@ -19,6 +20,7 @@ export const loadTransactionList = () => import("./TransactionList");
 
 const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
   dashboard: loadDashboardPage,
+  query: loadBQLQueryPage,
   "net-worth": loadNetWorthPage,
   investments: loadInvestmentsPage,
   transactions: loadTransactionList,
@@ -63,6 +65,7 @@ function pageFromHref(href: string): LedgerPage {
     }
   })();
   if (pathname.startsWith("/dashboard")) return "dashboard";
+  if (pathname.startsWith("/query")) return "query";
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
@@ -101,7 +104,7 @@ function preloadRoutesIncrementally(hrefs: string[], index = 0) {
 
 export function preloadOfflineCoreRoutes() {
   if (typeof window === "undefined") return;
-  const coreRoutes = ["/transactions", "/accounts", "/dashboard", "/net-worth", "/income-statement", "/settings"];
+  const coreRoutes = ["/transactions", "/accounts", "/dashboard", "/query", "/net-worth", "/income-statement", "/settings"];
   const secondaryRoutes = ["/imports", "/reconcile", "/currencies", "/investments", "/editor"];
   preloadRoutesIncrementally(coreRoutes);
   window.setTimeout(() => preloadRoutesIncrementally(secondaryRoutes), 1500);
