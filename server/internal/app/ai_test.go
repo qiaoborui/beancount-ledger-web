@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -77,6 +79,7 @@ func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
 }
 
 func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
+	installFakeBeanCheck(t)
 	server := testAgentServer(t)
 	arguments := `{"entries":[{"kind":"transaction","date":"2026-05-08","payee":"Agent Cafe","narration":"Coffee","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-18.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}]}`
 	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "write-1", Type: "function", Function: agentModelFunctionCall{Name: "append_transactions", Arguments: arguments}}}}}}
@@ -112,6 +115,21 @@ func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
 	if !strings.Contains(string(mustRead(t, filepath.Join(server.cfg.LedgerRoot, "transactions", "2026", "05.bean"))), "Agent Cafe") {
 		t.Fatal("approved agent write was not applied")
 	}
+}
+
+func installFakeBeanCheck(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "bean-check"
+	content := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		name = "bean-check.bat"
+		content = "@exit /b 0\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func testAgentServer(t *testing.T) *Server {
