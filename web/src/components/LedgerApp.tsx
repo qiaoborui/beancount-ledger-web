@@ -51,6 +51,7 @@ import {
   loadAccountDetailPage,
   loadAccountPanels,
   loadAiBookkeepingChat,
+  loadBQLQueryPage,
   loadCommandPalette,
   loadCurrencyPage,
   loadDashboardPage,
@@ -75,6 +76,7 @@ const LazyIncomeStatementPage = lazy(() => loadIncomeStatementPage().then((mod) 
 const LazyInvestmentsPage = lazy(() => loadInvestmentsPage().then((mod) => ({ default: mod.InvestmentsPage })));
 
 const LazyDashboardPage = lazy(() => loadDashboardPage().then((mod) => ({ default: mod.DashboardPage })));
+const LazyBQLQueryPage = lazy(() => loadBQLQueryPage().then((mod) => ({ default: mod.BQLQueryPage })));
 
 const LazyAiBookkeepingChat = lazy(() => loadAiBookkeepingChat().then((mod) => ({ default: mod.AiBookkeepingChat })));
 
@@ -109,6 +111,10 @@ function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备收支分析…</section>}><LazyDashboardPage {...props} /></Suspense>;
 }
 
+function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
+  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备 BQL 查询…</section>}><LazyBQLQueryPage {...props} /></Suspense>;
+}
+
 function AiBookkeepingChat(props: ComponentProps<typeof LazyAiBookkeepingChat>) {
   return <Suspense fallback={null}><LazyAiBookkeepingChat {...props} /></Suspense>;
 }
@@ -119,6 +125,7 @@ function RouteFallback({ label }: { label: string }) {
 
 function pageFromPathname(pathname: string): LedgerPage {
   if (pathname.startsWith("/dashboard")) return "dashboard";
+  if (pathname.startsWith("/query")) return "query";
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";
@@ -798,6 +805,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
+      {page === "query" && (unlocked ? <BQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
       {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("资产负债已隐藏", "此页会展示资产、负债、账户结构和净资产变化，需要解锁后查看。"))}
       {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
       {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
@@ -896,10 +904,11 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments";
+  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     home: { eyebrow: "financial overview", title: "财务概览" },
     dashboard: { eyebrow: "income and spending analysis", title: `${label} 收支分析` },
+    query: { eyebrow: "ledger query", title: "BQL 查询" },
     transactions: { eyebrow: "transactions", title: `${label} 流水` },
     imports: { eyebrow: "statement import", title: "账单导入" },
     editor: { eyebrow: "ledger editor", title: "账本编辑器" },

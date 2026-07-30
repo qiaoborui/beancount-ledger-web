@@ -366,6 +366,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/account-status":         true,
 		"GET /api/ledger/reconciliation":         true,
 		"POST /api/ledger/reconciliation":        true,
+		"POST /api/ledger/bql":                   true,
 		"POST /api/ledger/append":                true,
 		"POST /api/ledger/append-batch":          true,
 		"GET /api/ledger/insights":               true,
@@ -475,6 +476,7 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 		{http.MethodGet, "/api/ledger/accounts", ""},
 		{http.MethodGet, "/api/ledger/account-status", ""},
 		{http.MethodGet, "/api/ledger/reconciliation?start=2026-05-01&end=2026-06-01", ""},
+		{http.MethodPost, "/api/ledger/bql", `{"query":"SELECT month, count(*) AS tx_count FROM transactions GROUP BY month ORDER BY month DESC LIMIT 5","valuationCurrency":"CNY"}`},
 		{http.MethodGet, "/api/ledger/editor/files", ""},
 		{http.MethodGet, "/api/ledger/editor/file?path=main.bean", ""},
 	} {

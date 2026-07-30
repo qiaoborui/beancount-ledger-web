@@ -95,6 +95,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledgerRead300s.GET("/insights", s.insights)
 
 	ledger.POST("/transactions", s.reverseTransaction)
+	ledger.POST("/bql", noStore(), s.bql)
 	ledger.PUT("/transactions", s.updateTransaction)
 	ledger.DELETE("/transactions", s.deleteTransaction)
 	ledger.POST("/accounts", s.appendAccount)

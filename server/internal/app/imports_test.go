@@ -2011,3 +2011,7 @@ func (s fakeLedgerReadPorts) Balances(context.Context) (map[string]int, []Balanc
 func (s fakeLedgerReadPorts) IncomeStatement(string, string, bool, ...string) (IncomeStatementQueryResult, error) {
 	return IncomeStatementQueryResult{}, errors.New("unused fake ledger read service method")
 }
+
+func (s fakeLedgerReadPorts) BQL(context.Context, string, string) (BQLResult, error) {
+	return BQLResult{}, errors.New("unused fake ledger read service method")
+}
