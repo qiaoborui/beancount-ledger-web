@@ -381,7 +381,7 @@ function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowR
   );
 }
 
-export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
+export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
@@ -411,10 +411,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const currentFilterSnapshot = useMemo<TransactionFilterSnapshot>(() => ({
     categoryQuery: debouncedCategoryQuery.trim(),
     metadataQuery: debouncedMetadataQuery.trim(),
-    searchQuery: debouncedSearchQuery.trim(),
+    searchQuery: serverFilteredSearch ? "" : debouncedSearchQuery.trim(),
     matchMode: matchMode ?? "prefix",
     viewMode: viewMode ?? "compact",
-  }), [debouncedCategoryQuery, debouncedMetadataQuery, debouncedSearchQuery, matchMode, viewMode]);
+  }), [debouncedCategoryQuery, debouncedMetadataQuery, debouncedSearchQuery, serverFilteredSearch, matchMode, viewMode]);
   const rows = useMemo(() => filterTransactions(txns, currentFilterSnapshot), [txns, currentFilterSnapshot]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -534,7 +534,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
-          <span className="rounded-md bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
+          <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? "查询中…" : `${rows.length} / ${txns.length} 笔`}</span>
+          {serverFilteredSearch && <span className="rounded-md bg-brand/10 px-2 py-1 text-brand">后端查询</span>}
+          {serverSearchError && <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">{serverSearchError}</span>}
           {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} label={accountOptionLabel(category)} />)}</datalist>
           {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
@@ -582,8 +584,9 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             {hasFilters && <Button type="button" variant="outline" className="rounded-md bg-paper text-stone" onClick={clearFilters}>清空</Button>}
           </div>
           <div className="mb-3 flex items-center justify-between gap-3 text-xs text-stone lg:hidden">
-            <span className="rounded-md bg-tag px-2 py-1">{rows.length} / {txns.length} 笔</span>
-            {hasFilters && <span className="truncate text-right">已应用筛选</span>}
+            <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? "查询中…" : `${rows.length} / ${txns.length} 笔`}</span>
+            {serverFilteredSearch && <span className="truncate text-right text-brand">后端查询</span>}
+            {serverSearchError ? <span className="truncate text-right amount-danger">{serverSearchError}</span> : hasFilters && <span className="truncate text-right">已应用筛选</span>}
           </div>
           <div className="hidden border-b border-line bg-panel px-3 py-3 lg:block md:px-4">
             {renderFilterControls("desktop")}
@@ -596,7 +599,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         <span className="shrink-0 text-[11px] tabular-nums text-stone">{rows.length} 笔</span>
       </div>}
 
-      {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">没有匹配的流水，换个分类关键词试试。</div>}
+      {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">{serverSearchLoading ? "正在查询匹配流水…" : "没有匹配的流水，换个筛选条件试试。"}</div>}
 
       {rows.length > 0 && (
         <div className={searchable ? "xl:grid xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start" : ""}>

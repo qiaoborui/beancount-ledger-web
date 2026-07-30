@@ -99,7 +99,7 @@ func (s *Server) transactions(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.queryPort.Transactions(start, end, isSensitiveUnlocked(c))
+	payload, err := s.queryPort.Transactions(start, end, isSensitiveUnlocked(c), c.Query("q"))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -147,7 +147,12 @@ func (s *Server) dashboard(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	c.JSON(http.StatusOK, BuildDashboardSummaryWithFiltersInCurrency(snapshot, start, end, parseDashboardFilters(c), c.Query("valuationCurrency")))
+	filters, err := parseDashboardFilters(c)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, BuildDashboardSummaryWithFiltersInCurrency(snapshot, start, end, filters, c.Query("valuationCurrency")))
 }
 
 func (s *Server) homeReport(c *gin.Context) {
@@ -167,13 +172,21 @@ func (s *Server) investments(c *gin.Context) {
 	c.JSON(http.StatusOK, BuildInvestmentSummaryFromSnapshot(snapshot))
 }
 
-func parseDashboardFilters(c *gin.Context) DashboardFilters {
+func parseDashboardFilters(c *gin.Context) (DashboardFilters, error) {
 	filters := DashboardFilters{
 		Categories: splitDashboardFilterValues(c.Query("category")),
 		Accounts:   splitDashboardFilterValues(c.Query("account")),
 		Payees:     splitDashboardFilterValues(c.Query("payee")),
 		Tags:       splitDashboardFilterValues(c.Query("tag")),
 		Types:      splitDashboardFilterValues(c.Query("type")),
+		Query:      strings.TrimSpace(c.Query("q")),
+	}
+	if filters.Query != "" {
+		query, err := ParseTransactionQuery(filters.Query)
+		if err != nil {
+			return DashboardFilters{}, err
+		}
+		filters.query = query
 	}
 	if raw := strings.TrimSpace(c.Query("minAmount")); raw != "" {
 		value := cents(raw)
@@ -183,7 +196,7 @@ func parseDashboardFilters(c *gin.Context) DashboardFilters {
 		value := cents(raw)
 		filters.MaxAmount = &value
 	}
-	return filters
+	return filters, nil
 }
 
 func splitDashboardFilterValues(raw string) []string {

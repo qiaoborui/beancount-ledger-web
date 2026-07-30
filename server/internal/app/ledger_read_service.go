@@ -172,7 +172,11 @@ func (s *LedgerReadService) Summary(start, end string, unlocked bool, rawValuati
 	return BuildLedgerSummary(snapshot, start, end, unlocked, firstValuationCurrency(rawValuationCurrency)), nil
 }
 
-func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (TransactionQueryResult, error) {
+func (s *LedgerReadService) Transactions(start, end string, unlocked bool, rawQuery string) (TransactionQueryResult, error) {
+	query, err := ParseTransactionQuery(rawQuery)
+	if err != nil {
+		return TransactionQueryResult{}, err
+	}
 	if s.indexErr != nil {
 		return TransactionQueryResult{}, s.indexErr
 	}
@@ -191,7 +195,7 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (Tran
 			for index := range txns {
 				txns[index].Source.GitSHA = revision.GitSHA
 			}
-			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked), nil
+			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked, query), nil
 		}
 		if s.strict {
 			return TransactionQueryResult{}, ErrLedgerReadModelUnavailable
@@ -201,7 +205,7 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool) (Tran
 	if err != nil {
 		return TransactionQueryResult{}, err
 	}
-	return BuildLedgerTransactions(snapshot, start, end, unlocked), nil
+	return BuildLedgerTransactions(snapshot, start, end, unlocked, query), nil
 }
 
 func (s *LedgerReadService) Balances(ctx context.Context) (map[string]int, []BalanceAssertion, error) {
@@ -272,7 +276,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		NetWorthWindows:    windows,
 		CreditCards:        creditCards,
 		Investments:        investments,
-		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil),
 		ReconciliationRows: reconciliationRows,
 		Accounts:           snapshot.Accounts,
 		Commodities:        snapshot.Commodities,
@@ -311,7 +315,7 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 		NetWorthWindows:    nil,
 		CreditCards:        []CreditCardAnalytics{},
 		Investments:        InvestmentSummary{},
-		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil),
 		ReconciliationRows: []ReconciliationRow{},
 		Accounts:           snapshot.Accounts,
 		Commodities:        snapshot.Commodities,
@@ -346,20 +350,21 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	}
 }
 
-func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool) TransactionQueryResult {
+func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlocked bool, query ...*transactionQuery) TransactionQueryResult {
 	return TransactionQueryResult{
 		Start:             start,
 		End:               end,
-		Transactions:      filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked),
+		Transactions:      filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, firstTransactionQuery(query)),
 		SensitiveUnlocked: unlocked,
 	}
 }
 
-func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end string, unlocked bool) TransactionQueryResult {
+func BuildLedgerTransactionsFromIndexedRange(txns []Transaction, start, end string, unlocked bool, query ...*transactionQuery) TransactionQueryResult {
 	transactions := txns
 	if !unlocked {
 		transactions = filterSensitiveTransactions(txns)
 	}
+	transactions = FilterTransactionsByQuery(transactions, firstTransactionQuery(query))
 	return TransactionQueryResult{Start: start, End: end, Transactions: transactions, SensitiveUnlocked: unlocked}
 }
 
@@ -398,10 +403,10 @@ func buildLedgerIncomeStatementFields(snapshot *LedgerSnapshot, start, end strin
 
 func FilterLedgerTransactions(txns []Transaction, start, end string, unlocked bool) []Transaction {
 	_, desc := sortedTransactionViews(txns)
-	return filterLedgerTransactionsDesc(desc, start, end, unlocked)
+	return filterLedgerTransactionsDesc(desc, start, end, unlocked, nil)
 }
 
-func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocked bool) []Transaction {
+func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocked bool, query *transactionQuery) []Transaction {
 	filtered := make([]Transaction, 0, min(len(txns), 256))
 	for _, txn := range txns {
 		if txn.Date < start || txn.Date >= end {
@@ -410,9 +415,19 @@ func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocke
 		if !unlocked && transactionHasIncome(txn) {
 			continue
 		}
+		if query != nil && !query.Matches(txn) {
+			continue
+		}
 		filtered = append(filtered, txn)
 	}
 	return filtered
+}
+
+func firstTransactionQuery(queries []*transactionQuery) *transactionQuery {
+	if len(queries) == 0 {
+		return nil
+	}
+	return queries[0]
 }
 
 func filterSensitiveTransactions(txns []Transaction) []Transaction {
