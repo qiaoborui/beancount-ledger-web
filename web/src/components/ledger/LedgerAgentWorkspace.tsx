@@ -351,8 +351,19 @@ function buildChartData(result: BQLResult) {
   const valueIndex = result.columns.findIndex((column) => column.type === "money" || column.type === "number");
   const labelIndex = result.columns.findIndex((column, index) => index !== valueIndex && column.type !== "money" && column.type !== "number");
   if (valueIndex < 0 || labelIndex < 0) return null;
-  const data = result.rows.map((row, index) => ({ label: String(row[labelIndex] ?? `行 ${index + 1}`), value: Number(row[valueIndex]) })).filter((item) => Number.isFinite(item.value));
+  const valueColumn = result.columns[valueIndex];
+  const data = result.rows.map((row, index) => {
+    const numeric = Number(row[valueIndex]);
+    return {
+      label: String(row[labelIndex] ?? `行 ${index + 1}`),
+      value: normalizeBQLChartValue(numeric, valueColumn),
+    };
+  }).filter((item) => Number.isFinite(item.value));
   return data.length ? { data } : null;
+}
+
+export function normalizeBQLChartValue(value: number, column: BQLColumn) {
+  return column.type === "money" ? value / 100 : value;
 }
 
 function formatValue(value: unknown, column: BQLColumn) {

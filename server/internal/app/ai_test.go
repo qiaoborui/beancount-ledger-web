@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,6 +66,41 @@ func TestLedgerAgentUsesAvailableOpenAIConfigurationByDefault(t *testing.T) {
 	}
 	if result.Content != "ready" {
 		t.Fatalf("unexpected agent result: %#v", result)
+	}
+}
+
+func TestRunBQLToolUsesMajorUnitsForModelOutput(t *testing.T) {
+	server := testAgentServer(t)
+	tool := server.agentTools()["run_bql"]
+	execution, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"SELECT month, sum(value) AS total FROM postings WHERE account LIKE 'Expenses:%' GROUP BY month ORDER BY month","valuationCurrency":"CNY","visualization":"line"}`), AgentPageContext{SensitiveUnlocked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, ok := execution.ModelOutput.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected model output: %#v", execution.ModelOutput)
+	}
+	rows, ok := model["rows"].([]map[string]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("unexpected model rows: %#v", model["rows"])
+	}
+	if rows[0]["total"] != "12.00" {
+		t.Fatalf("money must use major units for the model: %#v", rows[0])
+	}
+	if model["moneyUnit"] != "major" {
+		t.Fatalf("model output must declare money units: %#v", model)
+	}
+}
+
+func TestBQLCapabilitiesExplainExpenseFiltering(t *testing.T) {
+	capabilities := bqlCapabilities()
+	examples, ok := capabilities["examples"].([]string)
+	if !ok || len(examples) == 0 || !strings.Contains(strings.Join(examples, "\n"), "account LIKE 'Expenses:%'") {
+		t.Fatalf("BQL capabilities must include a valid expense query: %#v", capabilities)
+	}
+	fieldNotes, ok := capabilities["fieldNotes"].(map[string]any)
+	if !ok || !strings.Contains(fmt.Sprint(fieldNotes["type"]), "expense, income, transfer") {
+		t.Fatalf("BQL capabilities must explain type values: %#v", capabilities)
 	}
 }
 
