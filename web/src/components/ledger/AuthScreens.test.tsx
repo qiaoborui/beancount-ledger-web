@@ -54,7 +54,7 @@ describe("LoginScreen", () => {
     const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered onUnlock={() => {}} onPasswordUnlock={() => {}} />);
 
     expect(html).toContain("Face ID / Passkey");
-    expect(html).toContain("或使用主密码");
+    expect(html).toContain("使用主密码");
   });
 
   it("shows one in-progress Face ID action instead of inviting repeated clicks", () => {

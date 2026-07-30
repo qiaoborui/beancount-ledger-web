@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Delete, Fingerprint, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -150,6 +151,7 @@ export function SensitiveUnlockPanel({
   onPasswordUnlock,
   unlocking,
   autoFocusInput,
+  surface = "page",
 }: {
   title?: string;
   description?: string;
@@ -167,6 +169,7 @@ export function SensitiveUnlockPanel({
   onPasswordUnlock?: (password: string) => void;
   unlocking?: boolean;
   autoFocusInput?: boolean;
+  surface?: "page" | "dialog";
 }) {
   const offlineInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -175,36 +178,51 @@ export function SensitiveUnlockPanel({
     return () => window.cancelAnimationFrame(id);
   }, [autoFocusInput, offline, offlineUnlockAvailable]);
 
-  return <section className="card p-6 text-center">
-    <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-brand" />
-    <h2 className="font-serif text-2xl font-medium">{title}</h2>
-    <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-olive">{description}</p>
-    {offline && offlineUnlockAvailable ? (
-      <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-        <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-12 rounded-xl bg-panel text-center" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder="离线解锁码" />
-        <Button className="h-12 rounded-xl px-5" onClick={onOfflineUnlock}>离线解锁</Button>
+  const canUsePasskey = !offline && passkeyRegistered;
+  const showPasswordInline = !offline && onPasswordUnlock && !quickUnlockEnabled && !passkeyRegistered;
+  const shellClassName = surface === "dialog"
+    ? "overflow-hidden rounded-md border border-line bg-panel px-5 py-6 shadow-[0_18px_50px_rgba(20,20,19,0.22)] sm:px-6"
+    : "border-y border-line bg-panel px-4 py-12 text-center sm:px-6 lg:py-16";
+
+  return <section className={shellClassName}>
+    <div className="mx-auto flex max-w-xl flex-col items-center text-center">
+      <div className="mb-5 grid h-10 w-10 place-items-center rounded-md border border-line bg-paper text-brand">
+        <LockKeyhole className="h-5 w-5" />
       </div>
-    ) : quickUnlockEnabled ? (
-      <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} />
+      <h2 className="font-serif text-2xl font-medium leading-tight text-ink">{title}</h2>
+      <p className="mt-3 max-w-lg text-sm leading-6 text-olive">{description}</p>
+    </div>
+
+    <div className="mx-auto mt-6 w-full max-w-sm">
+    {offline && offlineUnlockAvailable ? (
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder="离线解锁码" />
+        <Button className="h-11 px-4" onClick={onOfflineUnlock}><KeyRound className="mr-2 h-4 w-4" />离线解锁</Button>
+      </div>
     ) : (
-      <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-        {passkeyRegistered && <Button className="h-12 rounded-xl px-5" disabled={unlocking} onClick={onUnlock}>{unlocking ? "正在唤起 Face ID…" : "使用 Face ID / Passkey 查看"}</Button>}
-        {!passkeyRegistered && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式，可以使用主密码解锁。</p>}
+      <div className="space-y-3">
+        {canUsePasskey && <Button className="h-11 w-full px-5" disabled={unlocking} onClick={onUnlock}><Fingerprint className="mr-2 h-4 w-4" />{unlocking ? "正在唤起 Face ID…" : "Face ID / Passkey 解锁"}</Button>}
+        {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && !canUsePasskey} />}
+        {!canUsePasskey && !quickUnlockEnabled && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式。</p>}
       </div>
     )}
-    {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && !quickUnlockEnabled && !passkeyRegistered} showSeparator={Boolean(quickUnlockEnabled || passkeyRegistered)} />}
+    </div>
+
+    {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && showPasswordInline} initiallyOpen={Boolean(showPasswordInline)} />}
     {offline && !offlineUnlockAvailable && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">当前离线；需要先在线解锁并在设置里启用离线解锁码。</p>}
     {message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}
-    <p className="mt-4 text-xs text-stone">解锁后 15 分钟内可查看余额和净资产；重新打开仍可先直接聊天。</p>
+    <p className="mx-auto mt-5 flex max-w-sm items-center justify-center gap-1.5 text-xs leading-5 text-stone"><ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />后台超过 5 分钟会自动隐藏敏感数据。</p>
   </section>;
 }
 
-function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, showSeparator }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; showSeparator: boolean }) {
+function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initiallyOpen }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; initiallyOpen: boolean }) {
   const [password, setPassword] = useState("");
-  return <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-    {showSeparator && <div className="text-xs text-stone">或使用主密码</div>}
-    <Input autoFocus={autoFocusInput} type="password" autoComplete="current-password" className="h-12 rounded-xl bg-panel text-center" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
-    <Button variant={showSeparator ? "outline" : "default"} className="h-12 rounded-xl px-5" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "使用主密码解锁"}</Button>
+  const [open, setOpen] = useState(initiallyOpen);
+  return <div className="mx-auto mt-4 max-w-sm">
+    {!open ? <button type="button" className="text-sm font-medium text-brand disabled:opacity-50" onClick={() => setOpen(true)} disabled={unlocking}>使用主密码</button> : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <Input autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
+      <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "解锁"}</Button>
+    </div>}
   </div>;
 }
 
@@ -214,6 +232,7 @@ export function PasskeyBanner({ onRegister }: { onRegister: () => void }) {
 
 function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnlock, unlocking, autoFocusInput }: { mode: QuickUnlockMode; passkeyRegistered?: boolean; onUnlock: (secret: string) => void; onPasskeyUnlock: () => void; unlocking?: boolean; autoFocusInput?: boolean }) {
   const [secret, setSecret] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (!autoFocusInput || mode !== "text") return;
@@ -222,24 +241,30 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
   }, [autoFocusInput, mode]);
 
   if (mode === "numeric") {
-    return <div className="mx-auto mt-5 w-full max-w-xs">
-      <div className="mb-3 h-12 rounded-xl border border-line bg-panel px-4 text-center text-2xl tracking-[0.35em] text-ink" aria-label="本机数字解锁码">{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
+    if (!expanded) {
+      return <div className="flex flex-col items-center gap-2">
+        <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-brand hover:bg-tag disabled:opacity-50" disabled={unlocking} onClick={() => setExpanded(true)}><KeyRound className="h-4 w-4" />本机码</button>
+        {passkeyRegistered && <button type="button" className="text-xs text-stone hover:text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
+      </div>;
+    }
+    return <div className="mx-auto w-full max-w-xs">
+      <div className="mb-3 h-11 rounded-md border border-line bg-paper px-4 text-center text-2xl leading-10 tracking-[0.32em] text-ink" aria-label="本机数字解锁码">{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
       <div className="grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => setSecret(secret + digit)} disabled={unlocking} />)}
         <KeypadButton label="删" onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
         <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
-        <button type="button" className="h-14 rounded-xl bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
+        <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
       </div>
       {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
     </div>;
   }
-  return <div className="mx-auto mt-5 flex max-w-sm flex-col gap-3">
-    <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-12 rounded-xl bg-panel text-center" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
-    <Button className="h-12 rounded-xl px-5" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "快速解锁"}</Button>
-    {passkeyRegistered && <Button variant="outline" className="h-12 rounded-xl bg-paper text-warm" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</Button>}
+  return <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+    <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
+    <Button className="h-11 px-4" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}><KeyRound className="mr-2 h-4 w-4" />{unlocking ? "解锁中…" : "快速解锁"}</Button>
+    {passkeyRegistered && <button type="button" className="sm:col-span-2 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
   </div>;
 }
 
 function KeypadButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" className="h-14 rounded-xl border border-line bg-panel text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label}</button>;
+  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label === "删" ? <Delete className="h-4 w-4" /> : label}</button>;
 }
