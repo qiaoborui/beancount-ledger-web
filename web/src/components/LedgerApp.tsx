@@ -692,6 +692,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               onPasswordUnlock={(inputPassword) => { void unlockPasswordSensitive(inputPassword); }}
               unlocking={unlocking}
               autoFocusInput
+              surface="dialog"
             />
           </div>
         </div>,
