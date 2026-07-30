@@ -21,6 +21,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('approvalPolicy === "always"');
     expect(source).toContain("全屏查看会话");
     expect(source).toContain("会话历史");
+    expect(source).toContain("移动端会话历史");
+    expect(source).toContain("查看会话历史");
   });
 
   it("converts BQL money values from minor units before charting", () => {
