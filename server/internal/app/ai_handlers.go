@@ -39,104 +39,50 @@ func (s *Server) aiParse(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"entries": entries, "entry": first})
 }
 
-func (s *Server) aiChat(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.chat", 20, 5*time.Minute) {
+func (s *Server) aiAgentTurn(c *gin.Context) {
+	if !s.limiter.Check(c, "ai.agent_turn", 30, 5*time.Minute) {
 		return
 	}
 	if !requireAuth(c) {
 		return
 	}
-	var input AIChatRequest
+	var input AgentTurnRequest
 	if !bindJSON(c, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Message) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chat request"})
-		return
-	}
-	if input.Stream {
-		s.aiChatStream(c, input)
-		return
-	}
+	input.Context.SensitiveUnlocked = isSensitiveUnlocked(c)
+	prepareSSE(c)
 	start := time.Now()
-	result, err := s.chatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"))
-	elapsed := time.Since(start).Milliseconds()
-	logDuration("ai.chat", start, map[string]any{"entries": len(result.Entries)})
+	err := s.runAgentTurn(c.Request.Context(), input, func(event string, payload any) error {
+		return writeSSEEvent(c, event, payload)
+	})
+	logDuration("ai.agent.turn", start, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
-		return
+		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
 	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
-func (s *Server) aiAccountsChat(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.accounts_chat", 20, 5*time.Minute) {
+func (s *Server) aiAgentApproval(c *gin.Context) {
+	if !s.limiter.Check(c, "ai.agent_approval", 30, 5*time.Minute) {
 		return
 	}
 	if !requireAuth(c) {
 		return
 	}
-	var input AIAccountChatRequest
+	var input AgentApprovalRequest
 	if !bindJSON(c, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Message) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid account chat request"})
-		return
-	}
-	if input.Stream {
-		s.aiAccountsChatStream(c, input)
-		return
-	}
-	start := time.Now()
-	result, err := s.chatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"))
-	elapsed := time.Since(start).Milliseconds()
-	logDuration("ai.accounts_chat", start, map[string]any{"operations": len(result.Operations)})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
-}
-
-func (s *Server) aiChatStream(c *gin.Context, input AIChatRequest) {
-	start := time.Now()
 	prepareSSE(c)
-	_ = writeSSEEvent(c, "status", gin.H{"text": "读取当前记账草稿"})
-	result, err := s.streamChatBookkeeping(input.Message, input.Messages, input.DraftEntries, time.Now().Format("2006-01-02"), func(message string) error {
-		return writeSSEEvent(c, "message", gin.H{"text": message})
-	}, func(status string) error {
-		return writeSSEEvent(c, "status", gin.H{"text": status})
-	}, func(tool ChatToolEvent) error {
-		return writeSSEEvent(c, "tool", tool)
-	})
-	elapsed := time.Since(start).Milliseconds()
-	logDuration("ai.chat.stream", start, map[string]any{"entries": len(result.Entries)})
-	if err != nil {
-		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
-		return
-	}
-	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "entries": result.Entries, "meta": gin.H{"elapsedMs": elapsed}})
-}
-
-func (s *Server) aiAccountsChatStream(c *gin.Context, input AIAccountChatRequest) {
+	pageContext := AgentPageContext{SensitiveUnlocked: isSensitiveUnlocked(c)}
 	start := time.Now()
-	prepareSSE(c)
-	_ = writeSSEEvent(c, "status", gin.H{"text": "读取账户草稿和账户表"})
-	result, err := s.streamChatAccounts(input.Message, input.Messages, input.DraftOperations, time.Now().Format("2006-01-02"), func(message string) error {
-		return writeSSEEvent(c, "message", gin.H{"text": message})
-	}, func(status string) error {
-		return writeSSEEvent(c, "status", gin.H{"text": status})
-	}, func(tool ChatToolEvent) error {
-		return writeSSEEvent(c, "tool", tool)
+	err := s.resolveAgentApproval(c.Request.Context(), input, pageContext, func(event string, payload any) error {
+		return writeSSEEvent(c, event, payload)
 	})
-	elapsed := time.Since(start).Milliseconds()
-	logDuration("ai.accounts_chat.stream", start, map[string]any{"operations": len(result.Operations)})
+	logDuration("ai.agent.approval", start, nil)
 	if err != nil {
-		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error(), "meta": gin.H{"elapsedMs": elapsed}})
-		return
+		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
 	}
-	_ = writeSSEEvent(c, "final", gin.H{"message": result.Message, "plan": result.Plan, "sources": result.Sources, "operations": result.Operations, "meta": gin.H{"elapsedMs": elapsed}})
 }
 
 func prepareSSE(c *gin.Context) {

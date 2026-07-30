@@ -3,8 +3,8 @@
 import { sql } from "@codemirror/lang-sql";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { AlertTriangle, BarChart3, Clock, Database, LineChart as LineChartIcon, PieChart as PieChartIcon, Play, RefreshCw, Table2 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { AlertTriangle, BarChart3, Clock, Database, LineChart as LineChartIcon, PieChart as PieChartIcon, Play, RefreshCw, Sparkles, Table2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
@@ -155,7 +155,7 @@ const bqlEditorTheme = EditorView.theme({
   },
 });
 
-export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuationCurrency: string; onSensitiveLocked: () => void }) {
+export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent, agentQuery }: { valuationCurrency: string; onSensitiveLocked: () => void; onOpenAgent?: (prompt: string) => void; agentQuery?: { id: number; query: string } | null }) {
   const [recents, setRecents] = useState<string[]>(() => readRecents());
   const [query, setQuery] = useState(() => {
     const initialRecents = readRecents();
@@ -171,6 +171,13 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
   const hasRecents = recents.length > 0;
   const canRun = statements.length > 0 && !loading;
   const preview = useMemo(() => summarizeRuns(runs), [runs]);
+  const appliedAgentQueryRef = useRef(0);
+
+  useEffect(() => {
+    if (!agentQuery || agentQuery.id === appliedAgentQueryRef.current) return;
+    appliedAgentQueryRef.current = agentQuery.id;
+    useQuery(agentQuery.query);
+  }, [agentQuery]);
 
   async function runAllQueries() {
     await executeStatements(statements, query.trim());
@@ -252,6 +259,10 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {onOpenAgent && <Button type="button" variant="outline" size="sm" className="h-8 rounded-md border-line bg-paper text-ink hover:bg-tag" onClick={() => onOpenAgent(`请根据当前 BQL 编辑器内容生成或优化查询，并先校验语法。当前内容：\n\n${query}`)}>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  AI 生成
+                </Button>}
                 <Button type="button" variant="outline" size="sm" className="h-8 rounded-md border-line bg-paper text-ink hover:bg-tag" onClick={() => void runCurrentQuery()} disabled={!canRun}>
                   {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
                   当前语句

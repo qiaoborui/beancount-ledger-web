@@ -1,10 +1,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -17,7 +20,7 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 			t.Fatalf("unexpected AI path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-02\",\"payee\":\"Shop\",\"narration\":\"Snack\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"8.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-8.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-02\",\"payee\":\"Shop\",\"narration\":\"Snack\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"8.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-8.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}] }"}}]}`))
 	}))
 	defer fakeAI.Close()
 	t.Setenv("LEDGER_AI_PROVIDER", "openai")
@@ -41,158 +44,118 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 }
 
-func TestAIChatRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
-	cfg := testLedger(t)
-	t.Setenv("APP_PASSWORD", "secret")
-	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			t.Fatalf("unexpected AI path: %s", r.URL.Path)
-		}
-		var body struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if len(body.Messages) == 0 || !strings.Contains(body.Messages[len(body.Messages)-1].Content, "用户最新消息") {
-			t.Fatalf("chat payload missing latest message context: %#v", body.Messages)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"可以这样记。\",\"plan\":{\"title\":\"记账计划\",\"description\":\"先生成预览再确认写入。\",\"steps\":[\"识别咖啡消费金额\",\"用现金账户平衡分录\"]},\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-04\",\"payee\":\"Cafe\",\"narration\":\"Coffee\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"18.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-18.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}]}"}}]}`))
-	}))
-	defer fakeAI.Close()
-	t.Setenv("LEDGER_AI_PROVIDER", "openai")
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := testRouter(t, cfg)
-	cookies := loginCookies(t, router)
+type queuedAgentModel struct {
+	results []agentModelResult
+}
 
-	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[{"role":"assistant","text":"你好"}],"draftEntries":[]}`, cookies)
-	if res.Code != http.StatusOK {
-		t.Fatalf("ai chat=%d body=%s", res.Code, res.Body.String())
-	}
-	var body struct {
-		Message string        `json:"message"`
-		Plan    *ChatPlan     `json:"plan"`
-		Sources []ChatSource  `json:"sources"`
-		Entries []LedgerEntry `json:"entries"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+func (m *queuedAgentModel) Complete(context.Context, string, []agentModelMessage, []agentToolSpec) (agentModelResult, error) {
+	result := m.results[0]
+	m.results = m.results[1:]
+	return result, nil
+}
+
+type capturedAgentEvent struct {
+	name    string
+	payload any
+}
+
+func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
+	server := testAgentServer(t)
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "call-1", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
+		{Content: "BQL 支持 postings 和 transactions。"},
+	}}
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{Message: "BQL 支持什么？"}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if body.Message != "可以这样记。" || len(body.Entries) != 1 || body.Entries[0].Narration != "Coffee" {
-		t.Fatalf("unexpected chat response: %#v", body)
-	}
-	if body.Plan == nil || body.Plan.Title != "记账计划" || len(body.Plan.Steps) != 2 {
-		t.Fatalf("unexpected chat plan: %#v", body.Plan)
-	}
-	if len(body.Sources) == 0 || body.Sources[0].Kind != "accounts" {
-		t.Fatalf("unexpected chat sources: %#v", body.Sources)
+	if !hasAgentEvent(events, "tool_call") || !hasAgentEvent(events, "tool_result") || !hasAgentEvent(events, "message_delta") || !hasAgentEvent(events, "final") {
+		t.Fatalf("missing agent events: %#v", events)
 	}
 }
 
-func TestAIChatRouteStreamsAssistantMessageAndFinalDraft(t *testing.T) {
-	cfg := testLedger(t)
-	t.Setenv("APP_PASSWORD", "secret")
-	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Stream bool `json:"stream"`
+func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
+	installFakeBeanCheck(t)
+	server := testAgentServer(t)
+	arguments := `{"entries":[{"kind":"transaction","date":"2026-05-08","payee":"Agent Cafe","narration":"Coffee","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-18.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}]}`
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "write-1", Type: "function", Function: agentModelFunctionCall{Name: "append_transactions", Arguments: arguments}}}}}}
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "session-test-1", Message: "写入这笔咖啡", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mustRead(t, filepath.Join(server.cfg.LedgerRoot, "transactions", "2026", "05.bean"))), "Agent Cafe") {
+		t.Fatal("agent wrote before approval")
+	}
+	var approval AgentApproval
+	for _, event := range events {
+		if event.name == "approval_required" {
+			raw, _ := json.Marshal(event.payload)
+			if err := json.Unmarshal(raw, &approval); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if !body.Stream {
-			t.Fatalf("expected streaming AI request")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, chunk := range []string{
-			`{"message":"可以`,
-			`这样记。","plan":null,`,
-			`"entries":[{"kind":"transaction","date":"2026-05-04","payee":"Cafe","narration":"Coffee","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-18.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}]}`,
-		} {
-			_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", chunk)
-		}
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	defer fakeAI.Close()
-	t.Setenv("LEDGER_AI_PROVIDER", "openai")
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := testRouter(t, cfg)
-	cookies := loginCookies(t, router)
-
-	res := requestWithCookies(router, http.MethodPost, "/api/ai/chat", `{"message":"咖啡 18","messages":[],"draftEntries":[],"stream":true}`, cookies)
-	if res.Code != http.StatusOK {
-		t.Fatalf("ai chat stream=%d body=%s", res.Code, res.Body.String())
 	}
-	body := res.Body.String()
-	if !strings.Contains(body, "event: status") || !strings.Contains(body, "生成回复和处理计划") {
-		t.Fatalf("stream should include status events, got:\n%s", body)
+	if approval.ID == "" {
+		t.Fatalf("approval event missing: %#v", events)
 	}
-	if !strings.Contains(body, "event: tool") || !strings.Contains(body, "parseLedger") || !strings.Contains(body, "validateBeancount") {
-		t.Fatalf("stream should include tool events, got:\n%s", body)
+	if !hasAgentEvent(events, "artifact") {
+		t.Fatalf("write approval must include a validated draft artifact: %#v", events)
 	}
-	if !strings.Contains(body, "event: message") || !strings.Contains(body, "可以") {
-		t.Fatalf("stream should include assistant message events, got:\n%s", body)
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(string, any) error { return nil }); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(body, "event: final") || !strings.Contains(body, "Coffee") {
-		t.Fatalf("stream should include final draft event, got:\n%s", body)
-	}
-	if !strings.Contains(body, `"sources"`) || !strings.Contains(body, "当前账户表") {
-		t.Fatalf("stream should include final sources, got:\n%s", body)
+	if !strings.Contains(string(mustRead(t, filepath.Join(server.cfg.LedgerRoot, "transactions", "2026", "05.bean"))), "Agent Cafe") {
+		t.Fatal("approved agent write was not applied")
 	}
 }
 
-func TestAIAccountsChatRouteReturnsAccountOperationDrafts(t *testing.T) {
-	cfg := testLedger(t)
-	t.Setenv("APP_PASSWORD", "secret")
-	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			t.Fatalf("unexpected AI path: %s", r.URL.Path)
-		}
-		var body struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if len(body.Messages) == 0 || !strings.Contains(body.Messages[len(body.Messages)-1].Content, "账户操作草稿") {
-			t.Fatalf("account chat payload missing draft context: %#v", body.Messages)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"message\":\"已准备创建差旅分类。\",\"plan\":{\"title\":\"账户计划\",\"description\":\"确认后写入 accounts.bean。\",\"steps\":[\"创建差旅支出账户\"]},\"operations\":[{\"kind\":\"create\",\"date\":\"2026-05-25\",\"account\":\"Expenses:Travel\",\"alias\":\"差旅\",\"currency\":\"CNY\",\"group\":\"expense\"}]}"}}]}`))
-	}))
-	defer fakeAI.Close()
-	t.Setenv("LEDGER_AI_PROVIDER", "openai")
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
-	router := testRouter(t, cfg)
-	cookies := loginCookies(t, router)
-
-	res := requestWithCookies(router, http.MethodPost, "/api/ai/accounts-chat", `{"message":"帮我加一个差旅分类","messages":[{"role":"assistant","text":"你好"}],"draftOperations":[]}`, cookies)
-	if res.Code != http.StatusOK {
-		t.Fatalf("ai accounts chat=%d body=%s", res.Code, res.Body.String())
+func installFakeBeanCheck(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "bean-check"
+	content := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		name = "bean-check.bat"
+		content = "@exit /b 0\r\n"
 	}
-	var body struct {
-		Message    string             `json:"message"`
-		Plan       *ChatPlan          `json:"plan"`
-		Sources    []ChatSource       `json:"sources"`
-		Operations []AccountOperation `json:"operations"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if body.Message != "已准备创建差旅分类。" || len(body.Operations) != 1 || body.Operations[0].Account != "Expenses:Travel" {
-		t.Fatalf("unexpected account chat response: %#v", body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func testAgentServer(t *testing.T) *Server {
+	t.Helper()
+	cfg := testLedger(t)
+	runtimeStore := newFilesystemRuntimeStore(cfg.RuntimeDir)
+	cache := NewLedgerCache(cfg)
+	readService := NewLedgerReadService(cache)
+	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtimeStore)
+	return &Server{
+		cfg:            cfg,
+		runtimeStore:   runtimeStore,
+		cache:          cache,
+		writer:         writer,
+		accountService: NewAccountService(cache, writer),
+		queryPort:      readService,
+		snapshotPort:   readService,
+		limiter:        NewRateLimiter(),
 	}
-	if body.Plan == nil || body.Plan.Title != "账户计划" || len(body.Plan.Steps) != 1 {
-		t.Fatalf("unexpected account chat plan: %#v", body.Plan)
+}
+
+func hasAgentEvent(events []capturedAgentEvent, name string) bool {
+	for _, event := range events {
+		if event.name == name {
+			return true
+		}
 	}
-	if len(body.Sources) == 0 || body.Sources[0].Kind != "accounts" {
-		t.Fatalf("unexpected account chat sources: %#v", body.Sources)
-	}
+	return false
 }

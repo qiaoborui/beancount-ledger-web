@@ -25,7 +25,7 @@ export function QuickActionsSheet({ open, refreshing, pendingWriteCount = 0, syn
   };
   const actions = [
     { label: "记一笔", description: "手动录入一条或多条分录", icon: PenLine, onClick: onManualEntry, primary: true },
-    { label: "AI 记账", description: "用自然语言生成预览后确认写入", icon: Bot, onClick: onAiEntry },
+    { label: "账本 Agent", description: "查询、生成 BQL 或创建待确认操作", icon: Bot, onClick: onAiEntry },
     { label: "导入账单", description: "导入支付宝 / 微信等账单文件", icon: FileUp, onClick: onImport },
     { label: "对账", description: "核对实际余额并写入断言", icon: Scale, onClick: onReconcile },
     ...(pendingWriteCount > 0 && onSyncPendingWrites ? [{ label: syncingPendingWrites ? "同步中…" : "同步待写入", description: `${pendingWriteCount} 条离线记录待提交`, icon: RefreshCw, onClick: onSyncPendingWrites, disabled: syncingPendingWrites }] : []),

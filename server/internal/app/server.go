@@ -30,6 +30,7 @@ type Server struct {
 	reconcileService    *ReconciliationService
 	txService           *TransactionService
 	limiter             RateLimiter
+	agentModel          AgentModelClient
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
@@ -119,8 +120,8 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.PUT("/editor/file", s.saveEditorFile)
 
 	api.POST("/ai/parse", s.aiParse)
-	api.POST("/ai/chat", s.aiChat)
-	api.POST("/ai/accounts-chat", s.aiAccountsChat)
+	api.POST("/ai/agent/turn", s.aiAgentTurn)
+	api.POST("/ai/agent/approval", s.aiAgentApproval)
 
 	readOnly60s.GET("/push/subscription", s.pushStatus)
 	api.POST("/push/subscription", s.pushSave)
@@ -158,7 +159,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1"},
 	}
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)
