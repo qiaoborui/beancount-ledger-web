@@ -23,7 +23,8 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"entries\":[{\"kind\":\"transaction\",\"date\":\"2026-05-02\",\"payee\":\"Shop\",\"narration\":\"Snack\",\"metadata\":{},\"tags\":[],\"postings\":[{\"account\":\"Expenses:Food\",\"amount\":\"8.00\",\"currency\":\"CNY\"},{\"account\":\"Assets:Cash\",\"amount\":\"-8.00\",\"currency\":\"CNY\"}],\"confidence\":1,\"needsReview\":false,\"questions\":[]}] }"}}]}`))
 	}))
 	defer fakeAI.Close()
-	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("LEDGER_AI_PROVIDER", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
 	router := testRouter(t, cfg)
@@ -41,6 +42,29 @@ func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
 	}
 	if len(body.Entries) != 1 || body.Entries[0].Payee != "Shop" {
 		t.Fatalf("unexpected AI entries: %#v", body.Entries)
+	}
+}
+
+func TestLedgerAgentUsesAvailableOpenAIConfigurationByDefault(t *testing.T) {
+	fakeAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected AI path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ready"}}]}`))
+	}))
+	defer fakeAI.Close()
+	t.Setenv("LEDGER_AI_PROVIDER", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+
+	result, err := (openAICompatibleAgentClient{}).Complete(context.Background(), "system", []agentModelMessage{{Role: "user", Content: "hello"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "ready" {
+		t.Fatalf("unexpected agent result: %#v", result)
 	}
 }
 
