@@ -720,7 +720,13 @@ html[data-theme="dark"] .home-daily-chart-line {
   .app-shell-main {
     overflow-y: auto;
     scrollbar-gutter: stable;
+    transition: margin-right 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+
+  body.ledger-agent-dock-expanded .app-shell-main { margin-right: 430px; }
+  body.ledger-agent-dock-collapsed .app-shell-main { margin-right: 3.5rem; }
+  body.ledger-agent-dock-expanded .app-fab { right: calc(430px + 1rem); }
+  body.ledger-agent-dock-collapsed .app-fab { right: 4.5rem; }
 
   .dashboard-chart-canvas {
     height: var(--dashboard-chart-height, 12.5rem);
@@ -766,6 +772,10 @@ html[data-theme="dark"] .home-daily-chart-line {
 }
 
 @media (max-width: 767px) {
+  .app-fab {
+    right: 4.75rem;
+  }
+
   .app-shell:has(.ledger-editor-input:focus) .mobile-bottom-nav,
   .app-shell:has(.ledger-editor-input:focus) .app-fab {
     display: none;

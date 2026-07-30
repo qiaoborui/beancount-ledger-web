@@ -138,6 +138,25 @@ func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
 	}
 }
 
+func TestLedgerAgentCanRequireApprovalForReadTools(t *testing.T) {
+	server := testAgentServer(t)
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "read-1", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}}}}
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "session-test-2", Message: "查看 BQL 能力", ApprovalPolicy: "always"}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentEvent(events, "approval_required") {
+		t.Fatalf("read tool must require approval in always mode: %#v", events)
+	}
+	if hasAgentEvent(events, "tool_result") {
+		t.Fatalf("read tool executed before approval: %#v", events)
+	}
+}
+
 func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
 	installFakeBeanCheck(t)
 	server := testAgentServer(t)

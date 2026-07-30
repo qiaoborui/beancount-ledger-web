@@ -5,10 +5,10 @@ import { normalizeBQLChartValue } from "./LedgerAgentWorkspace";
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
 describe("LedgerAgentWorkspace", () => {
-  it("supports dock, floating and mobile full-screen layouts", () => {
-    expect(source).toContain('type AgentMode = "dock" | "float"');
+  it("supports dock, collapsible and mobile full-screen layouts", () => {
     expect(source).toContain("fixed inset-y-0 right-0");
-    expect(source).toContain("md:bottom-5 md:right-5");
+    expect(source).toContain("md:w-[430px]");
+    expect(source).toContain("dockCollapsed");
     expect(source).toContain("fixed inset-0");
   });
 
@@ -17,6 +17,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('artifact.type === "bql_query"');
     expect(source).toContain('artifact.type === "transaction_draft"');
     expect(source).toContain('artifact.type === "chart"');
+    expect(source).toContain("MessageResponse");
+    expect(source).toContain('approvalPolicy === "always"');
   });
 
   it("converts BQL money values from minor units before charting", () => {

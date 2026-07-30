@@ -36,10 +36,11 @@ type AgentPageContext struct {
 }
 
 type AgentTurnRequest struct {
-	SessionID string           `json:"sessionId,omitempty"`
-	Message   string           `json:"message"`
-	Messages  []AgentMessage   `json:"messages,omitempty"`
-	Context   AgentPageContext `json:"context,omitempty"`
+	SessionID      string           `json:"sessionId,omitempty"`
+	Message        string           `json:"message"`
+	Messages       []AgentMessage   `json:"messages,omitempty"`
+	Context        AgentPageContext `json:"context,omitempty"`
+	ApprovalPolicy string           `json:"approvalPolicy,omitempty"`
 }
 
 func (r AgentTurnRequest) Validate() error {
@@ -51,6 +52,9 @@ func (r AgentTurnRequest) Validate() error {
 	}
 	if len(r.Messages) > 60 {
 		return errors.New("too many messages")
+	}
+	if r.ApprovalPolicy != "" && r.ApprovalPolicy != "on-write" && r.ApprovalPolicy != "always" {
+		return errors.New("approvalPolicy must be on-write or always")
 	}
 	return nil
 }
@@ -231,6 +235,7 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 	messages = append(messages, agentModelMessage{Role: "user", Content: strings.TrimSpace(request.Message)})
 	tools := s.agentTools()
 	specs := sortedAgentToolSpecs(tools)
+	approvalPolicy := normalizeAgentApprovalPolicy(request.ApprovalPolicy)
 	if err := emit("status", map[string]any{"text": "正在分析请求"}); err != nil {
 		return err
 	}
@@ -269,18 +274,20 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 			if err := emit("tool_call", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "running", "input": input}); err != nil {
 				return err
 			}
-			if tool.RequiresApproval {
-				preview, err := s.previewAgentWrite(ctx, tool.Name, arguments, pageContext)
-				if err != nil {
-					messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
-					if emitErr := emit("tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
-						return emitErr
+			if tool.RequiresApproval || approvalPolicy == "always" {
+				if tool.RequiresApproval {
+					preview, err := s.previewAgentWrite(ctx, tool.Name, arguments, pageContext)
+					if err != nil {
+						messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
+						if emitErr := emit("tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
+							return emitErr
+						}
+						continue
 					}
-					continue
-				}
-				for _, artifact := range preview.Artifacts {
-					if err := emit("artifact", artifact); err != nil {
-						return err
+					for _, artifact := range preview.Artifacts {
+						if err := emit("artifact", artifact); err != nil {
+							return err
+						}
 					}
 				}
 				approval, err := s.saveAgentApproval(ctx, sessionID, call, tool, arguments, pageContext)
@@ -290,7 +297,10 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 				if err := emit("approval_required", approval); err != nil {
 					return err
 				}
-				message := "这项操作会修改账本，需要你确认后执行。"
+				message := "这项工具调用需要你确认后继续。"
+				if tool.RequiresApproval {
+					message = "这项操作会修改账本，需要你确认后执行。"
+				}
 				if err := emit("message_delta", map[string]any{"text": message}); err != nil {
 					return err
 				}
@@ -792,6 +802,13 @@ func normalizeAgentSessionID(value string) string {
 	return newAgentID("session")
 }
 
+func normalizeAgentApprovalPolicy(value string) string {
+	if strings.TrimSpace(value) == "always" {
+		return "always"
+	}
+	return "on-write"
+}
+
 func newAgentID(prefix string) string {
 	raw := make([]byte, 12)
 	if _, err := rand.Read(raw); err != nil {
@@ -835,7 +852,7 @@ func agentApprovalSummary(name string, raw json.RawMessage) string {
 	case "apply_account_operations":
 		return fmt.Sprintf("执行 %d 个账户操作", len(countInput.Operations))
 	default:
-		return "执行账本写入操作"
+		return "确认执行工具调用"
 	}
 }
 

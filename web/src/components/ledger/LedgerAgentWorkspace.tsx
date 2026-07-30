@@ -2,14 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AppWindow, Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, PanelRight, Play, Send, Trash2, X } from "lucide-react";
+import { Ban, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, ExternalLink, LoaderCircle, PanelRight, Play, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
+import { MessageResponse } from "@/components/ai-elements/message";
 import type { ParsedTransaction } from "@/lib/schemas";
 import type { AccountOperation } from "./types";
 
-type AgentMode = "dock" | "float";
+type AgentApprovalPolicy = "on-write" | "always";
 
 type AgentContext = {
   page: string;
@@ -65,7 +66,8 @@ export function LedgerAgentWorkspace({
 }) {
   const stored = useMemo(() => readStoredAgent(), []);
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<AgentMode>(stored.mode);
+  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
   const [sessionId, setSessionId] = useState(stored.sessionId);
   const [timeline, setTimeline] = useState<TimelineItem[]>(stored.messages);
   const [input, setInput] = useState("");
@@ -79,13 +81,20 @@ export function LedgerAgentWorkspace({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    writeStoredAgent({ mode, sessionId, messages: timeline.filter((item): item is MessageItem => item.kind === "message").slice(-40) });
-  }, [mode, sessionId, timeline]);
+    writeStoredAgent({ approvalPolicy, sessionId, messages: timeline.filter((item): item is MessageItem => item.kind === "message").slice(-40) });
+  }, [approvalPolicy, sessionId, timeline]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ledger-agent-dock-expanded", open && !dockCollapsed);
+    document.body.classList.toggle("ledger-agent-dock-collapsed", true);
+    return () => document.body.classList.remove("ledger-agent-dock-expanded", "ledger-agent-dock-collapsed");
+  }, [dockCollapsed, open]);
 
   useEffect(() => {
     if (!request || request.id === requestRef.current) return;
     requestRef.current = request.id;
     setOpen(true);
+    setDockCollapsed(false);
     const prompt = request.prompt?.trim() ?? "";
     if (!prompt) {
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -121,7 +130,7 @@ export function LedgerAgentWorkspace({
       const response = await apiFetch("/api/ai/agent/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: prompt, messages: history, context }),
+        body: JSON.stringify({ sessionId, message: prompt, messages: history, context, approvalPolicy }),
       }, { kind: "write" });
       const final = await consumeStream(response);
       finishTurn(final);
@@ -205,10 +214,9 @@ export function LedgerAgentWorkspace({
     void sendMessage(input);
   }
 
-  const shell = open ? (
-    <section className={mode === "dock"
-      ? "fixed inset-y-0 right-0 z-[90] flex w-full flex-col border-l border-line bg-paper shadow-2xl md:w-[430px]"
-      : "fixed inset-0 z-[90] flex flex-col bg-paper shadow-2xl md:inset-auto md:bottom-5 md:right-5 md:h-[min(760px,calc(100dvh-2.5rem))] md:w-[430px] md:rounded-md md:border md:border-line"}
+  const shell = (
+    <>
+    {open && <section className={`fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:w-[430px] md:border-l md:border-line md:shadow-xl ${dockCollapsed ? "md:hidden" : ""}`}
       aria-label="全局账本 Agent"
     >
       <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
@@ -220,18 +228,27 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className={`hidden h-8 w-8 place-items-center rounded-md border border-line md:grid ${mode === "dock" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} title="右侧停靠" aria-label="右侧停靠" onClick={() => setMode("dock")}><PanelRight className="h-4 w-4" /></button>
-          <button type="button" className={`hidden h-8 w-8 place-items-center rounded-md border border-line md:grid ${mode === "float" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} title="悬浮窗口" aria-label="悬浮窗口" onClick={() => setMode("float")}><AppWindow className="h-4 w-4" /></button>
+          <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title="折叠侧栏" aria-label="折叠侧栏" onClick={() => setDockCollapsed(true)}><PanelRight className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新对话" aria-label="新对话" onClick={resetConversation} disabled={busy}><Trash2 className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
         </div>
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-4">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-paper px-3 py-2.5 md:px-4">
+        <ShieldCheck className="h-4 w-4 shrink-0 text-brand" />
+        <span className="text-xs font-medium text-ink">审批策略</span>
+        <div className="ml-auto flex min-w-0 rounded-md border border-line bg-panel p-0.5" role="tablist" aria-label="Agent 审批策略">
+          <button type="button" role="tab" aria-selected={approvalPolicy === "on-write"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "on-write" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("on-write")}>常规</button>
+          <button type="button" role="tab" aria-selected={approvalPolicy === "always"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "always" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("always")}>逐项确认</button>
+        </div>
+        <span className="basis-full text-[11px] leading-4 text-stone">{approvalPolicy === "always" ? "每个工具调用都要你确认" : "读取自动执行，账本写入始终确认"}</span>
+      </div>
+
+      <div ref={scrollRef} className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-4">
         {!hasConversation && <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-1">
           {suggestions.map((suggestion) => <button key={suggestion} type="button" className="min-h-11 rounded-md border border-line bg-panel px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => void sendMessage(suggestion)} disabled={busy}>{suggestion}</button>)}
         </div>}
-        <div className="space-y-3">
+        <div className="min-w-0 max-w-full space-y-3">
           {timeline.map((item) => {
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
             if (item.kind === "tool") return <ToolCard key={item.id} tool={item.tool} expanded={Boolean(expandedTools[item.id])} onToggle={() => setExpandedTools((current) => ({ ...current, [item.id]: !current[item.id] }))} />;
@@ -265,9 +282,13 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
       </footer>
-    </section>
-  ) : (
-    <button type="button" className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[70] grid h-11 w-11 place-items-center rounded-md border border-line bg-brand text-paper shadow-lg hover:bg-brand/90 md:bottom-5 md:right-5" onClick={() => setOpen(true)} aria-label="打开账本 Agent" title="账本 Agent"><Bot className="h-5 w-5" /></button>
+    </section>}
+    <aside className="fixed inset-y-0 right-0 z-[89] hidden w-14 flex-col items-center border-l border-line bg-panel py-3 shadow-sm md:flex" aria-label="账本 Agent 侧栏">
+      <button type="button" className="grid h-9 w-9 place-items-center rounded-md bg-brand text-paper hover:bg-brand/90" onClick={() => { setOpen(true); setDockCollapsed(false); }} aria-label="展开账本 Agent" title="展开账本 Agent"><Bot className="h-4 w-4" /></button>
+      {open && <button type="button" className="mt-2 grid h-8 w-8 place-items-center rounded-md text-stone hover:bg-tag hover:text-ink" onClick={() => setDockCollapsed((current) => !current)} aria-label={dockCollapsed ? "展开账本 Agent" : "折叠账本 Agent"} title={dockCollapsed ? "展开账本 Agent" : "折叠账本 Agent"}>{dockCollapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}
+    </aside>
+    {!open && <button type="button" className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[70] grid h-11 w-11 place-items-center rounded-md border border-line bg-brand text-paper shadow-lg hover:bg-brand/90 md:hidden" onClick={() => setOpen(true)} aria-label="打开账本 Agent" title="账本 Agent"><Bot className="h-5 w-5" /></button>}
+    </>
   );
 
   return createPortal(shell, document.body);
@@ -275,24 +296,24 @@ export function LedgerAgentWorkspace({
 
 function MessageBubble({ item }: { item: MessageItem }) {
   const user = item.role === "user";
-  return <div className={`flex ${user ? "justify-end" : "justify-start"}`}>
-    <div className={`max-w-[88%] whitespace-pre-wrap rounded-md px-3 py-2 text-sm leading-relaxed ${user ? "bg-brand text-paper" : "border border-line bg-panel text-ink"}`}>{item.content}</div>
+  return <div className={`flex min-w-0 max-w-full ${user ? "justify-end" : "justify-start"}`}>
+    <div className={`min-w-0 max-w-[92%] break-words rounded-md px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${user ? "bg-brand text-paper whitespace-pre-wrap" : "border border-line bg-panel text-ink [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm [&_pre]:bg-paper [&_pre]:p-2 [&_code]:break-words [&_a]:break-all"}`}>{user ? item.content : <MessageResponse>{item.content}</MessageResponse>}</div>
   </div>;
 }
 
 function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded: boolean; onToggle: () => void }) {
   const state = tool.status === "running" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-brand" /> : tool.status === "completed" ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : <Ban className="h-3.5 w-3.5 text-[var(--danger)]" />;
-  return <div className="rounded-md border border-line bg-panel">
+  return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
     <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left" onClick={onToggle}>
       <span className="flex min-w-0 items-center gap-2">{state}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="truncate font-mono text-[10px] text-stone">{tool.name}</span></span>
       {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
     </button>
-    {expanded && <pre className="max-h-44 overflow-auto border-t border-line p-3 text-[11px] leading-relaxed text-stone">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
+    {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line p-3 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
   </div>;
 }
 
 function ApprovalCard({ approval, resolved, busy, onResolve }: { approval: AgentApproval; resolved?: boolean; busy: boolean; onResolve: (approval: AgentApproval, approved: boolean) => void }) {
-  return <div className="rounded-md border border-[var(--warning)] bg-panel p-3">
+  return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-[var(--warning)] bg-panel p-3">
     <div className="flex items-start gap-2"><Database className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" /><div className="min-w-0"><div className="text-sm font-semibold text-ink">{approval.toolTitle}</div><div className="mt-1 text-sm text-stone">{approval.summary}</div></div></div>
     <div className="mt-3 flex justify-end gap-2">
       <button type="button" className="h-8 rounded-md border border-line px-3 text-sm text-stone hover:bg-tag disabled:opacity-50" onClick={() => onResolve(approval, false)} disabled={busy || resolved}>取消</button>
@@ -304,7 +325,7 @@ function ApprovalCard({ approval, resolved, busy, onResolve }: { approval: Agent
 function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArtifact; onApplyBQL: (query: string) => void; onNavigate: (path: string) => void }) {
   if (artifact.type === "bql_query") {
     const query = objectString(artifact.data, "query");
-    return <div className="rounded-md border border-line bg-panel">
+    return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
       <div className="flex items-center justify-between border-b border-line px-3 py-2"><span className="text-sm font-semibold text-ink">{artifact.title}</span><button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-2.5 text-xs text-paper" onClick={() => onApplyBQL(query)} disabled={!query}><Play className="h-3.5 w-3.5" />应用</button></div>
       <pre className="max-h-56 overflow-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-olive">{query}</pre>
     </div>;
@@ -316,7 +337,7 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
   }
   if (artifact.type === "transaction_draft") {
     const entries = objectArray<ParsedTransaction>(artifact.data, "entries");
-    return <div className="rounded-md border border-line bg-panel p-3"><h3 className="text-sm font-semibold text-ink">{artifact.title} · {entries.length}</h3><div className="mt-2 space-y-2">{entries.map((entry, index) => <div key={`${entry.date}-${entry.payee}-${index}`} className="rounded-md border border-line bg-paper p-2.5"><div className="flex items-center justify-between gap-3 text-sm"><strong className="truncate text-ink">{entry.date} {entry.payee}</strong><span className="shrink-0 text-stone">{entry.postings[0]?.amount} {entry.postings[0]?.currency}</span></div><div className="mt-1 truncate text-xs text-stone">{entry.narration || entry.postings.map((posting) => posting.account).join(" · ")}</div></div>)}</div></div>;
+    return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel p-3"><h3 className="text-sm font-semibold text-ink">{artifact.title} · {entries.length}</h3><div className="mt-2 space-y-2">{entries.map((entry, index) => <div key={`${entry.date}-${entry.payee}-${index}`} className="rounded-md border border-line bg-paper p-2.5"><div className="flex min-w-0 items-center justify-between gap-3 text-sm"><strong className="truncate text-ink">{entry.date} {entry.payee}</strong><span className="shrink-0 text-stone">{entry.postings[0]?.amount} {entry.postings[0]?.currency}</span></div><div className="mt-1 truncate text-xs text-stone">{entry.narration || entry.postings.map((posting) => posting.account).join(" · ")}</div></div>)}</div></div>;
   }
   if (artifact.type === "account_draft") {
     const operations = objectArray<AccountOperation>(artifact.data, "operations");
@@ -389,22 +410,22 @@ function storageKey() {
   return `ledger.agent.workspace.v1:${apiEndpointLedgerScope()}`;
 }
 
-function readStoredAgent(): { mode: AgentMode; sessionId: string; messages: MessageItem[] } {
+function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: MessageItem[] } {
   try {
     const raw = window.localStorage.getItem(storageKey());
-    if (!raw) return { mode: "dock", sessionId: "", messages: [] };
-    const value = JSON.parse(raw) as { mode?: string; sessionId?: string; messages?: MessageItem[] };
+    if (!raw) return { approvalPolicy: "on-write", sessionId: "", messages: [] };
+    const value = JSON.parse(raw) as { approvalPolicy?: string; sessionId?: string; messages?: MessageItem[] };
     return {
-      mode: value.mode === "float" ? "float" : "dock",
+      approvalPolicy: value.approvalPolicy === "always" ? "always" : "on-write",
       sessionId: typeof value.sessionId === "string" ? value.sessionId : "",
       messages: Array.isArray(value.messages) ? value.messages.filter((item) => item?.kind === "message" && (item.role === "user" || item.role === "assistant") && typeof item.content === "string").slice(-40) : [],
     };
   } catch {
-    return { mode: "dock", sessionId: "", messages: [] };
+    return { approvalPolicy: "on-write", sessionId: "", messages: [] };
   }
 }
 
-function writeStoredAgent(value: { mode: AgentMode; sessionId: string; messages: MessageItem[] }) {
+function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; sessionId: string; messages: MessageItem[] }) {
   try {
     window.localStorage.setItem(storageKey(), JSON.stringify(value));
   } catch {
