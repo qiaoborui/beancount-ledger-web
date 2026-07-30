@@ -24,6 +24,8 @@ const COLORS = [
 
 const dashboardSummaryCache = new Map<string, DashboardSummary>();
 const dashboardSummaryInFlight = new Map<string, Promise<DashboardSummary>>();
+const dashboardQueryRecentsKey = "ledger.dashboard.queryRecents.v1";
+const dashboardQueryRecentsLimit = 10;
 
 type DashboardPanelId =
   | "dailyExpense"
@@ -263,6 +265,30 @@ function useDashboardSummary(timeRange: TimeRange, filters: DashboardFilterState
   return { data, loading, error, reload };
 }
 
+function scopedDashboardQueryRecentsKey() {
+  return `${dashboardQueryRecentsKey}:${apiEndpointLedgerScope()}`;
+}
+
+function readDashboardQueryRecents() {
+  try {
+    const raw = window.localStorage.getItem(scopedDashboardQueryRecentsKey());
+    if (!raw) return [];
+    const values = JSON.parse(raw);
+    if (!Array.isArray(values)) return [];
+    return values.filter((value): value is string => typeof value === "string" && value.trim() !== "").slice(0, dashboardQueryRecentsLimit);
+  } catch {
+    return [];
+  }
+}
+
+function writeDashboardQueryRecents(values: string[]) {
+  try {
+    window.localStorage.setItem(scopedDashboardQueryRecentsKey(), JSON.stringify(values.slice(0, dashboardQueryRecentsLimit)));
+  } catch {
+    // Ignore storage failures; recent queries are only a convenience.
+  }
+}
+
 class DashboardLockedError extends Error {}
 
 async function fetchDashboardSummary(params: string, cacheKey: string) {
@@ -351,15 +377,34 @@ function isDashboardEmpty(data: DashboardSummary) {
 
 function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: DashboardFilterKey, value: string | string[]) => void; onClear: (key: DashboardFilterKey) => void; onClearAll: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [queryRecents, setQueryRecents] = useState<string[]>(() => readDashboardQueryRecents());
+  const queryRecentsListId = useMemo(() => `dashboard-query-recents-${apiEndpointLedgerScope().replace(/[^a-zA-Z0-9_-]/g, "-")}`, []);
   const chips = activeFilterChips(data, filters);
   const advancedChips = chips.filter((chip) => chip.key !== "query");
   const clearAdvancedFilters = () => advancedChips.forEach((chip) => onClear(chip.key));
   const Icon = expanded ? ChevronDown : ChevronRight;
+
+  useEffect(() => {
+    const query = filters.query.trim();
+    if (!query) return;
+    const id = window.setTimeout(() => {
+      setQueryRecents((current) => {
+        const next = [query, ...current.filter((item) => item !== query)].slice(0, dashboardQueryRecentsLimit);
+        writeDashboardQueryRecents(next);
+        return next;
+      });
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [filters.query]);
+
   return <section className="border-b border-line bg-panel px-3 py-3 transition-colors md:px-4">
     <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
       <label className="min-w-0 flex-1">
         <span className="mb-1 block text-[11px] text-stone">查询</span>
-        <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="payee:星巴克 AND amount>30" value={filters.query} onChange={(event) => onChange("query", event.target.value)} />
+        <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="date:2026-05 AND payee:星巴克" value={filters.query} list={queryRecentsListId} onChange={(event) => onChange("query", event.target.value)} />
+        <datalist id={queryRecentsListId}>
+          {queryRecents.map((query) => <option key={query} value={query} />)}
+        </datalist>
       </label>
       <button type="button" className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-line bg-panel px-3 text-left text-sm font-medium text-warm hover:bg-tag hover:text-brand" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-line bg-panel">

@@ -177,6 +177,7 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool, rawQu
 	if err != nil {
 		return TransactionQueryResult{}, err
 	}
+	effectiveStart, effectiveEnd := transactionQueryEffectiveRange(start, end, query)
 	if s.indexErr != nil {
 		return TransactionQueryResult{}, s.indexErr
 	}
@@ -188,14 +189,14 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool, rawQu
 			return TransactionQueryResult{}, err
 		}
 		if ok {
-			txns, err := s.indexStore.TransactionsForRevision(indexCtx, revision.ID, start, end)
+			txns, err := s.indexStore.TransactionsForRevision(indexCtx, revision.ID, effectiveStart, effectiveEnd)
 			if err != nil {
 				return TransactionQueryResult{}, err
 			}
 			for index := range txns {
 				txns[index].Source.GitSHA = revision.GitSHA
 			}
-			return BuildLedgerTransactionsFromIndexedRange(txns, start, end, unlocked, query), nil
+			return BuildLedgerTransactionsFromIndexedRange(txns, effectiveStart, effectiveEnd, unlocked, query), nil
 		}
 		if s.strict {
 			return TransactionQueryResult{}, ErrLedgerReadModelUnavailable
@@ -205,7 +206,7 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool, rawQu
 	if err != nil {
 		return TransactionQueryResult{}, err
 	}
-	return BuildLedgerTransactions(snapshot, start, end, unlocked, query), nil
+	return BuildLedgerTransactions(snapshot, effectiveStart, effectiveEnd, unlocked, query), nil
 }
 
 func (s *LedgerReadService) Balances(ctx context.Context) (map[string]int, []BalanceAssertion, error) {

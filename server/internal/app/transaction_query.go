@@ -4,7 +4,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
+)
+
+const (
+	transactionQueryMinDate = "2000-01-01"
+	transactionQueryMaxDate = "2100-01-01"
 )
 
 type transactionQuery struct {
@@ -31,6 +37,11 @@ type queryTermNode struct {
 }
 
 type queryAllNode struct{}
+
+type transactionQueryDateRange struct {
+	start string
+	end   string
+}
 
 func ParseTransactionQuery(raw string) (*transactionQuery, error) {
 	raw = strings.TrimSpace(raw)
@@ -74,6 +85,59 @@ func FilterTransactionsByQuery(txns []Transaction, query *transactionQuery) []Tr
 		}
 	}
 	return out
+}
+
+func transactionQueryEffectiveRange(start, end string, query *transactionQuery) (string, string) {
+	if query == nil || query.root == nil {
+		return start, end
+	}
+	if dateRange, ok := transactionQueryNodeDateRange(query.root); ok {
+		return dateRange.start, dateRange.end
+	}
+	return start, end
+}
+
+func transactionQueryNodeDateRange(node transactionQueryNode) (transactionQueryDateRange, bool) {
+	switch n := node.(type) {
+	case queryTermNode:
+		if strings.ToLower(n.field) != "date" {
+			return transactionQueryDateRange{}, false
+		}
+		return queryDateTermRange(n.op, n.value)
+	case queryBinaryNode:
+		if n.op != "AND" {
+			return transactionQueryDateRange{}, false
+		}
+		left, leftOK := transactionQueryNodeDateRange(n.left)
+		right, rightOK := transactionQueryNodeDateRange(n.right)
+		switch {
+		case leftOK && rightOK:
+			return intersectTransactionQueryDateRanges(left, right)
+		case leftOK:
+			return left, true
+		case rightOK:
+			return right, true
+		default:
+			return transactionQueryDateRange{}, false
+		}
+	default:
+		return transactionQueryDateRange{}, false
+	}
+}
+
+func intersectTransactionQueryDateRanges(left, right transactionQueryDateRange) (transactionQueryDateRange, bool) {
+	start := left.start
+	if right.start > start {
+		start = right.start
+	}
+	end := left.end
+	if right.end < end {
+		end = right.end
+	}
+	if start >= end {
+		return transactionQueryDateRange{start: start, end: start}, true
+	}
+	return transactionQueryDateRange{start: start, end: end}, true
 }
 
 func (queryAllNode) Matches(Transaction) bool {
@@ -121,7 +185,7 @@ func (n queryTermNode) Matches(txn Transaction) bool {
 	case "type":
 		return strings.EqualFold(dashboardTransactionType(txn), value)
 	case "date":
-		return queryCompareString(txn.Date, n.op, value)
+		return queryDateMatches(txn.Date, n.op, value)
 	case "amount":
 		return queryCompareInt(transactionQueryAmount(txn), n.op, cents(value))
 	default:
@@ -235,6 +299,83 @@ func queryCompareString(left, op, right string) bool {
 	default:
 		return queryContains(left, right)
 	}
+}
+
+func queryDateMatches(date, op, value string) bool {
+	if dateRange, ok := queryDateTermRange(op, value); ok {
+		return date >= dateRange.start && date < dateRange.end
+	}
+	return false
+}
+
+func queryDateTermRange(op, value string) (transactionQueryDateRange, bool) {
+	value = strings.TrimSpace(value)
+	switch op {
+	case ":", "=":
+		return exactTransactionQueryDateRange(value)
+	case ">=", ">", "<", "<=":
+		date, ok := parseTransactionQueryDate(value)
+		if !ok {
+			return transactionQueryDateRange{}, false
+		}
+		switch op {
+		case ">=":
+			return transactionQueryDateRange{start: date, end: transactionQueryMaxDate}, true
+		case ">":
+			next, ok := shiftTransactionQueryDate(date, 1)
+			if !ok {
+				return transactionQueryDateRange{}, false
+			}
+			return transactionQueryDateRange{start: next, end: transactionQueryMaxDate}, true
+		case "<":
+			return transactionQueryDateRange{start: transactionQueryMinDate, end: date}, true
+		case "<=":
+			next, ok := shiftTransactionQueryDate(date, 1)
+			if !ok {
+				return transactionQueryDateRange{}, false
+			}
+			return transactionQueryDateRange{start: transactionQueryMinDate, end: next}, true
+		}
+	}
+	return transactionQueryDateRange{}, false
+}
+
+func exactTransactionQueryDateRange(value string) (transactionQueryDateRange, bool) {
+	if len(value) == len("2006-01") {
+		date, err := time.Parse("2006-01", value)
+		if err != nil || date.Format("2006-01") != value {
+			return transactionQueryDateRange{}, false
+		}
+		return transactionQueryDateRange{
+			start: date.Format("2006-01-02"),
+			end:   date.AddDate(0, 1, 0).Format("2006-01-02"),
+		}, true
+	}
+	date, ok := parseTransactionQueryDate(value)
+	if !ok {
+		return transactionQueryDateRange{}, false
+	}
+	next, ok := shiftTransactionQueryDate(date, 1)
+	if !ok {
+		return transactionQueryDateRange{}, false
+	}
+	return transactionQueryDateRange{start: date, end: next}, true
+}
+
+func parseTransactionQueryDate(value string) (string, bool) {
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil || date.Format("2006-01-02") != value {
+		return "", false
+	}
+	return date.Format("2006-01-02"), true
+}
+
+func shiftTransactionQueryDate(value string, days int) (string, bool) {
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil || date.Format("2006-01-02") != value {
+		return "", false
+	}
+	return date.AddDate(0, 0, days).Format("2006-01-02"), true
 }
 
 func queryCompareInt(left int, op string, right int) bool {

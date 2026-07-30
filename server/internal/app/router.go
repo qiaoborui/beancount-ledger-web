@@ -152,6 +152,7 @@ func (s *Server) dashboard(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	start, end = transactionQueryEffectiveRange(start, end, filters.query)
 	c.JSON(http.StatusOK, BuildDashboardSummaryWithFiltersInCurrency(snapshot, start, end, filters, c.Query("valuationCurrency")))
 }
 

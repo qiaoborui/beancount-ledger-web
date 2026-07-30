@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
+import { queryDateRange } from "@/lib/queryDateRange";
 import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel, timeRangeToParams } from "@/lib/timeRange";
 import type { TimeRange } from "@/lib/timeRange";
 import { apiEndpointSettingsChangeEvent, apiFetch, apiSensitiveDataLockedEvent, readApiEndpointSettings } from "@/lib/apiEndpoints";
@@ -434,6 +435,18 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   const searchKey = searchParams.toString();
   const shortcutAction = searchParams.get("action");
+
+  useEffect(() => {
+    const rawQuery = page === "transactions"
+      ? txnSearchQuery
+      : page === "dashboard"
+        ? searchParams.get("q") ?? ""
+        : "";
+    const range = queryDateRange(rawQuery);
+    if (!range) return;
+    if (range.start === timeRange.start && range.end === timeRange.end) return;
+    setTimeRange({ start: range.start, end: range.end, preset: "custom" });
+  }, [page, searchParams, timeRange.end, timeRange.start, txnSearchQuery]);
 
   useEffect(() => {
     if (page !== "transactions") return;
