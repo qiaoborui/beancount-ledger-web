@@ -191,7 +191,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
       </header>
 
       {(mobileMenuOpen || mobileMenuClosing) && <div className={`mobile-sidebar-backdrop fixed inset-0 z-40 bg-ink/45 md:hidden ${mobileMenuClosing ? "mobile-sidebar-backdrop-close" : ""}`} onClick={closeMobileMenu}>
-        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel p-3 ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
+        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
           <div className="mb-4 flex items-center justify-between border-b border-line pb-3">
             <div className="flex items-center gap-2.5">
               <span className="grid h-8 w-8 place-items-center rounded-md bg-brand text-primary-foreground"><Activity className="h-4 w-4" /></span>
