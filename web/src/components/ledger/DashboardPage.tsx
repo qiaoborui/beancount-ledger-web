@@ -352,30 +352,30 @@ function isDashboardEmpty(data: DashboardSummary) {
 function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: DashboardFilterKey, value: string | string[]) => void; onClear: (key: DashboardFilterKey) => void; onClearAll: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const chips = activeFilterChips(data, filters);
+  const advancedChips = chips.filter((chip) => chip.key !== "query");
+  const clearAdvancedFilters = () => advancedChips.forEach((chip) => onClear(chip.key));
   const Icon = expanded ? ChevronDown : ChevronRight;
-  return <section className={`border-b border-line bg-panel transition-colors ${expanded ? "px-3 py-3 md:px-4" : "px-3 py-2 md:px-4"}`}>
-    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-      <button type="button" className="flex min-w-0 items-center gap-2 text-left text-sm font-medium text-warm hover:text-brand" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+  return <section className="border-b border-line bg-panel px-3 py-3 transition-colors md:px-4">
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+      <label className="min-w-0 flex-1">
+        <span className="mb-1 block text-[11px] text-stone">查询</span>
+        <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="payee:星巴克 AND amount>30" value={filters.query} onChange={(event) => onChange("query", event.target.value)} />
+      </label>
+      <button type="button" className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-line bg-panel px-3 text-left text-sm font-medium text-warm hover:bg-tag hover:text-brand" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-line bg-panel">
           <SlidersHorizontal className="h-4 w-4 text-brand" />
         </span>
-        <span className="min-w-0 truncate">筛选</span>
-        <span className="shrink-0 rounded-full bg-tag px-2 py-0.5 text-xs font-normal text-stone">{chips.length ? `${chips.length} 个条件` : "全部数据"}</span>
+        <span className="min-w-0 truncate">高级筛选</span>
+        <span className="shrink-0 rounded-full bg-tag px-2 py-0.5 text-xs font-normal text-stone">{advancedChips.length ? `${advancedChips.length} 个条件` : "未启用"}</span>
         <Icon className="h-4 w-4 shrink-0 text-stone" />
       </button>
-      {!expanded && chips.length > 0 && <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-        {chips.slice(0, 4).map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />)}
-        {chips.length > 4 && <span className="rounded-full bg-tag px-2.5 py-1 text-xs text-stone">+{chips.length - 4}</span>}
-        <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={onClearAll}>清空</button>
-      </div>}
     </div>
+    {!expanded && advancedChips.length > 0 && <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
+      {advancedChips.slice(0, 4).map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />)}
+      {advancedChips.length > 4 && <span className="rounded-full bg-tag px-2.5 py-1 text-xs text-stone">+{advancedChips.length - 4}</span>}
+      <button type="button" className="rounded-full border border-line px-2.5 py-1 text-xs text-stone hover:bg-tag" onClick={clearAdvancedFilters}>清空高级</button>
+    </div>}
     {expanded && <>
-      <div className="mt-3">
-        <label className="block min-w-0">
-          <span className="mb-1 block text-[11px] text-stone">查询</span>
-          <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="payee:星巴克 AND amount>30" value={filters.query} onChange={(event) => onChange("query", event.target.value)} />
-        </label>
-      </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <MultiFilterSelect label="分类" value={filters.category} onChange={(value) => onChange("category", value)} options={data.filterOptions.categories} />
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
