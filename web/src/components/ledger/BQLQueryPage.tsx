@@ -103,16 +103,13 @@ const chartColors = [
 const bqlEditorTheme = EditorView.theme({
   "&": {
     minHeight: "12rem",
-    background: "transparent",
-    color: "inherit",
+    background: "var(--ledger-code-bg)",
+    color: "var(--ledger-code-fg)",
     fontSize: "13px",
-  },
-  ".cm-editor": {
-    minHeight: "12rem",
-    outline: "none",
   },
   ".cm-scroller": {
     minHeight: "12rem",
+    background: "transparent",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     lineHeight: "1.55",
   },
@@ -123,20 +120,40 @@ const bqlEditorTheme = EditorView.theme({
     padding: "0 12px",
   },
   ".cm-gutters": {
-    background: "transparent",
-    borderRight: "1px solid var(--line)",
-    color: "var(--stone)",
+    background: "var(--ledger-code-gutter-bg)",
+    borderRight: "1px solid var(--ledger-code-border)",
+    color: "var(--ledger-code-muted)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--ledger-code-fg)",
   },
   ".cm-activeLine, .cm-activeLineGutter": {
-    background: "color-mix(in srgb, var(--tag) 72%, transparent)",
+    background: "color-mix(in srgb, var(--ledger-code-selection) 46%, transparent)",
   },
   ".cm-focused": {
     outline: "none",
   },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    background: "color-mix(in srgb, var(--brand) 18%, transparent)",
+    background: "var(--ledger-code-selection)",
   },
-}, { dark: false });
+  ".cm-selectionMatch": {
+    background: "color-mix(in srgb, var(--ledger-code-selection) 68%, transparent)",
+  },
+  ".cm-matchingBracket, .cm-nonmatchingBracket": {
+    background: "color-mix(in srgb, var(--brand) 22%, transparent)",
+    outline: "1px solid var(--brand)",
+  },
+  ".cm-panels, .cm-tooltip": {
+    background: "var(--ledger-code-bg)",
+    borderColor: "var(--ledger-code-border)",
+    color: "var(--ledger-code-fg)",
+  },
+  ".cm-button, .cm-textfield": {
+    background: "var(--paper)",
+    border: "1px solid var(--ledger-code-border)",
+    color: "var(--ink)",
+  },
+});
 
 export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuationCurrency: string; onSensitiveLocked: () => void }) {
   const [recents, setRecents] = useState<string[]>(() => readRecents());
@@ -149,7 +166,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const selectionRef = useRef<EditorSelection>({ from: 0, to: 0 });
-  const editorExtensions = useMemo(() => [sql(), bqlEditorTheme], []);
+  const editorExtensions = useMemo(() => [sql()], []);
   const statements = useMemo(() => splitBQLStatements(query), [query]);
   const hasRecents = recents.length > 0;
   const canRun = statements.length > 0 && !loading;
@@ -246,7 +263,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
               </div>
             </div>
             <div
-              className="overflow-hidden rounded-md border border-line bg-paper text-ink focus-within:ring-2 focus-within:ring-brand/30"
+              className="overflow-hidden rounded-md border border-[var(--ledger-code-border)] bg-[var(--ledger-code-bg)] text-[var(--ledger-code-fg)] focus-within:ring-2 focus-within:ring-brand/30"
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                   event.preventDefault();
@@ -258,6 +275,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
                 basicSetup={{ foldGutter: false, highlightActiveLine: true, highlightActiveLineGutter: true }}
                 extensions={editorExtensions}
                 height="12rem"
+                theme={bqlEditorTheme}
                 value={query}
                 onUpdate={handleEditorUpdate}
               />
