@@ -5,10 +5,9 @@ import { normalizeBQLChartValue } from "./LedgerAgentWorkspace";
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
 describe("LedgerAgentWorkspace", () => {
-  it("supports dock, collapsible and mobile full-screen layouts", () => {
-    expect(source).toContain("fixed inset-y-0 right-0");
-    expect(source).toContain("md:w-[430px]");
-    expect(source).toContain("dockCollapsed");
+  it("supports docked and mobile full-screen layouts", () => {
+    expect(source).toContain("ledger-agent-dock");
+    expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
   });
 

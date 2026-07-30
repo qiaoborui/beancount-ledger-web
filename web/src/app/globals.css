@@ -720,13 +720,48 @@ html[data-theme="dark"] .home-daily-chart-line {
   .app-shell-main {
     overflow-y: auto;
     scrollbar-gutter: stable;
-    transition: margin-right 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  body.ledger-agent-dock-expanded .app-shell-main { margin-right: 430px; }
-  body.ledger-agent-dock-collapsed .app-shell-main { margin-right: 3.5rem; }
-  body.ledger-agent-dock-expanded .app-fab { right: calc(430px + 1rem); }
-  body.ledger-agent-dock-collapsed .app-fab { right: 4.5rem; }
+  .ledger-workspace-frame {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .ledger-workspace-content {
+    flex: 1 1 auto;
+    width: 0;
+  }
+
+  .ledger-agent-dock {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    flex: 0 0 0;
+    height: 100dvh;
+    overflow: hidden;
+    border-left: 0 solid var(--line);
+    background: var(--paper);
+    opacity: 0;
+    transition: flex-basis 260ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms ease-out, opacity 180ms ease-out;
+  }
+
+  .ledger-agent-dock[data-open="true"] {
+    flex-basis: 38vw;
+    max-width: 430px;
+    border-left-width: 1px;
+    opacity: 1;
+  }
+
+  .ledger-agent-dock > section {
+    transform: translate3d(18px, 0, 0);
+    opacity: 0;
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out;
+  }
+
+  .ledger-agent-dock[data-open="true"] > section {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
 
   .dashboard-chart-canvas {
     height: var(--dashboard-chart-height, 12.5rem);
@@ -772,10 +807,6 @@ html[data-theme="dark"] .home-daily-chart-line {
 }
 
 @media (max-width: 767px) {
-  .app-fab {
-    right: 4.75rem;
-  }
-
   .app-shell:has(.ledger-editor-input:focus) .mobile-bottom-nav,
   .app-shell:has(.ledger-editor-input:focus) .app-fab {
     display: none;
