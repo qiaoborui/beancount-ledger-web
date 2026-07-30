@@ -58,11 +58,15 @@ const recentsLimit = 8;
 const recentsKey = "ledger.bql.recents.v1";
 
 export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuationCurrency: string; onSensitiveLocked: () => void }) {
-  const [query, setQuery] = useState(defaultQuery);
+  const [recents, setRecents] = useState<string[]>(() => readRecents());
+  const [query, setQuery] = useState(() => {
+    const initialRecents = readRecents();
+    return initialRecents[0] ?? defaultQuery;
+  });
   const [result, setResult] = useState<BQLResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [recents, setRecents] = useState<string[]>(() => readRecents());
+  const hasRecents = recents.length > 0;
   const canRun = Boolean(query.trim()) && !loading;
   const preview = useMemo(() => result ? summarizeResult(result) : "", [result]);
 
@@ -144,21 +148,16 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked }: { valuati
             </div> : null}
           </div>
           <aside className="min-w-0 border-t border-line pt-3 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">示例</div>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">
+              {hasRecents ? <Clock className="h-3 w-3" /> : null}
+              {hasRecents ? "最近查询" : "默认查询"}
+            </div>
             <div className="mt-2 grid gap-2">
-              {examples.map((example) => <button key={example.label} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
+              {(hasRecents ? recents.map((recent, index) => ({ label: `最近 ${index + 1}`, query: recent })) : examples).map((example, index) => <button key={`${example.label}:${example.query}:${index}`} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
                 <span className="block truncate font-medium text-ink">{example.label}</span>
-                <span className="mt-1 block truncate font-mono text-[11px] text-stone">{example.query.split("\n")[0]}</span>
+                <span className="mt-1 block truncate font-mono text-[11px] text-stone">{example.query.replace(/\s+/g, " ")}</span>
               </button>)}
             </div>
-            {recents.length > 0 && <>
-              <div className="mt-4 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone"><Clock className="h-3 w-3" /> 最近</div>
-              <div className="mt-2 grid gap-2">
-                {recents.map((recent) => <button key={recent} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left hover:bg-tag" onClick={() => useQuery(recent)}>
-                  <span className="line-clamp-2 font-mono text-[11px] leading-4 text-olive">{recent.replace(/\s+/g, " ")}</span>
-                </button>)}
-              </div>
-            </>}
           </aside>
         </div>
       </section>
