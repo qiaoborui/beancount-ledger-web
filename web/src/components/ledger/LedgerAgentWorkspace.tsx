@@ -2,7 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, X } from "lucide-react";
+import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, History, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
@@ -91,6 +91,7 @@ export function LedgerAgentWorkspace({
   const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
   const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
   const [desktopFullscreen, setDesktopFullscreen] = useState(false);
+  const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("就绪");
@@ -125,6 +126,7 @@ export function LedgerAgentWorkspace({
     const session = createAgentSession();
     setSessions((current) => [session, ...current].slice(0, MAX_STORED_SESSIONS));
     setActiveSessionId(session.id);
+    setMobileSessionListOpen(false);
     setInput("");
     setStreamingText("");
     setStatus("就绪");
@@ -132,7 +134,9 @@ export function LedgerAgentWorkspace({
   }
 
   function selectSession(sessionId: string) {
-    if (busy || sessionId === activeSession.id) return;
+    if (busy) return;
+    setMobileSessionListOpen(false);
+    if (sessionId === activeSession.id) return;
     setActiveSessionId(sessionId);
     setInput("");
     setStreamingText("");
@@ -178,7 +182,10 @@ export function LedgerAgentWorkspace({
   }, [desktopFullscreen, open]);
 
   useEffect(() => {
-    if (!open) setDesktopFullscreen(false);
+    if (!open) {
+      setDesktopFullscreen(false);
+      setMobileSessionListOpen(false);
+    }
   }, [open]);
 
   const conversation = timeline.filter((item): item is MessageItem => item.kind === "message");
@@ -286,6 +293,7 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:hidden" title="查看会话历史" aria-label="查看会话历史" onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
           <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
@@ -365,6 +373,24 @@ export function LedgerAgentWorkspace({
       document.body
     )}
     {open && createPortal(panel("fixed inset-0 z-[90] flex min-w-0 max-w-full flex-col overflow-hidden bg-paper shadow-2xl md:hidden", mobileScrollRef), document.body)}
+    {open && mobileSessionListOpen && createPortal(
+      <section className="fixed inset-0 z-[110] flex flex-col overflow-hidden bg-paper md:hidden" aria-label="移动端会话历史">
+        <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
+          <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div>
+          <div className="flex items-center gap-1">
+            <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+            <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="返回聊天" aria-label="返回聊天" onClick={() => setMobileSessionListOpen(false)}><X className="h-4 w-4" /></button>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+          {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-2 w-full rounded-md border px-3 py-3 text-left transition ${session.id === activeSession.id ? "border-brand bg-brand text-paper" : "border-line bg-panel text-ink active:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
+            <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
+            <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {session.timeline.length} 条记录</span>
+          </button>)}
+        </div>
+      </section>,
+      document.body
+    )}
   </>;
 }
 
