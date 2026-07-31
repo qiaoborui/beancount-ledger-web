@@ -35,6 +35,7 @@ export type AgentApproval = {
 export type AgentFinal = {
   sessionId: string;
   message: string;
+  status?: "completed" | "approval_pending" | "budget_exhausted" | "cancelled" | "failed";
   pendingApprovalId?: string;
   refreshLedger?: boolean;
 };

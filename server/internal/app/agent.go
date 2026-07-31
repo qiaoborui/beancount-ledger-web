@@ -17,10 +17,16 @@ import (
 )
 
 const (
-	agentApprovalScope = "ledger-agent-approvals"
-	// agentMaxTurns applies to one request only. A persisted session restores context,
-	// but never carries this budget into the next request.
-	agentMaxTurns = 8
+	agentApprovalScope           = "ledger-agent-approvals"
+	agentApprovalResolutionScope = "ledger-agent-approval-resolutions"
+	// A task is allowed to span many sampling turns. These are circuit breakers,
+	// not a conversational turn limit: they bound provider cost and protect the
+	// server from a malformed model/tool loop while still allowing substantial work.
+	agentRunMaxModelCalls    = 48
+	agentRunMaxToolCalls     = 128
+	agentRunMaxNoProgress    = 8
+	agentRunMaxElapsed       = 4 * time.Minute
+	agentRunEmergencyLoopCap = 160
 )
 
 type AgentMessage struct {
@@ -98,6 +104,29 @@ type AgentApproval struct {
 	PageContext AgentPageContext `json:"context"`
 }
 
+// agentApprovalResolution is deliberately stored separately from the pending
+// approval token.  Pending tokens may be consumed atomically by a relational
+// repository, while this durable receipt makes a retried browser request safe:
+// a write is never executed twice just because the client did not receive SSE.
+type agentApprovalResolution struct {
+	ApprovalID     string         `json:"approvalId"`
+	SessionID      string         `json:"sessionId"`
+	Status         string         `json:"status"`
+	Approved       bool           `json:"approved"`
+	ToolCallID     string         `json:"toolCallId"`
+	ToolName       string         `json:"toolName"`
+	ToolTitle      string         `json:"toolTitle"`
+	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
+	ModelOutput    any            `json:"modelOutput,omitempty"`
+	ClientOutput   any            `json:"clientOutput,omitempty"`
+	RefreshLedger  bool           `json:"refreshLedger,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	Error          string         `json:"error,omitempty"`
+	CompletedAt    time.Time      `json:"completedAt,omitempty"`
+	ExpiresAt      time.Time      `json:"expiresAt"`
+	Approval       *AgentApproval `json:"approval,omitempty"`
+}
+
 type agentToolSpec struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
@@ -110,7 +139,10 @@ type agentTool struct {
 	RequiresApproval bool
 	ApprovalMessage  string
 	ExecutionStatus  string
-	Execute          func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error)
+	// ReadOnly is an explicit registry declaration.  Write tools always require
+	// approval; read tools can still be paused by the user's "always" policy.
+	ReadOnly bool
+	Execute  func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error)
 }
 
 type agentToolExecution struct {
@@ -215,6 +247,35 @@ func (openAICompatibleAgentClient) Complete(ctx context.Context, system string, 
 
 type agentEventWriter func(string, any) error
 
+type agentRunBudget struct {
+	startedAt       time.Time
+	modelCalls      int
+	toolCalls       int
+	noProgressTurns int
+	loops           int
+}
+
+func newAgentRunBudget() agentRunBudget { return agentRunBudget{startedAt: time.Now()} }
+
+func (b *agentRunBudget) exhausted() (string, bool) {
+	if b.loops >= agentRunEmergencyLoopCap {
+		return "循环保护已触发", true
+	}
+	if b.modelCalls >= agentRunMaxModelCalls {
+		return fmt.Sprintf("已达到 %d 次模型调用预算", agentRunMaxModelCalls), true
+	}
+	if b.toolCalls >= agentRunMaxToolCalls {
+		return fmt.Sprintf("已达到 %d 次工具调用预算", agentRunMaxToolCalls), true
+	}
+	if time.Since(b.startedAt) >= agentRunMaxElapsed {
+		return "已达到单次任务运行时间预算", true
+	}
+	if b.noProgressTurns >= agentRunMaxNoProgress {
+		return "连续工具调用未取得进展", true
+	}
+	return "", false
+}
+
 func (s *Server) modelClient() AgentModelClient {
 	if s.agentModel != nil {
 		return s.agentModel
@@ -223,6 +284,13 @@ func (s *Server) modelClient() AgentModelClient {
 }
 
 func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
+	sessionID := normalizeAgentSessionID(request.SessionID)
+	return s.withAgentSessionRunLock(ctx, sessionID, func(lockCtx context.Context) error {
+		return s.runAgentTurnLocked(lockCtx, request, emit)
+	})
+}
+
+func (s *Server) runAgentTurnLocked(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
 	sessionID := normalizeAgentSessionID(request.SessionID)
 	pageContext := request.Context
 	var messages []agentModelMessage
@@ -254,57 +322,95 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 			return err
 		}
 	}
-	tools := s.agentTools()
-	specs := sortedAgentToolSpecs(tools)
-	approvalPolicy := normalizeAgentApprovalPolicy(request.ApprovalPolicy)
 	if err := emit("status", map[string]any{"text": "正在分析请求"}); err != nil {
 		return err
 	}
+	return s.continueAgentRun(ctx, sessionID, pageContext, normalizeAgentApprovalPolicy(request.ApprovalPolicy), memories, messages, false, emit)
+}
 
-	for turn := 0; turn < agentMaxTurns; turn++ {
-		result, err := s.modelClient().Complete(ctx, agentSystemPrompt(pageContext, memories), messages, specs)
+// continueAgentRun owns a task lifecycle, not a UI request.  It is used both
+// for the initial prompt and after an approved write has produced its actual
+// result, so the model can inspect the result and decide the next safe step.
+func (s *Server) continueAgentRun(ctx context.Context, sessionID string, page AgentPageContext, approvalPolicy string, memories []AgentMemoryRecord, messages []agentModelMessage, refreshLedger bool, emit agentEventWriter) error {
+	tools := s.agentTools()
+	specs := sortedAgentToolSpecs(tools)
+	budget := newAgentRunBudget()
+	for {
+		if reason, exhausted := budget.exhausted(); exhausted {
+			if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+				return err
+			}
+			message := "任务已暂停：" + reason + "。发送“继续”可在保留任务状态的基础上继续。"
+			if err := emit("message_delta", map[string]any{"text": message}); err != nil {
+				return err
+			}
+			return emit("final", map[string]any{"sessionId": sessionID, "message": message, "status": "budget_exhausted", "refreshLedger": refreshLedger})
+		}
+		// Keep the live provider transcript within the same bounded, valid shape
+		// as the persisted session; do not wait until the next request to compact.
+		messages = trimAgentSessionMessages(messages)
+		budget.loops++
+		budget.modelCalls++
+		result, err := s.modelClient().Complete(ctx, agentSystemPrompt(page, memories), messages, specs)
 		if err != nil {
 			return err
 		}
 		assistantMessage := agentModelMessage{Role: "assistant", Content: result.Content, ToolCalls: result.ToolCalls}
 		messages = append(messages, assistantMessage)
+		if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+			return err
+		}
 		if len(result.ToolCalls) == 0 {
 			content := strings.TrimSpace(result.Content)
 			if content == "" {
 				content = "处理完成。"
 			}
-			if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
-				return err
-			}
 			if err := emit("message_delta", map[string]any{"text": content}); err != nil {
 				return err
 			}
-			return emit("final", map[string]any{"sessionId": sessionID, "message": content})
+			return emit("final", map[string]any{"sessionId": sessionID, "message": content, "status": "completed", "refreshLedger": refreshLedger})
+		}
+		if duplicateIDs := duplicateAgentToolCallIDs(result.ToolCalls); len(duplicateIDs) > 0 {
+			reported := make(map[string]struct{}, len(duplicateIDs))
+			for _, call := range result.ToolCalls {
+				if !duplicateIDs[call.ID] {
+					continue
+				}
+				if _, done := reported[call.ID]; done {
+					continue
+				}
+				reported[call.ID] = struct{}{}
+				if err := s.appendAgentToolError(ctx, sessionID, &messages, call, fmt.Errorf("duplicate or empty tool call id: %q", call.ID), emit); err != nil {
+					return err
+				}
+			}
+			budget.noProgressTurns++
+			if err := emit("status", map[string]any{"text": "正在整理工具结果"}); err != nil {
+				return err
+			}
+			continue
 		}
 
-		for _, call := range result.ToolCalls {
-			tool, ok := tools[call.Function.Name]
-			if !ok {
-				toolOutput := map[string]any{"error": "unknown tool: " + call.Function.Name}
-				messages = append(messages, agentToolResultMessage(call.ID, toolOutput))
-				_ = emit("tool_result", map[string]any{"id": call.ID, "name": call.Function.Name, "title": call.Function.Name, "status": "error", "error": toolOutput["error"]})
+		progressed := false
+		seenIDs := make(map[string]struct{}, len(result.ToolCalls))
+		for index, call := range result.ToolCalls {
+			budget.toolCalls++
+			tool, arguments, input, validationErr := validateAgentToolCall(tools, call, seenIDs)
+			if validationErr != nil {
+				if err := s.appendAgentToolError(ctx, sessionID, &messages, call, validationErr, emit); err != nil {
+					return err
+				}
 				continue
 			}
-			arguments := json.RawMessage(call.Function.Arguments)
-			if !json.Valid(arguments) {
-				arguments = json.RawMessage(`{}`)
-			}
-			input := decodeAgentInput(arguments)
 			if err := emit("tool_call", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "running", "input": input}); err != nil {
 				return err
 			}
 			if tool.RequiresApproval || approvalPolicy == "always" {
 				if tool.RequiresApproval {
-					preview, err := s.previewAgentWrite(ctx, tool.Name, arguments, pageContext)
+					preview, err := s.previewAgentWrite(ctx, tool.Name, arguments, page)
 					if err != nil {
-						messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
-						if emitErr := emit("tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
-							return emitErr
+						if err := s.appendAgentToolError(ctx, sessionID, &messages, call, err, emit); err != nil {
+							return err
 						}
 						continue
 					}
@@ -314,8 +420,15 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 						}
 					}
 				}
-				approval, err := s.saveAgentApproval(ctx, sessionID, call, tool, arguments, pageContext)
+				// Complete sibling calls so the saved model transcript is well-formed.
+				for _, deferred := range result.ToolCalls[index+1:] {
+					messages = append(messages, agentToolResultMessage(deferred.ID, map[string]any{"error": "deferred while awaiting approval; reissue after the approved operation completes"}))
+				}
+				approval, err := s.saveAgentApproval(ctx, sessionID, call, tool, arguments, page, approvalPolicy)
 				if err != nil {
+					return err
+				}
+				if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
 					return err
 				}
 				if err := emit("approval_required", approval); err != nil {
@@ -325,25 +438,24 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 				if err := emit("message_delta", map[string]any{"text": message}); err != nil {
 					return err
 				}
-				if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
-					return err
-				}
-				return emit("final", map[string]any{"sessionId": sessionID, "message": message, "pendingApprovalId": approval.ID})
+				return emit("final", map[string]any{"sessionId": sessionID, "message": message, "status": "approval_pending", "pendingApprovalId": approval.ID, "refreshLedger": refreshLedger})
 			}
-
-			execution, err := tool.Execute(ctx, arguments, pageContext)
+			execution, err := tool.Execute(ctx, arguments, page)
 			if err != nil {
-				messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
-				if emitErr := emit("tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
-					return emitErr
+				if err := s.appendAgentToolError(ctx, sessionID, &messages, call, err, emit); err != nil {
+					return err
 				}
 				continue
 			}
+			progressed = true
 			modelOutput := execution.ModelOutput
 			if modelOutput == nil {
 				modelOutput = execution.ClientOutput
 			}
 			messages = append(messages, agentToolResultMessage(call.ID, modelOutput))
+			if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+				return err
+			}
 			if err := emit("tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "completed", "output": execution.ClientOutput}); err != nil {
 				return err
 			}
@@ -352,19 +464,40 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 					return err
 				}
 			}
+			refreshLedger = refreshLedger || execution.RefreshLedger
+		}
+		if progressed {
+			budget.noProgressTurns = 0
+		} else {
+			budget.noProgressTurns++
 		}
 		if err := emit("status", map[string]any{"text": "正在整理工具结果"}); err != nil {
 			return err
 		}
 	}
-	if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+}
+
+func duplicateAgentToolCallIDs(calls []agentModelToolCall) map[string]bool {
+	counts := make(map[string]int, len(calls))
+	for _, call := range calls {
+		counts[call.ID]++
+	}
+	duplicates := make(map[string]bool)
+	for id, count := range counts {
+		if strings.TrimSpace(id) == "" || count > 1 {
+			duplicates[id] = true
+		}
+	}
+	return duplicates
+}
+
+func (s *Server) appendAgentToolError(ctx context.Context, sessionID string, messages *[]agentModelMessage, call agentModelToolCall, cause error, emit agentEventWriter) error {
+	output := map[string]any{"error": cause.Error()}
+	*messages = append(*messages, agentToolResultMessage(call.ID, output))
+	if err := s.writeAgentSession(ctx, sessionID, *messages); err != nil {
 		return err
 	}
-	message := "本次请求已完成 8 轮工具处理。发送“继续”可在保留当前结果的基础上继续处理。"
-	if err := emit("message_delta", map[string]any{"text": message}); err != nil {
-		return err
-	}
-	return emit("final", map[string]any{"sessionId": sessionID, "message": message})
+	return emit("tool_result", map[string]any{"id": call.ID, "name": call.Function.Name, "title": call.Function.Name, "status": "error", "error": cause.Error()})
 }
 
 func agentMessagesFromRequest(history []AgentMessage) []agentModelMessage {
@@ -516,27 +649,60 @@ func sameAgentTransactionSource(entry BeanEntry, source TransactionSource) bool 
 }
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
+	return s.withAgentSessionRunLock(ctx, request.SessionID, func(lockCtx context.Context) error {
+		return s.resolveAgentApprovalLocked(lockCtx, request, pageContext, emit)
+	})
+}
+
+func (s *Server) resolveAgentApprovalLocked(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
 	var approval AgentApproval
-	var err error
-	if s.agentApprovals != nil {
-		var found, expired bool
-		approval, found, expired, err = s.agentApprovals.Take(ctx, ledgerClusterID(s.cfg), request.SessionID, request.ApprovalID)
-		if err == nil && !found {
-			if expired {
-				err = errors.New("approval request has expired")
-			} else {
-				err = s.takeLegacyAgentApproval(ctx, request, &approval)
+	claim := agentApprovalResolution{}
+	if stored, found, err := s.readAgentApprovalResolution(ctx, request); err != nil {
+		return err
+	} else if found {
+		switch stored.Status {
+		case "pending":
+			if stored.Approval == nil {
+				return errors.New("approval recovery record is incomplete")
 			}
+			// Prefer consuming the relational token. If a process crashed after
+			// Take deleted it but before this claim was persisted, the pending
+			// runtime record proves that no execution was started and is safe to
+			// recover under the session lease.
+			if taken, takeErr := s.takeAgentApproval(ctx, request); takeErr == nil {
+				approval = taken
+			} else if strings.Contains(takeErr.Error(), "was not found") {
+				approval = *stored.Approval
+			} else {
+				return takeErr
+			}
+			claim = stored
+		case "executing":
+			return errors.New("approval is already being processed")
+		default:
+			return s.emitAgentApprovalResolution(stored, emit)
 		}
 	} else {
-		err = s.takeLegacyAgentApproval(ctx, request, &approval)
+		var err error
+		approval, err = s.takeAgentApproval(ctx, request)
+		if err != nil {
+			return err
+		}
+		claim = agentApprovalResolution{ApprovalID: approval.ID, SessionID: approval.SessionID, ToolCallID: approval.ToolCallID, ToolName: approval.ToolName, ToolTitle: approval.ToolTitle, ExpiresAt: time.Now().UTC().Add(agentSessionMaxAge), Approval: &approval}
 	}
-	if err != nil {
+	// Mark the consumed token before executing. A concurrent retry can observe
+	// this state and will never issue the write again.
+	claim.Status, claim.Approved, claim.Approval = "executing", request.Approved, &approval
+	if err := s.writeAgentApprovalResolution(ctx, claim); err != nil {
 		return err
 	}
 	if !request.Approved {
 		message := "已取消这项操作。"
 		if err := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, map[string]any{"error": "用户已取消"})); err != nil {
+			return err
+		}
+		resolution := agentApprovalResolution{ApprovalID: approval.ID, SessionID: approval.SessionID, Status: "cancelled", Approved: false, ToolCallID: approval.ToolCallID, ToolName: approval.ToolName, ToolTitle: approval.ToolTitle, Error: "用户已取消", Message: message, CompletedAt: time.Now().UTC(), ExpiresAt: claim.ExpiresAt}
+		if err := s.writeAgentApprovalResolution(ctx, resolution); err != nil {
 			return err
 		}
 		if err := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": approval.ToolName, "title": approval.ToolTitle, "status": "error", "error": "用户已取消"}); err != nil {
@@ -545,7 +711,7 @@ func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApproval
 		if err := emit("message_delta", map[string]any{"text": message}); err != nil {
 			return err
 		}
-		return emit("final", map[string]any{"sessionId": approval.SessionID, "message": message})
+		return emit("final", map[string]any{"sessionId": approval.SessionID, "message": message, "status": "cancelled"})
 	}
 
 	tools := s.agentTools()
@@ -562,20 +728,17 @@ func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApproval
 	}
 	execution, err := tool.Execute(ctx, approval.Arguments, approval.PageContext)
 	if err != nil {
-		if s.agentApprovals != nil {
-			_ = s.agentApprovals.Save(ctx, ledgerClusterID(s.cfg), approval)
-		} else {
-			_ = s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval)
-		}
 		if sessionErr := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, map[string]any{"error": err.Error()})); sessionErr != nil {
 			return sessionErr
+		}
+		resolution := claim
+		resolution.Status, resolution.Error, resolution.Message, resolution.CompletedAt = "failed", err.Error(), "已确认的操作执行失败。", time.Now().UTC()
+		if resolutionErr := s.writeAgentApprovalResolution(ctx, resolution); resolutionErr != nil {
+			return resolutionErr
 		}
 		if emitErr := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
 			return emitErr
 		}
-		return err
-	}
-	if err := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "completed", "output": execution.ClientOutput}); err != nil {
 		return err
 	}
 	modelOutput := execution.ModelOutput
@@ -585,20 +748,107 @@ func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApproval
 	if err := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, modelOutput)); err != nil {
 		return err
 	}
+	resolution := claim
+	resolution.Status, resolution.ModelOutput, resolution.ClientOutput, resolution.RefreshLedger, resolution.Message, resolution.CompletedAt = "completed", modelOutput, execution.ClientOutput, execution.RefreshLedger, agentApprovalSuccessMessage(tool.Name, execution.ClientOutput), time.Now().UTC()
+	if err := s.writeAgentApprovalResolution(ctx, resolution); err != nil {
+		return err
+	}
+	// Persist the actual effect before emitting SSE. A disconnected client can
+	// safely retry and receive this receipt without re-running the write.
+	if err := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "completed", "output": execution.ClientOutput}); err != nil {
+		return err
+	}
 	for _, artifact := range execution.Artifacts {
 		if err := emit("artifact", artifact); err != nil {
 			return err
 		}
 	}
-	message := agentApprovalSuccessMessage(tool.Name, execution.ClientOutput)
+	messages, found, err := s.readAgentSession(ctx, approval.SessionID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("agent session was not found after approval")
+	}
+	memories := []AgentMemoryRecord{}
+	if approval.PageContext.SensitiveUnlocked {
+		memories, err = s.listAgentMemories(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if err := emit("status", map[string]any{"text": "正在继续处理工具结果"}); err != nil {
+		return err
+	}
+	return s.continueAgentRun(ctx, approval.SessionID, approval.PageContext, normalizeAgentApprovalPolicy(claim.ApprovalPolicy), memories, messages, execution.RefreshLedger, emit)
+}
+
+func (s *Server) readAgentApprovalResolution(ctx context.Context, request AgentApprovalRequest) (agentApprovalResolution, bool, error) {
+	var resolution agentApprovalResolution
+	found, err := s.runtime().GetJSON(ctx, agentApprovalResolutionScope, request.ApprovalID, &resolution)
+	if err != nil || !found {
+		return resolution, found, err
+	}
+	if resolution.SessionID != request.SessionID {
+		return agentApprovalResolution{}, false, errors.New("approval does not belong to this session")
+	}
+	if !resolution.ExpiresAt.IsZero() && !resolution.ExpiresAt.After(time.Now().UTC()) {
+		_ = s.runtime().DeleteJSON(ctx, agentApprovalResolutionScope, request.ApprovalID)
+		return agentApprovalResolution{}, false, nil
+	}
+	if resolution.Status == "executing" {
+		return resolution, true, nil
+	}
+	return resolution, true, nil
+}
+
+func (s *Server) writeAgentApprovalResolution(ctx context.Context, resolution agentApprovalResolution) error {
+	return s.runtime().PutJSON(ctx, agentApprovalResolutionScope, resolution.ApprovalID, resolution)
+}
+
+func (s *Server) emitAgentApprovalResolution(resolution agentApprovalResolution, emit agentEventWriter) error {
+	if resolution.Status == "executing" {
+		return errors.New("approval is already being processed")
+	}
+	if resolution.Error != "" {
+		if err := emit("tool_result", map[string]any{"id": resolution.ToolCallID, "name": resolution.ToolName, "title": resolution.ToolTitle, "status": "error", "error": resolution.Error}); err != nil {
+			return err
+		}
+	} else {
+		if err := emit("tool_result", map[string]any{"id": resolution.ToolCallID, "name": resolution.ToolName, "title": resolution.ToolTitle, "status": "completed", "output": resolution.ClientOutput}); err != nil {
+			return err
+		}
+	}
+	message := firstNonEmpty(resolution.Message, "操作已处理。")
 	if err := emit("message_delta", map[string]any{"text": message}); err != nil {
 		return err
 	}
-	return emit("final", map[string]any{"sessionId": approval.SessionID, "message": message, "refreshLedger": execution.RefreshLedger})
+	return emit("final", map[string]any{"sessionId": resolution.SessionID, "message": message, "status": resolution.Status, "refreshLedger": resolution.RefreshLedger})
+}
+
+func (s *Server) takeAgentApproval(ctx context.Context, request AgentApprovalRequest) (AgentApproval, error) {
+	var approval AgentApproval
+	if s.agentApprovals != nil {
+		found, expired, err := false, false, error(nil)
+		approval, found, expired, err = s.agentApprovals.Take(ctx, ledgerClusterID(s.cfg), request.SessionID, request.ApprovalID)
+		if err != nil {
+			return AgentApproval{}, err
+		}
+		if found {
+			return approval, nil
+		}
+		if expired {
+			return AgentApproval{}, errors.New("approval request has expired")
+		}
+	}
+	if err := s.takeLegacyAgentApproval(ctx, request, &approval); err != nil {
+		return AgentApproval{}, err
+	}
+	return approval, nil
 }
 
 func (s *Server) takeLegacyAgentApproval(ctx context.Context, request AgentApprovalRequest, approval *AgentApproval) error {
-	return s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, func(lockContext context.Context) error {
+	take := func(lockContext context.Context) error {
 		found, err := s.runtime().GetJSON(lockContext, agentApprovalScope, request.ApprovalID, approval)
 		if err != nil {
 			return err
@@ -614,7 +864,11 @@ func (s *Server) takeLegacyAgentApproval(ctx context.Context, request AgentAppro
 			return errors.New("approval request has expired")
 		}
 		return s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
-	})
+	}
+	if _, held := ctx.Value(agentSessionRunLockContextKey{}).(string); held {
+		return take(ctx)
+	}
+	return s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, take)
 }
 
 func (s *Server) agentTools() map[string]agentTool {
@@ -683,14 +937,14 @@ func (s *Server) agentTools() map[string]agentTool {
 					"rowCount":          result.RowCount,
 					"warnings":          result.Warnings,
 					"valuationCurrency": result.ValuationCurrency,
-					"moneyUnit":         "major",
+					"amountUnit":        "major",
 				}
 				clientResult := map[string]any{"rowCount": result.RowCount, "columns": result.Columns, "warnings": result.Warnings}
 				return agentToolExecution{ModelOutput: modelResult, ClientOutput: clientResult, Artifacts: artifacts}, nil
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "search_transactions", Description: "使用看板/流水页 DSL 跨月份搜索交易，支持 AND、OR、NOT、字段和日期条件。返回的 postings.amount 是元单位字符串（moneyUnit=major），可直接用于 update_transaction，不能乘以 100。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "search_transactions", Description: "使用看板/流水页 DSL 跨月份搜索交易，支持 AND、OR、NOT、字段和日期条件。返回的 postings.amount 是元单位字符串（amountUnit=major），可直接用于 update_transaction，不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"query": stringSchema("流水查询 DSL"), "start": stringSchema("默认起始日期 YYYY-MM-DD"), "end": stringSchema("默认结束日期 YYYY-MM-DD，开区间"), "limit": numberSchema("最多返回条数，1-100"),
 			}, []string{"query"})},
 			Title: "搜索流水",
@@ -721,12 +975,12 @@ func (s *Server) agentTools() map[string]agentTool {
 				if len(transactions) > limit {
 					transactions = transactions[:limit]
 				}
-				output := map[string]any{"start": result.Start, "end": result.End, "count": len(transactions), "moneyUnit": "major", "transactions": agentTransactionsForModel(transactions)}
+				output := map[string]any{"start": result.Start, "end": result.End, "count": len(transactions), "amountUnit": "major", "transactions": agentTransactionsForModel(transactions)}
 				return agentToolExecution{ModelOutput: output, ClientOutput: map[string]any{"count": len(transactions), "start": result.Start, "end": result.End}}, nil
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。聚合金额是整数分（moneyUnit=cents），不能直接填入 LedgerEntry。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。返回给你的所有金额均为元单位字符串（amountUnit=major），可直接阅读，绝不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"start": stringSchema("起始日期 YYYY-MM-DD"), "end": stringSchema("结束日期 YYYY-MM-DD，开区间"), "valuationCurrency": stringSchema("折算币种"),
 			}, nil)},
 			Title: "读取账本汇总",
@@ -748,7 +1002,7 @@ func (s *Server) agentTools() map[string]agentTool {
 				if err != nil {
 					return agentToolExecution{}, err
 				}
-				return agentToolExecution{ModelOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency, "moneyUnit": "cents"}, ClientOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency}}, nil
+				return agentToolExecution{ModelOutput: map[string]any{"start": result.Start, "end": result.End, "summary": agentSummaryForModel(result.Summary), "valuationCurrency": result.ValuationCurrency, "amountUnit": "major"}, ClientOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency}}, nil
 			},
 		},
 		{
@@ -845,6 +1099,9 @@ func (s *Server) agentTools() map[string]agentTool {
 	}
 	out := make(map[string]agentTool, len(tools))
 	for _, tool := range tools {
+		// The registry is the single source of truth for capability safety. A
+		// tool that is not explicitly an approval-gated write is read-only.
+		tool.ReadOnly = !tool.RequiresApproval
 		out[tool.Name] = tool
 	}
 	return out
@@ -1059,20 +1316,26 @@ func (s *Server) validateAgentEntries(entries []LedgerEntry) ([]LedgerEntry, err
 	return validateAIEntries(entries, activeAccounts(snapshot.Accounts))
 }
 
-func (s *Server) saveAgentApproval(ctx context.Context, sessionID string, call agentModelToolCall, tool agentTool, arguments json.RawMessage, page AgentPageContext) (AgentApproval, error) {
+func (s *Server) saveAgentApproval(ctx context.Context, sessionID string, call agentModelToolCall, tool agentTool, arguments json.RawMessage, page AgentPageContext, approvalPolicy string) (AgentApproval, error) {
 	approval := AgentApproval{
 		ID: newAgentID("approval"), SessionID: sessionID, ToolCallID: call.ID, ToolName: tool.Name, ToolTitle: tool.Title,
 		Arguments: append(json.RawMessage(nil), arguments...), Summary: agentApprovalSummary(tool.Name, arguments),
 		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(30 * time.Minute), PageContext: page,
 	}
 	approval.PageContext.SensitiveUnlocked = false
+	pending := agentApprovalResolution{ApprovalID: approval.ID, SessionID: approval.SessionID, Status: "pending", ToolCallID: approval.ToolCallID, ToolName: approval.ToolName, ToolTitle: approval.ToolTitle, ApprovalPolicy: normalizeAgentApprovalPolicy(approvalPolicy), ExpiresAt: approval.ExpiresAt, Approval: &approval}
+	if err := s.writeAgentApprovalResolution(ctx, pending); err != nil {
+		return AgentApproval{}, err
+	}
 	if s.agentApprovals != nil {
 		if err := s.agentApprovals.Save(ctx, ledgerClusterID(s.cfg), approval); err != nil {
+			_ = s.runtime().DeleteJSON(ctx, agentApprovalResolutionScope, approval.ID)
 			return AgentApproval{}, err
 		}
 		return approval, nil
 	}
 	if err := s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval); err != nil {
+		_ = s.runtime().DeleteJSON(ctx, agentApprovalResolutionScope, approval.ID)
 		return AgentApproval{}, err
 	}
 	return approval, nil
@@ -1093,7 +1356,7 @@ func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) stri
 2. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
 3. 生成账户操作前先 get_accounts，再 draft_account_operations。
 4. 用户要新增交易时使用 append_transactions；要修改既有交易时，先 search_transactions，再使用 update_transaction；要删除既有交易时，先 search_transactions，再使用 delete_transaction；只有明确要求冲销时才用 reverse_transaction。绝不能用追加替代更新或删除。
-5. search_transactions 返回的交易金额是元单位字符串（moneyUnit=major），可原样填入 LedgerEntry；get_ledger_summary 返回的聚合整数是分（moneyUnit=cents）；run_bql 的金额是元单位。
+5. 所有工具传入或返回的金额都是元单位（amountUnit=major）：例如 12.34 CNY，绝不是分。不要把任何金额乘以 100。search_transactions 的交易金额可原样填入 LedgerEntry；run_bql 和 get_ledger_summary 的聚合金额同样是元单位。
 6. 所有写操作都会暂停并要求逐次人工确认。确认前会显示原始 Beancount 片段及拟议变更。
 7. 在工具真正返回成功前，绝不能说已经写入。
 8. 不提供 Shell、任意文件访问或绕过 Writer 的能力。
@@ -1151,9 +1414,132 @@ func decodeAgentArgs(raw json.RawMessage, dest any) error {
 func decodeAgentInput(raw json.RawMessage) any {
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return map[string]any{}
+		return nil
 	}
 	return value
+}
+
+// validateAgentToolCall is the runtime counterpart of the provider-facing JSON
+// schema.  Providers do not universally enforce schemas, so malformed calls
+// must be turned into tool errors rather than reaching an executor.
+func validateAgentToolCall(tools map[string]agentTool, call agentModelToolCall, seenIDs map[string]struct{}) (agentTool, json.RawMessage, any, error) {
+	if strings.TrimSpace(call.ID) == "" {
+		return agentTool{}, nil, nil, errors.New("tool call id is required")
+	}
+	if _, exists := seenIDs[call.ID]; exists {
+		return agentTool{}, nil, nil, fmt.Errorf("duplicate tool call id: %s", call.ID)
+	}
+	seenIDs[call.ID] = struct{}{}
+	if call.Type != "" && call.Type != "function" {
+		return agentTool{}, nil, nil, fmt.Errorf("unsupported tool call type: %s", call.Type)
+	}
+	tool, ok := tools[call.Function.Name]
+	if !ok {
+		return agentTool{}, nil, nil, fmt.Errorf("unknown tool: %s", call.Function.Name)
+	}
+	arguments := json.RawMessage(call.Function.Arguments)
+	if !json.Valid(arguments) {
+		return agentTool{}, nil, nil, errors.New("invalid tool arguments: malformed JSON")
+	}
+	var input any
+	if err := json.Unmarshal(arguments, &input); err != nil {
+		return agentTool{}, nil, nil, fmt.Errorf("invalid tool arguments: %w", err)
+	}
+	if err := validateAgentSchemaValue(input, tool.Parameters, "arguments"); err != nil {
+		return agentTool{}, nil, nil, err
+	}
+	return tool, arguments, input, nil
+}
+
+func validateAgentSchemaValue(value any, schema map[string]any, path string) error {
+	want, _ := schema["type"].(string)
+	switch want {
+	case "object":
+		object, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be an object", path)
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		if additional, ok := schema["additionalProperties"].(bool); ok && !additional {
+			for key := range object {
+				if _, exists := properties[key]; !exists {
+					return fmt.Errorf("%s.%s is not allowed", path, key)
+				}
+			}
+		}
+		if required, ok := schema["required"].([]string); ok {
+			for _, key := range required {
+				if _, exists := object[key]; !exists {
+					return fmt.Errorf("%s.%s is required", path, key)
+				}
+			}
+		} else if required, ok := schema["required"].([]any); ok {
+			for _, item := range required {
+				if key, ok := item.(string); ok {
+					if _, exists := object[key]; !exists {
+						return fmt.Errorf("%s.%s is required", path, key)
+					}
+				}
+			}
+		}
+		for key, nested := range properties {
+			child, exists := object[key]
+			if !exists {
+				continue
+			}
+			nestedSchema, ok := nested.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := validateAgentSchemaValue(child, nestedSchema, path+"."+key); err != nil {
+				return err
+			}
+		}
+	case "array":
+		items, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("%s must be an array", path)
+		}
+		if nested, ok := schema["items"].(map[string]any); ok {
+			for index, item := range items {
+				if err := validateAgentSchemaValue(item, nested, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+					return err
+				}
+			}
+		}
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%s must be a string", path)
+		}
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("%s must be a boolean", path)
+		}
+	case "integer":
+		number, ok := value.(float64)
+		if !ok || number != float64(int64(number)) {
+			return fmt.Errorf("%s must be an integer", path)
+		}
+	}
+	if values, ok := schema["enum"].([]string); ok {
+		valueString, _ := value.(string)
+		for _, candidate := range values {
+			if valueString == candidate {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s must be one of %s", path, strings.Join(values, ", "))
+	}
+	if values, ok := schema["enum"].([]any); ok {
+		valueString, _ := value.(string)
+		for _, candidate := range values {
+			if stringValue, ok := candidate.(string); ok && valueString == stringValue {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s has an unsupported value", path)
+	}
+	return nil
 }
 
 func normalizeAgentSessionID(value string) string {
@@ -1311,6 +1697,28 @@ func bqlMoneyForModel(value any) any {
 		return fmt.Sprintf("%.2f", amount/100)
 	default:
 		return value
+	}
+}
+
+// The public summary API uses integer cents for browser rendering. The model
+// boundary is intentionally different: every money value is a decimal major
+// unit string, with an explicit amountUnit marker on its enclosing response.
+func agentSummaryForModel(summary Summary) map[string]any {
+	days := make(map[string]map[string]string, len(summary.Days))
+	for day, values := range summary.Days {
+		converted := make(map[string]string, len(values))
+		for currency, amount := range values {
+			converted[currency] = fromCents(amount)
+		}
+		days[day] = converted
+	}
+	categories := make(map[string]string, len(summary.Categories))
+	for category, amount := range summary.Categories {
+		categories[category] = fromCents(amount)
+	}
+	return map[string]any{
+		"currency": summary.Currency, "income": fromCents(summary.Income), "expense": fromCents(summary.Expense), "net": fromCents(summary.Net),
+		"days": days, "categories": categories, "amountUnit": "major",
 	}
 }
 

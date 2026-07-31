@@ -255,7 +255,15 @@ export function LedgerAgentWorkspace({
 
   function finishTurn(final: AgentFinal) {
     updateActiveSession((session) => ({ ...session, serverSessionId: final.sessionId, updatedAt: Date.now() }));
-    setStatus(final.pendingApprovalId ? "等待确认" : "就绪");
+    setStatus(
+      final.pendingApprovalId || final.status === "approval_pending"
+        ? "等待确认"
+        : final.status === "budget_exhausted"
+          ? "任务已暂停"
+          : final.status === "cancelled"
+            ? "已取消"
+            : "就绪"
+    );
     if (final.message.trim()) {
       updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: final.message.trim() }]);
     }

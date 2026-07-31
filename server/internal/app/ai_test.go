@@ -87,7 +87,7 @@ func TestRunBQLToolUsesMajorUnitsForModelOutput(t *testing.T) {
 	if rows[0]["total"] != "12.00" {
 		t.Fatalf("money must use major units for the model: %#v", rows[0])
 	}
-	if model["moneyUnit"] != "major" {
+	if model["amountUnit"] != "major" {
 		t.Fatalf("model output must declare money units: %#v", model)
 	}
 }
@@ -111,6 +111,9 @@ type queuedAgentModel struct {
 
 func (m *queuedAgentModel) Complete(_ context.Context, _ string, messages []agentModelMessage, _ []agentToolSpec) (agentModelResult, error) {
 	m.messages = append(m.messages, append([]agentModelMessage(nil), messages...))
+	if len(m.results) == 0 {
+		return agentModelResult{Content: "操作已完成。"}, nil
+	}
 	result := m.results[0]
 	m.results = m.results[1:]
 	return result, nil
@@ -140,16 +143,13 @@ func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
 	}
 }
 
-func TestLedgerAgentResetsToolRoundLimitForEachRequest(t *testing.T) {
+func TestLedgerAgentHandlesMoreThanEightToolRoundsInOneTask(t *testing.T) {
 	server := testAgentServer(t)
-	results := make([]agentModelResult, 0, agentMaxTurns+2)
-	for turn := 0; turn < agentMaxTurns; turn++ {
+	results := make([]agentModelResult, 0, 13)
+	for turn := 0; turn < 12; turn++ {
 		results = append(results, agentModelResult{ToolCalls: []agentModelToolCall{{ID: fmt.Sprintf("call-%d", turn), Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}})
 	}
-	results = append(results,
-		agentModelResult{ToolCalls: []agentModelToolCall{{ID: "call-next", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
-		agentModelResult{Content: "已根据此前结果继续完成。"},
-	)
+	results = append(results, agentModelResult{Content: "已根据此前结果完成。"})
 	model := &queuedAgentModel{results: results}
 	server.agentModel = model
 	events := []capturedAgentEvent{}
@@ -160,30 +160,18 @@ func TestLedgerAgentResetsToolRoundLimitForEachRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasAgentEvent(events, "final") || !strings.Contains(agentEventText(events, "message_delta"), "本次请求已完成 8 轮工具处理") {
-		t.Fatalf("agent must offer continuation after eight tool rounds: %#v", events)
+	if !hasAgentEvent(events, "final") || !strings.Contains(agentEventText(events, "message_delta"), "已根据此前结果完成") {
+		t.Fatalf("agent must complete more than eight tool rounds in one task: %#v", events)
 	}
 	stored, found, err := server.readAgentSession(context.Background(), "round-limit")
 	if err != nil || !found {
 		t.Fatalf("agent session was not saved: found=%t err=%v", found, err)
 	}
-	if !containsAgentToolMessage(stored, "call-7") {
+	if !containsAgentToolMessage(stored, "call-11") {
 		t.Fatalf("tool results must be saved in the session: %#v", stored)
 	}
-
-	events = nil
-	err = server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "round-limit", Message: "继续", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
-		events = append(events, capturedAgentEvent{name: name, payload: payload})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(agentEventText(events, "message_delta"), "已根据此前结果继续完成") {
-		t.Fatalf("agent did not continue after a new request: %#v", events)
-	}
-	if len(model.messages) != agentMaxTurns+2 || !containsAgentToolMessage(model.messages[agentMaxTurns], "call-7") {
-		t.Fatalf("continuation must receive saved tool results and a new eight-round budget: %#v", model.messages)
+	if len(model.messages) != 13 || !containsAgentToolMessage(model.messages[12], "call-11") {
+		t.Fatalf("each model call must receive the durable preceding result: %#v", model.messages)
 	}
 }
 
@@ -272,6 +260,32 @@ func TestLedgerAgentCanRequireApprovalForReadTools(t *testing.T) {
 	}
 }
 
+func TestLedgerAgentPreservesAlwaysApprovalPolicyAfterResume(t *testing.T) {
+	server := testAgentServer(t)
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "read-first", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
+		{ToolCalls: []agentModelToolCall{{ID: "read-second", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
+	}}
+	initial := []capturedAgentEvent{}
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "always-resume", Message: "逐项读取", ApprovalPolicy: "always", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		initial = append(initial, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approval := agentApprovalFromEvents(t, initial)
+	resumed := []capturedAgentEvent{}
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(name string, payload any) error {
+		resumed = append(resumed, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentEvent(resumed, "approval_required") || hasAgentToolEvent(resumed, "tool_result", "read-second") {
+		t.Fatalf("always approval must remain active after continuation: %#v", resumed)
+	}
+}
+
 func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
 	installFakeBeanCheck(t)
 	server := testAgentServer(t)
@@ -308,6 +322,110 @@ func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
 	}
 	if !strings.Contains(string(mustRead(t, filepath.Join(server.cfg.LedgerRoot, "transactions", "2026", "05.bean"))), "Agent Cafe") {
 		t.Fatal("approved agent write was not applied")
+	}
+}
+
+func TestApprovedWriteResumesTheSameAgentTaskAndIsIdempotent(t *testing.T) {
+	installFakeBeanCheck(t)
+	server := testAgentServer(t)
+	arguments := `{"entries":[{"kind":"transaction","date":"2026-05-08","payee":"Resume Cafe","narration":"Coffee","metadata":{},"tags":[],"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"},{"account":"Assets:Cash","amount":"-18.00","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}]}`
+	model := &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "write-resume", Type: "function", Function: agentModelFunctionCall{Name: "append_transactions", Arguments: arguments}}}},
+		{Content: "已写入并完成后续核对。"},
+	}}
+	server.agentModel = model
+	events := []capturedAgentEvent{}
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "resume-write", Message: "写入咖啡", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approval := agentApprovalFromEvents(t, events)
+	events = nil
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(agentEventText(events, "message_delta"), "已写入并完成后续核对") || len(model.messages) != 2 || !containsAgentToolMessage(model.messages[1], "write-resume") {
+		t.Fatalf("approved result must resume sampling with the actual tool output: events=%#v messages=%#v", events, model.messages)
+	}
+	secondEvents := []capturedAgentEvent{}
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(name string, payload any) error {
+		secondEvents = append(secondEvents, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(model.messages) != 2 || !hasAgentEvent(secondEvents, "final") {
+		t.Fatalf("duplicate approval must replay its receipt without another model/tool run: events=%#v messages=%#v", secondEvents, model.messages)
+	}
+}
+
+func TestAgentRejectsMalformedOrSchemaInvalidToolCallsBeforeExecution(t *testing.T) {
+	tools := testAgentServer(t).agentTools()
+	_, _, _, err := validateAgentToolCall(tools, agentModelToolCall{ID: "bad-json", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: "{"}}, map[string]struct{}{})
+	if err == nil || !strings.Contains(err.Error(), "malformed JSON") {
+		t.Fatalf("malformed JSON must be rejected before execution: %v", err)
+	}
+	_, _, _, err = validateAgentToolCall(tools, agentModelToolCall{ID: "bad-schema", Type: "function", Function: agentModelFunctionCall{Name: "validate_bql", Arguments: `{"unknown":true}`}}, map[string]struct{}{})
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("schema-invalid call must be rejected before execution: %v", err)
+	}
+}
+
+func TestAgentRejectsDuplicateToolCallIDsBeforeAnyCallRuns(t *testing.T) {
+	server := testAgentServer(t)
+	model := &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{
+			{ID: "duplicate", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}},
+			{ID: "duplicate", Type: "function", Function: agentModelFunctionCall{Name: "append_transactions", Arguments: `{}`}},
+		}},
+		{Content: "已拒绝无效调用。"},
+	}}
+	server.agentModel = model
+	events := []capturedAgentEvent{}
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "duplicate-calls", Message: "test"}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if hasAgentEvent(events, "approval_required") || hasAgentEvent(events, "tool_call") || !hasAgentToolEvent(events, "tool_result", "duplicate") {
+		t.Fatalf("duplicate IDs must be rejected before executing or pausing: %#v", events)
+	}
+}
+
+func TestLedgerSummaryUsesMajorUnitsForModelOutput(t *testing.T) {
+	server := testAgentServer(t)
+	execution, err := server.agentTools()["get_ledger_summary"].Execute(context.Background(), json.RawMessage(`{"start":"2026-05-01","end":"2026-06-01"}`), AgentPageContext{SensitiveUnlocked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, ok := execution.ModelOutput.(map[string]any)
+	if !ok || output["amountUnit"] != "major" {
+		t.Fatalf("summary must state major units: %#v", execution.ModelOutput)
+	}
+	summary, ok := output["summary"].(map[string]any)
+	if !ok || summary["expense"] != "12.00" {
+		t.Fatalf("summary money must be a major-unit string: %#v", output)
+	}
+}
+
+func TestAgentSessionCompactionKeepsToolCallAndResultTogether(t *testing.T) {
+	messages := []agentModelMessage{{Role: "user", Content: "long task"}}
+	for index := 0; index < 60; index++ {
+		id := fmt.Sprintf("compact-%d", index)
+		messages = append(messages,
+			agentModelMessage{Role: "assistant", ToolCalls: []agentModelToolCall{{ID: id, Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
+			agentToolResultMessage(id, map[string]any{"ok": true}),
+		)
+	}
+	trimmed := trimAgentSessionMessages(messages)
+	if len(trimmed) >= len(messages) || trimmed[0].Role != "system" || hasUnresolvedAgentToolCalls(trimmed) {
+		t.Fatalf("compaction must retain a valid tool transcript: %#v", trimmed)
 	}
 }
 
@@ -349,7 +467,7 @@ func TestSearchTransactionsReturnsMajorUnitAmountsForAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	output, ok := execution.ModelOutput.(map[string]any)
-	if !ok || output["moneyUnit"] != "major" {
+	if !ok || output["amountUnit"] != "major" {
 		t.Fatalf("search result must declare major units: %#v", execution.ModelOutput)
 	}
 	transactions, ok := output["transactions"].([]map[string]any)
@@ -449,6 +567,19 @@ func testAgentServer(t *testing.T) *Server {
 func hasAgentEvent(events []capturedAgentEvent, name string) bool {
 	for _, event := range events {
 		if event.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAgentToolEvent(events []capturedAgentEvent, name, id string) bool {
+	for _, event := range events {
+		if event.name != name {
+			continue
+		}
+		payload, ok := event.payload.(map[string]any)
+		if ok && payload["id"] == id {
 			return true
 		}
 	}
