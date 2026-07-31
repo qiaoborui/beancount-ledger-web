@@ -345,7 +345,32 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/api/health"
+          health_body="$(mktemp)"
+          cleanup_health_body() {
+            rm -f "${health_body}"
+          }
+          trap cleanup_health_body EXIT
+
+          candidate_healthy=false
+          for attempt in {1..36}; do
+            health_status="$(curl --silent --show-error --output "${health_body}" --write-out '%{http_code}' --connect-timeout 10 --max-time 30 "${candidate_url}/api/health" || true)"
+            if [[ "${health_status}" == "200" ]]; then
+              candidate_healthy=true
+              break
+            fi
+            echo "candidate health attempt ${attempt}/36 returned HTTP ${health_status:-transport-error}"
+            head -c 8192 "${health_body}" || true
+            echo
+            sleep 5
+          done
+          if [[ "${candidate_healthy}" != "true" ]]; then
+            echo "::error::candidate health check did not become ready"
+            gcloud run revisions describe "${candidate_revision}" \
+              --project="${GCP_PROJECT_ID}" \
+              --region="${GCP_REGION}" \
+              --format='yaml(status.conditions)' || true
+            exit 1
+          fi
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/" >/dev/null
 
           gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
