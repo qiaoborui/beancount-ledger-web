@@ -1,12 +1,13 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Ban, Bot, Check, ChevronDown, ChevronUp, Database, ExternalLink, History, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, Database, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, SlidersHorizontal, Sparkles, Wrench, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { ParsedTransaction } from "@/lib/schemas";
 import type { AccountOperation } from "./types";
 
@@ -39,12 +40,17 @@ const MAX_STORED_SESSIONS = 30;
 type BQLColumn = { name: string; type: string };
 type BQLResult = { columns: BQLColumn[]; rows: unknown[][]; query: string; warnings?: string[]; valuationCurrency: string; rowCount: number };
 
-const suggestions = [
-  "查一下本月餐饮支出并画柱状图",
-  "生成最近 12 个月支出趋势的 BQL",
-  "搜索今年金额较大的异常流水",
-  "帮我记一笔今天午餐 35 元，支付宝支付",
+type AgentStarter = { label: string; description: string; prompt: string; icon: ReactNode };
+
+const agentStarters: AgentStarter[] = [
+  { label: "支出分析", description: "分类、趋势与异常", prompt: "分析当前周期的支出，按分类、趋势和异常流水给我一份简洁结论。", icon: <LineChartIcon className="h-4 w-4" /> },
+  { label: "生成记账草稿", description: "先解析，再等待确认", prompt: "帮我整理一笔交易为待确认的 Beancount 记账草稿：", icon: <ClipboardPenLine className="h-4 w-4" /> },
+  { label: "对账检查", description: "定位余额和待处理项", prompt: "检查当前账户范围的待对账项、异常余额和可能重复的流水，给出处理建议。", icon: <ListChecks className="h-4 w-4" /> },
+  { label: "账户维护", description: "创建、调整或关闭账户", prompt: "读取现有账户结构，为我创建、调整或关闭账户生成待确认草稿。", icon: <Wrench className="h-4 w-4" /> },
+  { label: "导入整理", description: "检查重复与分类缺失", prompt: "检查最近导入的流水，找出重复项、分类缺失和需要人工确认的项目。", icon: <Sparkles className="h-4 w-4" /> },
 ];
+
+const suggestions = agentStarters.slice(0, 4).map((starter) => starter.prompt);
 
 const chartColors = ["var(--chart-palette-1, var(--chart-primary))", "var(--chart-palette-2, var(--stone))", "var(--chart-palette-3, var(--brand))", "var(--chart-palette-4, var(--warm))"];
 
@@ -280,6 +286,12 @@ export function LedgerAgentWorkspace({
     void sendMessage(input);
   }
 
+  function selectStarter(starter: AgentStarter) {
+    if (busy) return;
+    setInput(starter.prompt);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   const panel = (className: string, scrollContainerRef: RefObject<HTMLDivElement | null>) => (
     <section className={className}
       aria-label="全局账本 Agent"
@@ -316,20 +328,36 @@ export function LedgerAgentWorkspace({
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-0.5">
-          <ShieldCheck className="h-4 w-4 shrink-0 text-brand" />
-          <span className="text-xs font-medium text-ink">审批</span>
-          <div className="ml-auto flex min-w-0 rounded-md border border-line bg-paper p-0.5" role="tablist" aria-label="Agent 审批策略">
-            <button type="button" role="tab" aria-selected={approvalPolicy === "on-write"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "on-write" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("on-write")}>常规</button>
-            <button type="button" role="tab" aria-selected={approvalPolicy === "always"} className={`min-w-0 rounded-sm px-2 py-1 text-[11px] ${approvalPolicy === "always" ? "bg-brand text-paper" : "text-stone hover:bg-tag"}`} onClick={() => setApprovalPolicy("always")}>逐项确认</button>
+      <footer className="shrink-0 border-t border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-2 md:p-3">
+        <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />
+            <span className="truncate">{approvalPolicy === "always" ? "逐项确认" : "写入时确认"}</span>
           </div>
-          <span className="basis-full text-[11px] leading-4 text-stone">{approvalPolicy === "always" ? "每个工具调用都要你确认" : "读取自动执行，账本写入始终确认"}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-xs font-medium text-ink active:scale-95 hover:bg-tag" aria-label="设置 Agent 审批策略">
+                审批<ChevronDown className="h-3.5 w-3.5 text-stone" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 border-line bg-paper text-ink">
+              <DropdownMenuLabel className="text-xs text-stone">审批策略</DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-line" />
+              <DropdownMenuRadioGroup value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as AgentApprovalPolicy)}>
+                <DropdownMenuRadioItem value="on-write" className="py-2.5 text-sm focus:bg-tag focus:text-ink">
+                  <span><span className="block font-medium">写入时确认</span><span className="mt-0.5 block text-xs text-stone">读取自动执行，账本写入始终确认</span></span>
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="always" className="py-2.5 text-sm focus:bg-tag focus:text-ink">
+                  <span><span className="block font-medium">逐项确认</span><span className="mt-0.5 block text-xs text-stone">每个 Agent 工具调用都要你确认</span></span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="overflow-hidden rounded-md border border-line bg-paper focus-within:ring-2 focus-within:ring-brand/25">
           <textarea
             ref={textareaRef}
-            className="block max-h-40 min-h-20 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed text-ink outline-none placeholder:text-stone"
+            className="block max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed text-ink outline-none placeholder:text-stone"
             value={input}
             onChange={(event) => setInput(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -338,12 +366,29 @@ export function LedgerAgentWorkspace({
                 handleSubmit();
               }
             }}
-            placeholder="询问账本，生成 BQL，或创建待确认操作"
+            placeholder="询问账本，或从工具开始"
             disabled={busy}
           />
           <div className="flex items-center justify-between border-t border-line px-2 py-2">
-            <span className="truncate px-1 text-[11px] text-stone">{context.page || "global"}</span>
-            <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy} aria-label="打开 Agent 工具">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-brand" />工具
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-72 border-line bg-paper text-ink">
+                <DropdownMenuLabel className="text-xs text-stone">选择一个起点</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-line" />
+                {agentStarters.map((starter) => <DropdownMenuItem key={starter.label} className="items-start gap-2.5 py-2.5 focus:bg-tag focus:text-ink" onSelect={() => selectStarter(starter)}>
+                  <span className="mt-0.5 text-brand">{starter.icon}</span>
+                  <span><span className="block text-sm font-medium">{starter.label}</span><span className="mt-0.5 block text-xs text-stone">{starter.description}</span></span>
+                </DropdownMenuItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="flex items-center gap-1.5">
+              <span className="hidden text-[11px] text-stone sm:inline">Enter 发送</span>
+              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
+            </div>
           </div>
         </div>
       </footer>

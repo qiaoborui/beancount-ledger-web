@@ -25,6 +25,17 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("查看会话历史");
   });
 
+  it("keeps the composer compact and exposes safe Agent starters", () => {
+    expect(source).toContain("min-h-14");
+    expect(source).toContain("DropdownMenuRadioGroup");
+    expect(source).toContain("写入时确认");
+    expect(source).toContain("支出分析");
+    expect(source).toContain("生成记账草稿");
+    expect(source).toContain("对账检查");
+    expect(source).toContain("账户维护");
+    expect(source).toContain("导入整理");
+  });
+
   it("converts BQL money values from minor units before charting", () => {
     expect(normalizeBQLChartValue(63070, { name: "total", type: "money" })).toBe(630.7);
     expect(normalizeBQLChartValue(12, { name: "count", type: "number" })).toBe(12);

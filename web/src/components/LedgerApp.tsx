@@ -551,6 +551,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         setCommandOpen(true);
         return;
       }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "u") {
+        if (!authed || unlocked) return;
+        event.preventDefault();
+        if (!online && offlineUnlockEnabled) {
+          offlineUnlockInputRef.current?.focus();
+        } else {
+          setShowUnlockModal(true);
+        }
+        return;
+      }
       if (isTypingTarget(event.target)) return;
       if (event.key === "/" && page === "transactions") {
         event.preventDefault();
@@ -570,7 +580,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [page, router, timeRange]);
+  }, [authed, offlineUnlockEnabled, online, page, router, timeRange, unlocked]);
 
   if (authed === null && !online && hasKnownLedgerAuthentication()) return <AppSkeleton />;
   if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
@@ -710,6 +720,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const commandActions: CommandAction[] = [
     { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
     { id: "ai-entry", label: "账本 Agent", detail: "查询、生成 BQL 或创建待确认操作", keywords: ["ai", "agent", "chat"], run: () => openAgent() },
+    ...(!unlocked ? [{ id: "unlock-sensitive", label: "解锁敏感数据", detail: "打开解锁框并聚焦密码输入", shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
     { id: "search-transactions", label: "搜索流水", detail: "跳到流水页并聚焦搜索框", shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
     { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
     { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
