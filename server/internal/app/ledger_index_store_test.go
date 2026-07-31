@@ -8,19 +8,16 @@ import (
 	"time"
 )
 
-func TestJSONPayloadsUsePostgresText(t *testing.T) {
-	payload, metadata, err := jsonPayloads(map[string]any{"ok": true}, nil)
+func TestMetadataUsesPostgresText(t *testing.T) {
+	metadata, err := marshalPostgresJSON(map[string]any{"ok": true})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, ok := any(payload).(string); !ok {
-		t.Fatalf("payload type=%T, want string for Postgres JSONB", payload)
 	}
 	if _, ok := any(metadata).(string); !ok {
 		t.Fatalf("metadata type=%T, want string for Postgres JSONB", metadata)
 	}
-	if !json.Valid([]byte(payload)) || !json.Valid([]byte(metadata)) {
-		t.Fatalf("invalid JSON payload=%q metadata=%q", payload, metadata)
+	if !json.Valid([]byte(metadata)) {
+		t.Fatalf("invalid JSON metadata=%q", metadata)
 	}
 }
 
@@ -151,7 +148,7 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(forcedTransactions) != 2 || forcedTransactions[1].Postings[0].Amount != 1800 {
-		t.Fatalf("forced rebuild did not replace transaction payload: %#v", forcedTransactions)
+		t.Fatalf("forced rebuild did not replace reconstructed transaction: %#v", forcedTransactions)
 	}
 }
 
