@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -29,8 +28,6 @@ type LedgerIndexRevision struct {
 	GitSHA        string
 	LedgerVersion LedgerVersion
 	IndexedAt     time.Time
-	beanEntries   []byte
-	beanErrors    []byte
 }
 
 func NewLedgerIndexStore(cfg Config) (*LedgerIndexStore, error) {
@@ -58,6 +55,9 @@ func NewLedgerIndexStoreWithDB(db *sql.DB, cfg Config) (*LedgerIndexStore, error
 		return nil, err
 	}
 	if err := store.EnsureSchema(ctx); err != nil {
+		return nil, err
+	}
+	if err := store.migrateLegacyBeanPayloads(ctx); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -110,8 +110,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_revisions (
   file_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   error TEXT NOT NULL DEFAULT '',
-  bean_entries JSONB NOT NULL DEFAULT '[]'::jsonb,
-  bean_errors JSONB NOT NULL DEFAULT '[]'::jsonb,
   indexed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   activated_at TIMESTAMPTZ,
   UNIQUE (source_key, ledger_version)
@@ -121,6 +119,147 @@ CREATE TABLE IF NOT EXISTS ledger_index_revisions (
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_index_revisions_active
   ON ledger_index_revisions (source_key)
   WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entries (
+  revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  entry_kind TEXT NOT NULL,
+  entry_date TEXT NOT NULL DEFAULT '',
+  source_file TEXT NOT NULL,
+  source_line INTEGER NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  value TEXT NOT NULL DEFAULT '',
+  filename TEXT NOT NULL DEFAULT '',
+  flag TEXT NOT NULL DEFAULT '',
+  payee TEXT NOT NULL DEFAULT '',
+  narration TEXT NOT NULL DEFAULT '',
+  account TEXT NOT NULL DEFAULT '',
+  account2 TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT '',
+  amount BIGINT NOT NULL DEFAULT 0,
+  amount_number TEXT NOT NULL DEFAULT '',
+  amount_currency TEXT NOT NULL DEFAULT '',
+  tolerance TEXT NOT NULL DEFAULT '',
+  quote_currency TEXT NOT NULL DEFAULT '',
+  custom_type TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (revision_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS ledger_index_bean_entries_kind_date
+  ON ledger_index_bean_entries (revision_id, entry_kind, entry_date, ordinal);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_lines (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_currencies (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_tags (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_links (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  link TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_metadata (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  metadata_key TEXT NOT NULL,
+  value_kind TEXT NOT NULL CHECK (value_kind IN ('null', 'string', 'number', 'boolean')),
+  text_value TEXT,
+  number_value DOUBLE PRECISION,
+  boolean_value BOOLEAN,
+  PRIMARY KEY (revision_id, entry_ordinal, metadata_key),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE,
+  CHECK (
+    (value_kind = 'null' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'string' AND text_value IS NOT NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'number' AND text_value IS NULL AND number_value IS NOT NULL AND boolean_value IS NULL) OR
+    (value_kind = 'boolean' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_custom_values (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  value_kind TEXT NOT NULL CHECK (value_kind IN ('null', 'string', 'number', 'boolean')),
+  text_value TEXT,
+  number_value DOUBLE PRECISION,
+  boolean_value BOOLEAN,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE,
+  CHECK (
+    (value_kind = 'null' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'string' AND text_value IS NOT NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'number' AND text_value IS NULL AND number_value IS NOT NULL AND boolean_value IS NULL) OR
+    (value_kind = 'boolean' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_entry_postings (
+  revision_id BIGINT NOT NULL,
+  entry_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  account TEXT NOT NULL,
+  amount BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  flag TEXT NOT NULL,
+  blank BOOLEAN NOT NULL,
+  quantity_number TEXT NOT NULL,
+  quantity_currency TEXT NOT NULL,
+  cost_amount BIGINT NOT NULL,
+  cost_currency TEXT NOT NULL,
+  cost_number TEXT NOT NULL,
+  cost_value_currency TEXT NOT NULL,
+  total_cost BOOLEAN NOT NULL,
+  price_amount BIGINT NOT NULL,
+  price_currency TEXT NOT NULL,
+  price_number TEXT NOT NULL,
+  price_value_currency TEXT NOT NULL,
+  total_price BOOLEAN NOT NULL,
+  PRIMARY KEY (revision_id, entry_ordinal, ordinal),
+  FOREIGN KEY (revision_id, entry_ordinal)
+    REFERENCES ledger_index_bean_entries(revision_id, ordinal) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_bean_errors (
+  revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  source_file TEXT NOT NULL,
+  source_line INTEGER NOT NULL,
+  message TEXT NOT NULL,
+  PRIMARY KEY (revision_id, ordinal)
+);
 
 CREATE TABLE IF NOT EXISTS ledger_index_accounts (
   revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
@@ -266,10 +405,10 @@ CREATE TABLE IF NOT EXISTS ledger_index_commodities (
 }
 
 func (s *LedgerIndexStore) ActiveRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
-	return s.activeRevision(ctx, false)
+	return s.activeRevision(ctx)
 }
 
-func (s *LedgerIndexStore) activeRevision(ctx context.Context, includeBeanPayloads bool) (LedgerIndexRevision, bool, error) {
+func (s *LedgerIndexStore) activeRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
 	var revision LedgerIndexRevision
 	query := `
 SELECT id, source_key, git_sha, ledger_version, latest_mtime_ms, file_count, indexed_at
@@ -277,18 +416,7 @@ FROM ledger_index_revisions
 WHERE source_key = $1 AND status = 'active'
 ORDER BY activated_at DESC NULLS LAST, indexed_at DESC
 LIMIT 1`
-	args := []any{s.sourceKey}
-	dest := []any{&revision.ID, &revision.SourceKey, &revision.GitSHA, &revision.LedgerVersion.Version, &revision.LedgerVersion.LatestMtime, &revision.LedgerVersion.FileCount, &revision.IndexedAt}
-	if includeBeanPayloads {
-		query = `
-SELECT id, source_key, git_sha, ledger_version, latest_mtime_ms, file_count, indexed_at, bean_entries, bean_errors
-FROM ledger_index_revisions
-WHERE source_key = $1 AND status = 'active'
-ORDER BY activated_at DESC NULLS LAST, indexed_at DESC
-LIMIT 1`
-		dest = append(dest, &revision.beanEntries, &revision.beanErrors)
-	}
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(dest...)
+	err := s.db.QueryRowContext(ctx, query, s.sourceKey).Scan(&revision.ID, &revision.SourceKey, &revision.GitSHA, &revision.LedgerVersion.Version, &revision.LedgerVersion.LatestMtime, &revision.LedgerVersion.FileCount, &revision.IndexedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LedgerIndexRevision{}, false, nil
 	}
@@ -307,16 +435,13 @@ func (s *LedgerIndexStore) ActiveSnapshotLite(ctx context.Context) (*LedgerSnaps
 }
 
 func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloads bool) (*LedgerSnapshot, bool, error) {
-	revision, ok, err := s.activeRevision(ctx, includeBeanPayloads)
+	revision, ok, err := s.activeRevision(ctx)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
 	snapshot := &LedgerSnapshot{LedgerVersion: revision.LedgerVersion, ParsedAt: revision.IndexedAt.UnixMilli()}
 	if includeBeanPayloads {
-		if err := json.Unmarshal(revision.beanEntries, &snapshot.BeanEntries); err != nil {
-			return nil, false, err
-		}
-		if err := json.Unmarshal(revision.beanErrors, &snapshot.BeanErrors); err != nil {
+		if err := loadBeanPayloads(ctx, s.db, revision.ID, snapshot); err != nil {
 			return nil, false, err
 		}
 	}
@@ -732,25 +857,20 @@ func (s *LedgerIndexStore) replaceActiveSnapshot(ctx context.Context, snapshot *
 }
 
 func replaceActiveSnapshotPGX(ctx context.Context, tx pgx.Tx, sourceKey string, previousRevisionID int64, snapshot *LedgerSnapshot, gitSHA string) (int64, error) {
-	beanEntries, err := marshalPostgresJSON(snapshot.BeanEntries)
-	if err != nil {
-		return 0, err
-	}
-	beanErrors, err := marshalPostgresJSON(snapshot.BeanErrors)
-	if err != nil {
-		return 0, err
-	}
 	var revisionID int64
-	err = tx.QueryRow(ctx, `
-INSERT INTO ledger_index_revisions (source_key, git_sha, ledger_version, latest_mtime_ms, file_count, status, error, bean_entries, bean_errors, indexed_at)
-VALUES ($1, $2, $3, $4, $5, 'indexing', '', $6, $7, now())
+	err := tx.QueryRow(ctx, `
+INSERT INTO ledger_index_revisions (source_key, git_sha, ledger_version, latest_mtime_ms, file_count, status, error, indexed_at)
+VALUES ($1, $2, $3, $4, $5, 'indexing', '', now())
 ON CONFLICT (source_key, ledger_version)
-DO UPDATE SET git_sha = EXCLUDED.git_sha, latest_mtime_ms = EXCLUDED.latest_mtime_ms, file_count = EXCLUDED.file_count, status = 'indexing', error = '', bean_entries = EXCLUDED.bean_entries, bean_errors = EXCLUDED.bean_errors, indexed_at = now()
-RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapshot.FileCount, beanEntries, beanErrors).Scan(&revisionID)
+DO UPDATE SET git_sha = EXCLUDED.git_sha, latest_mtime_ms = EXCLUDED.latest_mtime_ms, file_count = EXCLUDED.file_count, status = 'indexing', error = '', indexed_at = now()
+RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapshot.FileCount).Scan(&revisionID)
 	if err != nil {
 		return 0, err
 	}
 	if err := clearRevisionRowsPGX(ctx, tx, revisionID); err != nil {
+		return 0, err
+	}
+	if err := copyBeanPayloads(ctx, tx, revisionID, snapshot.BeanEntries, snapshot.BeanErrors); err != nil {
 		return 0, err
 	}
 	if err := copyAccounts(ctx, tx, revisionID, snapshot.Accounts); err != nil {
@@ -782,6 +902,15 @@ RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapsh
 
 func clearRevisionRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
 	for _, table := range []string{
+		"ledger_index_bean_entry_lines",
+		"ledger_index_bean_entry_currencies",
+		"ledger_index_bean_entry_tags",
+		"ledger_index_bean_entry_links",
+		"ledger_index_bean_entry_metadata",
+		"ledger_index_bean_entry_custom_values",
+		"ledger_index_bean_entry_postings",
+		"ledger_index_bean_entries",
+		"ledger_index_bean_errors",
 		"ledger_index_account_metadata",
 		"ledger_index_transaction_metadata",
 		"ledger_index_transaction_tags",
