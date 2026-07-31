@@ -56,7 +56,7 @@ func (s *Server) gmailConnectStart(c *gin.Context) {
 	}
 	state := randomID() + randomID()
 	oauthState := gmailOAuthState{Value: state, ExpiresAt: time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano)}
-	if err := s.runtime().PutJSON(c.Request.Context(), "gmail", gmailOAuthStateKey, oauthState); err != nil {
+	if err := s.gmailState().SaveOAuthState(c.Request.Context(), oauthState); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -72,8 +72,7 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/import?gmail=error&reason="+url.QueryEscape(callbackError))
 		return
 	}
-	var expected gmailOAuthState
-	ok, err := s.runtime().GetJSON(c.Request.Context(), "gmail", gmailOAuthStateKey, &expected)
+	expected, ok, err := s.gmailState().OAuthState(c.Request.Context())
 	if err != nil || !ok {
 		errorJSON(c, http.StatusBadRequest, errors.New("Gmail OAuth state 不存在或已过期"))
 		return
@@ -125,7 +124,7 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 	}
 	watch, err := api.Watch(c.Request.Context(), s.cfg.GmailPubSubTopic, labelID)
 	if err == nil {
-		err = s.runtime().WithLock(c.Request.Context(), "gmail-state", func(lockCtx context.Context) error {
+		err = s.gmailState().WithLock(c.Request.Context(), "gmail-state", func(lockCtx context.Context) error {
 			now := time.Now().UTC().Format(time.RFC3339Nano)
 			connection := gmailConnection{Version: 1, Email: strings.ToLower(profile.EmailAddress), EncryptedRefreshToken: encryptedRefreshToken, LabelID: labelID, LabelName: s.cfg.GmailLabel, HistoryID: watch.HistoryId, WatchExpiration: watch.Expiration, ConnectedAt: now, UpdatedAt: now}
 			return s.writeGmailConnection(lockCtx, connection)
@@ -135,7 +134,7 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	_ = s.runtime().PutJSON(c.Request.Context(), "gmail", gmailOAuthStateKey, gmailOAuthState{})
+	_ = s.gmailState().DeleteOAuthState(c.Request.Context())
 	c.Redirect(http.StatusFound, "/import?gmail=connected")
 }
 
@@ -170,11 +169,11 @@ func (s *Server) gmailDisconnect(c *gin.Context) {
 		err = revokeGoogleToken(c.Request.Context(), refreshToken)
 	}
 	if err == nil {
-		err = s.runtime().WithLock(c.Request.Context(), "gmail-state", func(lockCtx context.Context) error {
-			if err := s.runtime().DeleteJSON(lockCtx, "gmail", gmailConnectionKey); err != nil {
+		err = s.gmailState().WithLock(c.Request.Context(), "gmail-state", func(lockCtx context.Context) error {
+			if err := s.gmailState().DeleteConnection(lockCtx); err != nil {
 				return err
 			}
-			return s.runtime().DeleteJSON(lockCtx, "gmail", gmailOAuthStateKey)
+			return s.gmailState().DeleteOAuthState(lockCtx)
 		})
 	}
 	if err != nil {

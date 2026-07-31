@@ -21,6 +21,30 @@ type AgentSessionMessage func(*sql.Selector)
 // BQLHistoryRecord is the predicate function for bqlhistoryrecord builders.
 type BQLHistoryRecord func(*sql.Selector)
 
+// GmailConnection is the predicate function for gmailconnection builders.
+type GmailConnection func(*sql.Selector)
+
+// GmailOAuthState is the predicate function for gmailoauthstate builders.
+type GmailOAuthState func(*sql.Selector)
+
+// GmailPendingImport is the predicate function for gmailpendingimport builders.
+type GmailPendingImport func(*sql.Selector)
+
+// GmailPushEvent is the predicate function for gmailpushevent builders.
+type GmailPushEvent func(*sql.Selector)
+
+// GmailSyncLease is the predicate function for gmailsynclease builders.
+type GmailSyncLease func(*sql.Selector)
+
+// ImportJob is the predicate function for importjob builders.
+type ImportJob func(*sql.Selector)
+
+// ImportPreviewState is the predicate function for importpreviewstate builders.
+type ImportPreviewState func(*sql.Selector)
+
+// ImportPreviewWarning is the predicate function for importpreviewwarning builders.
+type ImportPreviewWarning func(*sql.Selector)
+
 // Notification is the predicate function for notification builders.
 type Notification func(*sql.Selector)
 
@@ -32,6 +56,9 @@ type PasskeySession func(*sql.Selector)
 
 // PasskeyTransport is the predicate function for passkeytransport builders.
 type PasskeyTransport func(*sql.Selector)
+
+// QuickUnlockDevice is the predicate function for quickunlockdevice builders.
+type QuickUnlockDevice func(*sql.Selector)
 
 // WebPushSubscription is the predicate function for webpushsubscription builders.
 type WebPushSubscription func(*sql.Selector)

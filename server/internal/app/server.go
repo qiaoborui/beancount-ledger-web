@@ -17,11 +17,14 @@ import (
 type Server struct {
 	cfg                  Config
 	runtimeStore         RuntimeStore
+	gmailRepository      gmailStateRepository
 	bqlHistoryRepository bqlHistoryRepository
+	quickUnlocks         quickUnlockRepository
 	passkeys             passkeyRepository
 	agentSessions        agentSessionRepository
 	agentApprovals       agentApprovalRepository
 	agentMemories        agentMemoryRepository
+	importState          importStateRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache

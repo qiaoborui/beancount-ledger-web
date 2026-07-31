@@ -21,6 +21,9 @@ type Application struct {
 type applicationDependencies struct {
 	runtimeStore         RuntimeStore
 	bqlHistoryRepository bqlHistoryRepository
+	quickUnlocks         quickUnlockRepository
+	gmailRepository      gmailStateRepository
+	importState          importStateRepository
 	pushSubscriptions    pushSubscriptionRepository
 	notifications        notificationRepository
 	passkeys             passkeyRepository
@@ -52,6 +55,9 @@ func NewApplication(cfg Config) (*Application, error) {
 		cfg:                  cfg,
 		runtimeStore:         dependencies.runtimeStore,
 		bqlHistoryRepository: dependencies.bqlHistoryRepository,
+		quickUnlocks:         dependencies.quickUnlocks,
+		gmailRepository:      dependencies.gmailRepository,
+		importState:          dependencies.importState,
 		passkeys:             dependencies.passkeys,
 		agentSessions:        dependencies.agentSessions,
 		agentApprovals:       dependencies.agentApprovals,
@@ -95,6 +101,12 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	dependencies.runtimeStore = storageAdapters.runtimeStore
 	if storageAdapters.persistence != nil {
 		dependencies.bqlHistoryRepository = newEntBQLHistoryRepository(storageAdapters.persistence.Client)
+		dependencies.quickUnlocks = newEntQuickUnlockRepository(storageAdapters.persistence.Client)
+		dependencies.gmailRepository = newEntGmailStateRepository(storageAdapters.persistence.Client)
+		dependencies.importState = newFallbackImportStateRepository(
+			newEntImportStateRepository(storageAdapters.persistence.Client),
+			newRuntimeImportStateRepository(dependencies.runtimeStore),
+		)
 		dependencies.pushSubscriptions = newEntPushSubscriptionRepository(storageAdapters.persistence.Client)
 		dependencies.notifications = newEntNotificationRepository(storageAdapters.persistence.Client)
 		dependencies.passkeys = newEntPasskeyRepository(storageAdapters.persistence.Client)
@@ -108,6 +120,12 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 			return fail(err)
 		}
 		if err := backfillPasskeyRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, dependencies.passkeys); err != nil {
+			return fail(err)
+		}
+		if err := backfillQuickUnlockRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, dependencies.quickUnlocks); err != nil {
+			return fail(err)
+		}
+		if err := backfillGmailRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, dependencies.gmailRepository); err != nil {
 			return fail(err)
 		}
 	}

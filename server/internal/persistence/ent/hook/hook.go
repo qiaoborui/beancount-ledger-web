@@ -69,6 +69,102 @@ func (f BQLHistoryRecordFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.BQLHistoryRecordMutation", m)
 }
 
+// The GmailConnectionFunc type is an adapter to allow the use of ordinary
+// function as GmailConnection mutator.
+type GmailConnectionFunc func(context.Context, *ent.GmailConnectionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f GmailConnectionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.GmailConnectionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.GmailConnectionMutation", m)
+}
+
+// The GmailOAuthStateFunc type is an adapter to allow the use of ordinary
+// function as GmailOAuthState mutator.
+type GmailOAuthStateFunc func(context.Context, *ent.GmailOAuthStateMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f GmailOAuthStateFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.GmailOAuthStateMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.GmailOAuthStateMutation", m)
+}
+
+// The GmailPendingImportFunc type is an adapter to allow the use of ordinary
+// function as GmailPendingImport mutator.
+type GmailPendingImportFunc func(context.Context, *ent.GmailPendingImportMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f GmailPendingImportFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.GmailPendingImportMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.GmailPendingImportMutation", m)
+}
+
+// The GmailPushEventFunc type is an adapter to allow the use of ordinary
+// function as GmailPushEvent mutator.
+type GmailPushEventFunc func(context.Context, *ent.GmailPushEventMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f GmailPushEventFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.GmailPushEventMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.GmailPushEventMutation", m)
+}
+
+// The GmailSyncLeaseFunc type is an adapter to allow the use of ordinary
+// function as GmailSyncLease mutator.
+type GmailSyncLeaseFunc func(context.Context, *ent.GmailSyncLeaseMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f GmailSyncLeaseFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.GmailSyncLeaseMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.GmailSyncLeaseMutation", m)
+}
+
+// The ImportJobFunc type is an adapter to allow the use of ordinary
+// function as ImportJob mutator.
+type ImportJobFunc func(context.Context, *ent.ImportJobMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ImportJobFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ImportJobMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ImportJobMutation", m)
+}
+
+// The ImportPreviewStateFunc type is an adapter to allow the use of ordinary
+// function as ImportPreviewState mutator.
+type ImportPreviewStateFunc func(context.Context, *ent.ImportPreviewStateMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ImportPreviewStateFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ImportPreviewStateMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ImportPreviewStateMutation", m)
+}
+
+// The ImportPreviewWarningFunc type is an adapter to allow the use of ordinary
+// function as ImportPreviewWarning mutator.
+type ImportPreviewWarningFunc func(context.Context, *ent.ImportPreviewWarningMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ImportPreviewWarningFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ImportPreviewWarningMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ImportPreviewWarningMutation", m)
+}
+
 // The NotificationFunc type is an adapter to allow the use of ordinary
 // function as Notification mutator.
 type NotificationFunc func(context.Context, *ent.NotificationMutation) (ent.Value, error)
@@ -115,6 +211,18 @@ func (f PasskeyTransportFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PasskeyTransportMutation", m)
+}
+
+// The QuickUnlockDeviceFunc type is an adapter to allow the use of ordinary
+// function as QuickUnlockDevice mutator.
+type QuickUnlockDeviceFunc func(context.Context, *ent.QuickUnlockDeviceMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f QuickUnlockDeviceFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.QuickUnlockDeviceMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.QuickUnlockDeviceMutation", m)
 }
 
 // The WebPushSubscriptionFunc type is an adapter to allow the use of ordinary

@@ -24,6 +24,22 @@ type Tx struct {
 	AgentSessionMessage *AgentSessionMessageClient
 	// BQLHistoryRecord is the client for interacting with the BQLHistoryRecord builders.
 	BQLHistoryRecord *BQLHistoryRecordClient
+	// GmailConnection is the client for interacting with the GmailConnection builders.
+	GmailConnection *GmailConnectionClient
+	// GmailOAuthState is the client for interacting with the GmailOAuthState builders.
+	GmailOAuthState *GmailOAuthStateClient
+	// GmailPendingImport is the client for interacting with the GmailPendingImport builders.
+	GmailPendingImport *GmailPendingImportClient
+	// GmailPushEvent is the client for interacting with the GmailPushEvent builders.
+	GmailPushEvent *GmailPushEventClient
+	// GmailSyncLease is the client for interacting with the GmailSyncLease builders.
+	GmailSyncLease *GmailSyncLeaseClient
+	// ImportJob is the client for interacting with the ImportJob builders.
+	ImportJob *ImportJobClient
+	// ImportPreviewState is the client for interacting with the ImportPreviewState builders.
+	ImportPreviewState *ImportPreviewStateClient
+	// ImportPreviewWarning is the client for interacting with the ImportPreviewWarning builders.
+	ImportPreviewWarning *ImportPreviewWarningClient
 	// Notification is the client for interacting with the Notification builders.
 	Notification *NotificationClient
 	// PasskeyCredential is the client for interacting with the PasskeyCredential builders.
@@ -32,6 +48,8 @@ type Tx struct {
 	PasskeySession *PasskeySessionClient
 	// PasskeyTransport is the client for interacting with the PasskeyTransport builders.
 	PasskeyTransport *PasskeyTransportClient
+	// QuickUnlockDevice is the client for interacting with the QuickUnlockDevice builders.
+	QuickUnlockDevice *QuickUnlockDeviceClient
 	// WebPushSubscription is the client for interacting with the WebPushSubscription builders.
 	WebPushSubscription *WebPushSubscriptionClient
 
@@ -170,10 +188,19 @@ func (tx *Tx) init() {
 	tx.AgentSession = NewAgentSessionClient(tx.config)
 	tx.AgentSessionMessage = NewAgentSessionMessageClient(tx.config)
 	tx.BQLHistoryRecord = NewBQLHistoryRecordClient(tx.config)
+	tx.GmailConnection = NewGmailConnectionClient(tx.config)
+	tx.GmailOAuthState = NewGmailOAuthStateClient(tx.config)
+	tx.GmailPendingImport = NewGmailPendingImportClient(tx.config)
+	tx.GmailPushEvent = NewGmailPushEventClient(tx.config)
+	tx.GmailSyncLease = NewGmailSyncLeaseClient(tx.config)
+	tx.ImportJob = NewImportJobClient(tx.config)
+	tx.ImportPreviewState = NewImportPreviewStateClient(tx.config)
+	tx.ImportPreviewWarning = NewImportPreviewWarningClient(tx.config)
 	tx.Notification = NewNotificationClient(tx.config)
 	tx.PasskeyCredential = NewPasskeyCredentialClient(tx.config)
 	tx.PasskeySession = NewPasskeySessionClient(tx.config)
 	tx.PasskeyTransport = NewPasskeyTransportClient(tx.config)
+	tx.QuickUnlockDevice = NewQuickUnlockDeviceClient(tx.config)
 	tx.WebPushSubscription = NewWebPushSubscriptionClient(tx.config)
 }
 

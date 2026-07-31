@@ -151,6 +151,211 @@ var (
 			},
 		},
 	}
+	// GmailConnectionsColumns holds the columns for the "gmail_connections" table.
+	GmailConnectionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "email", Type: field.TypeString},
+		{Name: "encrypted_refresh_token", Type: field.TypeString},
+		{Name: "label_id", Type: field.TypeString},
+		{Name: "label_name", Type: field.TypeString},
+		{Name: "history_id", Type: field.TypeString},
+		{Name: "watch_expiration", Type: field.TypeInt64},
+		{Name: "connected_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "last_sync_at", Type: field.TypeTime, Nullable: true},
+		{Name: "last_error", Type: field.TypeString},
+	}
+	// GmailConnectionsTable holds the schema information for the "gmail_connections" table.
+	GmailConnectionsTable = &schema.Table{
+		Name:       "gmail_connections",
+		Columns:    GmailConnectionsColumns,
+		PrimaryKey: []*schema.Column{GmailConnectionsColumns[0]},
+	}
+	// GmailOauthStatesColumns holds the columns for the "gmail_oauth_states" table.
+	GmailOauthStatesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "value", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "expires_at", Type: field.TypeTime},
+	}
+	// GmailOauthStatesTable holds the schema information for the "gmail_oauth_states" table.
+	GmailOauthStatesTable = &schema.Table{
+		Name:       "gmail_oauth_states",
+		Columns:    GmailOauthStatesColumns,
+		PrimaryKey: []*schema.Column{GmailOauthStatesColumns[0]},
+	}
+	// GmailPendingImportsColumns holds the columns for the "gmail_pending_imports" table.
+	GmailPendingImportsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "import_id", Type: field.TypeString, Nullable: true},
+		{Name: "source_key", Type: field.TypeString, Nullable: true},
+		{Name: "message_id", Type: field.TypeString},
+		{Name: "thread_id", Type: field.TypeString, Nullable: true},
+		{Name: "sender", Type: field.TypeString},
+		{Name: "subject", Type: field.TypeString},
+		{Name: "received_at", Type: field.TypeTime, Nullable: true},
+		{Name: "filename", Type: field.TypeString},
+		{Name: "provider", Type: field.TypeString, Nullable: true},
+		{Name: "candidate_count", Type: field.TypeInt},
+		{Name: "status", Type: field.TypeString},
+		{Name: "error", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "stored_bytes", Type: field.TypeInt64},
+		{Name: "output_file", Type: field.TypeString, Nullable: true},
+	}
+	// GmailPendingImportsTable holds the schema information for the "gmail_pending_imports" table.
+	GmailPendingImportsTable = &schema.Table{
+		Name:       "gmail_pending_imports",
+		Columns:    GmailPendingImportsColumns,
+		PrimaryKey: []*schema.Column{GmailPendingImportsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "gmailpendingimport_source_key",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPendingImportsColumns[2]},
+			},
+			{
+				Name:    "gmailpendingimport_import_id",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPendingImportsColumns[1]},
+			},
+			{
+				Name:    "gmailpendingimport_status_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPendingImportsColumns[11], GmailPendingImportsColumns[14]},
+			},
+			{
+				Name:    "gmailpendingimport_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPendingImportsColumns[13]},
+			},
+		},
+	}
+	// GmailPushEventsColumns holds the columns for the "gmail_push_events" table.
+	GmailPushEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "email", Type: field.TypeString},
+		{Name: "history_id", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "attempts", Type: field.TypeInt},
+		{Name: "available_at", Type: field.TypeTime},
+		{Name: "lease_until", Type: field.TypeTime, Nullable: true},
+		{Name: "last_error", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// GmailPushEventsTable holds the schema information for the "gmail_push_events" table.
+	GmailPushEventsTable = &schema.Table{
+		Name:       "gmail_push_events",
+		Columns:    GmailPushEventsColumns,
+		PrimaryKey: []*schema.Column{GmailPushEventsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "gmailpushevent_status_available_at",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPushEventsColumns[3], GmailPushEventsColumns[5]},
+			},
+			{
+				Name:    "gmailpushevent_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{GmailPushEventsColumns[8]},
+			},
+		},
+	}
+	// GmailSyncLeasesColumns holds the columns for the "gmail_sync_leases" table.
+	GmailSyncLeasesColumns = []*schema.Column{
+		{Name: "name", Type: field.TypeString},
+		{Name: "owner", Type: field.TypeString},
+		{Name: "expires_at", Type: field.TypeTime},
+	}
+	// GmailSyncLeasesTable holds the schema information for the "gmail_sync_leases" table.
+	GmailSyncLeasesTable = &schema.Table{
+		Name:       "gmail_sync_leases",
+		Columns:    GmailSyncLeasesColumns,
+		PrimaryKey: []*schema.Column{GmailSyncLeasesColumns[0]},
+	}
+	// ImportJobsColumns holds the columns for the "import_jobs" table.
+	ImportJobsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "provider", Type: field.TypeString},
+		{Name: "original_filename", Type: field.TypeString},
+		{Name: "input_filename", Type: field.TypeString, Nullable: true},
+		{Name: "input_file_key", Type: field.TypeString, Nullable: true},
+		{Name: "document_file_key", Type: field.TypeString, Nullable: true},
+		{Name: "generated_file_key", Type: field.TypeString, Nullable: true},
+		{Name: "deduped_file_key", Type: field.TypeString, Nullable: true},
+		{Name: "detection_provider", Type: field.TypeString},
+		{Name: "detection_reason", Type: field.TypeString},
+		{Name: "detection_confidence", Type: field.TypeString},
+		{Name: "statement_hash", Type: field.TypeString},
+		{Name: "date_start", Type: field.TypeString, Nullable: true},
+		{Name: "date_end", Type: field.TypeString, Nullable: true},
+		{Name: "expected_entry_count", Type: field.TypeInt, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// ImportJobsTable holds the schema information for the "import_jobs" table.
+	ImportJobsTable = &schema.Table{
+		Name:       "import_jobs",
+		Columns:    ImportJobsColumns,
+		PrimaryKey: []*schema.Column{ImportJobsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "importjob_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{ImportJobsColumns[16]},
+			},
+		},
+	}
+	// ImportPreviewStateColumns holds the columns for the "import_preview_state" table.
+	ImportPreviewStateColumns = []*schema.Column{
+		{Name: "import_id", Type: field.TypeString},
+		{Name: "dedup_report", Type: field.TypeString},
+		{Name: "candidate_count", Type: field.TypeInt},
+		{Name: "raw_row_count", Type: field.TypeInt},
+		{Name: "filtered_row_count", Type: field.TypeInt},
+		{Name: "generated_count", Type: field.TypeInt},
+		{Name: "excluded_row_count", Type: field.TypeInt},
+		{Name: "skipped_duplicate_count", Type: field.TypeInt},
+		{Name: "date_start", Type: field.TypeString, Nullable: true},
+		{Name: "date_end", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// ImportPreviewStateTable holds the schema information for the "import_preview_state" table.
+	ImportPreviewStateTable = &schema.Table{
+		Name:       "import_preview_state",
+		Columns:    ImportPreviewStateColumns,
+		PrimaryKey: []*schema.Column{ImportPreviewStateColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "importpreviewstate_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{ImportPreviewStateColumns[11]},
+			},
+		},
+	}
+	// ImportPreviewWarningsColumns holds the columns for the "import_preview_warnings" table.
+	ImportPreviewWarningsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "import_id", Type: field.TypeString},
+		{Name: "position", Type: field.TypeInt},
+		{Name: "message", Type: field.TypeString},
+	}
+	// ImportPreviewWarningsTable holds the schema information for the "import_preview_warnings" table.
+	ImportPreviewWarningsTable = &schema.Table{
+		Name:       "import_preview_warnings",
+		Columns:    ImportPreviewWarningsColumns,
+		PrimaryKey: []*schema.Column{ImportPreviewWarningsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "importpreviewwarning_import_id_position",
+				Unique:  true,
+				Columns: []*schema.Column{ImportPreviewWarningsColumns[1], ImportPreviewWarningsColumns[2]},
+			},
+		},
+	}
 	// NotificationsColumns holds the columns for the "notifications" table.
 	NotificationsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -236,6 +441,22 @@ var (
 			},
 		},
 	}
+	// QuickUnlockDevicesColumns holds the columns for the "quick_unlock_devices" table.
+	QuickUnlockDevicesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "name", Type: field.TypeString},
+		{Name: "mode", Type: field.TypeString},
+		{Name: "token_hash", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true},
+	}
+	// QuickUnlockDevicesTable holds the schema information for the "quick_unlock_devices" table.
+	QuickUnlockDevicesTable = &schema.Table{
+		Name:       "quick_unlock_devices",
+		Columns:    QuickUnlockDevicesColumns,
+		PrimaryKey: []*schema.Column{QuickUnlockDevicesColumns[0]},
+	}
 	// WebPushSubscriptionsColumns holds the columns for the "web_push_subscriptions" table.
 	WebPushSubscriptionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -260,10 +481,19 @@ var (
 		AgentSessionsTable,
 		AgentSessionMessagesTable,
 		BqlHistoryRecordsTable,
+		GmailConnectionsTable,
+		GmailOauthStatesTable,
+		GmailPendingImportsTable,
+		GmailPushEventsTable,
+		GmailSyncLeasesTable,
+		ImportJobsTable,
+		ImportPreviewStateTable,
+		ImportPreviewWarningsTable,
 		NotificationsTable,
 		PasskeyCredentialsTable,
 		PasskeySessionsTable,
 		PasskeyTransportsTable,
+		QuickUnlockDevicesTable,
 		WebPushSubscriptionsTable,
 	}
 )
@@ -284,6 +514,30 @@ func init() {
 	BqlHistoryRecordsTable.Annotation = &entsql.Annotation{
 		Table: "bql_history_records",
 	}
+	GmailConnectionsTable.Annotation = &entsql.Annotation{
+		Table: "gmail_connections",
+	}
+	GmailOauthStatesTable.Annotation = &entsql.Annotation{
+		Table: "gmail_oauth_states",
+	}
+	GmailPendingImportsTable.Annotation = &entsql.Annotation{
+		Table: "gmail_pending_imports",
+	}
+	GmailPushEventsTable.Annotation = &entsql.Annotation{
+		Table: "gmail_push_events",
+	}
+	GmailSyncLeasesTable.Annotation = &entsql.Annotation{
+		Table: "gmail_sync_leases",
+	}
+	ImportJobsTable.Annotation = &entsql.Annotation{
+		Table: "import_jobs",
+	}
+	ImportPreviewStateTable.Annotation = &entsql.Annotation{
+		Table: "import_preview_state",
+	}
+	ImportPreviewWarningsTable.Annotation = &entsql.Annotation{
+		Table: "import_preview_warnings",
+	}
 	NotificationsTable.Annotation = &entsql.Annotation{
 		Table: "notifications",
 	}
@@ -295,6 +549,9 @@ func init() {
 	}
 	PasskeyTransportsTable.Annotation = &entsql.Annotation{
 		Table: "passkey_transports",
+	}
+	QuickUnlockDevicesTable.Annotation = &entsql.Annotation{
+		Table: "quick_unlock_devices",
 	}
 	WebPushSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "web_push_subscriptions",

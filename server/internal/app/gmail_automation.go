@@ -285,8 +285,7 @@ func gmailOAuthConfig(cfg Config) *oauth2.Config {
 }
 
 func (s *Server) gmailConnection(ctx context.Context) (gmailConnection, bool, error) {
-	var connection gmailConnection
-	ok, err := s.runtime().GetJSON(ctx, "gmail", gmailConnectionKey, &connection)
+	connection, ok, err := s.gmailState().Connection(ctx)
 	if err != nil || !ok || connection.EncryptedRefreshToken == "" {
 		return gmailConnection{}, false, err
 	}
@@ -296,7 +295,14 @@ func (s *Server) gmailConnection(ctx context.Context) (gmailConnection, bool, er
 func (s *Server) writeGmailConnection(ctx context.Context, connection gmailConnection) error {
 	connection.Version = 1
 	connection.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return s.runtime().PutJSON(ctx, "gmail", gmailConnectionKey, connection)
+	return s.gmailState().SaveConnection(ctx, connection)
+}
+
+func (s *Server) gmailState() gmailStateRepository {
+	if s.gmailRepository != nil {
+		return s.gmailRepository
+	}
+	return newRuntimeGmailStateRepository(s.runtime())
 }
 
 func (s *Server) connectedGmailAPI(ctx context.Context) (gmailAPI, gmailConnection, error) {
@@ -394,7 +400,7 @@ func (s *Server) renewGmailWatch(ctx context.Context) (gmailConnection, error) {
 		return gmailConnection{}, err
 	}
 	var renewed gmailConnection
-	err = s.runtime().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+	err = s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
 		latest, ok, err := s.gmailConnection(lockCtx)
 		if err != nil || !ok {
 			return err
@@ -469,7 +475,7 @@ func (s *Server) enqueueGmailPushEvent(ctx context.Context, messageID string, da
 	if err != nil {
 		return err
 	}
-	return s.runtime().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
 		store, err := s.readGmailPushEvents(lockCtx)
 		if err != nil {
 			return err
@@ -495,15 +501,7 @@ func (s *Server) enqueueGmailPushEvent(ctx context.Context, messageID string, da
 }
 
 func (s *Server) readGmailPushEvents(ctx context.Context) (gmailPushEventStore, error) {
-	var store gmailPushEventStore
-	ok, err := s.runtime().GetJSON(ctx, "gmail", gmailPushEventsKey, &store)
-	if err != nil {
-		return gmailPushEventStore{}, err
-	}
-	if !ok {
-		return gmailPushEventStore{Version: 1, Items: []gmailPushEvent{}}, nil
-	}
-	return store, nil
+	return s.gmailState().PushEvents(ctx)
 }
 
 func (s *Server) writeGmailPushEvents(ctx context.Context, store gmailPushEventStore) error {
@@ -511,13 +509,13 @@ func (s *Server) writeGmailPushEvents(ctx context.Context, store gmailPushEventS
 	if len(store.Items) > maxGmailPushEvents {
 		store.Items = store.Items[len(store.Items)-maxGmailPushEvents:]
 	}
-	return s.runtime().PutJSON(ctx, "gmail", gmailPushEventsKey, store)
+	return s.gmailState().SavePushEvents(ctx, store)
 }
 
 func (s *Server) claimGmailPushEvent(ctx context.Context) (gmailPushEvent, bool, error) {
 	var claimed gmailPushEvent
 	found := false
-	err := s.runtime().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
 		store, err := s.readGmailPushEvents(lockCtx)
 		if err != nil {
 			return err
@@ -550,7 +548,7 @@ func (s *Server) claimGmailPushEvent(ctx context.Context) (gmailPushEvent, bool,
 }
 
 func (s *Server) finishGmailPushEvent(ctx context.Context, event gmailPushEvent, processErr error) error {
-	return s.runtime().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
 		store, err := s.readGmailPushEvents(lockCtx)
 		if err != nil {
 			return err
@@ -654,7 +652,7 @@ func (s *Server) syncGmailWithAPI(ctx context.Context, api gmailAPI, connection 
 			}
 		}
 	}
-	return s.runtime().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
 		latest, ok, err := s.gmailConnection(lockCtx)
 		if err != nil || !ok {
 			return err
@@ -678,7 +676,7 @@ func gmailErrorTransient(err error) bool {
 }
 
 func (s *Server) updateGmailConnectionError(ctx context.Context, syncErr error) error {
-	return s.runtime().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
 		connection, ok, err := s.gmailConnection(lockCtx)
 		if err != nil || !ok {
 			return err
@@ -690,9 +688,9 @@ func (s *Server) updateGmailConnectionError(ctx context.Context, syncErr error) 
 
 func (s *Server) claimGmailSyncLease(ctx context.Context, owner string) (bool, error) {
 	claimed := false
-	err := s.runtime().WithLock(ctx, "gmail-sync-lease", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-sync-lease", func(lockCtx context.Context) error {
 		var lease gmailSyncLease
-		ok, err := s.runtime().GetJSON(lockCtx, "gmail", gmailSyncLeaseKey, &lease)
+		lease, ok, err := s.gmailState().SyncLease(lockCtx)
 		if err != nil {
 			return err
 		}
@@ -701,19 +699,19 @@ func (s *Server) claimGmailSyncLease(ctx context.Context, owner string) (bool, e
 			return nil
 		}
 		claimed = true
-		return s.runtime().PutJSON(lockCtx, "gmail", gmailSyncLeaseKey, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)})
+		return s.gmailState().SaveSyncLease(lockCtx, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)})
 	})
 	return claimed, err
 }
 
 func (s *Server) releaseGmailSyncLease(ctx context.Context, owner string) {
-	_ = s.runtime().WithLock(ctx, "gmail-sync-lease", func(lockCtx context.Context) error {
+	_ = s.gmailState().WithLock(ctx, "gmail-sync-lease", func(lockCtx context.Context) error {
 		var lease gmailSyncLease
-		ok, err := s.runtime().GetJSON(lockCtx, "gmail", gmailSyncLeaseKey, &lease)
+		lease, ok, err := s.gmailState().SyncLease(lockCtx)
 		if err != nil || !ok || lease.Owner != owner {
 			return err
 		}
-		return s.runtime().DeleteJSON(lockCtx, "gmail", gmailSyncLeaseKey)
+		return s.gmailState().DeleteSyncLease(lockCtx)
 	})
 }
 
@@ -1184,13 +1182,9 @@ func gmailSenderAllowed(sender string, allowed []string) bool {
 }
 
 func (s *Server) readGmailPending(ctx context.Context) (gmailPendingStore, error) {
-	var store gmailPendingStore
-	ok, err := s.runtime().GetJSON(ctx, "gmail", gmailPendingKey, &store)
+	store, err := s.gmailState().Pending(ctx)
 	if err != nil {
 		return gmailPendingStore{}, err
-	}
-	if !ok {
-		return gmailPendingStore{Version: 1, Items: []GmailPendingImport{}}, nil
 	}
 	if store.Version == 0 {
 		store.Version = 1
@@ -1203,7 +1197,7 @@ func (s *Server) readGmailPending(ctx context.Context) (gmailPendingStore, error
 
 func (s *Server) writeGmailPending(ctx context.Context, store gmailPendingStore) error {
 	store.Version = 1
-	return s.runtime().PutJSON(ctx, "gmail", gmailPendingKey, store)
+	return s.gmailState().SavePending(ctx, store)
 }
 
 func (s *Server) gmailPendingSourceKeys(ctx context.Context) (map[string]struct{}, error) {
@@ -1234,7 +1228,7 @@ func (s *Server) gmailPendingSnapshot(ctx context.Context) (gmailPendingStore, e
 		return store, err
 	}
 	var snapshot gmailPendingStore
-	err = s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err = s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		latest, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1280,12 +1274,11 @@ func (s *Server) recoverStaleGmailPendingUnlocked(ctx context.Context, store *gm
 				continue
 			}
 		}
-		var preview ginH
-		exists, err := s.runtime().GetJSON(ctx, "imports", importFileKey(item.ImportID, "preview"), &preview)
-		if err != nil {
+		preview, err := s.readImportPreview(ctx, item.ImportID)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
-		if exists {
+		if err == nil {
 			item.Status = "ready"
 			item.Provider, _ = preview["provider"].(string)
 			item.CandidateCount = anyInt(preview["candidateCount"])
@@ -1318,7 +1311,7 @@ func (s *Server) importCommitExists(ctx context.Context, outputFile, importID st
 
 func (s *Server) reserveGmailPending(ctx context.Context, item GmailPendingImport) (bool, error) {
 	reserved := false
-	err := s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1345,7 +1338,7 @@ func (s *Server) reserveGmailPending(ctx context.Context, item GmailPendingImpor
 }
 
 func (s *Server) finalizeGmailPending(ctx context.Context, item GmailPendingImport) error {
-	return s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1382,7 +1375,7 @@ func pruneGmailPending(items []GmailPendingImport, limit int) []GmailPendingImpo
 }
 
 func (s *Server) updateGmailPendingStatus(ctx context.Context, id, status, message string) error {
-	return s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		return s.updateGmailPendingStatusUnlocked(lockCtx, id, status, message)
 	})
 }
@@ -1410,7 +1403,7 @@ func (s *Server) claimGmailPendingRetry(ctx context.Context, id string) (GmailPe
 	}
 	var claimed GmailPendingImport
 	previousImportID := ""
-	err := s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1444,7 +1437,7 @@ func (s *Server) claimGmailPendingImport(ctx context.Context, importID string) (
 		return false, err
 	}
 	claimed := false
-	err := s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1477,7 +1470,7 @@ func (s *Server) dismissGmailPendingImport(ctx context.Context, id string) error
 	if _, err := s.gmailPendingSnapshot(ctx); err != nil {
 		return err
 	}
-	return s.runtime().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err

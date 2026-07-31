@@ -271,41 +271,65 @@ func (s *Server) importAccountOptions() ([]ginH, error) {
 }
 
 func (s *Server) writeImportMeta(ctx context.Context, importID string, meta importMeta) error {
-	return s.runtime().PutJSON(ctx, "imports", importFileKey(importID, "meta"), meta)
+	repository := s.importStates()
+	if repository == nil {
+		return errors.New("导入状态存储不可用")
+	}
+	return repository.SaveJob(ctx, importID, meta)
 }
 
 func (s *Server) readImportMeta(ctx context.Context, importID string) (importMeta, error) {
-	var meta importMeta
-	ok, err := s.runtime().GetJSON(ctx, "imports", importFileKey(importID, "meta"), &meta)
+	repository := s.importStates()
+	if repository == nil {
+		return importMeta{}, errors.New("导入状态存储不可用")
+	}
+	meta, err := repository.Job(ctx, importID)
 	if err != nil {
 		return importMeta{}, err
 	}
-	if !ok {
-		return importMeta{}, os.ErrNotExist
+	// Local paths are process-local implementation details. Relational rows
+	// retain only runtime file keys and derive a safe materialization target
+	// when a worker needs the original bytes.
+	if meta.InputFile == "" && meta.InputFileKey != "" {
+		meta.InputFile = previewPath(s.cfg, importID, "original")
+	}
+	if meta.DocumentFile == "" && meta.DocumentFileKey != "" {
+		meta.DocumentFile = previewPath(s.cfg, importID, "document")
 	}
 	return meta, nil
 }
 
 func (s *Server) writeImportPreview(ctx context.Context, importID string, preview ginH) error {
-	return s.runtime().PutJSON(ctx, "imports", importFileKey(importID, "preview"), preview)
+	state, err := importPreviewStateFromResponse(preview)
+	if err != nil {
+		return err
+	}
+	repository := s.importStates()
+	if repository == nil {
+		return errors.New("导入状态存储不可用")
+	}
+	return repository.SavePreview(ctx, importID, state, preview)
 }
 
 func (s *Server) readImportPreview(ctx context.Context, importID string) (ginH, error) {
-	var preview ginH
-	ok, err := s.runtime().GetJSON(ctx, "imports", importFileKey(importID, "preview"), &preview)
+	repository := s.importStates()
+	if repository == nil {
+		return nil, errors.New("导入状态存储不可用")
+	}
+	state, legacy, err := repository.Preview(ctx, importID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, os.ErrNotExist
+	if legacy != nil {
+		return legacy, nil
 	}
-	return preview, nil
+	return s.rebuildImportPreview(ctx, importID, state)
 }
 
 func (s *Server) cleanupImportRuntime(ctx context.Context, importID string) error {
 	errs := []error{}
-	for _, name := range []string{"meta", "preview"} {
-		if err := s.runtime().DeleteJSON(ctx, "imports", importFileKey(importID, name)); err != nil {
+	if repository := s.importStates(); repository != nil {
+		if err := repository.Delete(ctx, importID); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -315,6 +339,72 @@ func (s *Server) cleanupImportRuntime(ctx context.Context, importID string) erro
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Server) importStates() importStateRepository {
+	if s.importState == nil {
+		s.importState = newRuntimeImportStateRepository(s.runtime())
+	}
+	return s.importState
+}
+
+func (s *Server) rebuildImportPreview(ctx context.Context, importID string, state importPreviewState) (ginH, error) {
+	meta, err := s.readImportMeta(ctx, importID)
+	if err != nil {
+		return nil, err
+	}
+	generated, ok, err := s.runtime().GetFile(ctx, "imports", meta.GeneratedFileKey)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: 找不到生成的账单文件", errImportPreviewMalformed)
+	}
+	deduped, ok, err := s.runtime().GetFile(ctx, "imports", meta.DedupedFileKey)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: 找不到去重后的账单文件", errImportPreviewMalformed)
+	}
+	entries, err := parsePreviewEntries(transactionOnlyBeanText(string(deduped.Content)))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errImportPreviewMalformed, err)
+	}
+	importer, ok := s.importerRegistry().Lookup(meta.Provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: 未知导入 provider %q", errImportPreviewMalformed, meta.Provider)
+	}
+	importer.DecorateEntries(meta, entries)
+	accountOptions, err := s.importAccountOptions()
+	if err != nil {
+		return nil, err
+	}
+	return importPreviewResponseFromState(importID, meta, state, generated.Content, ginH{"entries": entries, "accountOptions": accountOptions}), nil
+}
+
+func importPreviewResponseFromState(importID string, meta importMeta, state importPreviewState, generated []byte, derived ginH) ginH {
+	response := ginH{
+		"importId":              importID,
+		"provider":              meta.Provider,
+		"providerDetection":     meta.ProviderDetection,
+		"originalFilename":      meta.OriginalFilename,
+		"generatedBean":         string(generated),
+		"dedupReport":           state.DedupReport,
+		"candidateCount":        state.CandidateCount,
+		"rawRowCount":           state.RawRowCount,
+		"filteredRowCount":      state.FilteredRowCount,
+		"generatedCount":        state.GeneratedCount,
+		"excludedRowCount":      state.ExcludedRowCount,
+		"skippedDuplicateCount": state.SkippedDuplicateCount,
+		"dateStart":             nullableString(state.DateStart),
+		"dateEnd":               nullableString(state.DateEnd),
+		"warnings":              append([]string(nil), state.Warnings...),
+	}
+	for key, value := range derived {
+		response[key] = value
+	}
+	return response
 }
 
 func importFileKey(importID, name string) string {

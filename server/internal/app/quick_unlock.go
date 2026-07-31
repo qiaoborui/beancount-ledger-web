@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -136,6 +135,13 @@ func (s *Server) quickUnlockRevoke(c *gin.Context) {
 }
 
 func (s *Server) readQuickUnlockStore(ctx context.Context) quickUnlockStore {
+	if s.quickUnlocks != nil {
+		devices, err := s.quickUnlocks.List(ctx)
+		if err != nil {
+			return quickUnlockStore{Version: 1, Devices: []quickUnlockDevice{}}
+		}
+		return quickUnlockStore{Version: 1, Devices: devices}
+	}
 	var store quickUnlockStore
 	ok, err := s.runtime().GetJSON(ctx, "auth", "quick-unlock", &store)
 	if err != nil || !ok {
@@ -156,6 +162,9 @@ func (s *Server) writeQuickUnlockStore(ctx context.Context, store quickUnlockSto
 }
 
 func (s *Server) saveQuickUnlockDevice(device quickUnlockDevice) error {
+	if s.quickUnlocks != nil {
+		return s.quickUnlocks.Save(context.Background(), device)
+	}
 	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
 		store := s.readQuickUnlockStore(lockCtx)
 		next := make([]quickUnlockDevice, 0, len(store.Devices)+1)
@@ -172,6 +181,9 @@ func (s *Server) saveQuickUnlockDevice(device quickUnlockDevice) error {
 }
 
 func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
+	if s.quickUnlocks != nil {
+		return s.quickUnlocks.Verify(context.Background(), deviceID, quickUnlockTokenHash(token), time.Now().UTC())
+	}
 	tokenHash := quickUnlockTokenHash(token)
 	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
 		store := s.readQuickUnlockStore(lockCtx)
@@ -181,7 +193,7 @@ func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
 			if device.ID != deviceID || device.RevokedAt != nil {
 				continue
 			}
-			if subtle.ConstantTimeCompare([]byte(device.TokenHash), []byte(tokenHash)) != 1 {
+			if !quickUnlockTokenHashesEqual(device.TokenHash, tokenHash) {
 				return errors.New("quick unlock token mismatch")
 			}
 			device.LastUsedAt = &now
@@ -192,6 +204,9 @@ func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
 }
 
 func (s *Server) revokeQuickUnlockDevice(deviceID string) error {
+	if s.quickUnlocks != nil {
+		return s.quickUnlocks.Revoke(context.Background(), deviceID, time.Now().UTC())
+	}
 	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
 		store := s.readQuickUnlockStore(lockCtx)
 		now := time.Now()

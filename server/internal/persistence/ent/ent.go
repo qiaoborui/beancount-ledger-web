@@ -17,10 +17,19 @@ import (
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsession"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsessionmessage"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailconnection"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailoauthstate"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailpendingimport"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailpushevent"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailsynclease"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importjob"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importpreviewstate"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importpreviewwarning"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/notification"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeycredential"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeysession"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeytransport"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/quickunlockdevice"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/webpushsubscription"
 )
 
@@ -82,16 +91,25 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			agentapproval.Table:       agentapproval.ValidColumn,
-			agentmemory.Table:         agentmemory.ValidColumn,
-			agentsession.Table:        agentsession.ValidColumn,
-			agentsessionmessage.Table: agentsessionmessage.ValidColumn,
-			bqlhistoryrecord.Table:    bqlhistoryrecord.ValidColumn,
-			notification.Table:        notification.ValidColumn,
-			passkeycredential.Table:   passkeycredential.ValidColumn,
-			passkeysession.Table:      passkeysession.ValidColumn,
-			passkeytransport.Table:    passkeytransport.ValidColumn,
-			webpushsubscription.Table: webpushsubscription.ValidColumn,
+			agentapproval.Table:        agentapproval.ValidColumn,
+			agentmemory.Table:          agentmemory.ValidColumn,
+			agentsession.Table:         agentsession.ValidColumn,
+			agentsessionmessage.Table:  agentsessionmessage.ValidColumn,
+			bqlhistoryrecord.Table:     bqlhistoryrecord.ValidColumn,
+			gmailconnection.Table:      gmailconnection.ValidColumn,
+			gmailoauthstate.Table:      gmailoauthstate.ValidColumn,
+			gmailpendingimport.Table:   gmailpendingimport.ValidColumn,
+			gmailpushevent.Table:       gmailpushevent.ValidColumn,
+			gmailsynclease.Table:       gmailsynclease.ValidColumn,
+			importjob.Table:            importjob.ValidColumn,
+			importpreviewstate.Table:   importpreviewstate.ValidColumn,
+			importpreviewwarning.Table: importpreviewwarning.ValidColumn,
+			notification.Table:         notification.ValidColumn,
+			passkeycredential.Table:    passkeycredential.ValidColumn,
+			passkeysession.Table:       passkeysession.ValidColumn,
+			passkeytransport.Table:     passkeytransport.ValidColumn,
+			quickunlockdevice.Table:    quickunlockdevice.ValidColumn,
+			webpushsubscription.Table:  webpushsubscription.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

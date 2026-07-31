@@ -19,10 +19,19 @@ import (
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsession"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsessionmessage"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailconnection"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailoauthstate"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailpendingimport"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailpushevent"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailsynclease"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importjob"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importpreviewstate"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/importpreviewwarning"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/notification"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeycredential"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeysession"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeytransport"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/quickunlockdevice"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/webpushsubscription"
 
 	stdsql "database/sql"
@@ -43,6 +52,22 @@ type Client struct {
 	AgentSessionMessage *AgentSessionMessageClient
 	// BQLHistoryRecord is the client for interacting with the BQLHistoryRecord builders.
 	BQLHistoryRecord *BQLHistoryRecordClient
+	// GmailConnection is the client for interacting with the GmailConnection builders.
+	GmailConnection *GmailConnectionClient
+	// GmailOAuthState is the client for interacting with the GmailOAuthState builders.
+	GmailOAuthState *GmailOAuthStateClient
+	// GmailPendingImport is the client for interacting with the GmailPendingImport builders.
+	GmailPendingImport *GmailPendingImportClient
+	// GmailPushEvent is the client for interacting with the GmailPushEvent builders.
+	GmailPushEvent *GmailPushEventClient
+	// GmailSyncLease is the client for interacting with the GmailSyncLease builders.
+	GmailSyncLease *GmailSyncLeaseClient
+	// ImportJob is the client for interacting with the ImportJob builders.
+	ImportJob *ImportJobClient
+	// ImportPreviewState is the client for interacting with the ImportPreviewState builders.
+	ImportPreviewState *ImportPreviewStateClient
+	// ImportPreviewWarning is the client for interacting with the ImportPreviewWarning builders.
+	ImportPreviewWarning *ImportPreviewWarningClient
 	// Notification is the client for interacting with the Notification builders.
 	Notification *NotificationClient
 	// PasskeyCredential is the client for interacting with the PasskeyCredential builders.
@@ -51,6 +76,8 @@ type Client struct {
 	PasskeySession *PasskeySessionClient
 	// PasskeyTransport is the client for interacting with the PasskeyTransport builders.
 	PasskeyTransport *PasskeyTransportClient
+	// QuickUnlockDevice is the client for interacting with the QuickUnlockDevice builders.
+	QuickUnlockDevice *QuickUnlockDeviceClient
 	// WebPushSubscription is the client for interacting with the WebPushSubscription builders.
 	WebPushSubscription *WebPushSubscriptionClient
 }
@@ -69,10 +96,19 @@ func (c *Client) init() {
 	c.AgentSession = NewAgentSessionClient(c.config)
 	c.AgentSessionMessage = NewAgentSessionMessageClient(c.config)
 	c.BQLHistoryRecord = NewBQLHistoryRecordClient(c.config)
+	c.GmailConnection = NewGmailConnectionClient(c.config)
+	c.GmailOAuthState = NewGmailOAuthStateClient(c.config)
+	c.GmailPendingImport = NewGmailPendingImportClient(c.config)
+	c.GmailPushEvent = NewGmailPushEventClient(c.config)
+	c.GmailSyncLease = NewGmailSyncLeaseClient(c.config)
+	c.ImportJob = NewImportJobClient(c.config)
+	c.ImportPreviewState = NewImportPreviewStateClient(c.config)
+	c.ImportPreviewWarning = NewImportPreviewWarningClient(c.config)
 	c.Notification = NewNotificationClient(c.config)
 	c.PasskeyCredential = NewPasskeyCredentialClient(c.config)
 	c.PasskeySession = NewPasskeySessionClient(c.config)
 	c.PasskeyTransport = NewPasskeyTransportClient(c.config)
+	c.QuickUnlockDevice = NewQuickUnlockDeviceClient(c.config)
 	c.WebPushSubscription = NewWebPushSubscriptionClient(c.config)
 }
 
@@ -164,18 +200,27 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:                 ctx,
-		config:              cfg,
-		AgentApproval:       NewAgentApprovalClient(cfg),
-		AgentMemory:         NewAgentMemoryClient(cfg),
-		AgentSession:        NewAgentSessionClient(cfg),
-		AgentSessionMessage: NewAgentSessionMessageClient(cfg),
-		BQLHistoryRecord:    NewBQLHistoryRecordClient(cfg),
-		Notification:        NewNotificationClient(cfg),
-		PasskeyCredential:   NewPasskeyCredentialClient(cfg),
-		PasskeySession:      NewPasskeySessionClient(cfg),
-		PasskeyTransport:    NewPasskeyTransportClient(cfg),
-		WebPushSubscription: NewWebPushSubscriptionClient(cfg),
+		ctx:                  ctx,
+		config:               cfg,
+		AgentApproval:        NewAgentApprovalClient(cfg),
+		AgentMemory:          NewAgentMemoryClient(cfg),
+		AgentSession:         NewAgentSessionClient(cfg),
+		AgentSessionMessage:  NewAgentSessionMessageClient(cfg),
+		BQLHistoryRecord:     NewBQLHistoryRecordClient(cfg),
+		GmailConnection:      NewGmailConnectionClient(cfg),
+		GmailOAuthState:      NewGmailOAuthStateClient(cfg),
+		GmailPendingImport:   NewGmailPendingImportClient(cfg),
+		GmailPushEvent:       NewGmailPushEventClient(cfg),
+		GmailSyncLease:       NewGmailSyncLeaseClient(cfg),
+		ImportJob:            NewImportJobClient(cfg),
+		ImportPreviewState:   NewImportPreviewStateClient(cfg),
+		ImportPreviewWarning: NewImportPreviewWarningClient(cfg),
+		Notification:         NewNotificationClient(cfg),
+		PasskeyCredential:    NewPasskeyCredentialClient(cfg),
+		PasskeySession:       NewPasskeySessionClient(cfg),
+		PasskeyTransport:     NewPasskeyTransportClient(cfg),
+		QuickUnlockDevice:    NewQuickUnlockDeviceClient(cfg),
+		WebPushSubscription:  NewWebPushSubscriptionClient(cfg),
 	}, nil
 }
 
@@ -193,18 +238,27 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:                 ctx,
-		config:              cfg,
-		AgentApproval:       NewAgentApprovalClient(cfg),
-		AgentMemory:         NewAgentMemoryClient(cfg),
-		AgentSession:        NewAgentSessionClient(cfg),
-		AgentSessionMessage: NewAgentSessionMessageClient(cfg),
-		BQLHistoryRecord:    NewBQLHistoryRecordClient(cfg),
-		Notification:        NewNotificationClient(cfg),
-		PasskeyCredential:   NewPasskeyCredentialClient(cfg),
-		PasskeySession:      NewPasskeySessionClient(cfg),
-		PasskeyTransport:    NewPasskeyTransportClient(cfg),
-		WebPushSubscription: NewWebPushSubscriptionClient(cfg),
+		ctx:                  ctx,
+		config:               cfg,
+		AgentApproval:        NewAgentApprovalClient(cfg),
+		AgentMemory:          NewAgentMemoryClient(cfg),
+		AgentSession:         NewAgentSessionClient(cfg),
+		AgentSessionMessage:  NewAgentSessionMessageClient(cfg),
+		BQLHistoryRecord:     NewBQLHistoryRecordClient(cfg),
+		GmailConnection:      NewGmailConnectionClient(cfg),
+		GmailOAuthState:      NewGmailOAuthStateClient(cfg),
+		GmailPendingImport:   NewGmailPendingImportClient(cfg),
+		GmailPushEvent:       NewGmailPushEventClient(cfg),
+		GmailSyncLease:       NewGmailSyncLeaseClient(cfg),
+		ImportJob:            NewImportJobClient(cfg),
+		ImportPreviewState:   NewImportPreviewStateClient(cfg),
+		ImportPreviewWarning: NewImportPreviewWarningClient(cfg),
+		Notification:         NewNotificationClient(cfg),
+		PasskeyCredential:    NewPasskeyCredentialClient(cfg),
+		PasskeySession:       NewPasskeySessionClient(cfg),
+		PasskeyTransport:     NewPasskeyTransportClient(cfg),
+		QuickUnlockDevice:    NewQuickUnlockDeviceClient(cfg),
+		WebPushSubscription:  NewWebPushSubscriptionClient(cfg),
 	}, nil
 }
 
@@ -235,8 +289,10 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.AgentApproval, c.AgentMemory, c.AgentSession, c.AgentSessionMessage,
-		c.BQLHistoryRecord, c.Notification, c.PasskeyCredential, c.PasskeySession,
-		c.PasskeyTransport, c.WebPushSubscription,
+		c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState, c.GmailPendingImport,
+		c.GmailPushEvent, c.GmailSyncLease, c.ImportJob, c.ImportPreviewState,
+		c.ImportPreviewWarning, c.Notification, c.PasskeyCredential, c.PasskeySession,
+		c.PasskeyTransport, c.QuickUnlockDevice, c.WebPushSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -247,8 +303,10 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.AgentApproval, c.AgentMemory, c.AgentSession, c.AgentSessionMessage,
-		c.BQLHistoryRecord, c.Notification, c.PasskeyCredential, c.PasskeySession,
-		c.PasskeyTransport, c.WebPushSubscription,
+		c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState, c.GmailPendingImport,
+		c.GmailPushEvent, c.GmailSyncLease, c.ImportJob, c.ImportPreviewState,
+		c.ImportPreviewWarning, c.Notification, c.PasskeyCredential, c.PasskeySession,
+		c.PasskeyTransport, c.QuickUnlockDevice, c.WebPushSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -267,6 +325,22 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.AgentSessionMessage.mutate(ctx, m)
 	case *BQLHistoryRecordMutation:
 		return c.BQLHistoryRecord.mutate(ctx, m)
+	case *GmailConnectionMutation:
+		return c.GmailConnection.mutate(ctx, m)
+	case *GmailOAuthStateMutation:
+		return c.GmailOAuthState.mutate(ctx, m)
+	case *GmailPendingImportMutation:
+		return c.GmailPendingImport.mutate(ctx, m)
+	case *GmailPushEventMutation:
+		return c.GmailPushEvent.mutate(ctx, m)
+	case *GmailSyncLeaseMutation:
+		return c.GmailSyncLease.mutate(ctx, m)
+	case *ImportJobMutation:
+		return c.ImportJob.mutate(ctx, m)
+	case *ImportPreviewStateMutation:
+		return c.ImportPreviewState.mutate(ctx, m)
+	case *ImportPreviewWarningMutation:
+		return c.ImportPreviewWarning.mutate(ctx, m)
 	case *NotificationMutation:
 		return c.Notification.mutate(ctx, m)
 	case *PasskeyCredentialMutation:
@@ -275,6 +349,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PasskeySession.mutate(ctx, m)
 	case *PasskeyTransportMutation:
 		return c.PasskeyTransport.mutate(ctx, m)
+	case *QuickUnlockDeviceMutation:
+		return c.QuickUnlockDevice.mutate(ctx, m)
 	case *WebPushSubscriptionMutation:
 		return c.WebPushSubscription.mutate(ctx, m)
 	default:
@@ -947,6 +1023,1070 @@ func (c *BQLHistoryRecordClient) mutate(ctx context.Context, m *BQLHistoryRecord
 	}
 }
 
+// GmailConnectionClient is a client for the GmailConnection schema.
+type GmailConnectionClient struct {
+	config
+}
+
+// NewGmailConnectionClient returns a client for the GmailConnection from the given config.
+func NewGmailConnectionClient(c config) *GmailConnectionClient {
+	return &GmailConnectionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `gmailconnection.Hooks(f(g(h())))`.
+func (c *GmailConnectionClient) Use(hooks ...Hook) {
+	c.hooks.GmailConnection = append(c.hooks.GmailConnection, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `gmailconnection.Intercept(f(g(h())))`.
+func (c *GmailConnectionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GmailConnection = append(c.inters.GmailConnection, interceptors...)
+}
+
+// Create returns a builder for creating a GmailConnection entity.
+func (c *GmailConnectionClient) Create() *GmailConnectionCreate {
+	mutation := newGmailConnectionMutation(c.config, OpCreate)
+	return &GmailConnectionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GmailConnection entities.
+func (c *GmailConnectionClient) CreateBulk(builders ...*GmailConnectionCreate) *GmailConnectionCreateBulk {
+	return &GmailConnectionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GmailConnectionClient) MapCreateBulk(slice any, setFunc func(*GmailConnectionCreate, int)) *GmailConnectionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GmailConnectionCreateBulk{err: fmt.Errorf("calling to GmailConnectionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GmailConnectionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GmailConnectionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GmailConnection.
+func (c *GmailConnectionClient) Update() *GmailConnectionUpdate {
+	mutation := newGmailConnectionMutation(c.config, OpUpdate)
+	return &GmailConnectionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GmailConnectionClient) UpdateOne(_m *GmailConnection) *GmailConnectionUpdateOne {
+	mutation := newGmailConnectionMutation(c.config, OpUpdateOne, withGmailConnection(_m))
+	return &GmailConnectionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GmailConnectionClient) UpdateOneID(id string) *GmailConnectionUpdateOne {
+	mutation := newGmailConnectionMutation(c.config, OpUpdateOne, withGmailConnectionID(id))
+	return &GmailConnectionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GmailConnection.
+func (c *GmailConnectionClient) Delete() *GmailConnectionDelete {
+	mutation := newGmailConnectionMutation(c.config, OpDelete)
+	return &GmailConnectionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GmailConnectionClient) DeleteOne(_m *GmailConnection) *GmailConnectionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GmailConnectionClient) DeleteOneID(id string) *GmailConnectionDeleteOne {
+	builder := c.Delete().Where(gmailconnection.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GmailConnectionDeleteOne{builder}
+}
+
+// Query returns a query builder for GmailConnection.
+func (c *GmailConnectionClient) Query() *GmailConnectionQuery {
+	return &GmailConnectionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGmailConnection},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GmailConnection entity by its id.
+func (c *GmailConnectionClient) Get(ctx context.Context, id string) (*GmailConnection, error) {
+	return c.Query().Where(gmailconnection.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GmailConnectionClient) GetX(ctx context.Context, id string) *GmailConnection {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *GmailConnectionClient) Hooks() []Hook {
+	return c.hooks.GmailConnection
+}
+
+// Interceptors returns the client interceptors.
+func (c *GmailConnectionClient) Interceptors() []Interceptor {
+	return c.inters.GmailConnection
+}
+
+func (c *GmailConnectionClient) mutate(ctx context.Context, m *GmailConnectionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GmailConnectionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GmailConnectionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GmailConnectionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GmailConnectionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GmailConnection mutation op: %q", m.Op())
+	}
+}
+
+// GmailOAuthStateClient is a client for the GmailOAuthState schema.
+type GmailOAuthStateClient struct {
+	config
+}
+
+// NewGmailOAuthStateClient returns a client for the GmailOAuthState from the given config.
+func NewGmailOAuthStateClient(c config) *GmailOAuthStateClient {
+	return &GmailOAuthStateClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `gmailoauthstate.Hooks(f(g(h())))`.
+func (c *GmailOAuthStateClient) Use(hooks ...Hook) {
+	c.hooks.GmailOAuthState = append(c.hooks.GmailOAuthState, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `gmailoauthstate.Intercept(f(g(h())))`.
+func (c *GmailOAuthStateClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GmailOAuthState = append(c.inters.GmailOAuthState, interceptors...)
+}
+
+// Create returns a builder for creating a GmailOAuthState entity.
+func (c *GmailOAuthStateClient) Create() *GmailOAuthStateCreate {
+	mutation := newGmailOAuthStateMutation(c.config, OpCreate)
+	return &GmailOAuthStateCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GmailOAuthState entities.
+func (c *GmailOAuthStateClient) CreateBulk(builders ...*GmailOAuthStateCreate) *GmailOAuthStateCreateBulk {
+	return &GmailOAuthStateCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GmailOAuthStateClient) MapCreateBulk(slice any, setFunc func(*GmailOAuthStateCreate, int)) *GmailOAuthStateCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GmailOAuthStateCreateBulk{err: fmt.Errorf("calling to GmailOAuthStateClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GmailOAuthStateCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GmailOAuthStateCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GmailOAuthState.
+func (c *GmailOAuthStateClient) Update() *GmailOAuthStateUpdate {
+	mutation := newGmailOAuthStateMutation(c.config, OpUpdate)
+	return &GmailOAuthStateUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GmailOAuthStateClient) UpdateOne(_m *GmailOAuthState) *GmailOAuthStateUpdateOne {
+	mutation := newGmailOAuthStateMutation(c.config, OpUpdateOne, withGmailOAuthState(_m))
+	return &GmailOAuthStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GmailOAuthStateClient) UpdateOneID(id string) *GmailOAuthStateUpdateOne {
+	mutation := newGmailOAuthStateMutation(c.config, OpUpdateOne, withGmailOAuthStateID(id))
+	return &GmailOAuthStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GmailOAuthState.
+func (c *GmailOAuthStateClient) Delete() *GmailOAuthStateDelete {
+	mutation := newGmailOAuthStateMutation(c.config, OpDelete)
+	return &GmailOAuthStateDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GmailOAuthStateClient) DeleteOne(_m *GmailOAuthState) *GmailOAuthStateDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GmailOAuthStateClient) DeleteOneID(id string) *GmailOAuthStateDeleteOne {
+	builder := c.Delete().Where(gmailoauthstate.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GmailOAuthStateDeleteOne{builder}
+}
+
+// Query returns a query builder for GmailOAuthState.
+func (c *GmailOAuthStateClient) Query() *GmailOAuthStateQuery {
+	return &GmailOAuthStateQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGmailOAuthState},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GmailOAuthState entity by its id.
+func (c *GmailOAuthStateClient) Get(ctx context.Context, id string) (*GmailOAuthState, error) {
+	return c.Query().Where(gmailoauthstate.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GmailOAuthStateClient) GetX(ctx context.Context, id string) *GmailOAuthState {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *GmailOAuthStateClient) Hooks() []Hook {
+	return c.hooks.GmailOAuthState
+}
+
+// Interceptors returns the client interceptors.
+func (c *GmailOAuthStateClient) Interceptors() []Interceptor {
+	return c.inters.GmailOAuthState
+}
+
+func (c *GmailOAuthStateClient) mutate(ctx context.Context, m *GmailOAuthStateMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GmailOAuthStateCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GmailOAuthStateUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GmailOAuthStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GmailOAuthStateDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GmailOAuthState mutation op: %q", m.Op())
+	}
+}
+
+// GmailPendingImportClient is a client for the GmailPendingImport schema.
+type GmailPendingImportClient struct {
+	config
+}
+
+// NewGmailPendingImportClient returns a client for the GmailPendingImport from the given config.
+func NewGmailPendingImportClient(c config) *GmailPendingImportClient {
+	return &GmailPendingImportClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `gmailpendingimport.Hooks(f(g(h())))`.
+func (c *GmailPendingImportClient) Use(hooks ...Hook) {
+	c.hooks.GmailPendingImport = append(c.hooks.GmailPendingImport, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `gmailpendingimport.Intercept(f(g(h())))`.
+func (c *GmailPendingImportClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GmailPendingImport = append(c.inters.GmailPendingImport, interceptors...)
+}
+
+// Create returns a builder for creating a GmailPendingImport entity.
+func (c *GmailPendingImportClient) Create() *GmailPendingImportCreate {
+	mutation := newGmailPendingImportMutation(c.config, OpCreate)
+	return &GmailPendingImportCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GmailPendingImport entities.
+func (c *GmailPendingImportClient) CreateBulk(builders ...*GmailPendingImportCreate) *GmailPendingImportCreateBulk {
+	return &GmailPendingImportCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GmailPendingImportClient) MapCreateBulk(slice any, setFunc func(*GmailPendingImportCreate, int)) *GmailPendingImportCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GmailPendingImportCreateBulk{err: fmt.Errorf("calling to GmailPendingImportClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GmailPendingImportCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GmailPendingImportCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GmailPendingImport.
+func (c *GmailPendingImportClient) Update() *GmailPendingImportUpdate {
+	mutation := newGmailPendingImportMutation(c.config, OpUpdate)
+	return &GmailPendingImportUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GmailPendingImportClient) UpdateOne(_m *GmailPendingImport) *GmailPendingImportUpdateOne {
+	mutation := newGmailPendingImportMutation(c.config, OpUpdateOne, withGmailPendingImport(_m))
+	return &GmailPendingImportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GmailPendingImportClient) UpdateOneID(id string) *GmailPendingImportUpdateOne {
+	mutation := newGmailPendingImportMutation(c.config, OpUpdateOne, withGmailPendingImportID(id))
+	return &GmailPendingImportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GmailPendingImport.
+func (c *GmailPendingImportClient) Delete() *GmailPendingImportDelete {
+	mutation := newGmailPendingImportMutation(c.config, OpDelete)
+	return &GmailPendingImportDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GmailPendingImportClient) DeleteOne(_m *GmailPendingImport) *GmailPendingImportDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GmailPendingImportClient) DeleteOneID(id string) *GmailPendingImportDeleteOne {
+	builder := c.Delete().Where(gmailpendingimport.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GmailPendingImportDeleteOne{builder}
+}
+
+// Query returns a query builder for GmailPendingImport.
+func (c *GmailPendingImportClient) Query() *GmailPendingImportQuery {
+	return &GmailPendingImportQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGmailPendingImport},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GmailPendingImport entity by its id.
+func (c *GmailPendingImportClient) Get(ctx context.Context, id string) (*GmailPendingImport, error) {
+	return c.Query().Where(gmailpendingimport.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GmailPendingImportClient) GetX(ctx context.Context, id string) *GmailPendingImport {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *GmailPendingImportClient) Hooks() []Hook {
+	return c.hooks.GmailPendingImport
+}
+
+// Interceptors returns the client interceptors.
+func (c *GmailPendingImportClient) Interceptors() []Interceptor {
+	return c.inters.GmailPendingImport
+}
+
+func (c *GmailPendingImportClient) mutate(ctx context.Context, m *GmailPendingImportMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GmailPendingImportCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GmailPendingImportUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GmailPendingImportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GmailPendingImportDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GmailPendingImport mutation op: %q", m.Op())
+	}
+}
+
+// GmailPushEventClient is a client for the GmailPushEvent schema.
+type GmailPushEventClient struct {
+	config
+}
+
+// NewGmailPushEventClient returns a client for the GmailPushEvent from the given config.
+func NewGmailPushEventClient(c config) *GmailPushEventClient {
+	return &GmailPushEventClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `gmailpushevent.Hooks(f(g(h())))`.
+func (c *GmailPushEventClient) Use(hooks ...Hook) {
+	c.hooks.GmailPushEvent = append(c.hooks.GmailPushEvent, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `gmailpushevent.Intercept(f(g(h())))`.
+func (c *GmailPushEventClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GmailPushEvent = append(c.inters.GmailPushEvent, interceptors...)
+}
+
+// Create returns a builder for creating a GmailPushEvent entity.
+func (c *GmailPushEventClient) Create() *GmailPushEventCreate {
+	mutation := newGmailPushEventMutation(c.config, OpCreate)
+	return &GmailPushEventCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GmailPushEvent entities.
+func (c *GmailPushEventClient) CreateBulk(builders ...*GmailPushEventCreate) *GmailPushEventCreateBulk {
+	return &GmailPushEventCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GmailPushEventClient) MapCreateBulk(slice any, setFunc func(*GmailPushEventCreate, int)) *GmailPushEventCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GmailPushEventCreateBulk{err: fmt.Errorf("calling to GmailPushEventClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GmailPushEventCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GmailPushEventCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GmailPushEvent.
+func (c *GmailPushEventClient) Update() *GmailPushEventUpdate {
+	mutation := newGmailPushEventMutation(c.config, OpUpdate)
+	return &GmailPushEventUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GmailPushEventClient) UpdateOne(_m *GmailPushEvent) *GmailPushEventUpdateOne {
+	mutation := newGmailPushEventMutation(c.config, OpUpdateOne, withGmailPushEvent(_m))
+	return &GmailPushEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GmailPushEventClient) UpdateOneID(id string) *GmailPushEventUpdateOne {
+	mutation := newGmailPushEventMutation(c.config, OpUpdateOne, withGmailPushEventID(id))
+	return &GmailPushEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GmailPushEvent.
+func (c *GmailPushEventClient) Delete() *GmailPushEventDelete {
+	mutation := newGmailPushEventMutation(c.config, OpDelete)
+	return &GmailPushEventDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GmailPushEventClient) DeleteOne(_m *GmailPushEvent) *GmailPushEventDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GmailPushEventClient) DeleteOneID(id string) *GmailPushEventDeleteOne {
+	builder := c.Delete().Where(gmailpushevent.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GmailPushEventDeleteOne{builder}
+}
+
+// Query returns a query builder for GmailPushEvent.
+func (c *GmailPushEventClient) Query() *GmailPushEventQuery {
+	return &GmailPushEventQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGmailPushEvent},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GmailPushEvent entity by its id.
+func (c *GmailPushEventClient) Get(ctx context.Context, id string) (*GmailPushEvent, error) {
+	return c.Query().Where(gmailpushevent.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GmailPushEventClient) GetX(ctx context.Context, id string) *GmailPushEvent {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *GmailPushEventClient) Hooks() []Hook {
+	return c.hooks.GmailPushEvent
+}
+
+// Interceptors returns the client interceptors.
+func (c *GmailPushEventClient) Interceptors() []Interceptor {
+	return c.inters.GmailPushEvent
+}
+
+func (c *GmailPushEventClient) mutate(ctx context.Context, m *GmailPushEventMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GmailPushEventCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GmailPushEventUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GmailPushEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GmailPushEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GmailPushEvent mutation op: %q", m.Op())
+	}
+}
+
+// GmailSyncLeaseClient is a client for the GmailSyncLease schema.
+type GmailSyncLeaseClient struct {
+	config
+}
+
+// NewGmailSyncLeaseClient returns a client for the GmailSyncLease from the given config.
+func NewGmailSyncLeaseClient(c config) *GmailSyncLeaseClient {
+	return &GmailSyncLeaseClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `gmailsynclease.Hooks(f(g(h())))`.
+func (c *GmailSyncLeaseClient) Use(hooks ...Hook) {
+	c.hooks.GmailSyncLease = append(c.hooks.GmailSyncLease, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `gmailsynclease.Intercept(f(g(h())))`.
+func (c *GmailSyncLeaseClient) Intercept(interceptors ...Interceptor) {
+	c.inters.GmailSyncLease = append(c.inters.GmailSyncLease, interceptors...)
+}
+
+// Create returns a builder for creating a GmailSyncLease entity.
+func (c *GmailSyncLeaseClient) Create() *GmailSyncLeaseCreate {
+	mutation := newGmailSyncLeaseMutation(c.config, OpCreate)
+	return &GmailSyncLeaseCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GmailSyncLease entities.
+func (c *GmailSyncLeaseClient) CreateBulk(builders ...*GmailSyncLeaseCreate) *GmailSyncLeaseCreateBulk {
+	return &GmailSyncLeaseCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *GmailSyncLeaseClient) MapCreateBulk(slice any, setFunc func(*GmailSyncLeaseCreate, int)) *GmailSyncLeaseCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &GmailSyncLeaseCreateBulk{err: fmt.Errorf("calling to GmailSyncLeaseClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*GmailSyncLeaseCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &GmailSyncLeaseCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GmailSyncLease.
+func (c *GmailSyncLeaseClient) Update() *GmailSyncLeaseUpdate {
+	mutation := newGmailSyncLeaseMutation(c.config, OpUpdate)
+	return &GmailSyncLeaseUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GmailSyncLeaseClient) UpdateOne(_m *GmailSyncLease) *GmailSyncLeaseUpdateOne {
+	mutation := newGmailSyncLeaseMutation(c.config, OpUpdateOne, withGmailSyncLease(_m))
+	return &GmailSyncLeaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GmailSyncLeaseClient) UpdateOneID(id string) *GmailSyncLeaseUpdateOne {
+	mutation := newGmailSyncLeaseMutation(c.config, OpUpdateOne, withGmailSyncLeaseID(id))
+	return &GmailSyncLeaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GmailSyncLease.
+func (c *GmailSyncLeaseClient) Delete() *GmailSyncLeaseDelete {
+	mutation := newGmailSyncLeaseMutation(c.config, OpDelete)
+	return &GmailSyncLeaseDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GmailSyncLeaseClient) DeleteOne(_m *GmailSyncLease) *GmailSyncLeaseDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GmailSyncLeaseClient) DeleteOneID(id string) *GmailSyncLeaseDeleteOne {
+	builder := c.Delete().Where(gmailsynclease.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GmailSyncLeaseDeleteOne{builder}
+}
+
+// Query returns a query builder for GmailSyncLease.
+func (c *GmailSyncLeaseClient) Query() *GmailSyncLeaseQuery {
+	return &GmailSyncLeaseQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeGmailSyncLease},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a GmailSyncLease entity by its id.
+func (c *GmailSyncLeaseClient) Get(ctx context.Context, id string) (*GmailSyncLease, error) {
+	return c.Query().Where(gmailsynclease.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GmailSyncLeaseClient) GetX(ctx context.Context, id string) *GmailSyncLease {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *GmailSyncLeaseClient) Hooks() []Hook {
+	return c.hooks.GmailSyncLease
+}
+
+// Interceptors returns the client interceptors.
+func (c *GmailSyncLeaseClient) Interceptors() []Interceptor {
+	return c.inters.GmailSyncLease
+}
+
+func (c *GmailSyncLeaseClient) mutate(ctx context.Context, m *GmailSyncLeaseMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GmailSyncLeaseCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GmailSyncLeaseUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GmailSyncLeaseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GmailSyncLeaseDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GmailSyncLease mutation op: %q", m.Op())
+	}
+}
+
+// ImportJobClient is a client for the ImportJob schema.
+type ImportJobClient struct {
+	config
+}
+
+// NewImportJobClient returns a client for the ImportJob from the given config.
+func NewImportJobClient(c config) *ImportJobClient {
+	return &ImportJobClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `importjob.Hooks(f(g(h())))`.
+func (c *ImportJobClient) Use(hooks ...Hook) {
+	c.hooks.ImportJob = append(c.hooks.ImportJob, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `importjob.Intercept(f(g(h())))`.
+func (c *ImportJobClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ImportJob = append(c.inters.ImportJob, interceptors...)
+}
+
+// Create returns a builder for creating a ImportJob entity.
+func (c *ImportJobClient) Create() *ImportJobCreate {
+	mutation := newImportJobMutation(c.config, OpCreate)
+	return &ImportJobCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ImportJob entities.
+func (c *ImportJobClient) CreateBulk(builders ...*ImportJobCreate) *ImportJobCreateBulk {
+	return &ImportJobCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ImportJobClient) MapCreateBulk(slice any, setFunc func(*ImportJobCreate, int)) *ImportJobCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ImportJobCreateBulk{err: fmt.Errorf("calling to ImportJobClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ImportJobCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ImportJobCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ImportJob.
+func (c *ImportJobClient) Update() *ImportJobUpdate {
+	mutation := newImportJobMutation(c.config, OpUpdate)
+	return &ImportJobUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ImportJobClient) UpdateOne(_m *ImportJob) *ImportJobUpdateOne {
+	mutation := newImportJobMutation(c.config, OpUpdateOne, withImportJob(_m))
+	return &ImportJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ImportJobClient) UpdateOneID(id string) *ImportJobUpdateOne {
+	mutation := newImportJobMutation(c.config, OpUpdateOne, withImportJobID(id))
+	return &ImportJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ImportJob.
+func (c *ImportJobClient) Delete() *ImportJobDelete {
+	mutation := newImportJobMutation(c.config, OpDelete)
+	return &ImportJobDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ImportJobClient) DeleteOne(_m *ImportJob) *ImportJobDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ImportJobClient) DeleteOneID(id string) *ImportJobDeleteOne {
+	builder := c.Delete().Where(importjob.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ImportJobDeleteOne{builder}
+}
+
+// Query returns a query builder for ImportJob.
+func (c *ImportJobClient) Query() *ImportJobQuery {
+	return &ImportJobQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeImportJob},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ImportJob entity by its id.
+func (c *ImportJobClient) Get(ctx context.Context, id string) (*ImportJob, error) {
+	return c.Query().Where(importjob.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ImportJobClient) GetX(ctx context.Context, id string) *ImportJob {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ImportJobClient) Hooks() []Hook {
+	return c.hooks.ImportJob
+}
+
+// Interceptors returns the client interceptors.
+func (c *ImportJobClient) Interceptors() []Interceptor {
+	return c.inters.ImportJob
+}
+
+func (c *ImportJobClient) mutate(ctx context.Context, m *ImportJobMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ImportJobCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ImportJobUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ImportJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ImportJobDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ImportJob mutation op: %q", m.Op())
+	}
+}
+
+// ImportPreviewStateClient is a client for the ImportPreviewState schema.
+type ImportPreviewStateClient struct {
+	config
+}
+
+// NewImportPreviewStateClient returns a client for the ImportPreviewState from the given config.
+func NewImportPreviewStateClient(c config) *ImportPreviewStateClient {
+	return &ImportPreviewStateClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `importpreviewstate.Hooks(f(g(h())))`.
+func (c *ImportPreviewStateClient) Use(hooks ...Hook) {
+	c.hooks.ImportPreviewState = append(c.hooks.ImportPreviewState, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `importpreviewstate.Intercept(f(g(h())))`.
+func (c *ImportPreviewStateClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ImportPreviewState = append(c.inters.ImportPreviewState, interceptors...)
+}
+
+// Create returns a builder for creating a ImportPreviewState entity.
+func (c *ImportPreviewStateClient) Create() *ImportPreviewStateCreate {
+	mutation := newImportPreviewStateMutation(c.config, OpCreate)
+	return &ImportPreviewStateCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ImportPreviewState entities.
+func (c *ImportPreviewStateClient) CreateBulk(builders ...*ImportPreviewStateCreate) *ImportPreviewStateCreateBulk {
+	return &ImportPreviewStateCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ImportPreviewStateClient) MapCreateBulk(slice any, setFunc func(*ImportPreviewStateCreate, int)) *ImportPreviewStateCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ImportPreviewStateCreateBulk{err: fmt.Errorf("calling to ImportPreviewStateClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ImportPreviewStateCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ImportPreviewStateCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ImportPreviewState.
+func (c *ImportPreviewStateClient) Update() *ImportPreviewStateUpdate {
+	mutation := newImportPreviewStateMutation(c.config, OpUpdate)
+	return &ImportPreviewStateUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ImportPreviewStateClient) UpdateOne(_m *ImportPreviewState) *ImportPreviewStateUpdateOne {
+	mutation := newImportPreviewStateMutation(c.config, OpUpdateOne, withImportPreviewState(_m))
+	return &ImportPreviewStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ImportPreviewStateClient) UpdateOneID(id string) *ImportPreviewStateUpdateOne {
+	mutation := newImportPreviewStateMutation(c.config, OpUpdateOne, withImportPreviewStateID(id))
+	return &ImportPreviewStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ImportPreviewState.
+func (c *ImportPreviewStateClient) Delete() *ImportPreviewStateDelete {
+	mutation := newImportPreviewStateMutation(c.config, OpDelete)
+	return &ImportPreviewStateDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ImportPreviewStateClient) DeleteOne(_m *ImportPreviewState) *ImportPreviewStateDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ImportPreviewStateClient) DeleteOneID(id string) *ImportPreviewStateDeleteOne {
+	builder := c.Delete().Where(importpreviewstate.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ImportPreviewStateDeleteOne{builder}
+}
+
+// Query returns a query builder for ImportPreviewState.
+func (c *ImportPreviewStateClient) Query() *ImportPreviewStateQuery {
+	return &ImportPreviewStateQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeImportPreviewState},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ImportPreviewState entity by its id.
+func (c *ImportPreviewStateClient) Get(ctx context.Context, id string) (*ImportPreviewState, error) {
+	return c.Query().Where(importpreviewstate.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ImportPreviewStateClient) GetX(ctx context.Context, id string) *ImportPreviewState {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ImportPreviewStateClient) Hooks() []Hook {
+	return c.hooks.ImportPreviewState
+}
+
+// Interceptors returns the client interceptors.
+func (c *ImportPreviewStateClient) Interceptors() []Interceptor {
+	return c.inters.ImportPreviewState
+}
+
+func (c *ImportPreviewStateClient) mutate(ctx context.Context, m *ImportPreviewStateMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ImportPreviewStateCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ImportPreviewStateUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ImportPreviewStateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ImportPreviewStateDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ImportPreviewState mutation op: %q", m.Op())
+	}
+}
+
+// ImportPreviewWarningClient is a client for the ImportPreviewWarning schema.
+type ImportPreviewWarningClient struct {
+	config
+}
+
+// NewImportPreviewWarningClient returns a client for the ImportPreviewWarning from the given config.
+func NewImportPreviewWarningClient(c config) *ImportPreviewWarningClient {
+	return &ImportPreviewWarningClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `importpreviewwarning.Hooks(f(g(h())))`.
+func (c *ImportPreviewWarningClient) Use(hooks ...Hook) {
+	c.hooks.ImportPreviewWarning = append(c.hooks.ImportPreviewWarning, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `importpreviewwarning.Intercept(f(g(h())))`.
+func (c *ImportPreviewWarningClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ImportPreviewWarning = append(c.inters.ImportPreviewWarning, interceptors...)
+}
+
+// Create returns a builder for creating a ImportPreviewWarning entity.
+func (c *ImportPreviewWarningClient) Create() *ImportPreviewWarningCreate {
+	mutation := newImportPreviewWarningMutation(c.config, OpCreate)
+	return &ImportPreviewWarningCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ImportPreviewWarning entities.
+func (c *ImportPreviewWarningClient) CreateBulk(builders ...*ImportPreviewWarningCreate) *ImportPreviewWarningCreateBulk {
+	return &ImportPreviewWarningCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ImportPreviewWarningClient) MapCreateBulk(slice any, setFunc func(*ImportPreviewWarningCreate, int)) *ImportPreviewWarningCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ImportPreviewWarningCreateBulk{err: fmt.Errorf("calling to ImportPreviewWarningClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ImportPreviewWarningCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ImportPreviewWarningCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ImportPreviewWarning.
+func (c *ImportPreviewWarningClient) Update() *ImportPreviewWarningUpdate {
+	mutation := newImportPreviewWarningMutation(c.config, OpUpdate)
+	return &ImportPreviewWarningUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ImportPreviewWarningClient) UpdateOne(_m *ImportPreviewWarning) *ImportPreviewWarningUpdateOne {
+	mutation := newImportPreviewWarningMutation(c.config, OpUpdateOne, withImportPreviewWarning(_m))
+	return &ImportPreviewWarningUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ImportPreviewWarningClient) UpdateOneID(id string) *ImportPreviewWarningUpdateOne {
+	mutation := newImportPreviewWarningMutation(c.config, OpUpdateOne, withImportPreviewWarningID(id))
+	return &ImportPreviewWarningUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ImportPreviewWarning.
+func (c *ImportPreviewWarningClient) Delete() *ImportPreviewWarningDelete {
+	mutation := newImportPreviewWarningMutation(c.config, OpDelete)
+	return &ImportPreviewWarningDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ImportPreviewWarningClient) DeleteOne(_m *ImportPreviewWarning) *ImportPreviewWarningDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ImportPreviewWarningClient) DeleteOneID(id string) *ImportPreviewWarningDeleteOne {
+	builder := c.Delete().Where(importpreviewwarning.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ImportPreviewWarningDeleteOne{builder}
+}
+
+// Query returns a query builder for ImportPreviewWarning.
+func (c *ImportPreviewWarningClient) Query() *ImportPreviewWarningQuery {
+	return &ImportPreviewWarningQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeImportPreviewWarning},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ImportPreviewWarning entity by its id.
+func (c *ImportPreviewWarningClient) Get(ctx context.Context, id string) (*ImportPreviewWarning, error) {
+	return c.Query().Where(importpreviewwarning.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ImportPreviewWarningClient) GetX(ctx context.Context, id string) *ImportPreviewWarning {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ImportPreviewWarningClient) Hooks() []Hook {
+	return c.hooks.ImportPreviewWarning
+}
+
+// Interceptors returns the client interceptors.
+func (c *ImportPreviewWarningClient) Interceptors() []Interceptor {
+	return c.inters.ImportPreviewWarning
+}
+
+func (c *ImportPreviewWarningClient) mutate(ctx context.Context, m *ImportPreviewWarningMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ImportPreviewWarningCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ImportPreviewWarningUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ImportPreviewWarningUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ImportPreviewWarningDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ImportPreviewWarning mutation op: %q", m.Op())
+	}
+}
+
 // NotificationClient is a client for the Notification schema.
 type NotificationClient struct {
 	config
@@ -1479,6 +2619,139 @@ func (c *PasskeyTransportClient) mutate(ctx context.Context, m *PasskeyTransport
 	}
 }
 
+// QuickUnlockDeviceClient is a client for the QuickUnlockDevice schema.
+type QuickUnlockDeviceClient struct {
+	config
+}
+
+// NewQuickUnlockDeviceClient returns a client for the QuickUnlockDevice from the given config.
+func NewQuickUnlockDeviceClient(c config) *QuickUnlockDeviceClient {
+	return &QuickUnlockDeviceClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `quickunlockdevice.Hooks(f(g(h())))`.
+func (c *QuickUnlockDeviceClient) Use(hooks ...Hook) {
+	c.hooks.QuickUnlockDevice = append(c.hooks.QuickUnlockDevice, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `quickunlockdevice.Intercept(f(g(h())))`.
+func (c *QuickUnlockDeviceClient) Intercept(interceptors ...Interceptor) {
+	c.inters.QuickUnlockDevice = append(c.inters.QuickUnlockDevice, interceptors...)
+}
+
+// Create returns a builder for creating a QuickUnlockDevice entity.
+func (c *QuickUnlockDeviceClient) Create() *QuickUnlockDeviceCreate {
+	mutation := newQuickUnlockDeviceMutation(c.config, OpCreate)
+	return &QuickUnlockDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of QuickUnlockDevice entities.
+func (c *QuickUnlockDeviceClient) CreateBulk(builders ...*QuickUnlockDeviceCreate) *QuickUnlockDeviceCreateBulk {
+	return &QuickUnlockDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *QuickUnlockDeviceClient) MapCreateBulk(slice any, setFunc func(*QuickUnlockDeviceCreate, int)) *QuickUnlockDeviceCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &QuickUnlockDeviceCreateBulk{err: fmt.Errorf("calling to QuickUnlockDeviceClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*QuickUnlockDeviceCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &QuickUnlockDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for QuickUnlockDevice.
+func (c *QuickUnlockDeviceClient) Update() *QuickUnlockDeviceUpdate {
+	mutation := newQuickUnlockDeviceMutation(c.config, OpUpdate)
+	return &QuickUnlockDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *QuickUnlockDeviceClient) UpdateOne(_m *QuickUnlockDevice) *QuickUnlockDeviceUpdateOne {
+	mutation := newQuickUnlockDeviceMutation(c.config, OpUpdateOne, withQuickUnlockDevice(_m))
+	return &QuickUnlockDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *QuickUnlockDeviceClient) UpdateOneID(id string) *QuickUnlockDeviceUpdateOne {
+	mutation := newQuickUnlockDeviceMutation(c.config, OpUpdateOne, withQuickUnlockDeviceID(id))
+	return &QuickUnlockDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for QuickUnlockDevice.
+func (c *QuickUnlockDeviceClient) Delete() *QuickUnlockDeviceDelete {
+	mutation := newQuickUnlockDeviceMutation(c.config, OpDelete)
+	return &QuickUnlockDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *QuickUnlockDeviceClient) DeleteOne(_m *QuickUnlockDevice) *QuickUnlockDeviceDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *QuickUnlockDeviceClient) DeleteOneID(id string) *QuickUnlockDeviceDeleteOne {
+	builder := c.Delete().Where(quickunlockdevice.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &QuickUnlockDeviceDeleteOne{builder}
+}
+
+// Query returns a query builder for QuickUnlockDevice.
+func (c *QuickUnlockDeviceClient) Query() *QuickUnlockDeviceQuery {
+	return &QuickUnlockDeviceQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeQuickUnlockDevice},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a QuickUnlockDevice entity by its id.
+func (c *QuickUnlockDeviceClient) Get(ctx context.Context, id string) (*QuickUnlockDevice, error) {
+	return c.Query().Where(quickunlockdevice.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *QuickUnlockDeviceClient) GetX(ctx context.Context, id string) *QuickUnlockDevice {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *QuickUnlockDeviceClient) Hooks() []Hook {
+	return c.hooks.QuickUnlockDevice
+}
+
+// Interceptors returns the client interceptors.
+func (c *QuickUnlockDeviceClient) Interceptors() []Interceptor {
+	return c.inters.QuickUnlockDevice
+}
+
+func (c *QuickUnlockDeviceClient) mutate(ctx context.Context, m *QuickUnlockDeviceMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&QuickUnlockDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&QuickUnlockDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&QuickUnlockDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&QuickUnlockDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown QuickUnlockDevice mutation op: %q", m.Op())
+	}
+}
+
 // WebPushSubscriptionClient is a client for the WebPushSubscription schema.
 type WebPushSubscriptionClient struct {
 	config
@@ -1616,13 +2889,17 @@ func (c *WebPushSubscriptionClient) mutate(ctx context.Context, m *WebPushSubscr
 type (
 	hooks struct {
 		AgentApproval, AgentMemory, AgentSession, AgentSessionMessage, BQLHistoryRecord,
+		GmailConnection, GmailOAuthState, GmailPendingImport, GmailPushEvent,
+		GmailSyncLease, ImportJob, ImportPreviewState, ImportPreviewWarning,
 		Notification, PasskeyCredential, PasskeySession, PasskeyTransport,
-		WebPushSubscription []ent.Hook
+		QuickUnlockDevice, WebPushSubscription []ent.Hook
 	}
 	inters struct {
 		AgentApproval, AgentMemory, AgentSession, AgentSessionMessage, BQLHistoryRecord,
+		GmailConnection, GmailOAuthState, GmailPendingImport, GmailPushEvent,
+		GmailSyncLease, ImportJob, ImportPreviewState, ImportPreviewWarning,
 		Notification, PasskeyCredential, PasskeySession, PasskeyTransport,
-		WebPushSubscription []ent.Interceptor
+		QuickUnlockDevice, WebPushSubscription []ent.Interceptor
 	}
 )
 
