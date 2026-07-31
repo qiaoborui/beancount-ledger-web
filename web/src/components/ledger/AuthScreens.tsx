@@ -179,7 +179,7 @@ export function SensitiveUnlockPanel({
   }, [autoFocusInput, offline, offlineUnlockAvailable]);
 
   const canUsePasskey = !offline && passkeyRegistered;
-  const showPasswordInline = !offline && Boolean(onPasswordUnlock) && (autoFocusInput || (!quickUnlockEnabled && !passkeyRegistered));
+  const showPasswordInline = !offline && Boolean(onPasswordUnlock) && !quickUnlockEnabled && !passkeyRegistered;
   const shellClassName = surface === "dialog"
     ? "overflow-hidden rounded-md border border-line bg-panel px-5 py-6 shadow-[0_18px_50px_rgba(20,20,19,0.22)] sm:px-6"
     : "border-y border-line bg-panel px-4 py-12 text-center sm:px-6 lg:py-16";
@@ -202,7 +202,7 @@ export function SensitiveUnlockPanel({
     ) : (
       <div className="space-y-3">
         {canUsePasskey && <Button className="h-11 w-full px-5" disabled={unlocking} onClick={onUnlock}><Fingerprint className="mr-2 h-4 w-4" />{unlocking ? "正在唤起 Face ID…" : "Face ID / Passkey 解锁"}</Button>}
-        {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && !canUsePasskey} />}
+        {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} />}
         {!canUsePasskey && !quickUnlockEnabled && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式。</p>}
       </div>
     )}

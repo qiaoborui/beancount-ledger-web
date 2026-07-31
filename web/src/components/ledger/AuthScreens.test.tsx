@@ -57,11 +57,12 @@ describe("LoginScreen", () => {
     expect(html).toContain("使用主密码");
   });
 
-  it("opens and focuses the main-password field for a quick unlock", () => {
-    const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered autoFocusInput onUnlock={() => {}} onPasswordUnlock={() => {}} />);
+  it("focuses the quick-unlock field ahead of the main-password fallback", () => {
+    const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered quickUnlockEnabled quickUnlockMode="text" autoFocusInput onUnlock={() => {}} onQuickUnlock={() => {}} onPasswordUnlock={() => {}} />);
 
-    expect(html).toContain('placeholder="主密码"');
+    expect(html).toContain('placeholder="本机快速解锁口令"');
     expect(html).toContain("autofocus");
+    expect(html).not.toContain('placeholder="主密码"');
   });
 
   it("shows one in-progress Face ID action instead of inviting repeated clicks", () => {
