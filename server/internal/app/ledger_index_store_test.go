@@ -2,11 +2,50 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestAccountMetadataValuesRoundTripWithoutJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		value MetadataValue
+		want  MetadataValue
+	}{
+		{name: "null", value: nil, want: nil},
+		{name: "string", value: "CMB", want: "CMB"},
+		{name: "number", value: 18.5, want: 18.5},
+		{name: "boolean", value: true, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kind, textValue, numberValue, booleanValue, err := indexAccountMetadataValue(test.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text, _ := textValue.(string)
+			number, _ := numberValue.(float64)
+			boolean, _ := booleanValue.(bool)
+			got, err := accountMetadataValue(kind, sql.NullString{String: text, Valid: textValue != nil}, sql.NullFloat64{Float64: number, Valid: numberValue != nil}, sql.NullBool{Bool: boolean, Valid: booleanValue != nil})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("round trip = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestAccountMetadataValuesRejectUnsupportedType(t *testing.T) {
+	if _, _, _, _, err := indexAccountMetadataValue([]string{"unsupported"}); err == nil {
+		t.Fatal("expected unsupported metadata value to fail")
+	}
+}
 
 func TestMetadataUsesPostgresText(t *testing.T) {
 	metadata, err := marshalPostgresJSON(map[string]any{"ok": true})
@@ -95,6 +134,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got := activeSnapshot.Transactions[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
 		t.Fatalf("active snapshot transaction annotations=%#v", got)
 	}
+	if got, want := activeSnapshot.Accounts[0].Metadata, map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("active snapshot account metadata=%#v, want %#v", got, want)
+	}
 	txns, err := store.TransactionsForRevision(ctx, secondID, "2026-05-01", "2026-06-01")
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +215,7 @@ func testIndexSnapshot(version string, txns []Transaction) *LedgerSnapshot {
 		LedgerVersion: LedgerVersion{Version: version, FileCount: 1},
 		Transactions:  txns,
 		Accounts: []Account{
-			{Account: "Assets:Cash", OpenDate: "2026-01-01", Currency: "CNY", Label: "Cash", Group: "cash", Active: true},
+			{Account: "Assets:Cash", OpenDate: "2026-01-01", Currency: "CNY", Label: "Cash", Group: "cash", Active: true, Metadata: map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}},
 			{Account: "Expenses:Food", OpenDate: "2026-01-01", Currency: "CNY", Label: "Food", Group: "expense", Active: true},
 		},
 		Commodities: []string{"CNY"},

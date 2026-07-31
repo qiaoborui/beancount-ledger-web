@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -131,9 +132,30 @@ CREATE TABLE IF NOT EXISTS ledger_index_accounts (
   label TEXT NOT NULL,
   account_group TEXT NOT NULL,
   active BOOLEAN NOT NULL,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (revision_id, account)
 );
+
+CREATE TABLE IF NOT EXISTS ledger_index_account_metadata (
+  revision_id BIGINT NOT NULL,
+  account TEXT NOT NULL,
+  metadata_key TEXT NOT NULL,
+  value_kind TEXT NOT NULL CHECK (value_kind IN ('null', 'string', 'number', 'boolean')),
+  text_value TEXT,
+  number_value DOUBLE PRECISION,
+  boolean_value BOOLEAN,
+  PRIMARY KEY (revision_id, account, metadata_key),
+  FOREIGN KEY (revision_id, account)
+    REFERENCES ledger_index_accounts(revision_id, account) ON DELETE CASCADE,
+  CHECK (
+    (value_kind = 'null' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'string' AND text_value IS NOT NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'number' AND text_value IS NULL AND number_value IS NOT NULL AND boolean_value IS NULL) OR
+    (value_kind = 'boolean' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS ledger_index_account_metadata_key
+  ON ledger_index_account_metadata (revision_id, metadata_key);
 
 CREATE TABLE IF NOT EXISTS ledger_index_transactions (
   revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
@@ -417,7 +439,7 @@ GROUP BY p.account, a.currency, COALESCE(NULLIF(p.currency, ''), 'CNY')`, revisi
 
 func loadIndexAccounts(ctx context.Context, db *sql.DB, revisionID int64) ([]Account, error) {
 	rows, err := db.QueryContext(ctx, `
-SELECT account, open_date, close_date, currency, alias, label, account_group, active, metadata
+SELECT account, open_date, close_date, currency, alias, label, account_group, active
 FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revisionID)
 	if err != nil {
 		return nil, err
@@ -427,8 +449,7 @@ FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revisionID)
 	for rows.Next() {
 		var account Account
 		var closeDate, alias sql.NullString
-		var metadata []byte
-		if err := rows.Scan(&account.Account, &account.OpenDate, &closeDate, &account.Currency, &alias, &account.Label, &account.Group, &account.Active, &metadata); err != nil {
+		if err := rows.Scan(&account.Account, &account.OpenDate, &closeDate, &account.Currency, &alias, &account.Label, &account.Group, &account.Active); err != nil {
 			return nil, err
 		}
 		if closeDate.Valid {
@@ -437,12 +458,45 @@ FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revisionID)
 		if alias.Valid {
 			account.Alias = &alias.String
 		}
-		if err := json.Unmarshal(metadata, &account.Metadata); err != nil {
-			return nil, err
-		}
+		account.Metadata = map[string]MetadataValue{}
 		accounts = append(accounts, account)
 	}
-	return accounts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	metadataRows, err := db.QueryContext(ctx, `
+SELECT account, metadata_key, value_kind, text_value, number_value, boolean_value
+FROM ledger_index_account_metadata
+WHERE revision_id = $1
+ORDER BY account, metadata_key`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer metadataRows.Close()
+	byAccount := make(map[string]int, len(accounts))
+	for i, account := range accounts {
+		byAccount[account.Account] = i
+	}
+	for metadataRows.Next() {
+		var account, key, kind string
+		var textValue sql.NullString
+		var numberValue sql.NullFloat64
+		var booleanValue sql.NullBool
+		if err := metadataRows.Scan(&account, &key, &kind, &textValue, &numberValue, &booleanValue); err != nil {
+			return nil, err
+		}
+		value, err := accountMetadataValue(kind, textValue, numberValue, booleanValue)
+		if err != nil {
+			return nil, fmt.Errorf("decode account metadata %s.%s: %w", account, key, err)
+		}
+		if index, ok := byAccount[account]; ok {
+			accounts[index].Metadata[key] = value
+		}
+	}
+	if err := metadataRows.Err(); err != nil {
+		return nil, err
+	}
+	return accounts, nil
 }
 
 func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, transactionQuery, postingQuery, annotationQuery string, args ...any) ([]Transaction, error) {
@@ -676,6 +730,7 @@ RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapsh
 
 func clearRevisionRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
 	for _, table := range []string{
+		"ledger_index_account_metadata",
 		"ledger_index_transaction_tags",
 		"ledger_index_transaction_links",
 		"ledger_index_postings",
@@ -696,18 +751,97 @@ func copyAccounts(ctx context.Context, tx pgx.Tx, revisionID int64, accounts []A
 	if len(accounts) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_accounts"}, []string{"revision_id", "account", "open_date", "close_date", "currency", "alias", "label", "account_group", "active", "metadata"}, pgx.CopyFromSlice(len(accounts), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_accounts"}, []string{"revision_id", "account", "open_date", "close_date", "currency", "alias", "label", "account_group", "active"}, pgx.CopyFromSlice(len(accounts), func(i int) ([]any, error) {
 		account := accounts[i]
-		metadata, err := marshalPostgresJSON(account.Metadata)
-		if err != nil {
-			return nil, err
+		return []any{revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active}, nil
+	}))
+	if err != nil {
+		return err
+	}
+	return copyAccountMetadata(ctx, tx, revisionID, accounts)
+}
+
+type indexedAccountMetadata struct {
+	account string
+	key     string
+	kind    string
+	text    any
+	number  any
+	boolean any
+}
+
+func copyAccountMetadata(ctx context.Context, tx pgx.Tx, revisionID int64, accounts []Account) error {
+	rows := make([]indexedAccountMetadata, 0)
+	for _, account := range accounts {
+		keys := make([]string, 0, len(account.Metadata))
+		for key := range account.Metadata {
+			keys = append(keys, key)
 		}
-		if metadata == "null" {
-			metadata = "{}"
+		sort.Strings(keys)
+		for _, key := range keys {
+			kind, textValue, numberValue, booleanValue, err := indexAccountMetadataValue(account.Metadata[key])
+			if err != nil {
+				return fmt.Errorf("encode account metadata %s.%s: %w", account.Account, key, err)
+			}
+			rows = append(rows, indexedAccountMetadata{account: account.Account, key: key, kind: kind, text: textValue, number: numberValue, boolean: booleanValue})
 		}
-		return []any{revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata}, nil
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_account_metadata"}, []string{"revision_id", "account", "metadata_key", "value_kind", "text_value", "number_value", "boolean_value"}, pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
+		row := rows[i]
+		return []any{revisionID, row.account, row.key, row.kind, row.text, row.number, row.boolean}, nil
 	}))
 	return err
+}
+
+func indexAccountMetadataValue(value MetadataValue) (string, any, any, any, error) {
+	switch typed := value.(type) {
+	case nil:
+		return "null", nil, nil, nil, nil
+	case string:
+		return "string", typed, nil, nil, nil
+	case bool:
+		return "boolean", nil, nil, typed, nil
+	case float64:
+		return "number", nil, typed, nil, nil
+	case float32:
+		return "number", nil, float64(typed), nil, nil
+	case int:
+		return "number", nil, float64(typed), nil, nil
+	case int64:
+		return "number", nil, float64(typed), nil, nil
+	default:
+		return "", nil, nil, nil, fmt.Errorf("unsupported value type %T", value)
+	}
+}
+
+func accountMetadataValue(kind string, textValue sql.NullString, numberValue sql.NullFloat64, booleanValue sql.NullBool) (MetadataValue, error) {
+	switch kind {
+	case "null":
+		if textValue.Valid || numberValue.Valid || booleanValue.Valid {
+			return nil, errors.New("null value has data")
+		}
+		return nil, nil
+	case "string":
+		if !textValue.Valid || numberValue.Valid || booleanValue.Valid {
+			return nil, errors.New("invalid string value")
+		}
+		return textValue.String, nil
+	case "number":
+		if textValue.Valid || !numberValue.Valid || booleanValue.Valid {
+			return nil, errors.New("invalid number value")
+		}
+		return numberValue.Float64, nil
+	case "boolean":
+		if textValue.Valid || numberValue.Valid || !booleanValue.Valid {
+			return nil, errors.New("invalid boolean value")
+		}
+		return booleanValue.Bool, nil
+	default:
+		return nil, fmt.Errorf("unknown value kind %q", kind)
+	}
 }
 
 type indexedTransaction struct {
