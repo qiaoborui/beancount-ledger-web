@@ -13,10 +13,11 @@ Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
 ```
 
 The deployment workflow lives at
-`.github/workflows/deploy-google-cloud.yml`. It runs backend tests, frontend
-typecheck/tests/build, publishes an immutable image to Artifact Registry, and
-deploys the image digest to Cloud Run. Missing Google Cloud repository variables
-leave the deployment job skipped.
+`.github/workflows/deploy-google-cloud.yml`. It waits for a successful `CI` run,
+then uses CI's change plan to publish an immutable image and deploy its digest
+to Cloud Run. Frontend-only changes leave the ZIP worker untouched; backend or
+container changes update both services. Missing Google Cloud repository
+variables leave the deployment job skipped.
 
 ## Prerequisites
 
