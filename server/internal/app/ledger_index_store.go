@@ -166,7 +166,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_transactions (
   source_file TEXT NOT NULL,
   source_line INTEGER NOT NULL,
   source_hash TEXT NOT NULL,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (revision_id, ordinal)
 );
 
@@ -175,6 +174,28 @@ CREATE INDEX IF NOT EXISTS ledger_index_transactions_date
 
 CREATE INDEX IF NOT EXISTS ledger_index_transactions_range
   ON ledger_index_transactions (revision_id, txn_date DESC, source_line ASC, ordinal ASC);
+
+CREATE TABLE IF NOT EXISTS ledger_index_transaction_metadata (
+  revision_id BIGINT NOT NULL,
+  transaction_ordinal INTEGER NOT NULL,
+  metadata_key TEXT NOT NULL,
+  value_kind TEXT NOT NULL CHECK (value_kind IN ('null', 'string', 'number', 'boolean')),
+  text_value TEXT,
+  number_value DOUBLE PRECISION,
+  boolean_value BOOLEAN,
+  PRIMARY KEY (revision_id, transaction_ordinal, metadata_key),
+  FOREIGN KEY (revision_id, transaction_ordinal)
+    REFERENCES ledger_index_transactions(revision_id, ordinal) ON DELETE CASCADE,
+  CHECK (
+    (value_kind = 'null' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'string' AND text_value IS NOT NULL AND number_value IS NULL AND boolean_value IS NULL) OR
+    (value_kind = 'number' AND text_value IS NULL AND number_value IS NOT NULL AND boolean_value IS NULL) OR
+    (value_kind = 'boolean' AND text_value IS NULL AND number_value IS NULL AND boolean_value IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS ledger_index_transaction_metadata_key
+  ON ledger_index_transaction_metadata (revision_id, metadata_key);
 
 CREATE TABLE IF NOT EXISTS ledger_index_transaction_tags (
   revision_id BIGINT NOT NULL,
@@ -310,7 +331,7 @@ func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloa
 	g.Go(func() error {
 		var loadErr error
 		snapshot.Transactions, loadErr = loadIndexTransactions(ctx, s.db, revision.ID, `
-SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata
+SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash
 FROM ledger_index_transactions
 WHERE revision_id = $1
 ORDER BY ordinal`, `
@@ -325,7 +346,11 @@ UNION ALL
 SELECT 'link', transaction_ordinal, ordinal, link
 FROM ledger_index_transaction_links
 WHERE revision_id = $1
-ORDER BY 2, 1, 3`, revision.ID)
+ORDER BY 2, 1, 3`, `
+SELECT transaction_ordinal, metadata_key, value_kind, text_value, number_value, boolean_value
+FROM ledger_index_transaction_metadata
+WHERE revision_id = $1
+ORDER BY transaction_ordinal, metadata_key`, revision.ID)
 		return loadErr
 	})
 	g.Go(func() error {
@@ -355,7 +380,7 @@ ORDER BY 2, 1, 3`, revision.ID)
 
 func (s *LedgerIndexStore) TransactionsForRevision(ctx context.Context, revisionID int64, start, end string) ([]Transaction, error) {
 	return loadIndexTransactions(ctx, s.db, revisionID, `
-SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata
+SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash
 FROM ledger_index_transactions
 WHERE revision_id = $1 AND txn_date >= $2 AND txn_date < $3
 ORDER BY txn_date DESC, source_line ASC, ordinal ASC`, `
@@ -373,7 +398,12 @@ SELECT 'link', tl.transaction_ordinal, tl.ordinal, tl.link
 FROM ledger_index_transaction_links tl
 JOIN ledger_index_transactions t ON t.revision_id = tl.revision_id AND t.ordinal = tl.transaction_ordinal
 WHERE tl.revision_id = $1 AND t.txn_date >= $2 AND t.txn_date < $3
-ORDER BY 2, 1, 3`, revisionID, start, end)
+ORDER BY 2, 1, 3`, `
+SELECT tm.transaction_ordinal, tm.metadata_key, tm.value_kind, tm.text_value, tm.number_value, tm.boolean_value
+FROM ledger_index_transaction_metadata tm
+JOIN ledger_index_transactions t ON t.revision_id = tm.revision_id AND t.ordinal = tm.transaction_ordinal
+WHERE tm.revision_id = $1 AND t.txn_date >= $2 AND t.txn_date < $3
+ORDER BY tm.transaction_ordinal, tm.metadata_key`, revisionID, start, end)
 }
 
 // BalancesForRevision returns each account's balance in its configured native
@@ -485,7 +515,7 @@ ORDER BY account, metadata_key`, revisionID)
 		if err := metadataRows.Scan(&account, &key, &kind, &textValue, &numberValue, &booleanValue); err != nil {
 			return nil, err
 		}
-		value, err := accountMetadataValue(kind, textValue, numberValue, booleanValue)
+		value, err := decodeLedgerMetadataValue(kind, textValue, numberValue, booleanValue)
 		if err != nil {
 			return nil, fmt.Errorf("decode account metadata %s.%s: %w", account, key, err)
 		}
@@ -499,7 +529,7 @@ ORDER BY account, metadata_key`, revisionID)
 	return accounts, nil
 }
 
-func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, transactionQuery, postingQuery, annotationQuery string, args ...any) ([]Transaction, error) {
+func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, transactionQuery, postingQuery, annotationQuery, metadataQuery string, args ...any) ([]Transaction, error) {
 	rows, err := db.QueryContext(ctx, transactionQuery, args...)
 	if err != nil {
 		return nil, err
@@ -513,13 +543,10 @@ func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, tr
 	byOrdinal := map[int]int{}
 	for rows.Next() {
 		var row indexedTransactionRow
-		var metadata []byte
-		if err := rows.Scan(&row.ordinal, &row.txn.Date, &row.txn.Payee, &row.txn.Narration, &row.txn.Source.File, &row.txn.Source.Line, &row.txn.Source.Hash, &metadata); err != nil {
+		if err := rows.Scan(&row.ordinal, &row.txn.Date, &row.txn.Payee, &row.txn.Narration, &row.txn.Source.File, &row.txn.Source.Line, &row.txn.Source.Hash); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(metadata, &row.txn.Metadata); err != nil {
-			return nil, err
-		}
+		row.txn.Metadata = map[string]MetadataValue{}
 		byOrdinal[row.ordinal] = len(indexed)
 		indexed = append(indexed, row)
 	}
@@ -565,6 +592,31 @@ func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, tr
 		}
 	}
 	if err := annotations.Err(); err != nil {
+		return nil, err
+	}
+	metadataRows, err := db.QueryContext(ctx, metadataQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer metadataRows.Close()
+	for metadataRows.Next() {
+		var key, kind string
+		var ordinal int
+		var textValue sql.NullString
+		var numberValue sql.NullFloat64
+		var booleanValue sql.NullBool
+		if err := metadataRows.Scan(&ordinal, &key, &kind, &textValue, &numberValue, &booleanValue); err != nil {
+			return nil, err
+		}
+		value, err := decodeLedgerMetadataValue(kind, textValue, numberValue, booleanValue)
+		if err != nil {
+			return nil, fmt.Errorf("decode transaction metadata %d.%s: %w", ordinal, key, err)
+		}
+		if index, ok := byOrdinal[ordinal]; ok {
+			indexed[index].txn.Metadata[key] = value
+		}
+	}
+	if err := metadataRows.Err(); err != nil {
 		return nil, err
 	}
 	out := make([]Transaction, 0, len(indexed))
@@ -731,6 +783,7 @@ RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapsh
 func clearRevisionRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
 	for _, table := range []string{
 		"ledger_index_account_metadata",
+		"ledger_index_transaction_metadata",
 		"ledger_index_transaction_tags",
 		"ledger_index_transaction_links",
 		"ledger_index_postings",
@@ -779,7 +832,7 @@ func copyAccountMetadata(ctx context.Context, tx pgx.Tx, revisionID int64, accou
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			kind, textValue, numberValue, booleanValue, err := indexAccountMetadataValue(account.Metadata[key])
+			kind, textValue, numberValue, booleanValue, err := encodeLedgerMetadataValue(account.Metadata[key])
 			if err != nil {
 				return fmt.Errorf("encode account metadata %s.%s: %w", account.Account, key, err)
 			}
@@ -796,7 +849,7 @@ func copyAccountMetadata(ctx context.Context, tx pgx.Tx, revisionID int64, accou
 	return err
 }
 
-func indexAccountMetadataValue(value MetadataValue) (string, any, any, any, error) {
+func encodeLedgerMetadataValue(value MetadataValue) (string, any, any, any, error) {
 	switch typed := value.(type) {
 	case nil:
 		return "null", nil, nil, nil, nil
@@ -817,7 +870,7 @@ func indexAccountMetadataValue(value MetadataValue) (string, any, any, any, erro
 	}
 }
 
-func accountMetadataValue(kind string, textValue sql.NullString, numberValue sql.NullFloat64, booleanValue sql.NullBool) (MetadataValue, error) {
+func decodeLedgerMetadataValue(kind string, textValue sql.NullString, numberValue sql.NullFloat64, booleanValue sql.NullBool) (MetadataValue, error) {
 	switch kind {
 	case "null":
 		if textValue.Valid || numberValue.Valid || booleanValue.Valid {
@@ -877,7 +930,13 @@ func copyTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, previous
 	if err := copyFreshPostings(ctx, tx, revisionID, fresh); err != nil {
 		return err
 	}
+	if err := copyReusedTransactionMetadata(ctx, tx, revisionID, previousRevisionID, reused); err != nil {
+		return err
+	}
 	if err := copyReusedTransactionAnnotations(ctx, tx, revisionID, previousRevisionID, reused); err != nil {
+		return err
+	}
+	if err := copyFreshTransactionMetadata(ctx, tx, revisionID, fresh); err != nil {
 		return err
 	}
 	return copyFreshTransactionAnnotations(ctx, tx, revisionID, fresh)
@@ -953,8 +1012,8 @@ func copyReusedTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, pr
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata)
-SELECT $1, m.new_ordinal, t.txn_date, t.payee, t.narration, t.source_file, t.source_line, t.source_hash, t.metadata
+INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash)
+SELECT $1, m.new_ordinal, t.txn_date, t.payee, t.narration, t.source_file, t.source_line, t.source_hash
 FROM ledger_index_txn_reuse_map m
 JOIN ledger_index_transactions t ON t.revision_id = $2 AND t.ordinal = m.old_ordinal`, revisionID, previousRevisionID); err != nil {
 		return err
@@ -971,19 +1030,60 @@ func copyFreshTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, txn
 	if len(txns) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transactions"}, []string{"revision_id", "ordinal", "txn_date", "payee", "narration", "source_file", "source_line", "source_hash", "metadata"}, pgx.CopyFromSlice(len(txns), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transactions"}, []string{"revision_id", "ordinal", "txn_date", "payee", "narration", "source_file", "source_line", "source_hash"}, pgx.CopyFromSlice(len(txns), func(i int) ([]any, error) {
 		indexed := txns[i]
 		txn := indexed.txn
-		metadata, err := marshalPostgresJSON(txn.Metadata)
-		if err != nil {
-			return nil, err
-		}
-		if metadata == "null" {
-			metadata = "{}"
-		}
-		return []any{revisionID, indexed.ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata}, nil
+		return []any{revisionID, indexed.ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash}, nil
 	}))
 	return err
+}
+
+func copyReusedTransactionMetadata(ctx context.Context, tx pgx.Tx, revisionID int64, previousRevisionID int64, reused []reusedTransaction) error {
+	if len(reused) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+INSERT INTO ledger_index_transaction_metadata (revision_id, transaction_ordinal, metadata_key, value_kind, text_value, number_value, boolean_value)
+SELECT $1, m.new_ordinal, metadata.metadata_key, metadata.value_kind, metadata.text_value, metadata.number_value, metadata.boolean_value
+FROM ledger_index_txn_reuse_map m
+JOIN ledger_index_transaction_metadata metadata
+  ON metadata.revision_id = $2 AND metadata.transaction_ordinal = m.old_ordinal`, revisionID, previousRevisionID)
+	return err
+}
+
+func copyFreshTransactionMetadata(ctx context.Context, tx pgx.Tx, revisionID int64, txns []indexedTransaction) error {
+	rows := make([]indexedTransactionMetadata, 0)
+	for _, indexed := range txns {
+		keys := make([]string, 0, len(indexed.txn.Metadata))
+		for key := range indexed.txn.Metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			kind, textValue, numberValue, booleanValue, err := encodeLedgerMetadataValue(indexed.txn.Metadata[key])
+			if err != nil {
+				return fmt.Errorf("encode transaction metadata %d.%s: %w", indexed.ordinal, key, err)
+			}
+			rows = append(rows, indexedTransactionMetadata{transactionOrdinal: indexed.ordinal, key: key, kind: kind, text: textValue, number: numberValue, boolean: booleanValue})
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transaction_metadata"}, []string{"revision_id", "transaction_ordinal", "metadata_key", "value_kind", "text_value", "number_value", "boolean_value"}, pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
+		row := rows[i]
+		return []any{revisionID, row.transactionOrdinal, row.key, row.kind, row.text, row.number, row.boolean}, nil
+	}))
+	return err
+}
+
+type indexedTransactionMetadata struct {
+	transactionOrdinal int
+	key                string
+	kind               string
+	text               any
+	number             any
+	boolean            any
 }
 
 func copyReusedTransactionAnnotations(ctx context.Context, tx pgx.Tx, revisionID int64, previousRevisionID int64, reused []reusedTransaction) error {
