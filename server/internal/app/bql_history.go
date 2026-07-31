@@ -164,6 +164,9 @@ func bqlHistoryError(c *gin.Context, err error) {
 var errBQLHistoryRecordNotFound = errors.New("BQL history record not found")
 
 func (s *Server) listBQLHistory(ctx context.Context) ([]BQLHistoryRecord, error) {
+	if s.bqlHistoryRepository != nil {
+		return s.bqlHistoryRepository.List(ctx, ledgerClusterID(s.cfg))
+	}
 	store, err := s.readBQLHistoryStore(ctx)
 	if err != nil {
 		return nil, err
@@ -174,6 +177,9 @@ func (s *Server) listBQLHistory(ctx context.Context) ([]BQLHistoryRecord, error)
 }
 
 func (s *Server) getBQLHistoryRecord(ctx context.Context, id string) (BQLHistoryRecord, error) {
+	if s.bqlHistoryRepository != nil {
+		return s.bqlHistoryRepository.Get(ctx, ledgerClusterID(s.cfg), id)
+	}
 	store, err := s.readBQLHistoryStore(ctx)
 	if err != nil {
 		return BQLHistoryRecord{}, err
@@ -188,6 +194,18 @@ func (s *Server) getBQLHistoryRecord(ctx context.Context, id string) (BQLHistory
 
 func (s *Server) touchBQLHistory(ctx context.Context, rawQuery string) (BQLHistoryRecord, bool, error) {
 	query := strings.TrimSpace(rawQuery)
+	if s.bqlHistoryRepository != nil {
+		now := time.Now().UTC()
+		return s.bqlHistoryRepository.Touch(ctx, ledgerClusterID(s.cfg), BQLHistoryRecord{
+			ID:          bqlHistoryID(query),
+			Query:       query,
+			Title:       fallbackBQLHistoryTitle(query),
+			TitleSource: "fallback",
+			CreatedAt:   now,
+			LastRunAt:   now,
+			RunCount:    1,
+		})
+	}
 	var record BQLHistoryRecord
 	created := false
 	err := s.runtime().WithLock(ctx, s.bqlHistoryLockName(), func(lockCtx context.Context) error {
@@ -227,6 +245,9 @@ func (s *Server) touchBQLHistory(ctx context.Context, rawQuery string) (BQLHisto
 }
 
 func (s *Server) setBQLHistoryGeneratedTitle(ctx context.Context, id, title string) (BQLHistoryRecord, error) {
+	if s.bqlHistoryRepository != nil {
+		return s.bqlHistoryRepository.SetGeneratedTitle(ctx, ledgerClusterID(s.cfg), id, title)
+	}
 	var record BQLHistoryRecord
 	err := s.runtime().WithLock(ctx, s.bqlHistoryLockName(), func(lockCtx context.Context) error {
 		store, err := s.readBQLHistoryStore(lockCtx)
@@ -252,6 +273,9 @@ func (s *Server) setBQLHistoryGeneratedTitle(ctx context.Context, id, title stri
 }
 
 func (s *Server) renameBQLHistoryRecord(ctx context.Context, id, title string) (BQLHistoryRecord, error) {
+	if s.bqlHistoryRepository != nil {
+		return s.bqlHistoryRepository.Rename(ctx, ledgerClusterID(s.cfg), id, title)
+	}
 	var record BQLHistoryRecord
 	err := s.runtime().WithLock(ctx, s.bqlHistoryLockName(), func(lockCtx context.Context) error {
 		store, err := s.readBQLHistoryStore(lockCtx)
@@ -273,6 +297,9 @@ func (s *Server) renameBQLHistoryRecord(ctx context.Context, id, title string) (
 }
 
 func (s *Server) deleteBQLHistoryRecord(ctx context.Context, id string) error {
+	if s.bqlHistoryRepository != nil {
+		return s.bqlHistoryRepository.Delete(ctx, ledgerClusterID(s.cfg), id)
+	}
 	return s.runtime().WithLock(ctx, s.bqlHistoryLockName(), func(lockCtx context.Context) error {
 		store, err := s.readBQLHistoryStore(lockCtx)
 		if err != nil {

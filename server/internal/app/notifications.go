@@ -51,9 +51,11 @@ type notificationStore struct {
 }
 
 type NotificationServiceDependencies struct {
-	Config       Config
-	RuntimeStore RuntimeStore
-	SnapshotPort LedgerSnapshotPort
+	Config                     Config
+	RuntimeStore               RuntimeStore
+	PushSubscriptionRepository pushSubscriptionRepository
+	NotificationRepository     notificationRepository
+	SnapshotPort               LedgerSnapshotPort
 }
 
 // NotificationChannelRegistry owns the configured delivery channels.
@@ -105,11 +107,12 @@ func (r *NotificationChannelRegistry) Publish(ctx context.Context, message Notif
 
 // NotificationService owns notification state, delivery, and optional refresh scheduling.
 type NotificationService struct {
-	cfg          Config
-	runtimeStore RuntimeStore
-	snapshotPort LedgerSnapshotPort
-	channels     *NotificationChannelRegistry
-	interval     time.Duration
+	cfg           Config
+	runtimeStore  RuntimeStore
+	notifications notificationRepository
+	snapshotPort  LedgerSnapshotPort
+	channels      *NotificationChannelRegistry
+	interval      time.Duration
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -131,11 +134,12 @@ func newNotificationService(dependencies NotificationServiceDependencies, channe
 		return nil, errors.New("notification channels are required")
 	}
 	return &NotificationService{
-		cfg:          dependencies.Config,
-		runtimeStore: dependencies.RuntimeStore,
-		snapshotPort: dependencies.SnapshotPort,
-		channels:     channels,
-		interval:     interval,
+		cfg:           dependencies.Config,
+		runtimeStore:  dependencies.RuntimeStore,
+		notifications: dependencies.NotificationRepository,
+		snapshotPort:  dependencies.SnapshotPort,
+		channels:      channels,
+		interval:      interval,
 	}, nil
 }
 
@@ -232,6 +236,9 @@ func (s *NotificationService) refreshMonth(month string, snapshot *LedgerSnapsho
 }
 
 func (s *NotificationService) UpdateStatus(ids []string, status string) ([]StoredNotification, error) {
+	if s.notifications != nil {
+		return s.notifications.UpdateStatus(context.Background(), ids, status)
+	}
 	updated := []StoredNotification{}
 	err := s.runtimeStore.WithLock(context.Background(), "notifications", func(lockCtx context.Context) error {
 		store := s.readStore(lockCtx)
@@ -410,6 +417,13 @@ func (s *NotificationService) detectInsights(month string, snapshot *LedgerSnaps
 }
 
 func (s *NotificationService) mergeInsightsIntoNotifications(month string, insights []Insight) ([]StoredNotification, error) {
+	if s.notifications != nil {
+		created, notifications, err := s.notifications.MergeMonth(context.Background(), month, insights)
+		if err != nil {
+			return nil, err
+		}
+		return s.publishCreatedNotifications(month, created, notifications)
+	}
 	created := []StoredNotification{}
 	var notifications []StoredNotification
 	err := s.runtimeStore.WithLock(context.Background(), "notifications", func(lockCtx context.Context) error {
@@ -467,6 +481,10 @@ func (s *NotificationService) mergeInsightsIntoNotifications(month string, insig
 	if err != nil {
 		return nil, err
 	}
+	return s.publishCreatedNotifications(month, created, notifications)
+}
+
+func (s *NotificationService) publishCreatedNotifications(month string, created, notifications []StoredNotification) ([]StoredNotification, error) {
 	if len(created) > 0 {
 		sort.Slice(created, func(i, j int) bool { return severityRank(created[i].Severity) < severityRank(created[j].Severity) })
 		title := created[0].Title

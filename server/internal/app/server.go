@@ -15,22 +15,23 @@ import (
 )
 
 type Server struct {
-	cfg                 Config
-	runtimeStore        RuntimeStore
-	indexStore          LedgerIndexPort
-	indexStoreErr       error
-	cache               *LedgerCache
-	importers           *BillImporterRegistry
-	moduleNames         []string
-	notificationService *NotificationService
-	writer              *LedgerWriter
-	accountService      *AccountService
-	queryPort           LedgerQueryPort
-	snapshotPort        LedgerSnapshotPort
-	reconcileService    *ReconciliationService
-	txService           *TransactionService
-	limiter             RateLimiter
-	agentModel          AgentModelClient
+	cfg                  Config
+	runtimeStore         RuntimeStore
+	bqlHistoryRepository bqlHistoryRepository
+	indexStore           LedgerIndexPort
+	indexStoreErr        error
+	cache                *LedgerCache
+	importers            *BillImporterRegistry
+	moduleNames          []string
+	notificationService  *NotificationService
+	writer               *LedgerWriter
+	accountService       *AccountService
+	queryPort            LedgerQueryPort
+	snapshotPort         LedgerSnapshotPort
+	reconcileService     *ReconciliationService
+	txService            *TransactionService
+	limiter              RateLimiter
+	agentModel           AgentModelClient
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {

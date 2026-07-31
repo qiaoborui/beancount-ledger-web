@@ -42,7 +42,7 @@ type NotificationChannel interface {
 
 type notificationChannelFactory interface {
 	ID() string
-	NewNotificationChannel(RuntimeStore) (NotificationChannel, error)
+	NewNotificationChannel(RuntimeStore, pushSubscriptionRepository) (NotificationChannel, error)
 }
 
 type notificationServiceFactory func(NotificationServiceDependencies, *NotificationChannelRegistry) (*NotificationService, error)
@@ -178,7 +178,7 @@ func (r *ModuleRegistry) BuildNotificationService(dependencies NotificationServi
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		channel, err := r.channelFactories[id].NewNotificationChannel(dependencies.RuntimeStore)
+		channel, err := r.channelFactories[id].NewNotificationChannel(dependencies.RuntimeStore, dependencies.PushSubscriptionRepository)
 		if err != nil {
 			return nil, fmt.Errorf("build notification channel %q: %w", id, err)
 		}
