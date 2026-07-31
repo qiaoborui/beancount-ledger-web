@@ -313,7 +313,7 @@ jobs:
             --ingress=all \
             --port=3000 \
             --cpu=1 \
-            --memory=512Mi \
+            --memory=1Gi \
             --cpu-throttling \
             --concurrency=8 \
             --min-instances=0 \
