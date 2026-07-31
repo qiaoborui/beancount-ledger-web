@@ -46,6 +46,34 @@ var (
 			},
 		},
 	}
+	// AgentMemoriesColumns holds the columns for the "agent_memories" table.
+	AgentMemoriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "cluster_id", Type: field.TypeString},
+		{Name: "kind", Type: field.TypeString},
+		{Name: "title", Type: field.TypeString},
+		{Name: "instruction", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// AgentMemoriesTable holds the schema information for the "agent_memories" table.
+	AgentMemoriesTable = &schema.Table{
+		Name:       "agent_memories",
+		Columns:    AgentMemoriesColumns,
+		PrimaryKey: []*schema.Column{AgentMemoriesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "agentmemory_cluster_id_kind_title",
+				Unique:  true,
+				Columns: []*schema.Column{AgentMemoriesColumns[1], AgentMemoriesColumns[2], AgentMemoriesColumns[3]},
+			},
+			{
+				Name:    "agentmemory_cluster_id_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{AgentMemoriesColumns[1], AgentMemoriesColumns[6]},
+			},
+		},
+	}
 	// AgentSessionsColumns holds the columns for the "agent_sessions" table.
 	AgentSessionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -228,6 +256,7 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		AgentApprovalsTable,
+		AgentMemoriesTable,
 		AgentSessionsTable,
 		AgentSessionMessagesTable,
 		BqlHistoryRecordsTable,
@@ -242,6 +271,9 @@ var (
 func init() {
 	AgentApprovalsTable.Annotation = &entsql.Annotation{
 		Table: "agent_approvals",
+	}
+	AgentMemoriesTable.Annotation = &entsql.Annotation{
+		Table: "agent_memories",
 	}
 	AgentSessionsTable.Annotation = &entsql.Annotation{
 		Table: "agent_sessions",

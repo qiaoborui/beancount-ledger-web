@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentapproval"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentmemory"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsession"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsessionmessage"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
@@ -82,6 +83,7 @@ func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
 			agentapproval.Table:       agentapproval.ValidColumn,
+			agentmemory.Table:         agentmemory.ValidColumn,
 			agentsession.Table:        agentsession.ValidColumn,
 			agentsessionmessage.Table: agentsessionmessage.ValidColumn,
 			bqlhistoryrecord.Table:    bqlhistoryrecord.ValidColumn,

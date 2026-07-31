@@ -82,6 +82,9 @@ func containsSensitiveAgentContent(value string) bool {
 }
 
 func (s *Server) listAgentMemories(ctx context.Context) ([]AgentMemoryRecord, error) {
+	if s.agentMemories != nil {
+		return s.agentMemories.List(ctx, ledgerClusterID(s.cfg))
+	}
 	store, err := s.readAgentMemoryStore(ctx)
 	if err != nil {
 		return nil, err
@@ -118,6 +121,9 @@ func (s *Server) upsertAgentMemory(ctx context.Context, input agentMemoryInput) 
 	input.Kind = strings.TrimSpace(input.Kind)
 	input.Title = strings.TrimSpace(input.Title)
 	input.Instruction = strings.TrimSpace(input.Instruction)
+	if s.agentMemories != nil {
+		return s.agentMemories.Upsert(ctx, ledgerClusterID(s.cfg), input)
+	}
 	var result AgentMemoryRecord
 	err := s.runtime().WithLock(ctx, s.agentMemoryLockName(), func(lockCtx context.Context) error {
 		store, err := s.readAgentMemoryStore(lockCtx)
@@ -170,7 +176,11 @@ func (s *Server) writeAgentMemoryStore(ctx context.Context, store agentMemorySto
 }
 
 func (s *Server) agentMemoryStoreKey() string {
-	sum := sha256.Sum256([]byte(ledgerClusterID(s.cfg)))
+	return agentMemoryStoreKeyForCluster(ledgerClusterID(s.cfg))
+}
+
+func agentMemoryStoreKeyForCluster(clusterID string) string {
+	sum := sha256.Sum256([]byte(clusterID))
 	return "memory:" + hex.EncodeToString(sum[:12])
 }
 

@@ -9,6 +9,9 @@ import (
 // AgentApproval is the predicate function for agentapproval builders.
 type AgentApproval func(*sql.Selector)
 
+// AgentMemory is the predicate function for agentmemory builders.
+type AgentMemory func(*sql.Selector)
+
 // AgentSession is the predicate function for agentsession builders.
 type AgentSession func(*sql.Selector)
 

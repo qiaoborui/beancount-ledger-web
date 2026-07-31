@@ -26,6 +26,7 @@ type applicationDependencies struct {
 	passkeys             passkeyRepository
 	agentSessions        agentSessionRepository
 	agentApprovals       agentApprovalRepository
+	agentMemories        agentMemoryRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache
@@ -54,6 +55,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		passkeys:             dependencies.passkeys,
 		agentSessions:        dependencies.agentSessions,
 		agentApprovals:       dependencies.agentApprovals,
+		agentMemories:        dependencies.agentMemories,
 		indexStore:           dependencies.indexStore,
 		indexStoreErr:        dependencies.indexStoreErr,
 		cache:                dependencies.cache,
@@ -98,7 +100,11 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		dependencies.passkeys = newEntPasskeyRepository(storageAdapters.persistence.Client)
 		dependencies.agentSessions = newEntAgentSessionRepository(storageAdapters.persistence.Client)
 		dependencies.agentApprovals = newEntAgentApprovalRepository(storageAdapters.persistence.Client)
+		dependencies.agentMemories = newEntAgentMemoryRepository(storageAdapters.persistence.Client)
 		if err := backfillRelationalRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, cfg, dependencies.bqlHistoryRepository, dependencies.pushSubscriptions, dependencies.notifications); err != nil {
+			return fail(err)
+		}
+		if err := backfillAgentMemoryRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, cfg, dependencies.agentMemories); err != nil {
 			return fail(err)
 		}
 		if err := backfillPasskeyRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, dependencies.passkeys); err != nil {
