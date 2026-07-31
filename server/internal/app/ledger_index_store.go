@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/borui/beancount-ledger-web/server/internal/persistence"
 	"github.com/jackc/pgx/v5"
 	pgxstdlib "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/sync/errgroup"
@@ -52,6 +53,9 @@ func NewLedgerIndexStoreWithDB(db *sql.DB, cfg Config) (*LedgerIndexStore, error
 	store := &LedgerIndexStore{db: db, sourceKey: ledgerIndexSourceKey(cfg)}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	if err := persistence.ApplyMigrations(ctx, db); err != nil {
+		return nil, err
+	}
 	if err := store.EnsureSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -128,7 +132,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_accounts (
   account_group TEXT NOT NULL,
   active BOOLEAN NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  payload JSONB NOT NULL,
   PRIMARY KEY (revision_id, account)
 );
 
@@ -144,7 +147,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_transactions (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   tags TEXT[] NOT NULL DEFAULT '{}'::text[],
   links TEXT[] NOT NULL DEFAULT '{}'::text[],
-  payload JSONB NOT NULL,
   PRIMARY KEY (revision_id, ordinal)
 );
 
@@ -162,7 +164,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_postings (
   amount BIGINT NOT NULL,
   currency TEXT NOT NULL,
   flag TEXT NOT NULL,
-  payload JSONB NOT NULL,
   PRIMARY KEY (revision_id, transaction_ordinal, posting_ordinal)
 );
 
@@ -176,7 +177,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_balance_assertions (
   account TEXT NOT NULL,
   amount BIGINT NOT NULL,
   currency TEXT NOT NULL,
-  payload JSONB NOT NULL,
   PRIMARY KEY (revision_id, ordinal)
 );
 
@@ -187,7 +187,6 @@ CREATE TABLE IF NOT EXISTS ledger_index_prices (
   currency TEXT NOT NULL,
   amount BIGINT NOT NULL,
   quote_currency TEXT NOT NULL,
-  payload JSONB NOT NULL,
   PRIMARY KEY (revision_id, ordinal)
 );
 
@@ -259,22 +258,30 @@ func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloa
 	var g errgroup.Group
 	g.Go(func() error {
 		var loadErr error
-		snapshot.Accounts, loadErr = loadIndexRows[Account](ctx, s.db, `SELECT payload FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revision.ID)
+		snapshot.Accounts, loadErr = loadIndexAccounts(ctx, s.db, revision.ID)
 		return loadErr
 	})
 	g.Go(func() error {
 		var loadErr error
-		snapshot.Transactions, loadErr = loadIndexRows[Transaction](ctx, s.db, `SELECT payload FROM ledger_index_transactions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		snapshot.Transactions, loadErr = loadIndexTransactions(ctx, s.db, revision.ID, `
+SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links
+FROM ledger_index_transactions
+WHERE revision_id = $1
+ORDER BY ordinal`, `
+SELECT transaction_ordinal, posting_ordinal, account, amount, currency, flag
+FROM ledger_index_postings
+WHERE revision_id = $1
+ORDER BY transaction_ordinal, posting_ordinal`, revision.ID)
 		return loadErr
 	})
 	g.Go(func() error {
 		var loadErr error
-		snapshot.BalanceAssertions, loadErr = loadIndexRows[BalanceAssertion](ctx, s.db, `SELECT payload FROM ledger_index_balance_assertions WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		snapshot.BalanceAssertions, loadErr = loadIndexBalanceAssertions(ctx, s.db, revision.ID)
 		return loadErr
 	})
 	g.Go(func() error {
 		var loadErr error
-		snapshot.Prices, loadErr = loadIndexRows[Price](ctx, s.db, `SELECT payload FROM ledger_index_prices WHERE revision_id = $1 ORDER BY ordinal`, revision.ID)
+		snapshot.Prices, loadErr = loadIndexPrices(ctx, s.db, revision.ID)
 		return loadErr
 	})
 	g.Go(func() error {
@@ -293,28 +300,16 @@ func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloa
 }
 
 func (s *LedgerIndexStore) TransactionsForRevision(ctx context.Context, revisionID int64, start, end string) ([]Transaction, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT payload
+	return loadIndexTransactions(ctx, s.db, revisionID, `
+SELECT ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links
 FROM ledger_index_transactions
 WHERE revision_id = $1 AND txn_date >= $2 AND txn_date < $3
-ORDER BY txn_date DESC, source_line ASC, ordinal ASC`, revisionID, start, end)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Transaction{}
-	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		var txn Transaction
-		if err := json.Unmarshal(raw, &txn); err != nil {
-			return nil, err
-		}
-		out = append(out, txn)
-	}
-	return out, rows.Err()
+ORDER BY txn_date DESC, source_line ASC, ordinal ASC`, `
+SELECT p.transaction_ordinal, p.posting_ordinal, p.account, p.amount, p.currency, p.flag
+FROM ledger_index_postings p
+JOIN ledger_index_transactions t ON t.revision_id = p.revision_id AND t.ordinal = p.transaction_ordinal
+WHERE p.revision_id = $1 AND t.txn_date >= $2 AND t.txn_date < $3
+ORDER BY p.transaction_ordinal, p.posting_ordinal`, revisionID, start, end)
 }
 
 // BalancesForRevision returns each account's balance in its configured native
@@ -371,36 +366,131 @@ GROUP BY p.account, a.currency, COALESCE(NULLIF(p.currency, ''), 'CNY')`, revisi
 			}
 		}
 	}
-	assertions, err := loadIndexRows[BalanceAssertion](ctx, s.db, `
-SELECT payload
-FROM ledger_index_balance_assertions
-WHERE revision_id = $1
-ORDER BY ordinal`, revisionID)
+	assertions, err := loadIndexBalanceAssertions(ctx, s.db, revisionID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return balances, assertions, nil
 }
 
-func loadIndexRows[T any](ctx context.Context, db *sql.DB, query string, revisionID int64) ([]T, error) {
-	rows, err := db.QueryContext(ctx, query, revisionID)
+func loadIndexAccounts(ctx context.Context, db *sql.DB, revisionID int64) ([]Account, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT account, open_date, close_date, currency, alias, label, account_group, active, metadata
+FROM ledger_index_accounts WHERE revision_id = $1 ORDER BY account`, revisionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []T{}
+	accounts := []Account{}
 	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var account Account
+		var closeDate, alias sql.NullString
+		var metadata []byte
+		if err := rows.Scan(&account.Account, &account.OpenDate, &closeDate, &account.Currency, &alias, &account.Label, &account.Group, &account.Active, &metadata); err != nil {
 			return nil, err
 		}
-		var item T
-		if err := json.Unmarshal(raw, &item); err != nil {
+		if closeDate.Valid {
+			account.CloseDate = &closeDate.String
+		}
+		if alias.Valid {
+			account.Alias = &alias.String
+		}
+		if err := json.Unmarshal(metadata, &account.Metadata); err != nil {
 			return nil, err
 		}
-		out = append(out, item)
+		accounts = append(accounts, account)
 	}
-	return out, rows.Err()
+	return accounts, rows.Err()
+}
+
+func loadIndexTransactions(ctx context.Context, db *sql.DB, revisionID int64, transactionQuery, postingQuery string, args ...any) ([]Transaction, error) {
+	rows, err := db.QueryContext(ctx, transactionQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type indexedTransactionRow struct {
+		ordinal int
+		txn     Transaction
+	}
+	indexed := []indexedTransactionRow{}
+	byOrdinal := map[int]int{}
+	for rows.Next() {
+		var row indexedTransactionRow
+		var metadata []byte
+		if err := rows.Scan(&row.ordinal, &row.txn.Date, &row.txn.Payee, &row.txn.Narration, &row.txn.Source.File, &row.txn.Source.Line, &row.txn.Source.Hash, &metadata, &row.txn.Tags, &row.txn.Links); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(metadata, &row.txn.Metadata); err != nil {
+			return nil, err
+		}
+		byOrdinal[row.ordinal] = len(indexed)
+		indexed = append(indexed, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	postings, err := db.QueryContext(ctx, postingQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer postings.Close()
+	for postings.Next() {
+		var transactionOrdinal, postingOrdinal int
+		var posting Posting
+		if err := postings.Scan(&transactionOrdinal, &postingOrdinal, &posting.Account, &posting.Amount, &posting.Currency, &posting.Flag); err != nil {
+			return nil, err
+		}
+		if index, ok := byOrdinal[transactionOrdinal]; ok {
+			indexed[index].txn.Postings = append(indexed[index].txn.Postings, posting)
+		}
+	}
+	if err := postings.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Transaction, 0, len(indexed))
+	for _, row := range indexed {
+		out = append(out, row.txn)
+	}
+	return out, nil
+}
+
+func loadIndexBalanceAssertions(ctx context.Context, db *sql.DB, revisionID int64) ([]BalanceAssertion, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT assertion_date, account, amount, currency
+FROM ledger_index_balance_assertions WHERE revision_id = $1 ORDER BY ordinal`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	assertions := []BalanceAssertion{}
+	for rows.Next() {
+		var assertion BalanceAssertion
+		if err := rows.Scan(&assertion.Date, &assertion.Account, &assertion.Amount, &assertion.Currency); err != nil {
+			return nil, err
+		}
+		assertions = append(assertions, assertion)
+	}
+	return assertions, rows.Err()
+}
+
+func loadIndexPrices(ctx context.Context, db *sql.DB, revisionID int64) ([]Price, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT price_date, currency, amount, quote_currency
+FROM ledger_index_prices WHERE revision_id = $1 ORDER BY ordinal`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	prices := []Price{}
+	for rows.Next() {
+		var price Price
+		if err := rows.Scan(&price.Date, &price.Currency, &price.Amount, &price.QuoteCurrency); err != nil {
+			return nil, err
+		}
+		prices = append(prices, price)
+	}
+	return prices, rows.Err()
 }
 
 func loadIndexCommodities(ctx context.Context, db *sql.DB, revisionID int64) ([]string, error) {
@@ -539,13 +629,16 @@ func copyAccounts(ctx context.Context, tx pgx.Tx, revisionID int64, accounts []A
 	if len(accounts) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_accounts"}, []string{"revision_id", "account", "open_date", "close_date", "currency", "alias", "label", "account_group", "active", "metadata", "payload"}, pgx.CopyFromSlice(len(accounts), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_accounts"}, []string{"revision_id", "account", "open_date", "close_date", "currency", "alias", "label", "account_group", "active", "metadata"}, pgx.CopyFromSlice(len(accounts), func(i int) ([]any, error) {
 		account := accounts[i]
-		payload, metadata, err := jsonPayloads(account, account.Metadata)
+		metadata, err := marshalPostgresJSON(account.Metadata)
 		if err != nil {
 			return nil, err
 		}
-		return []any{revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata, payload}, nil
+		if metadata == "null" {
+			metadata = "{}"
+		}
+		return []any{revisionID, account.Account, account.OpenDate, nullableStringPtr(account.CloseDate), account.Currency, nullableStringPtr(account.Alias), account.Label, account.Group, account.Active, metadata}, nil
 	}))
 	return err
 }
@@ -653,15 +746,15 @@ func copyReusedTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, pr
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links, payload)
-SELECT $1, m.new_ordinal, t.txn_date, t.payee, t.narration, t.source_file, t.source_line, t.source_hash, t.metadata, t.tags, t.links, t.payload
+INSERT INTO ledger_index_transactions (revision_id, ordinal, txn_date, payee, narration, source_file, source_line, source_hash, metadata, tags, links)
+SELECT $1, m.new_ordinal, t.txn_date, t.payee, t.narration, t.source_file, t.source_line, t.source_hash, t.metadata, t.tags, t.links
 FROM ledger_index_txn_reuse_map m
 JOIN ledger_index_transactions t ON t.revision_id = $2 AND t.ordinal = m.old_ordinal`, revisionID, previousRevisionID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
-INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag, payload)
-SELECT $1, m.new_ordinal, p.posting_ordinal, p.account, p.amount, p.currency, p.flag, p.payload
+INSERT INTO ledger_index_postings (revision_id, transaction_ordinal, posting_ordinal, account, amount, currency, flag)
+SELECT $1, m.new_ordinal, p.posting_ordinal, p.account, p.amount, p.currency, p.flag
 FROM ledger_index_txn_reuse_map m
 JOIN ledger_index_postings p ON p.revision_id = $2 AND p.transaction_ordinal = m.old_ordinal`, revisionID, previousRevisionID)
 	return err
@@ -671,14 +764,17 @@ func copyFreshTransactions(ctx context.Context, tx pgx.Tx, revisionID int64, txn
 	if len(txns) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transactions"}, []string{"revision_id", "ordinal", "txn_date", "payee", "narration", "source_file", "source_line", "source_hash", "metadata", "tags", "links", "payload"}, pgx.CopyFromSlice(len(txns), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_transactions"}, []string{"revision_id", "ordinal", "txn_date", "payee", "narration", "source_file", "source_line", "source_hash", "metadata", "tags", "links"}, pgx.CopyFromSlice(len(txns), func(i int) ([]any, error) {
 		indexed := txns[i]
 		txn := indexed.txn
-		payload, metadata, err := jsonPayloads(txn, txn.Metadata)
+		metadata, err := marshalPostgresJSON(txn.Metadata)
 		if err != nil {
 			return nil, err
 		}
-		return []any{revisionID, indexed.ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links), payload}, nil
+		if metadata == "null" {
+			metadata = "{}"
+		}
+		return []any{revisionID, indexed.ordinal, txn.Date, txn.Payee, txn.Narration, txn.Source.File, txn.Source.Line, txn.Source.Hash, metadata, stringSlice(txn.Tags), stringSlice(txn.Links)}, nil
 	}))
 	return err
 }
@@ -688,7 +784,7 @@ func copyFreshPostings(ctx context.Context, tx pgx.Tx, revisionID int64, txns []
 		return nil
 	}
 	txnIndex, postingIndex := 0, 0
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_postings"}, []string{"revision_id", "transaction_ordinal", "posting_ordinal", "account", "amount", "currency", "flag", "payload"}, pgx.CopyFromFunc(func() ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_postings"}, []string{"revision_id", "transaction_ordinal", "posting_ordinal", "account", "amount", "currency", "flag"}, pgx.CopyFromFunc(func() ([]any, error) {
 		for txnIndex < len(txns) && postingIndex >= len(txns[txnIndex].txn.Postings) {
 			txnIndex++
 			postingIndex = 0
@@ -700,11 +796,7 @@ func copyFreshPostings(ctx context.Context, tx pgx.Tx, revisionID int64, txns []
 		posting := indexed.txn.Postings[postingIndex]
 		currentPostingIndex := postingIndex
 		postingIndex++
-		payload, err := marshalPostgresJSON(posting)
-		if err != nil {
-			return nil, err
-		}
-		return []any{revisionID, indexed.ordinal, currentPostingIndex, posting.Account, posting.Amount, posting.Currency, posting.Flag, payload}, nil
+		return []any{revisionID, indexed.ordinal, currentPostingIndex, posting.Account, posting.Amount, posting.Currency, posting.Flag}, nil
 	}))
 	return err
 }
@@ -713,13 +805,9 @@ func copyBalanceAssertions(ctx context.Context, tx pgx.Tx, revisionID int64, ass
 	if len(assertions) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_balance_assertions"}, []string{"revision_id", "ordinal", "assertion_date", "account", "amount", "currency", "payload"}, pgx.CopyFromSlice(len(assertions), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_balance_assertions"}, []string{"revision_id", "ordinal", "assertion_date", "account", "amount", "currency"}, pgx.CopyFromSlice(len(assertions), func(i int) ([]any, error) {
 		assertion := assertions[i]
-		payload, err := marshalPostgresJSON(assertion)
-		if err != nil {
-			return nil, err
-		}
-		return []any{revisionID, i, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency, payload}, nil
+		return []any{revisionID, i, assertion.Date, assertion.Account, assertion.Amount, assertion.Currency}, nil
 	}))
 	return err
 }
@@ -728,13 +816,9 @@ func copyPrices(ctx context.Context, tx pgx.Tx, revisionID int64, prices []Price
 	if len(prices) == 0 {
 		return nil
 	}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_prices"}, []string{"revision_id", "ordinal", "price_date", "currency", "amount", "quote_currency", "payload"}, pgx.CopyFromSlice(len(prices), func(i int) ([]any, error) {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"ledger_index_prices"}, []string{"revision_id", "ordinal", "price_date", "currency", "amount", "quote_currency"}, pgx.CopyFromSlice(len(prices), func(i int) ([]any, error) {
 		price := prices[i]
-		payload, err := marshalPostgresJSON(price)
-		if err != nil {
-			return nil, err
-		}
-		return []any{revisionID, i, price.Date, price.Currency, price.Amount, price.QuoteCurrency, payload}, nil
+		return []any{revisionID, i, price.Date, price.Currency, price.Amount, price.QuoteCurrency}, nil
 	}))
 	return err
 }
@@ -747,21 +831,6 @@ func copyCommodities(ctx context.Context, tx pgx.Tx, revisionID int64, commoditi
 		return []any{revisionID, commodities[i]}, nil
 	}))
 	return err
-}
-
-func jsonPayloads(payloadValue any, metadataValue any) (string, string, error) {
-	payload, err := marshalPostgresJSON(payloadValue)
-	if err != nil {
-		return "", "", err
-	}
-	metadata, err := marshalPostgresJSON(metadataValue)
-	if err != nil {
-		return "", "", err
-	}
-	if metadata == "null" {
-		metadata = "{}"
-	}
-	return payload, metadata, nil
 }
 
 func nullableStringPtr(value *string) any {
