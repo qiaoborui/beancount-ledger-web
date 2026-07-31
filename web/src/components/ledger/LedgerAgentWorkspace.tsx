@@ -58,6 +58,10 @@ function nextID() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function containsSensitiveAgentInput(value: string) {
+  return /密码|口令|验证码|密钥|身份证|\b(password|passcode|pin|otp|token|secret|cvv)\b/i.test(value) || /(?:\d[ -]?){12,}/.test(value);
+}
+
 function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = ""): AgentSession {
   const now = Date.now();
   return { id: nextID(), serverSessionId, createdAt: now, updatedAt: now, timeline };
@@ -113,6 +117,9 @@ export function LedgerAgentWorkspace({
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const sessionId = activeSession.serverSessionId;
   const timeline = activeSession.timeline;
+  const lastAssistantMessage = [...timeline].reverse().find((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
+  const pendingApproval = timeline.find((item): item is ApprovalItem => item.kind === "approval" && !item.resolved);
+  const canContinue = !pendingApproval && (lastAssistantMessage?.content.includes("本次请求已完成 8 轮工具处理") ?? false);
 
   function setOpen(next: boolean) {
     setUncontrolledOpen(next);
@@ -200,6 +207,14 @@ export function LedgerAgentWorkspace({
   async function sendMessage(text: string) {
     const prompt = text.trim();
     if (!prompt || busy) return;
+    if (containsSensitiveAgentInput(prompt)) {
+      showToast("error", "请勿在 Agent 对话中输入密码、验证码、令牌或完整卡号");
+      return;
+    }
+    if (pendingApproval) {
+      showToast("info", "请先确认或取消待处理操作");
+      return;
+    }
     const history = timeline.filter((item): item is MessageItem => item.kind === "message").map((message) => ({ role: message.role, content: message.content }));
     setOpen(true);
     setBusy(true);
@@ -367,12 +382,12 @@ export function LedgerAgentWorkspace({
               }
             }}
             placeholder="询问账本，或从工具开始"
-            disabled={busy}
+            disabled={busy || Boolean(pendingApproval)}
           />
           <div className="flex items-center justify-between border-t border-line px-2 py-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy} aria-label="打开 Agent 工具">
+                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy || Boolean(pendingApproval)} aria-label="打开 Agent 工具">
                   <SlidersHorizontal className="h-3.5 w-3.5 text-brand" />工具
                 </button>
               </DropdownMenuTrigger>
@@ -386,8 +401,9 @@ export function LedgerAgentWorkspace({
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="flex items-center gap-1.5">
+              {canContinue && <button type="button" className="inline-flex h-8 items-center rounded-md border border-line px-2.5 text-xs font-medium text-brand hover:bg-tag disabled:opacity-45" onClick={() => void sendMessage("继续")} disabled={busy}>继续处理</button>}
               <span className="hidden text-[11px] text-stone sm:inline">Enter 发送</span>
-              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
+              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || Boolean(pendingApproval) || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
             </div>
           </div>
         </div>
@@ -488,11 +504,28 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
     const operations = objectArray<AccountOperation>(artifact.data, "operations");
     return <div className="rounded-md border border-line bg-panel p-3"><h3 className="text-sm font-semibold text-ink">{artifact.title} · {operations.length}</h3><div className="mt-2 divide-y divide-line border-y border-line">{operations.map((operation, index) => <div key={`${operation.kind}-${operation.account}-${index}`} className="flex items-center justify-between gap-3 py-2 text-sm"><span className="min-w-0 truncate text-ink">{operation.account}</span><span className="shrink-0 text-xs uppercase text-stone">{operation.kind}</span></div>)}</div></div>;
   }
+  if (artifact.type === "memory_draft") {
+    const kind = objectString(artifact.data, "kind");
+    const title = objectString(artifact.data, "title");
+    const instruction = objectString(artifact.data, "instruction");
+    return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel p-3"><div className="flex items-start gap-2"><Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" /><div className="min-w-0"><h3 className="text-sm font-semibold text-ink">{artifact.title}</h3><p className="mt-1 text-xs text-stone">{memoryKindLabel(kind)}{title ? ` · ${title}` : ""}</p></div></div>{instruction && <p className="mt-2 break-words text-sm leading-relaxed text-olive">{instruction}</p>}</div>;
+  }
   if (artifact.type === "navigation") {
     const path = objectString(artifact.data, "path");
     return <button type="button" className="flex w-full items-center justify-between rounded-md border border-line bg-panel px-3 py-2.5 text-sm text-ink hover:bg-tag" onClick={() => onNavigate(path)} disabled={!path}><span>{artifact.title}</span><ExternalLink className="h-4 w-4 text-stone" /></button>;
   }
   return null;
+}
+
+function memoryKindLabel(kind: string) {
+  switch (kind) {
+    case "preference": return "偏好";
+    case "category_rule": return "分类规则";
+    case "account_alias": return "账户别名";
+    case "recurring": return "周期习惯";
+    case "response_style": return "回复风格";
+    default: return "记忆";
+  }
 }
 
 function BQLTableCard({ title, result }: { title: string; result: BQLResult }) {

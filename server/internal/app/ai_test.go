@@ -105,10 +105,12 @@ func TestBQLCapabilitiesExplainExpenseFiltering(t *testing.T) {
 }
 
 type queuedAgentModel struct {
-	results []agentModelResult
+	results  []agentModelResult
+	messages [][]agentModelMessage
 }
 
-func (m *queuedAgentModel) Complete(context.Context, string, []agentModelMessage, []agentToolSpec) (agentModelResult, error) {
+func (m *queuedAgentModel) Complete(_ context.Context, _ string, messages []agentModelMessage, _ []agentToolSpec) (agentModelResult, error) {
+	m.messages = append(m.messages, append([]agentModelMessage(nil), messages...))
 	result := m.results[0]
 	m.results = m.results[1:]
 	return result, nil
@@ -138,6 +140,116 @@ func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
 	}
 }
 
+func TestLedgerAgentResetsToolRoundLimitForEachRequest(t *testing.T) {
+	server := testAgentServer(t)
+	results := make([]agentModelResult, 0, agentMaxTurns+2)
+	for turn := 0; turn < agentMaxTurns; turn++ {
+		results = append(results, agentModelResult{ToolCalls: []agentModelToolCall{{ID: fmt.Sprintf("call-%d", turn), Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}})
+	}
+	results = append(results,
+		agentModelResult{ToolCalls: []agentModelToolCall{{ID: "call-next", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
+		agentModelResult{Content: "已根据此前结果继续完成。"},
+	)
+	model := &queuedAgentModel{results: results}
+	server.agentModel = model
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "round-limit", Message: "请分析账本", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentEvent(events, "final") || !strings.Contains(agentEventText(events, "message_delta"), "本次请求已完成 8 轮工具处理") {
+		t.Fatalf("agent must offer continuation after eight tool rounds: %#v", events)
+	}
+	stored, found, err := server.readAgentSession(context.Background(), "round-limit")
+	if err != nil || !found {
+		t.Fatalf("agent session was not saved: found=%t err=%v", found, err)
+	}
+	if !containsAgentToolMessage(stored, "call-7") {
+		t.Fatalf("tool results must be saved in the session: %#v", stored)
+	}
+
+	events = nil
+	err = server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "round-limit", Message: "继续", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(agentEventText(events, "message_delta"), "已根据此前结果继续完成") {
+		t.Fatalf("agent did not continue after a new request: %#v", events)
+	}
+	if len(model.messages) != agentMaxTurns+2 || !containsAgentToolMessage(model.messages[agentMaxTurns], "call-7") {
+		t.Fatalf("continuation must receive saved tool results and a new eight-round budget: %#v", model.messages)
+	}
+}
+
+func TestAgentMemoryRequiresApprovalAndSensitiveUnlock(t *testing.T) {
+	server := testAgentServer(t)
+	arguments := `{"kind":"preference","title":"月度汇总","instruction":"优先按月给出简洁汇总。"}`
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "memory-1", Type: "function", Function: agentModelFunctionCall{Name: "upsert_memory", Arguments: arguments}}}}}}
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "memory-session", Message: "记住我喜欢月度简洁汇总", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAgentEvent(events, "approval_required") || !hasAgentEvent(events, "artifact") {
+		t.Fatalf("memory write must require approval and show its draft: %#v", events)
+	}
+	var approval AgentApproval
+	for _, event := range events {
+		if event.name == "approval_required" {
+			raw, _ := json.Marshal(event.payload)
+			if err := json.Unmarshal(raw, &approval); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(string, any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	records, err := server.searchAgentMemories(context.Background(), "月度")
+	if err != nil || len(records) != 1 || records[0].Instruction != "优先按月给出简洁汇总。" {
+		t.Fatalf("approved memory was not saved: records=%#v err=%v", records, err)
+	}
+	if _, err := server.agentTools()["search_memories"].Execute(context.Background(), json.RawMessage(`{}`), AgentPageContext{}); err == nil {
+		t.Fatal("memory search must require sensitive unlock")
+	}
+	if _, err := server.upsertAgentMemory(context.Background(), agentMemoryInput{Kind: "preference", Title: "密码", Instruction: "123456789012"}); err == nil {
+		t.Fatal("sensitive memory content must be rejected")
+	}
+	if _, err := server.upsertAgentMemory(context.Background(), agentMemoryInput{Kind: "preference", Title: "卡号", Instruction: "4111 1111 1111 1111"}); err == nil {
+		t.Fatal("formatted card number must be rejected")
+	}
+	if err := (AgentTurnRequest{Message: "我的 OTP 是 123456"}).Validate(); err == nil {
+		t.Fatal("sensitive agent input must be rejected before session persistence")
+	}
+}
+
+func TestLockedAgentTurnDoesNotReuseUnlockedSessionOrClientHistory(t *testing.T) {
+	server := testAgentServer(t)
+	model := &queuedAgentModel{results: []agentModelResult{
+		{Content: "已读取敏感账本信息。"},
+		{Content: "锁定状态下的新请求。"},
+	}}
+	server.agentModel = model
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "privacy-session", Message: "读取账本", Context: AgentPageContext{SensitiveUnlocked: true}}, func(string, any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "privacy-session", Message: "锁定后提问", Messages: []AgentMessage{{Role: "assistant", Content: "前端历史中的敏感数据"}}, Context: AgentPageContext{}}, func(string, any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(model.messages) != 2 || len(model.messages[1]) != 1 || model.messages[1][0].Content != "锁定后提问" {
+		t.Fatalf("locked agent turn must not reuse unlocked context: %#v", model.messages)
+	}
+}
+
 func TestLedgerAgentCanRequireApprovalForReadTools(t *testing.T) {
 	server := testAgentServer(t)
 	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "read-1", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}}}}
@@ -154,6 +266,9 @@ func TestLedgerAgentCanRequireApprovalForReadTools(t *testing.T) {
 	}
 	if hasAgentEvent(events, "tool_result") {
 		t.Fatalf("read tool executed before approval: %#v", events)
+	}
+	if err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "session-test-2", Message: "继续", Context: AgentPageContext{SensitiveUnlocked: true}}, func(string, any) error { return nil }); err == nil || !strings.Contains(err.Error(), "待确认操作") {
+		t.Fatalf("agent must block continuation while an approval is pending: %v", err)
 	}
 }
 
@@ -233,6 +348,30 @@ func testAgentServer(t *testing.T) *Server {
 func hasAgentEvent(events []capturedAgentEvent, name string) bool {
 	for _, event := range events {
 		if event.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func agentEventText(events []capturedAgentEvent, name string) string {
+	parts := make([]string, 0, len(events))
+	for _, event := range events {
+		if event.name != name {
+			continue
+		}
+		if payload, ok := event.payload.(map[string]any); ok {
+			if text, ok := payload["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func containsAgentToolMessage(messages []agentModelMessage, callID string) bool {
+	for _, message := range messages {
+		if message.Role == "tool" && message.ToolCallID == callID {
 			return true
 		}
 	}

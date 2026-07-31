@@ -12,7 +12,7 @@ export type AgentToolEvent = {
   error?: string;
 };
 
-export type AgentArtifactType = "bql_query" | "transaction_draft" | "account_draft" | "table" | "chart" | "navigation";
+export type AgentArtifactType = "bql_query" | "transaction_draft" | "account_draft" | "memory_draft" | "table" | "chart" | "navigation";
 
 export type AgentArtifact = {
   id: string;
