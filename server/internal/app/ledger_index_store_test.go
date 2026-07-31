@@ -260,11 +260,23 @@ ALTER TABLE ledger_index_revisions
 	var revisionID int64
 	if err := store.db.QueryRowContext(context.Background(), `
 INSERT INTO ledger_index_revisions (source_key, git_sha, ledger_version, latest_mtime_ms, file_count, status, error, bean_entries, bean_errors)
-VALUES ($1, '', 'legacy-v1', 0, 1, 'indexed', '', $2, $3)
+VALUES ($1, '', 'legacy-v1', 0, 1, 'active', '', $2, $3)
 RETURNING id`, store.sourceKey, string(entriesJSON), string(errorsJSON)).Scan(&revisionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.migrateLegacyBeanPayloads(context.Background()); err != nil {
+	reopened, err := NewLedgerIndexStore(Config{DatabaseURL: databaseURL, LedgerReadModel: "postgres", LedgerGitBranch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	legacySnapshot, ok, err := reopened.ActiveSnapshot(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("legacy active snapshot: ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(legacySnapshot.BeanEntries, entries) || !reflect.DeepEqual(legacySnapshot.BeanErrors, parseErrors) {
+		t.Fatalf("legacy snapshot payloads = %#v / %#v", legacySnapshot.BeanEntries, legacySnapshot.BeanErrors)
+	}
+	if err := reopened.MigrateLegacyBeanPayloads(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var columns int
@@ -278,7 +290,7 @@ WHERE table_schema = current_schema() AND table_name = 'ledger_index_revisions' 
 		t.Fatalf("legacy bean payload columns = %d, want 0", columns)
 	}
 	snapshot := &LedgerSnapshot{}
-	if err := loadBeanPayloads(context.Background(), store.db, revisionID, snapshot); err != nil {
+	if err := loadBeanPayloads(context.Background(), store.db, revisionID, false, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(snapshot.BeanEntries, entries) {
