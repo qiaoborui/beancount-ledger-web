@@ -311,6 +311,106 @@ func TestLedgerAgentRequiresApprovalBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestLedgerAgentUpdatePreviewsOriginalBeancountAndRequiresApproval(t *testing.T) {
+	installFakeBeanCheck(t)
+	server := testAgentServer(t)
+	file := filepath.Join(server.cfg.LedgerRoot, "transactions", "2026", "05.bean")
+	hash := transactionHash([]string{`2026-05-01 * "Cafe" "Lunch" #work`, `  note: "noodles"`, "  Expenses:Food 12.00 CNY", "  Assets:Cash -12.00 CNY"})
+	arguments := `{"source":{"file":"` + file + `","line":1,"hash":"` + hash + `"},"entry":{"kind":"transaction","date":"2026-05-01","payee":"Cafe","narration":"Dinner","metadata":{"note":"noodles"},"tags":["work"],"postings":[{"account":"Expenses:Food","amount":"13.80","currency":"CNY"},{"account":"Assets:Cash","amount":"-13.80","currency":"CNY"}],"confidence":1,"needsReview":false,"questions":[]}}`
+	server.agentModel = &queuedAgentModel{results: []agentModelResult{{ToolCalls: []agentModelToolCall{{ID: "update-1", Type: "function", Function: agentModelFunctionCall{Name: "update_transaction", Arguments: arguments}}}}}}
+	events := []capturedAgentEvent{}
+	err := server.runAgentTurn(context.Background(), AgentTurnRequest{SessionID: "session-test-update", Message: "把午餐改成晚餐", Context: AgentPageContext{SensitiveUnlocked: true}}, func(name string, payload any) error {
+		events = append(events, capturedAgentEvent{name: name, payload: payload})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mustRead(t, file)), `"Dinner"`) {
+		t.Fatal("agent updated before approval")
+	}
+	if !hasAgentArtifact(events, "transaction_change", `"Lunch"`, `"Dinner"`) {
+		t.Fatalf("update approval must show original and replacement Beancount: %#v", events)
+	}
+	approval := agentApprovalFromEvents(t, events)
+	if err := server.resolveAgentApproval(context.Background(), AgentApprovalRequest{SessionID: approval.SessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(string, any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	updated := string(mustRead(t, file))
+	if !strings.Contains(updated, `"Dinner"`) || !strings.Contains(updated, "13.80 CNY") || strings.Contains(updated, `"Lunch"`) {
+		t.Fatalf("approved update was not applied:\n%s", updated)
+	}
+}
+
+func TestSearchTransactionsReturnsMajorUnitAmountsForAgent(t *testing.T) {
+	server := testAgentServer(t)
+	execution, err := server.agentTools()["search_transactions"].Execute(context.Background(), json.RawMessage(`{"query":"payee:Cafe"}`), AgentPageContext{SensitiveUnlocked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, ok := execution.ModelOutput.(map[string]any)
+	if !ok || output["moneyUnit"] != "major" {
+		t.Fatalf("search result must declare major units: %#v", execution.ModelOutput)
+	}
+	transactions, ok := output["transactions"].([]map[string]any)
+	if !ok || len(transactions) != 1 {
+		t.Fatalf("unexpected transactions: %#v", output["transactions"])
+	}
+	postings, ok := transactions[0]["postings"].([]map[string]any)
+	if !ok || postings[0]["amount"] != "12.00" || postings[1]["amount"] != "-12.00" {
+		t.Fatalf("agent must receive major unit strings, got %#v", transactions[0]["postings"])
+	}
+}
+
+func TestLedgerAgentExposesCompleteTransactionWriteTools(t *testing.T) {
+	tools := testAgentServer(t).agentTools()
+	for _, name := range []string{"append_transactions", "update_transaction", "delete_transaction", "reverse_transaction"} {
+		tool, ok := tools[name]
+		if !ok || !tool.RequiresApproval {
+			t.Fatalf("transaction write tool %q must be available and require approval: %#v", name, tool)
+		}
+	}
+}
+
+func agentApprovalFromEvents(t *testing.T, events []capturedAgentEvent) AgentApproval {
+	t.Helper()
+	for _, event := range events {
+		if event.name != "approval_required" {
+			continue
+		}
+		raw, _ := json.Marshal(event.payload)
+		var approval AgentApproval
+		if err := json.Unmarshal(raw, &approval); err != nil {
+			t.Fatal(err)
+		}
+		return approval
+	}
+	t.Fatalf("approval event missing: %#v", events)
+	return AgentApproval{}
+}
+
+func hasAgentArtifact(events []capturedAgentEvent, artifactType string, values ...string) bool {
+	for _, event := range events {
+		if event.name != "artifact" {
+			continue
+		}
+		raw, _ := json.Marshal(event.payload)
+		var artifact AgentArtifact
+		if json.Unmarshal(raw, &artifact) != nil || artifact.Type != artifactType {
+			continue
+		}
+		text := fmt.Sprint(artifact.Data)
+		for _, value := range values {
+			if !strings.Contains(text, value) {
+				goto next
+			}
+		}
+		return true
+	next:
+	}
+	return false
+}
+
 func installFakeBeanCheck(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -339,6 +439,7 @@ func testAgentServer(t *testing.T) *Server {
 		cache:          cache,
 		writer:         writer,
 		accountService: NewAccountService(cache, writer),
+		txService:      NewTransactionServiceWithSnapshot(cache, writer, func() (*LedgerSnapshot, error) { return readService.Snapshot(context.Background()) }),
 		queryPort:      readService,
 		snapshotPort:   readService,
 		limiter:        NewRateLimiter(),
