@@ -30,6 +30,17 @@ func TestReverseTransactionEntryMirrorsOriginalPostings(t *testing.T) {
 	}
 }
 
+func TestFindTransactionPrefersHashOverStaleLine(t *testing.T) {
+	txns := []Transaction{
+		{Narration: "Replaced", Source: TransactionSource{File: "transactions/2026/05.bean", Line: 1, Hash: "new"}},
+		{Narration: "Original", Source: TransactionSource{File: "transactions/2026/05.bean", Line: 2, Hash: "old"}},
+	}
+	found := FindTransaction(txns, TransactionSource{File: "transactions/2026/05.bean", Line: 1, Hash: "old"})
+	if found == nil || found.Narration != "Original" {
+		t.Fatalf("hash must identify the approved transaction, got %#v", found)
+	}
+}
+
 func TestTransactionServiceReverseWritesEntry(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

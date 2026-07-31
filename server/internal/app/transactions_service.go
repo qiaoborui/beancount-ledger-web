@@ -58,7 +58,13 @@ func (s *TransactionService) Reverse(input ReverseTransactionRequest) (LedgerEnt
 func FindTransaction(txns []Transaction, source TransactionSource) *Transaction {
 	for i := range txns {
 		txn := &txns[i]
-		if txn.Source.File == source.File && (txn.Source.Line == source.Line || (source.Hash != "" && txn.Source.Hash == source.Hash)) {
+		if txn.Source.File != source.File {
+			continue
+		}
+		if source.Hash != "" && txn.Source.Hash == source.Hash {
+			return txn
+		}
+		if source.Hash == "" && txn.Source.Line == source.Line {
 			return txn
 		}
 	}

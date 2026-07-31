@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -402,6 +403,65 @@ func (s *Server) previewAgentWrite(_ context.Context, toolName string, raw json.
 			return agentToolExecution{}, err
 		}
 		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "transaction_draft", Title: "待确认交易", Data: map[string]any{"entries": entries}}}}, nil
+	case "update_transaction":
+		var input UpdateTransactionRequest
+		if err := decodeAgentArgs(raw, &input); err != nil {
+			return agentToolExecution{}, err
+		}
+		entry, err := s.validateAgentTransactionEntry(input.Entry)
+		if err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := validateAgentTransactionSource(input.Source); err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := s.validateAgentTransactionUpdateSource(input.Source); err != nil {
+			return agentToolExecution{}, err
+		}
+		original, err := s.agentTransactionSourceText(input.Source)
+		if err != nil {
+			return agentToolExecution{}, err
+		}
+		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "transaction_change", Title: "待确认交易更新", Data: map[string]any{"source": input.Source, "original": original, "replacement": strings.TrimRight(TransactionToBean(entry), "\n")}}}}, nil
+	case "delete_transaction":
+		var input DeleteTransactionRequest
+		if err := decodeAgentArgs(raw, &input); err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := validateAgentTransactionSource(input.Source); err != nil {
+			return agentToolExecution{}, err
+		}
+		original, err := s.agentTransactionSourceText(input.Source)
+		if err != nil {
+			return agentToolExecution{}, err
+		}
+		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "transaction_change", Title: "待确认交易删除", Data: map[string]any{"source": input.Source, "original": original, "reason": strings.TrimSpace(input.Reason)}}}}, nil
+	case "reverse_transaction":
+		var input ReverseTransactionRequest
+		if err := decodeAgentArgs(raw, &input); err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := input.Validate(); err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := validateAgentTransactionSource(input.Source); err != nil {
+			return agentToolExecution{}, err
+		}
+		original, err := s.agentTransactionSourceText(input.Source)
+		if err != nil {
+			return agentToolExecution{}, err
+		}
+		snapshot, err := s.ledgerSnapshot(context.Background())
+		if err != nil {
+			return agentToolExecution{}, err
+		}
+		originalTransaction := FindTransaction(snapshot.Transactions, input.Source)
+		if originalTransaction == nil {
+			return agentToolExecution{}, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
+		}
+		date := firstNonEmpty(input.Date, time.Now().Format("2006-01-02"))
+		reversal := ReverseTransactionEntry(*originalTransaction, date)
+		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "transaction_change", Title: "待确认交易冲销", Data: map[string]any{"source": input.Source, "original": original, "replacement": strings.TrimRight(TransactionToBean(reversal), "\n")}}}}, nil
 	case "apply_account_operations":
 		var input struct {
 			Operations []AccountOperation `json:"operations"`
@@ -429,6 +489,30 @@ func (s *Server) previewAgentWrite(_ context.Context, toolName string, raw json.
 	default:
 		return agentToolExecution{}, fmt.Errorf("unsupported approval tool: %s", toolName)
 	}
+}
+
+func (s *Server) agentTransactionSourceText(source TransactionSource) (string, error) {
+	snapshot, err := s.ledgerSnapshot(context.Background())
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range snapshot.BeanEntries {
+		if entry.Kind != "transaction" || !sameAgentTransactionSource(entry, source) {
+			continue
+		}
+		return strings.Join(entry.RawLines, "\n"), nil
+	}
+	return "", errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
+}
+
+func sameAgentTransactionSource(entry BeanEntry, source TransactionSource) bool {
+	if filepath.Clean(entry.File) != filepath.Clean(source.File) {
+		return false
+	}
+	if source.Hash != "" {
+		return transactionHash(entry.RawLines) == source.Hash
+	}
+	return entry.Line == source.Line
 }
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
@@ -606,7 +690,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "search_transactions", Description: "使用看板/流水页 DSL 跨月份搜索交易，支持 AND、OR、NOT、字段和日期条件。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "search_transactions", Description: "使用看板/流水页 DSL 跨月份搜索交易，支持 AND、OR、NOT、字段和日期条件。返回的 postings.amount 是元单位字符串（moneyUnit=major），可直接用于 update_transaction，不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"query": stringSchema("流水查询 DSL"), "start": stringSchema("默认起始日期 YYYY-MM-DD"), "end": stringSchema("默认结束日期 YYYY-MM-DD，开区间"), "limit": numberSchema("最多返回条数，1-100"),
 			}, []string{"query"})},
 			Title: "搜索流水",
@@ -637,12 +721,12 @@ func (s *Server) agentTools() map[string]agentTool {
 				if len(transactions) > limit {
 					transactions = transactions[:limit]
 				}
-				output := map[string]any{"start": result.Start, "end": result.End, "count": len(transactions), "transactions": transactions}
+				output := map[string]any{"start": result.Start, "end": result.End, "count": len(transactions), "moneyUnit": "major", "transactions": agentTransactionsForModel(transactions)}
 				return agentToolExecution{ModelOutput: output, ClientOutput: map[string]any{"count": len(transactions), "start": result.Start, "end": result.End}}, nil
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。聚合金额是整数分（moneyUnit=cents），不能直接填入 LedgerEntry。", Parameters: objectSchema(map[string]any{
 				"start": stringSchema("起始日期 YYYY-MM-DD"), "end": stringSchema("结束日期 YYYY-MM-DD，开区间"), "valuationCurrency": stringSchema("折算币种"),
 			}, nil)},
 			Title: "读取账本汇总",
@@ -664,7 +748,7 @@ func (s *Server) agentTools() map[string]agentTool {
 				if err != nil {
 					return agentToolExecution{}, err
 				}
-				return agentToolExecution{ModelOutput: result, ClientOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency}}, nil
+				return agentToolExecution{ModelOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency, "moneyUnit": "cents"}, ClientOutput: map[string]any{"start": result.Start, "end": result.End, "summary": result.Summary, "valuationCurrency": result.ValuationCurrency}}, nil
 			},
 		},
 		{
@@ -734,6 +818,9 @@ func (s *Server) agentTools() map[string]agentTool {
 		newTransactionDraftTool(s, "draft_transactions", "生成并校验交易草稿，返回待确认预览但不写入账本。", "生成交易草稿", false),
 		newTransactionDraftTool(s, "validate_transactions", "校验交易草稿的字段、账户和每币种平衡，不写入账本。", "校验交易草稿", false),
 		newTransactionDraftTool(s, "append_transactions", "写入已经校验并展示给用户的交易草稿。每次调用都必须等待用户确认。", "写入账本", true),
+		newUpdateTransactionTool(s),
+		newDeleteTransactionTool(s),
+		newReverseTransactionTool(s),
 		newAccountOperationsTool(s, "draft_account_operations", "生成并校验账户创建、更新或关闭草稿，不写入。", "生成账户草稿", false),
 		newAccountOperationsTool(s, "validate_account_operations", "校验账户操作草稿，不写入。", "校验账户草稿", false),
 		newAccountOperationsTool(s, "apply_account_operations", "执行已经校验并展示给用户的账户操作。每次调用都必须等待用户确认。", "写入账户定义", true),
@@ -793,6 +880,132 @@ func newTransactionDraftTool(s *Server, name, description, title string, write b
 			return agentToolExecution{ModelOutput: result, ClientOutput: map[string]any{"valid": true, "count": len(entries)}, Artifacts: []AgentArtifact{artifact}}, nil
 		},
 	}
+}
+
+func newUpdateTransactionTool(s *Server) agentTool {
+	return agentTool{
+		agentToolSpec: agentToolSpec{Name: "update_transaction", Description: "覆盖更新一笔已存在的交易。source 必须来自 search_transactions；entry.amount 和 entry.postings[].amount 使用元单位字符串，例如 13.80，绝不能把分金额乘以 100。每次调用都必须等待用户确认。", Parameters: objectSchema(map[string]any{"source": transactionSourceSchema(), "entry": ledgerEntrySchema()}, []string{"source", "entry"})},
+		Title:         "更新交易", RequiresApproval: true,
+		Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
+			var input UpdateTransactionRequest
+			if err := decodeAgentArgs(raw, &input); err != nil {
+				return agentToolExecution{}, err
+			}
+			entry, err := s.validateAgentTransactionEntry(input.Entry)
+			if err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := validateAgentTransactionSource(input.Source); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := s.validateAgentTransactionUpdateSource(input.Source); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := requireAgentSensitive(page); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := s.txService.Update(input.Source, entry); err != nil {
+				return agentToolExecution{}, err
+			}
+			return agentToolExecution{ModelOutput: map[string]any{"count": 1}, ClientOutput: map[string]any{"count": 1}, RefreshLedger: true}, nil
+		},
+	}
+}
+
+func newDeleteTransactionTool(s *Server) agentTool {
+	return agentTool{
+		agentToolSpec: agentToolSpec{Name: "delete_transaction", Description: "删除（注释保留）一笔已存在的交易，而不是追加冲销或重复交易。source 必须来自 search_transactions；可填写 reason 说明原因。每次调用都必须等待用户确认。", Parameters: objectSchema(map[string]any{"source": transactionSourceSchema(), "reason": stringSchema("删除原因，可选")}, []string{"source"})},
+		Title:         "删除交易", RequiresApproval: true,
+		Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
+			var input DeleteTransactionRequest
+			if err := decodeAgentArgs(raw, &input); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := validateAgentTransactionSource(input.Source); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := requireAgentSensitive(page); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := s.txService.Delete(input.Source, input.Reason); err != nil {
+				return agentToolExecution{}, err
+			}
+			return agentToolExecution{ModelOutput: map[string]any{"count": 1}, ClientOutput: map[string]any{"count": 1}, RefreshLedger: true}, nil
+		},
+	}
+}
+
+func newReverseTransactionTool(s *Server) agentTool {
+	return agentTool{
+		agentToolSpec: agentToolSpec{Name: "reverse_transaction", Description: "为一笔已存在的交易追加金额相反的冲销交易；仅当用户明确要求冲销而非更新或删除时使用。source 必须来自 search_transactions，date 必须明确指定。每次调用都必须等待用户确认。", Parameters: objectSchema(map[string]any{"source": transactionSourceSchema(), "date": stringSchema("冲销日期 YYYY-MM-DD")}, []string{"source", "date"})},
+		Title:         "冲销交易", RequiresApproval: true,
+		Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
+			var input ReverseTransactionRequest
+			if err := decodeAgentArgs(raw, &input); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := input.Validate(); err != nil {
+				return agentToolExecution{}, err
+			}
+			if err := validateAgentTransactionSource(input.Source); err != nil {
+				return agentToolExecution{}, err
+			}
+			if input.Date == "" {
+				return agentToolExecution{}, errors.New("date is required for reverse_transaction")
+			}
+			if err := requireAgentSensitive(page); err != nil {
+				return agentToolExecution{}, err
+			}
+			entry, err := s.txService.Reverse(input)
+			if err != nil {
+				return agentToolExecution{}, err
+			}
+			return agentToolExecution{ModelOutput: map[string]any{"count": 1, "entry": entry}, ClientOutput: map[string]any{"count": 1}, RefreshLedger: true}, nil
+		},
+	}
+}
+
+func (s *Server) validateAgentTransactionEntry(entry LedgerEntry) (LedgerEntry, error) {
+	if entry.Kind != "transaction" {
+		return LedgerEntry{}, errors.New("entry.kind must be transaction when updating a transaction")
+	}
+	entries, err := s.validateAgentEntries([]LedgerEntry{entry})
+	if err != nil {
+		return LedgerEntry{}, err
+	}
+	return entries[0], nil
+}
+
+func validateAgentTransactionSource(source TransactionSource) error {
+	if err := source.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(source.Hash) == "" {
+		return errors.New("source.hash is required; use the complete source returned by search_transactions")
+	}
+	return nil
+}
+
+func (s *Server) validateAgentTransactionUpdateSource(source TransactionSource) error {
+	snapshot, err := s.ledgerSnapshot(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, entry := range snapshot.BeanEntries {
+		if entry.Kind != "transaction" || !sameAgentTransactionSource(entry, source) {
+			continue
+		}
+		if entry.Flag != "*" || len(entry.Links) > 0 {
+			return errors.New("该交易包含当前更新工具无法无损保留的标记或链接，请使用编辑器修改")
+		}
+		for _, posting := range entry.Postings {
+			if posting.Flag != "" || posting.PriceCurrency != "" || posting.CostCurrency != "" {
+				return errors.New("该交易包含当前更新工具无法无损保留的分录标记、价格或成本，请使用编辑器修改")
+			}
+		}
+		return nil
+	}
+	return errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
 }
 
 func newAccountOperationsTool(s *Server, name, description, title string, write bool) agentTool {
@@ -877,14 +1090,16 @@ func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) stri
 
 规则：
 1. 查询、统计和搜索优先调用只读工具。涉及 BQL 时先读取能力并校验；用户要求结果时运行 BQL。
-2. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。
+2. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
 3. 生成账户操作前先 get_accounts，再 draft_account_operations。
-4. 只有用户明确要求写入时才能调用 append_transactions 或 apply_account_operations；这两个工具会暂停并要求逐次人工确认。
-5. 在工具真正返回成功前，绝不能说已经写入。
-6. 不提供 Shell、任意文件访问或绕过 Writer 的能力。
-7. 用户问“记得什么”或要求核对习惯时，使用 search_memories。只有用户明确要求记住、更新记忆，或确认了稳定习惯时，才能调用 upsert_memory；不得静默保存。
-8. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
-9. 回复使用简洁中文。工具结果已通过结构化卡片展示，不要重复大段表格或 JSON。
+4. 用户要新增交易时使用 append_transactions；要修改既有交易时，先 search_transactions，再使用 update_transaction；要删除既有交易时，先 search_transactions，再使用 delete_transaction；只有明确要求冲销时才用 reverse_transaction。绝不能用追加替代更新或删除。
+5. search_transactions 返回的交易金额是元单位字符串（moneyUnit=major），可原样填入 LedgerEntry；get_ledger_summary 返回的聚合整数是分（moneyUnit=cents）；run_bql 的金额是元单位。
+6. 所有写操作都会暂停并要求逐次人工确认。确认前会显示原始 Beancount 片段及拟议变更。
+7. 在工具真正返回成功前，绝不能说已经写入。
+8. 不提供 Shell、任意文件访问或绕过 Writer 的能力。
+9. 用户问“记得什么”或要求核对习惯时，使用 search_memories。只有用户明确要求记住、更新记忆，或确认了稳定习惯时，才能调用 upsert_memory；不得静默保存。
+10. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
+11. 回复使用简洁中文。工具结果已通过结构化卡片展示，不要重复大段表格或 JSON。
 
 ` + contextText
 }
@@ -1005,6 +1220,12 @@ func agentApprovalSummary(name string, raw json.RawMessage) string {
 	switch name {
 	case "append_transactions":
 		return fmt.Sprintf("写入 %d 条账本记录", len(countInput.Entries))
+	case "update_transaction":
+		return "更新既有交易（已展示原始 Beancount 与拟议替换）"
+	case "delete_transaction":
+		return "删除既有交易（将以注释方式保留原文）"
+	case "reverse_transaction":
+		return "冲销既有交易（将追加一笔相反分录）"
 	case "apply_account_operations":
 		return fmt.Sprintf("执行 %d 个账户操作", len(countInput.Operations))
 	default:
@@ -1025,6 +1246,12 @@ func agentApprovalSuccessMessage(name string, output any) string {
 	switch name {
 	case "append_transactions":
 		return fmt.Sprintf("已写入 %d 条账本记录。", count)
+	case "update_transaction":
+		return "已更新既有交易。"
+	case "delete_transaction":
+		return "已删除既有交易（原文已注释保留）。"
+	case "reverse_transaction":
+		return "已追加冲销交易。"
 	case "apply_account_operations":
 		return fmt.Sprintf("已执行 %d 个账户操作。", count)
 	default:
@@ -1087,6 +1314,21 @@ func bqlMoneyForModel(value any) any {
 	}
 }
 
+func agentTransactionsForModel(transactions []Transaction) []map[string]any {
+	result := make([]map[string]any, 0, len(transactions))
+	for _, transaction := range transactions {
+		postings := make([]map[string]any, 0, len(transaction.Postings))
+		for _, posting := range transaction.Postings {
+			postings = append(postings, map[string]any{"account": posting.Account, "amount": fromCents(posting.Amount), "currency": posting.Currency, "flag": posting.Flag})
+		}
+		result = append(result, map[string]any{
+			"date": transaction.Date, "payee": transaction.Payee, "narration": transaction.Narration, "metadata": transaction.Metadata,
+			"tags": transaction.Tags, "links": transaction.Links, "postings": postings, "source": transaction.Source,
+		})
+	}
+	return result
+}
+
 func objectSchema(properties map[string]any, required []string) map[string]any {
 	if properties == nil {
 		properties = map[string]any{}
@@ -1125,6 +1367,19 @@ func ledgerEntrySchema() map[string]any {
 			"confidence": map[string]any{"type": "number"}, "needsReview": booleanSchema("是否需要人工复核"), "questions": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		},
 		"required": []string{"kind", "date"},
+	}
+}
+
+func transactionSourceSchema() map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"file":   stringSchema("交易来源文件，由 search_transactions 返回"),
+			"line":   numberSchema("交易起始行，由 search_transactions 返回"),
+			"hash":   stringSchema("交易内容哈希，由 search_transactions 返回"),
+			"gitSha": stringSchema("账本版本 Git SHA，由 search_transactions 返回"),
+		},
+		"required": []string{"file", "hash"},
 	}
 }
 

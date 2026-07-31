@@ -16,6 +16,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("onApproval");
     expect(source).toContain('artifact.type === "bql_query"');
     expect(source).toContain('artifact.type === "transaction_draft"');
+    expect(source).toContain('artifact.type === "transaction_change"');
+    expect(source).toContain("原始 Beancount");
     expect(source).toContain('artifact.type === "chart"');
     expect(source).toContain("MessageResponse");
     expect(source).toContain('approvalPolicy === "always"');

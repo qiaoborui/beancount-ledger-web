@@ -496,6 +496,18 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
     const data = artifact.data as { kind?: string; result?: BQLResult };
     return data.result ? <BQLChartCard title={artifact.title} kind={data.kind ?? "bar"} result={data.result} /> : null;
   }
+  if (artifact.type === "transaction_change") {
+    const original = objectString(artifact.data, "original");
+    const replacement = objectString(artifact.data, "replacement");
+    const reason = objectString(artifact.data, "reason");
+    return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
+      <h3 className="border-b border-line px-3 py-2 text-sm font-semibold text-ink">{artifact.title}</h3>
+      <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">原始 Beancount</div><pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{original}</pre></div>
+        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">{replacement ? "拟议替换" : "拟议操作"}</div>{replacement ? <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{replacement}</pre> : <div className="rounded-md bg-paper p-2.5 text-sm text-ink">删除此交易{reason ? `：${reason}` : ""}</div>}</div>
+      </div>
+    </div>;
+  }
   if (artifact.type === "transaction_draft") {
     const entries = objectArray<ParsedTransaction>(artifact.data, "entries");
     return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel p-3"><h3 className="text-sm font-semibold text-ink">{artifact.title} · {entries.length}</h3><div className="mt-2 space-y-2">{entries.map((entry, index) => <div key={`${entry.date}-${entry.payee}-${index}`} className="rounded-md border border-line bg-paper p-2.5"><div className="flex min-w-0 items-center justify-between gap-3 text-sm"><strong className="truncate text-ink">{entry.date} {entry.payee}</strong><span className="shrink-0 text-stone">{entry.postings[0]?.amount} {entry.postings[0]?.currency}</span></div><div className="mt-1 truncate text-xs text-stone">{entry.narration || entry.postings.map((posting) => posting.account).join(" · ")}</div></div>)}</div></div>;
