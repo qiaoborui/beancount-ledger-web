@@ -9,6 +9,42 @@ import (
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent"
 )
 
+// The AgentApprovalFunc type is an adapter to allow the use of ordinary
+// function as AgentApproval mutator.
+type AgentApprovalFunc func(context.Context, *ent.AgentApprovalMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AgentApprovalFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AgentApprovalMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AgentApprovalMutation", m)
+}
+
+// The AgentSessionFunc type is an adapter to allow the use of ordinary
+// function as AgentSession mutator.
+type AgentSessionFunc func(context.Context, *ent.AgentSessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AgentSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AgentSessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AgentSessionMutation", m)
+}
+
+// The AgentSessionMessageFunc type is an adapter to allow the use of ordinary
+// function as AgentSessionMessage mutator.
+type AgentSessionMessageFunc func(context.Context, *ent.AgentSessionMessageMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AgentSessionMessageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AgentSessionMessageMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AgentSessionMessageMutation", m)
+}
+
 // The BQLHistoryRecordFunc type is an adapter to allow the use of ordinary
 // function as BQLHistoryRecord mutator.
 type BQLHistoryRecordFunc func(context.Context, *ent.BQLHistoryRecordMutation) (ent.Value, error)

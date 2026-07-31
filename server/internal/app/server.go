@@ -19,6 +19,8 @@ type Server struct {
 	runtimeStore         RuntimeStore
 	bqlHistoryRepository bqlHistoryRepository
 	passkeys             passkeyRepository
+	agentSessions        agentSessionRepository
+	agentApprovals       agentApprovalRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache

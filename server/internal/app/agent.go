@@ -433,23 +433,20 @@ func (s *Server) previewAgentWrite(_ context.Context, toolName string, raw json.
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
 	var approval AgentApproval
-	err := s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, func(lockContext context.Context) error {
-		found, err := s.runtime().GetJSON(lockContext, agentApprovalScope, request.ApprovalID, &approval)
-		if err != nil {
-			return err
+	var err error
+	if s.agentApprovals != nil {
+		var found, expired bool
+		approval, found, expired, err = s.agentApprovals.Take(ctx, ledgerClusterID(s.cfg), request.SessionID, request.ApprovalID)
+		if err == nil && !found {
+			if expired {
+				err = errors.New("approval request has expired")
+			} else {
+				err = s.takeLegacyAgentApproval(ctx, request, &approval)
+			}
 		}
-		if !found || approval.ID == "" {
-			return errors.New("approval request was not found")
-		}
-		if approval.SessionID != request.SessionID {
-			return errors.New("approval does not belong to this session")
-		}
-		if time.Now().After(approval.ExpiresAt) {
-			_ = s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
-			return errors.New("approval request has expired")
-		}
-		return s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
-	})
+	} else {
+		err = s.takeLegacyAgentApproval(ctx, request, &approval)
+	}
 	if err != nil {
 		return err
 	}
@@ -481,7 +478,11 @@ func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApproval
 	}
 	execution, err := tool.Execute(ctx, approval.Arguments, approval.PageContext)
 	if err != nil {
-		_ = s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval)
+		if s.agentApprovals != nil {
+			_ = s.agentApprovals.Save(ctx, ledgerClusterID(s.cfg), approval)
+		} else {
+			_ = s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval)
+		}
 		if sessionErr := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, map[string]any{"error": err.Error()})); sessionErr != nil {
 			return sessionErr
 		}
@@ -510,6 +511,26 @@ func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApproval
 		return err
 	}
 	return emit("final", map[string]any{"sessionId": approval.SessionID, "message": message, "refreshLedger": execution.RefreshLedger})
+}
+
+func (s *Server) takeLegacyAgentApproval(ctx context.Context, request AgentApprovalRequest, approval *AgentApproval) error {
+	return s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, func(lockContext context.Context) error {
+		found, err := s.runtime().GetJSON(lockContext, agentApprovalScope, request.ApprovalID, approval)
+		if err != nil {
+			return err
+		}
+		if !found || approval.ID == "" {
+			return errors.New("approval request was not found")
+		}
+		if approval.SessionID != request.SessionID {
+			return errors.New("approval does not belong to this session")
+		}
+		if time.Now().After(approval.ExpiresAt) {
+			_ = s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
+			return errors.New("approval request has expired")
+		}
+		return s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
+	})
 }
 
 func (s *Server) agentTools() map[string]agentTool {
@@ -832,6 +853,12 @@ func (s *Server) saveAgentApproval(ctx context.Context, sessionID string, call a
 		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(30 * time.Minute), PageContext: page,
 	}
 	approval.PageContext.SensitiveUnlocked = false
+	if s.agentApprovals != nil {
+		if err := s.agentApprovals.Save(ctx, ledgerClusterID(s.cfg), approval); err != nil {
+			return AgentApproval{}, err
+		}
+		return approval, nil
+	}
 	if err := s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval); err != nil {
 		return AgentApproval{}, err
 	}
