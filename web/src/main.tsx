@@ -5,9 +5,11 @@ import { LedgerApp } from "@/components/LedgerApp";
 import { PwaRegister } from "@/components/PwaRegister";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { installApiEndpointFetchInterceptor } from "@/lib/apiEndpoints";
+import { loadIOSAuthenticationHaptics } from "@/components/ledger/haptics";
 import "@/app/globals.css";
 
 installApiEndpointFetchInterceptor();
+void loadIOSAuthenticationHaptics();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

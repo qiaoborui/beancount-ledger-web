@@ -45,7 +45,7 @@ import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from ".
 import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
 import { Toast } from "./ledger/shared";
-import { haptic } from "./ledger/haptics";
+import { authenticationHaptic, haptic, loadIOSAuthenticationHaptics, readIOSAuthenticationHapticsEnabled, writeIOSAuthenticationHapticsEnabled } from "./ledger/haptics";
 import { TimeRangePicker } from "./ledger/TimeRangePicker";
 import {
   loadAccountDetailPage,
@@ -172,6 +172,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
   const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
+  const [iosAuthenticationHapticsEnabled, setIOSAuthenticationHapticsEnabled] = useState(() => readIOSAuthenticationHapticsEnabled());
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange(page === "home" ? "year" : "month"));
   const { toast, showToast, clearToast } = useToast();
   const online = useNetworkStatus();
@@ -191,6 +192,23 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     setVisibleAccountMap,
   } = usePrivacySettings();
   const valuationCurrency = privacySettings.valuationCurrency || "CNY";
+
+  async function updateIOSAuthenticationHaptics(enabled: boolean) {
+    writeIOSAuthenticationHapticsEnabled(enabled);
+    setIOSAuthenticationHapticsEnabled(enabled);
+    if (!enabled) {
+      showToast("info", "已关闭 iPhone / iPad 触感反馈；刷新页面后会移除兼容层。");
+      return;
+    }
+    try {
+      await loadIOSAuthenticationHaptics();
+      showToast("success", "已启用 iPhone / iPad 认证触感反馈。");
+    } catch {
+      writeIOSAuthenticationHapticsEnabled(false);
+      setIOSAuthenticationHapticsEnabled(false);
+      showToast("error", "无法加载 iPhone / iPad 触感反馈兼容层。");
+    }
+  }
   const initialCategoryQuery = searchParams.get("category") ?? "";
   const initialMetadataQuery = searchParams.get("metadata") ?? "";
   const initialSearchQuery = searchParams.get("q") ?? "";
@@ -803,7 +821,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               </div>
             </div>
             {offlineSensitiveUnlockAvailable && (
-              <form className="mt-2 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void unlockOfflineSensitive(); }}>
+              <form className="mt-2 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); authenticationHaptic(); void unlockOfflineSensitive(); }}>
                 <input
                   ref={offlineUnlockInputRef}
                   type="password"
@@ -837,7 +855,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要解锁后查看。");
         return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} onOpenAgent={(prompt) => openAgent(prompt, true)} /></></Suspense>;
       })()}
-      {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} showToast={showToast} /></Suspense>}
+      {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} iosAuthenticationHapticsEnabled={iosAuthenticationHapticsEnabled} onIOSAuthenticationHapticsChange={updateIOSAuthenticationHaptics} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} showToast={showToast} /></Suspense>}
       {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} showToast={showToast} /></Suspense>}
       {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备账本编辑器…" />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock("账本编辑器已隐藏", "在线编辑会展示完整 Beancount 文件和金额，需要解锁后查看。"))}
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要解锁后查看。"))}

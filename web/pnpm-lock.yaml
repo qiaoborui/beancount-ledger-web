@@ -38,6 +38,9 @@ dependencies:
   cmdk:
     specifier: ^1.1.1
     version: 1.1.1(@types/react-dom@19.2.3)(@types/react@19.2.14)(react-dom@19.2.6)(react@19.2.6)
+  ios-vibrator-pro-max:
+    specifier: 3.0.3
+    version: 3.0.3
   lucide-react:
     specifier: ^0.468.0
     version: 0.468.0(react@19.2.6)
@@ -3243,6 +3246,10 @@ packages:
   /internmap@2.0.3:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
+    dev: false
+
+  /ios-vibrator-pro-max@3.0.3:
+    resolution: {integrity: sha512-D1C+goFN1qw2v9jJFO9FksOte5V73PSDirWijRGLsjtOrl4ZyT3WanEUrxPXO/YENIOgj56BHtyb++9DPOel4g==}
     dev: false
 
   /is-alphabetical@2.0.1:

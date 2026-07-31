@@ -51,6 +51,8 @@ export function SettingsPage({
   onThemeModeChange,
   mobileTabHrefs,
   onMobileTabHrefsChange,
+  iosAuthenticationHapticsEnabled,
+  onIOSAuthenticationHapticsChange,
   sensitiveUnlocked,
   quickUnlockEnabled,
   quickUnlockMode,
@@ -68,6 +70,8 @@ export function SettingsPage({
   onThemeModeChange: (mode: ThemeMode) => void;
   mobileTabHrefs: LedgerNavHref[];
   onMobileTabHrefsChange: (hrefs: LedgerNavHref[]) => void;
+  iosAuthenticationHapticsEnabled: boolean;
+  onIOSAuthenticationHapticsChange: (enabled: boolean) => void;
   sensitiveUnlocked: boolean;
   quickUnlockEnabled: boolean;
   quickUnlockMode: QuickUnlockMode;
@@ -89,6 +93,17 @@ export function SettingsPage({
     <ApiEndpointSettingsPanel showToast={showToast} />
     <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} showToast={showToast} />
     <OfflineUnlockSettings enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} showToast={showToast} />
+
+    <section className="card p-5 md:p-6">
+      <div className="border-b border-line pb-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">interaction feedback</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">交互反馈</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">为 iPhone 和 iPad 的密码登录、主密码解锁与本机数字解锁按钮提供轻微触感。该实验性兼容层只在此设备上保存。</p>
+      </div>
+      <div className="mt-6 divide-y divide-line rounded-2xl border border-line bg-panel">
+        <SettingToggle id="ios-authentication-haptics" title="iPhone / iPad 认证触感反馈" description="默认关闭。启用后只影响认证相关按钮，不会扩展到其余账本操作。关闭后会立即停止反馈，刷新页面后移除兼容层。" checked={iosAuthenticationHapticsEnabled} onChange={onIOSAuthenticationHapticsChange} />
+      </div>
+    </section>
 
     <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">

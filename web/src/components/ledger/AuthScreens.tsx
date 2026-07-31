@@ -16,6 +16,7 @@ import {
   type ApiEndpointSettings,
 } from "@/lib/apiEndpoints";
 import type { QuickUnlockMode } from "./quickUnlock";
+import { authenticationHaptic } from "./haptics";
 
 export function AppSkeleton() {
   return <div className="min-h-dvh bg-paper p-6"><div className="mx-auto max-w-4xl animate-pulse space-y-6"><div className="h-12 rounded-2xl bg-line" /><div className="grid grid-cols-3 gap-3"><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /><div className="h-24 rounded-2xl bg-line" /></div><div className="h-72 rounded-2xl bg-line" /></div></div>;
@@ -123,7 +124,7 @@ export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyL
         </div>}
       </div>
       <Input type="password" className="mt-6 h-12 rounded-xl bg-panel" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
-      <Button className="mt-4 h-12 w-full rounded-xl" onClick={onLogin}>密码登录</Button>
+      <Button className="mt-4 h-12 w-full rounded-xl" onClick={() => { authenticationHaptic(); onLogin(); }}>密码登录</Button>
       {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" disabled={passkeyLoading} onClick={onPasskeyLogin}>{passkeyLoading ? "正在唤起 Face ID…" : "使用 Face ID / Passkey 登录"}</Button>}
       {toastText && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{toastText}</p>}
     </div>
@@ -197,7 +198,7 @@ export function SensitiveUnlockPanel({
     {offline && offlineUnlockAvailable ? (
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
         <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder="离线解锁码" />
-        <Button className="h-11 px-4" onClick={onOfflineUnlock}><KeyRound className="mr-2 h-4 w-4" />离线解锁</Button>
+        <Button className="h-11 px-4" onClick={() => { authenticationHaptic(); onOfflineUnlock?.(); }}><KeyRound className="mr-2 h-4 w-4" />离线解锁</Button>
       </div>
     ) : (
       <div className="space-y-3">
@@ -227,7 +228,7 @@ function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initially
   return <div className="mx-auto mt-4 max-w-sm">
     {!open ? <button type="button" className="text-sm font-medium text-brand disabled:opacity-50" onClick={() => setOpen(true)} disabled={unlocking}>使用主密码</button> : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
       <Input ref={inputRef} autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
-      <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "解锁"}</Button>
+      <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => { authenticationHaptic(); onUnlock(password); }}>{unlocking ? "解锁中…" : "解锁"}</Button>
     </div>}
   </div>;
 }
@@ -259,18 +260,18 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => setSecret(secret + digit)} disabled={unlocking} />)}
         <KeypadButton label="删" onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
         <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
-        <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
+        <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => { authenticationHaptic(); onUnlock(secret); }}>{unlocking ? "解锁中…" : "解锁"}</button>
       </div>
       {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
     </div>;
   }
   return <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
     <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
-    <Button className="h-11 px-4" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}><KeyRound className="mr-2 h-4 w-4" />{unlocking ? "解锁中…" : "快速解锁"}</Button>
+    <Button className="h-11 px-4" disabled={!secret || unlocking} onClick={() => { authenticationHaptic(); onUnlock(secret); }}><KeyRound className="mr-2 h-4 w-4" />{unlocking ? "解锁中…" : "快速解锁"}</Button>
     {passkeyRegistered && <button type="button" className="sm:col-span-2 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
   </div>;
 }
 
 function KeypadButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label === "删" ? <Delete className="h-4 w-4" /> : label}</button>;
+  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={() => { authenticationHaptic(5); onClick(); }}>{label === "删" ? <Delete className="h-4 w-4" /> : label}</button>;
 }
