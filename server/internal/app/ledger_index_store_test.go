@@ -140,6 +140,12 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got, want := activeSnapshot.Accounts[0].Metadata, map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("active snapshot account metadata=%#v, want %#v", got, want)
 	}
+	if !reflect.DeepEqual(activeSnapshot.BeanEntries, second.BeanEntries) {
+		t.Fatalf("active snapshot bean entries=%#v, want %#v", activeSnapshot.BeanEntries, second.BeanEntries)
+	}
+	if !reflect.DeepEqual(activeSnapshot.BeanErrors, second.BeanErrors) {
+		t.Fatalf("active snapshot bean errors=%#v, want %#v", activeSnapshot.BeanErrors, second.BeanErrors)
+	}
 	txns, err := store.TransactionsForRevision(ctx, secondID, "2026-05-01", "2026-06-01")
 	if err != nil {
 		t.Fatal(err)
@@ -222,10 +228,73 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 }
 
+func TestLedgerIndexStoreMigratesLegacyBeanPayloadsPostgres(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	branch := "test-legacy-bean-payloads-" + time.Now().Format("20060102150405.000000000")
+	store, err := NewLedgerIndexStore(Config{DatabaseURL: databaseURL, LedgerReadModel: "postgres", LedgerGitBranch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	defer store.db.ExecContext(context.Background(), `DELETE FROM ledger_index_revisions WHERE source_key = $1`, store.sourceKey)
+
+	entries := testIndexedBeanEntries()
+	parseErrors := []BeanParseError{{File: "transactions/2026/bad.bean", Line: 12, Message: "unrecognized transaction body line"}}
+	entriesJSON, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errorsJSON, err := json.Marshal(parseErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(context.Background(), `
+ALTER TABLE ledger_index_revisions
+  ADD COLUMN IF NOT EXISTS bean_entries JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS bean_errors JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		t.Fatal(err)
+	}
+	var revisionID int64
+	if err := store.db.QueryRowContext(context.Background(), `
+INSERT INTO ledger_index_revisions (source_key, git_sha, ledger_version, latest_mtime_ms, file_count, status, error, bean_entries, bean_errors)
+VALUES ($1, '', 'legacy-v1', 0, 1, 'indexed', '', $2, $3)
+RETURNING id`, store.sourceKey, string(entriesJSON), string(errorsJSON)).Scan(&revisionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrateLegacyBeanPayloads(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var columns int
+	if err := store.db.QueryRowContext(context.Background(), `
+SELECT count(*)
+FROM information_schema.columns
+WHERE table_schema = current_schema() AND table_name = 'ledger_index_revisions' AND column_name IN ('bean_entries', 'bean_errors')`).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 0 {
+		t.Fatalf("legacy bean payload columns = %d, want 0", columns)
+	}
+	snapshot := &LedgerSnapshot{}
+	if err := loadBeanPayloads(context.Background(), store.db, revisionID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot.BeanEntries, entries) {
+		t.Fatalf("migrated bean entries=%#v, want %#v", snapshot.BeanEntries, entries)
+	}
+	if !reflect.DeepEqual(snapshot.BeanErrors, parseErrors) {
+		t.Fatalf("migrated bean errors=%#v, want %#v", snapshot.BeanErrors, parseErrors)
+	}
+}
+
 func testIndexSnapshot(version string, txns []Transaction) *LedgerSnapshot {
 	snapshot := &LedgerSnapshot{
 		LedgerVersion: LedgerVersion{Version: version, FileCount: 1},
 		Transactions:  txns,
+		BeanEntries:   testIndexedBeanEntries(),
+		BeanErrors:    []BeanParseError{{File: "transactions/2026/bad.bean", Line: 12, Message: "unrecognized transaction body line"}},
 		Accounts: []Account{
 			{Account: "Assets:Cash", OpenDate: "2026-01-01", Currency: "CNY", Label: "Cash", Group: "cash", Active: true, Metadata: map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}},
 			{Account: "Expenses:Food", OpenDate: "2026-01-01", Currency: "CNY", Label: "Food", Group: "expense", Active: true},
@@ -234,6 +303,58 @@ func testIndexSnapshot(version string, txns []Transaction) *LedgerSnapshot {
 	}
 	prepareLedgerSnapshot(snapshot)
 	return snapshot
+}
+
+func testIndexedBeanEntries() []BeanEntry {
+	return []BeanEntry{{
+		Kind:          "transaction",
+		Date:          "2026-05-01",
+		File:          "transactions/2026/05.bean",
+		Line:          10,
+		RawLines:      []string{`2026-05-01 * "Cafe" "Coffee" #work ^receipt-cafe`, `  orderId: "order-cafe"`, `  Expenses:Food 12.34 CNY { 11.00 CNY } @ 1.10 USD`},
+		Name:          "event-name",
+		Value:         "event-value",
+		Filename:      "receipt.pdf",
+		Flag:          "*",
+		Payee:         "Cafe",
+		Narration:     "Coffee",
+		Account:       "Assets:Cash",
+		Account2:      "Equity:Opening-Balances",
+		Currencies:    []string{"CNY", "USD"},
+		Currency:      "CNY",
+		Amount:        1234,
+		AmountValue:   BeanAmount{Number: "12.34", Currency: "CNY"},
+		Tolerance:     "0.01",
+		QuoteCurrency: "USD",
+		Metadata: map[string]MetadataValue{
+			"orderId":  "order-cafe",
+			"imported": true,
+			"amount":   float64(12),
+			"empty":    nil,
+		},
+		Tags:       []string{"work", "food"},
+		Links:      []string{"receipt-cafe"},
+		CustomType: "budget",
+		CustomValues: []MetadataValue{
+			"Expenses:Food", float64(500), true, nil,
+		},
+		Postings: []parsedPosting{{
+			Posting:       Posting{Account: "Expenses:Food", Amount: 1234, Currency: "CNY", Flag: "!"},
+			Blank:         false,
+			Quantity:      BeanAmount{Number: "12.34", Currency: "CNY"},
+			CostAmount:    1100,
+			CostCurrency:  "CNY",
+			Cost:          BeanAmount{Number: "11.00", Currency: "CNY"},
+			TotalCost:     true,
+			PriceAmount:   110,
+			PriceCurrency: "USD",
+			Price:         BeanAmount{Number: "1.10", Currency: "USD"},
+			TotalPrice:    true,
+		}, {
+			Posting: Posting{Account: "Assets:Cash", Flag: "?"},
+			Blank:   true,
+		}},
+	}}
 }
 
 func testIndexedTransaction(date, payee, file string, line int, hash string, amount int) Transaction {
