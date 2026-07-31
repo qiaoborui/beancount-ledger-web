@@ -16,6 +16,8 @@ type Tx struct {
 	config
 	// AgentApproval is the client for interacting with the AgentApproval builders.
 	AgentApproval *AgentApprovalClient
+	// AgentMemory is the client for interacting with the AgentMemory builders.
+	AgentMemory *AgentMemoryClient
 	// AgentSession is the client for interacting with the AgentSession builders.
 	AgentSession *AgentSessionClient
 	// AgentSessionMessage is the client for interacting with the AgentSessionMessage builders.
@@ -164,6 +166,7 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.AgentApproval = NewAgentApprovalClient(tx.config)
+	tx.AgentMemory = NewAgentMemoryClient(tx.config)
 	tx.AgentSession = NewAgentSessionClient(tx.config)
 	tx.AgentSessionMessage = NewAgentSessionMessageClient(tx.config)
 	tx.BQLHistoryRecord = NewBQLHistoryRecordClient(tx.config)

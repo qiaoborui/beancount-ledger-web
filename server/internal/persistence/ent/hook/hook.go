@@ -21,6 +21,18 @@ func (f AgentApprovalFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Valu
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AgentApprovalMutation", m)
 }
 
+// The AgentMemoryFunc type is an adapter to allow the use of ordinary
+// function as AgentMemory mutator.
+type AgentMemoryFunc func(context.Context, *ent.AgentMemoryMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AgentMemoryFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AgentMemoryMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AgentMemoryMutation", m)
+}
+
 // The AgentSessionFunc type is an adapter to allow the use of ordinary
 // function as AgentSession mutator.
 type AgentSessionFunc func(context.Context, *ent.AgentSessionMutation) (ent.Value, error)

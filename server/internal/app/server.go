@@ -21,6 +21,7 @@ type Server struct {
 	passkeys             passkeyRepository
 	agentSessions        agentSessionRepository
 	agentApprovals       agentApprovalRepository
+	agentMemories        agentMemoryRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache
