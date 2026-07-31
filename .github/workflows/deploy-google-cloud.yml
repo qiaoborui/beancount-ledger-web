@@ -48,7 +48,7 @@ jobs:
             zip_worker=true
             reason="manual deployment"
           else
-            gh run download "${CI_RUN_ID}" --name cloud-run-plan --dir cloud-run-plan
+            gh run download "${CI_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name cloud-run-plan --dir cloud-run-plan
             plan_file="cloud-run-plan/cloud-run-plan.json"
             deploy="$(jq -r '.cloud_run' "${plan_file}")"
             zip_worker="$(jq -r '.zip_worker' "${plan_file}")"

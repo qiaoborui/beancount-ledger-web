@@ -7,7 +7,7 @@ if ! grep -Fq 'workflow_run:' "${workflow}" || ! grep -Fq 'workflows: [CI]' "${w
   exit 1
 fi
 
-if ! grep -Fq 'gh run download "${CI_RUN_ID}" --name cloud-run-plan' "${workflow}"; then
+if ! grep -Fq 'gh run download "${CI_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name cloud-run-plan' "${workflow}"; then
   echo "Cloud Run deployment must use CI's published change plan" >&2
   exit 1
 fi
