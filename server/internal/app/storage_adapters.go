@@ -1,14 +1,18 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"io"
+
+	"github.com/borui/beancount-ledger-web/server/internal/persistence"
 )
 
 // applicationStorageAdapters groups infrastructure selected by application configuration.
 // The composition root owns selection; application services receive only their ports.
 type applicationStorageAdapters struct {
 	runtimeStore  RuntimeStore
+	persistence   *persistence.Store
 	indexStore    LedgerIndexPort
 	indexStoreErr error
 	limiter       RateLimiter
@@ -26,6 +30,10 @@ func openApplicationStorageAdapters(cfg Config) (*applicationStorageAdapters, er
 			return nil, err
 		}
 		adapters.closers = append(adapters.closers, db)
+		adapters.persistence, err = persistence.NewStore(context.Background(), db)
+		if err != nil {
+			return fail(err)
+		}
 		adapters.runtimeStore, err = NewRuntimeStoreWithDB(db)
 		if err != nil {
 			return fail(err)

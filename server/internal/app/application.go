@@ -19,21 +19,24 @@ type Application struct {
 }
 
 type applicationDependencies struct {
-	runtimeStore        RuntimeStore
-	indexStore          LedgerIndexPort
-	indexStoreErr       error
-	cache               *LedgerCache
-	modules             *ModuleRegistry
-	moduleNames         []string
-	notificationService *NotificationService
-	writer              *LedgerWriter
-	accountService      *AccountService
-	queryPort           LedgerQueryPort
-	snapshotPort        LedgerSnapshotPort
-	reconcileService    *ReconciliationService
-	txService           *TransactionService
-	limiter             RateLimiter
-	closers             []io.Closer
+	runtimeStore         RuntimeStore
+	bqlHistoryRepository bqlHistoryRepository
+	pushSubscriptions    pushSubscriptionRepository
+	notifications        notificationRepository
+	indexStore           LedgerIndexPort
+	indexStoreErr        error
+	cache                *LedgerCache
+	modules              *ModuleRegistry
+	moduleNames          []string
+	notificationService  *NotificationService
+	writer               *LedgerWriter
+	accountService       *AccountService
+	queryPort            LedgerQueryPort
+	snapshotPort         LedgerSnapshotPort
+	reconcileService     *ReconciliationService
+	txService            *TransactionService
+	limiter              RateLimiter
+	closers              []io.Closer
 }
 
 func NewApplication(cfg Config) (*Application, error) {
@@ -42,21 +45,22 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, err
 	}
 	server := &Server{
-		cfg:                 cfg,
-		runtimeStore:        dependencies.runtimeStore,
-		indexStore:          dependencies.indexStore,
-		indexStoreErr:       dependencies.indexStoreErr,
-		cache:               dependencies.cache,
-		importers:           dependencies.modules.Importers(),
-		moduleNames:         dependencies.moduleNames,
-		notificationService: dependencies.notificationService,
-		writer:              dependencies.writer,
-		accountService:      dependencies.accountService,
-		queryPort:           dependencies.queryPort,
-		snapshotPort:        dependencies.snapshotPort,
-		reconcileService:    dependencies.reconcileService,
-		txService:           dependencies.txService,
-		limiter:             dependencies.limiter,
+		cfg:                  cfg,
+		runtimeStore:         dependencies.runtimeStore,
+		bqlHistoryRepository: dependencies.bqlHistoryRepository,
+		indexStore:           dependencies.indexStore,
+		indexStoreErr:        dependencies.indexStoreErr,
+		cache:                dependencies.cache,
+		importers:            dependencies.modules.Importers(),
+		moduleNames:          dependencies.moduleNames,
+		notificationService:  dependencies.notificationService,
+		writer:               dependencies.writer,
+		accountService:       dependencies.accountService,
+		queryPort:            dependencies.queryPort,
+		snapshotPort:         dependencies.snapshotPort,
+		reconcileService:     dependencies.reconcileService,
+		txService:            dependencies.txService,
+		limiter:              dependencies.limiter,
 	}
 	return newApplication(newRouter(cfg, server), dependencies.closers), nil
 }
@@ -79,11 +83,19 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	if err != nil {
 		return nil, err
 	}
+	dependencies.closers = append(dependencies.closers, storageAdapters.closers...)
 	dependencies.runtimeStore = storageAdapters.runtimeStore
+	if storageAdapters.persistence != nil {
+		dependencies.bqlHistoryRepository = newEntBQLHistoryRepository(storageAdapters.persistence.Client)
+		dependencies.pushSubscriptions = newEntPushSubscriptionRepository(storageAdapters.persistence.Client)
+		dependencies.notifications = newEntNotificationRepository(storageAdapters.persistence.Client)
+		if err := backfillRelationalRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, cfg, dependencies.bqlHistoryRepository, dependencies.pushSubscriptions, dependencies.notifications); err != nil {
+			return fail(err)
+		}
+	}
 	dependencies.indexStore = storageAdapters.indexStore
 	dependencies.indexStoreErr = storageAdapters.indexStoreErr
 	dependencies.limiter = storageAdapters.limiter
-	dependencies.closers = append(dependencies.closers, storageAdapters.closers...)
 
 	dependencies.cache = NewLedgerCache(cfg)
 	readService := NewLedgerReadServiceWithIndex(dependencies.cache, dependencies.indexStore, dependencies.indexStoreErr, cfg.ReadModelStrict)
@@ -103,9 +115,11 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	dependencies.reconcileService = NewReconciliationServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.txService = NewTransactionServiceWithSnapshot(dependencies.cache, dependencies.writer, snapshot)
 	dependencies.notificationService, err = modules.BuildNotificationService(NotificationServiceDependencies{
-		Config:       cfg,
-		RuntimeStore: dependencies.runtimeStore,
-		SnapshotPort: dependencies.snapshotPort,
+		Config:                     cfg,
+		RuntimeStore:               dependencies.runtimeStore,
+		PushSubscriptionRepository: dependencies.pushSubscriptions,
+		NotificationRepository:     dependencies.notifications,
+		SnapshotPort:               dependencies.snapshotPort,
 	})
 	if err != nil {
 		return fail(err)
