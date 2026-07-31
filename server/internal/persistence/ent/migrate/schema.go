@@ -9,6 +9,91 @@ import (
 )
 
 var (
+	// AgentApprovalsColumns holds the columns for the "agent_approvals" table.
+	AgentApprovalsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "cluster_id", Type: field.TypeString},
+		{Name: "session_id", Type: field.TypeString},
+		{Name: "tool_call_id", Type: field.TypeString},
+		{Name: "tool_name", Type: field.TypeString},
+		{Name: "tool_title", Type: field.TypeString},
+		{Name: "arguments", Type: field.TypeJSON},
+		{Name: "summary", Type: field.TypeString},
+		{Name: "page", Type: field.TypeString, Nullable: true},
+		{Name: "path", Type: field.TypeString, Nullable: true},
+		{Name: "range_start", Type: field.TypeString, Nullable: true},
+		{Name: "range_end", Type: field.TypeString, Nullable: true},
+		{Name: "valuation_currency", Type: field.TypeString, Nullable: true},
+		{Name: "bql_query", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "expires_at", Type: field.TypeTime},
+	}
+	// AgentApprovalsTable holds the schema information for the "agent_approvals" table.
+	AgentApprovalsTable = &schema.Table{
+		Name:       "agent_approvals",
+		Columns:    AgentApprovalsColumns,
+		PrimaryKey: []*schema.Column{AgentApprovalsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "agentapproval_cluster_id_session_id",
+				Unique:  false,
+				Columns: []*schema.Column{AgentApprovalsColumns[1], AgentApprovalsColumns[2]},
+			},
+			{
+				Name:    "agentapproval_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{AgentApprovalsColumns[15]},
+			},
+		},
+	}
+	// AgentSessionsColumns holds the columns for the "agent_sessions" table.
+	AgentSessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "cluster_id", Type: field.TypeString},
+		{Name: "session_id", Type: field.TypeString},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// AgentSessionsTable holds the schema information for the "agent_sessions" table.
+	AgentSessionsTable = &schema.Table{
+		Name:       "agent_sessions",
+		Columns:    AgentSessionsColumns,
+		PrimaryKey: []*schema.Column{AgentSessionsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "agentsession_cluster_id_session_id",
+				Unique:  true,
+				Columns: []*schema.Column{AgentSessionsColumns[1], AgentSessionsColumns[2]},
+			},
+			{
+				Name:    "agentsession_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{AgentSessionsColumns[3]},
+			},
+		},
+	}
+	// AgentSessionMessagesColumns holds the columns for the "agent_session_messages" table.
+	AgentSessionMessagesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "session_key", Type: field.TypeString},
+		{Name: "ordinal", Type: field.TypeInt},
+		{Name: "role", Type: field.TypeString},
+		{Name: "content", Type: field.TypeString, Nullable: true},
+		{Name: "tool_call_id", Type: field.TypeString, Nullable: true},
+		{Name: "tool_calls", Type: field.TypeJSON, Nullable: true},
+	}
+	// AgentSessionMessagesTable holds the schema information for the "agent_session_messages" table.
+	AgentSessionMessagesTable = &schema.Table{
+		Name:       "agent_session_messages",
+		Columns:    AgentSessionMessagesColumns,
+		PrimaryKey: []*schema.Column{AgentSessionMessagesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "agentsessionmessage_session_key_ordinal",
+				Unique:  true,
+				Columns: []*schema.Column{AgentSessionMessagesColumns[1], AgentSessionMessagesColumns[2]},
+			},
+		},
+	}
 	// BqlHistoryRecordsColumns holds the columns for the "bql_history_records" table.
 	BqlHistoryRecordsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -142,6 +227,9 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		AgentApprovalsTable,
+		AgentSessionsTable,
+		AgentSessionMessagesTable,
 		BqlHistoryRecordsTable,
 		NotificationsTable,
 		PasskeyCredentialsTable,
@@ -152,6 +240,15 @@ var (
 )
 
 func init() {
+	AgentApprovalsTable.Annotation = &entsql.Annotation{
+		Table: "agent_approvals",
+	}
+	AgentSessionsTable.Annotation = &entsql.Annotation{
+		Table: "agent_sessions",
+	}
+	AgentSessionMessagesTable.Annotation = &entsql.Annotation{
+		Table: "agent_session_messages",
+	}
 	BqlHistoryRecordsTable.Annotation = &entsql.Annotation{
 		Table: "bql_history_records",
 	}
