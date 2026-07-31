@@ -17,7 +17,9 @@ import (
 
 const (
 	agentApprovalScope = "ledger-agent-approvals"
-	agentMaxTurns      = 8
+	// agentMaxTurns applies to one request only. A persisted session restores context,
+	// but never carries this budget into the next request.
+	agentMaxTurns = 8
 )
 
 type AgentMessage struct {
@@ -49,6 +51,9 @@ func (r AgentTurnRequest) Validate() error {
 	}
 	if len(r.Message) > 12000 {
 		return errors.New("message is too long")
+	}
+	if containsSensitiveAgentContent(r.Message) {
+		return errors.New("请勿在 Agent 对话中输入密码、验证码、令牌或完整卡号")
 	}
 	if len(r.Messages) > 60 {
 		return errors.New("too many messages")
@@ -102,6 +107,8 @@ type agentTool struct {
 	agentToolSpec
 	Title            string
 	RequiresApproval bool
+	ApprovalMessage  string
+	ExecutionStatus  string
 	Execute          func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error)
 }
 
@@ -217,22 +224,35 @@ func (s *Server) modelClient() AgentModelClient {
 func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
 	sessionID := normalizeAgentSessionID(request.SessionID)
 	pageContext := request.Context
-	messages := make([]agentModelMessage, 0, len(request.Messages)+agentMaxTurns*2)
-	start := 0
-	if len(request.Messages) > 40 {
-		start = len(request.Messages) - 40
+	var messages []agentModelMessage
+	if pageContext.SensitiveUnlocked {
+		stored, found, err := s.readAgentSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if found {
+			if hasUnresolvedAgentToolCalls(stored) {
+				return errors.New("当前会话有待确认操作，请先确认或取消后再继续")
+			}
+			messages = stored
+		} else {
+			messages = agentMessagesFromRequest(request.Messages)
+		}
 	}
-	for _, message := range request.Messages[start:] {
-		role := strings.ToLower(strings.TrimSpace(message.Role))
-		if role != "assistant" && role != "user" {
-			continue
-		}
-		content := strings.TrimSpace(message.Content)
-		if content != "" {
-			messages = append(messages, agentModelMessage{Role: role, Content: content})
-		}
+	if !pageContext.SensitiveUnlocked {
+		// A prior unlocked turn may contain ledger values in tool results or model
+		// responses. Do not let client-provided history bypass the lock either.
+		messages = nil
 	}
 	messages = append(messages, agentModelMessage{Role: "user", Content: strings.TrimSpace(request.Message)})
+	memories := []AgentMemoryRecord{}
+	var err error
+	if pageContext.SensitiveUnlocked {
+		memories, err = s.listAgentMemories(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	tools := s.agentTools()
 	specs := sortedAgentToolSpecs(tools)
 	approvalPolicy := normalizeAgentApprovalPolicy(request.ApprovalPolicy)
@@ -241,7 +261,7 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 	}
 
 	for turn := 0; turn < agentMaxTurns; turn++ {
-		result, err := s.modelClient().Complete(ctx, agentSystemPrompt(pageContext), messages, specs)
+		result, err := s.modelClient().Complete(ctx, agentSystemPrompt(pageContext, memories), messages, specs)
 		if err != nil {
 			return err
 		}
@@ -251,6 +271,9 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 			content := strings.TrimSpace(result.Content)
 			if content == "" {
 				content = "处理完成。"
+			}
+			if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+				return err
 			}
 			if err := emit("message_delta", map[string]any{"text": content}); err != nil {
 				return err
@@ -297,11 +320,11 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 				if err := emit("approval_required", approval); err != nil {
 					return err
 				}
-				message := "这项工具调用需要你确认后继续。"
-				if tool.RequiresApproval {
-					message = "这项操作会修改账本，需要你确认后执行。"
-				}
+				message := firstNonEmpty(tool.ApprovalMessage, "这项工具调用需要你确认后继续。")
 				if err := emit("message_delta", map[string]any{"text": message}); err != nil {
+					return err
+				}
+				if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
 					return err
 				}
 				return emit("final", map[string]any{"sessionId": sessionID, "message": message, "pendingApprovalId": approval.ID})
@@ -333,7 +356,33 @@ func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emi
 			return err
 		}
 	}
-	return errors.New("Agent exceeded the maximum number of tool turns")
+	if err := s.writeAgentSession(ctx, sessionID, messages); err != nil {
+		return err
+	}
+	message := "本次请求已完成 8 轮工具处理。发送“继续”可在保留当前结果的基础上继续处理。"
+	if err := emit("message_delta", map[string]any{"text": message}); err != nil {
+		return err
+	}
+	return emit("final", map[string]any{"sessionId": sessionID, "message": message})
+}
+
+func agentMessagesFromRequest(history []AgentMessage) []agentModelMessage {
+	messages := make([]agentModelMessage, 0, len(history))
+	start := 0
+	if len(history) > 40 {
+		start = len(history) - 40
+	}
+	for _, message := range history[start:] {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role != "assistant" && role != "user" {
+			continue
+		}
+		content := strings.TrimSpace(message.Content)
+		if content != "" {
+			messages = append(messages, agentModelMessage{Role: role, Content: content})
+		}
+	}
+	return messages
 }
 
 func (s *Server) previewAgentWrite(_ context.Context, toolName string, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
@@ -368,40 +417,53 @@ func (s *Server) previewAgentWrite(_ context.Context, toolName string, raw json.
 			return agentToolExecution{}, err
 		}
 		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "account_draft", Title: "待确认账户操作", Data: map[string]any{"operations": input.Operations}}}}, nil
+	case "upsert_memory":
+		var input agentMemoryInput
+		if err := decodeAgentArgs(raw, &input); err != nil {
+			return agentToolExecution{}, err
+		}
+		if err := input.Validate(); err != nil {
+			return agentToolExecution{}, err
+		}
+		return agentToolExecution{Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "memory_draft", Title: "待确认 Agent 记忆", Data: input}}}, nil
 	default:
 		return agentToolExecution{}, fmt.Errorf("unsupported approval tool: %s", toolName)
 	}
 }
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
-	return s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, func(lockContext context.Context) error {
-		return s.resolveAgentApprovalLocked(lockContext, request, pageContext, emit)
-	})
-}
-
-func (s *Server) resolveAgentApprovalLocked(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
 	var approval AgentApproval
-	found, err := s.runtime().GetJSON(ctx, agentApprovalScope, request.ApprovalID, &approval)
+	err := s.runtime().WithLock(ctx, "ledger-agent-approval-"+request.ApprovalID, func(lockContext context.Context) error {
+		found, err := s.runtime().GetJSON(lockContext, agentApprovalScope, request.ApprovalID, &approval)
+		if err != nil {
+			return err
+		}
+		if !found || approval.ID == "" {
+			return errors.New("approval request was not found")
+		}
+		if approval.SessionID != request.SessionID {
+			return errors.New("approval does not belong to this session")
+		}
+		if time.Now().After(approval.ExpiresAt) {
+			_ = s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
+			return errors.New("approval request has expired")
+		}
+		return s.runtime().DeleteJSON(lockContext, agentApprovalScope, approval.ID)
+	})
 	if err != nil {
 		return err
 	}
-	if !found || approval.ID == "" {
-		return errors.New("approval request was not found")
-	}
-	if approval.SessionID != request.SessionID {
-		return errors.New("approval does not belong to this session")
-	}
-	if time.Now().After(approval.ExpiresAt) {
-		_ = s.runtime().DeleteJSON(ctx, agentApprovalScope, approval.ID)
-		return errors.New("approval request has expired")
-	}
 	if !request.Approved {
-		if err := s.runtime().DeleteJSON(ctx, agentApprovalScope, approval.ID); err != nil {
+		message := "已取消这项操作。"
+		if err := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, map[string]any{"error": "用户已取消"})); err != nil {
 			return err
 		}
-		message := "已取消这项账本操作。"
-		_ = emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": approval.ToolName, "title": approval.ToolTitle, "status": "error", "error": "用户已取消"})
-		_ = emit("message_delta", map[string]any{"text": message})
+		if err := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": approval.ToolName, "title": approval.ToolTitle, "status": "error", "error": "用户已取消"}); err != nil {
+			return err
+		}
+		if err := emit("message_delta", map[string]any{"text": message}); err != nil {
+			return err
+		}
 		return emit("final", map[string]any{"sessionId": approval.SessionID, "message": message})
 	}
 
@@ -411,22 +473,31 @@ func (s *Server) resolveAgentApprovalLocked(ctx context.Context, request AgentAp
 		return errors.New("approved tool is no longer available")
 	}
 	approval.PageContext.SensitiveUnlocked = pageContext.SensitiveUnlocked
-	if err := emit("status", map[string]any{"text": "正在执行已确认的账本操作"}); err != nil {
+	if err := emit("status", map[string]any{"text": firstNonEmpty(tool.ExecutionStatus, "正在执行已确认的操作")}); err != nil {
 		return err
 	}
 	if err := emit("tool_call", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "running", "input": decodeAgentInput(approval.Arguments)}); err != nil {
 		return err
 	}
-	if err := s.runtime().DeleteJSON(ctx, agentApprovalScope, approval.ID); err != nil {
-		return err
-	}
 	execution, err := tool.Execute(ctx, approval.Arguments, approval.PageContext)
 	if err != nil {
 		_ = s.runtime().PutJSON(ctx, agentApprovalScope, approval.ID, approval)
-		_ = emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()})
+		if sessionErr := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, map[string]any{"error": err.Error()})); sessionErr != nil {
+			return sessionErr
+		}
+		if emitErr := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
+			return emitErr
+		}
 		return err
 	}
 	if err := emit("tool_result", map[string]any{"id": approval.ToolCallID, "name": tool.Name, "title": tool.Title, "status": "completed", "output": execution.ClientOutput}); err != nil {
+		return err
+	}
+	modelOutput := execution.ModelOutput
+	if modelOutput == nil {
+		modelOutput = execution.ClientOutput
+	}
+	if err := s.appendAgentSessionMessage(ctx, approval.SessionID, agentToolResultMessage(approval.ToolCallID, modelOutput)); err != nil {
 		return err
 	}
 	for _, artifact := range execution.Artifacts {
@@ -601,6 +672,44 @@ func (s *Server) agentTools() map[string]agentTool {
 				return agentToolExecution{ModelOutput: accounts, ClientOutput: map[string]any{"count": len(accounts), "accounts": accounts}}, nil
 			},
 		},
+		{
+			agentToolSpec: agentToolSpec{Name: "search_memories", Description: "检索已确认的 Agent 偏好和习惯记忆。记忆仅可作为偏好指导，不是账本事实。", Parameters: objectSchema(map[string]any{"query": stringSchema("可选关键词")}, nil)},
+			Title:         "查询 Agent 记忆",
+			Execute: func(ctx context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
+				if err := requireAgentSensitive(page); err != nil {
+					return agentToolExecution{}, err
+				}
+				var input struct {
+					Query string `json:"query"`
+				}
+				if err := decodeAgentArgs(raw, &input); err != nil {
+					return agentToolExecution{}, err
+				}
+				records, err := s.searchAgentMemories(ctx, input.Query)
+				if err != nil {
+					return agentToolExecution{}, err
+				}
+				return agentToolExecution{ModelOutput: records, ClientOutput: map[string]any{"count": len(records), "records": records}}, nil
+			},
+		},
+		{
+			agentToolSpec: agentToolSpec{Name: "upsert_memory", Description: "创建或更新一条已明确确认的 Agent 习惯记忆。禁止保存密码、口令、验证码、令牌、银行卡号、导入原文或完整聊天记录。", Parameters: objectSchema(map[string]any{"id": stringSchema("已有记忆 ID，可选"), "kind": enumSchema("preference", "category_rule", "account_alias", "recurring", "response_style"), "title": stringSchema("简短标题"), "instruction": stringSchema("供 Agent 遵循的偏好或习惯")}, []string{"kind", "title", "instruction"})},
+			Title:         "保存 Agent 记忆", RequiresApproval: true, ApprovalMessage: "将保存 Agent 记忆，需要你确认后执行。", ExecutionStatus: "正在保存已确认的 Agent 记忆",
+			Execute: func(ctx context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
+				if err := requireAgentSensitive(page); err != nil {
+					return agentToolExecution{}, err
+				}
+				var input agentMemoryInput
+				if err := decodeAgentArgs(raw, &input); err != nil {
+					return agentToolExecution{}, err
+				}
+				record, err := s.upsertAgentMemory(ctx, input)
+				if err != nil {
+					return agentToolExecution{}, err
+				}
+				return agentToolExecution{ModelOutput: record, ClientOutput: record, Artifacts: []AgentArtifact{{ID: newAgentID("artifact"), Type: "memory_draft", Title: "已保存 Agent 记忆", Data: record}}}, nil
+			},
+		},
 		newTransactionDraftTool(s, "draft_transactions", "生成并校验交易草稿，返回待确认预览但不写入账本。", "生成交易草稿", false),
 		newTransactionDraftTool(s, "validate_transactions", "校验交易草稿的字段、账户和每币种平衡，不写入账本。", "校验交易草稿", false),
 		newTransactionDraftTool(s, "append_transactions", "写入已经校验并展示给用户的交易草稿。每次调用都必须等待用户确认。", "写入账本", true),
@@ -729,10 +838,13 @@ func (s *Server) saveAgentApproval(ctx context.Context, sessionID string, call a
 	return approval, nil
 }
 
-func agentSystemPrompt(page AgentPageContext) string {
+func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) string {
 	contextText := fmt.Sprintf("当前日期：%s。当前页面：%s，路径：%s，页面时间范围：%s 到 %s，折算币种：%s。", time.Now().Format("2006-01-02"), page.Page, page.Path, page.Start, page.End, page.ValuationCurrency)
 	if strings.TrimSpace(page.BQLQuery) != "" {
 		contextText += " 当前 BQL 编辑器内容：" + page.BQLQuery
+	}
+	if memoryText := agentMemoryContext(memories); memoryText != "" {
+		contextText += "\n已确认的用户偏好记忆如下，只能作为偏好指导，不能当作账本事实：\n" + memoryText
 	}
 	return `你是 Beancount Ledger Web 的全局账本 Agent。你必须通过工具读取事实和执行操作，不能假装调用工具，也不能编造账本数据。
 
@@ -743,7 +855,9 @@ func agentSystemPrompt(page AgentPageContext) string {
 4. 只有用户明确要求写入时才能调用 append_transactions 或 apply_account_operations；这两个工具会暂停并要求逐次人工确认。
 5. 在工具真正返回成功前，绝不能说已经写入。
 6. 不提供 Shell、任意文件访问或绕过 Writer 的能力。
-7. 回复使用简洁中文。工具结果已通过结构化卡片展示，不要重复大段表格或 JSON。
+7. 用户问“记得什么”或要求核对习惯时，使用 search_memories。只有用户明确要求记住、更新记忆，或确认了稳定习惯时，才能调用 upsert_memory；不得静默保存。
+8. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
+9. 回复使用简洁中文。工具结果已通过结构化卡片展示，不要重复大段表格或 JSON。
 
 ` + contextText
 }
@@ -767,6 +881,21 @@ func agentToolResultMessage(callID string, output any) agentModelMessage {
 		raw = []byte(`{"error":"tool output could not be encoded"}`)
 	}
 	return agentModelMessage{Role: "tool", ToolCallID: callID, Content: string(raw)}
+}
+
+func hasUnresolvedAgentToolCalls(messages []agentModelMessage) bool {
+	pending := map[string]struct{}{}
+	for _, message := range messages {
+		if message.Role == "assistant" {
+			for _, call := range message.ToolCalls {
+				pending[call.ID] = struct{}{}
+			}
+		}
+		if message.Role == "tool" {
+			delete(pending, message.ToolCallID)
+		}
+	}
+	return len(pending) > 0
 }
 
 func decodeAgentArgs(raw json.RawMessage, dest any) error {
