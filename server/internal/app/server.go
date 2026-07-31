@@ -18,6 +18,7 @@ type Server struct {
 	cfg                  Config
 	runtimeStore         RuntimeStore
 	bqlHistoryRepository bqlHistoryRepository
+	passkeys             passkeyRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache

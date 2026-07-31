@@ -18,6 +18,12 @@ type Tx struct {
 	BQLHistoryRecord *BQLHistoryRecordClient
 	// Notification is the client for interacting with the Notification builders.
 	Notification *NotificationClient
+	// PasskeyCredential is the client for interacting with the PasskeyCredential builders.
+	PasskeyCredential *PasskeyCredentialClient
+	// PasskeySession is the client for interacting with the PasskeySession builders.
+	PasskeySession *PasskeySessionClient
+	// PasskeyTransport is the client for interacting with the PasskeyTransport builders.
+	PasskeyTransport *PasskeyTransportClient
 	// WebPushSubscription is the client for interacting with the WebPushSubscription builders.
 	WebPushSubscription *WebPushSubscriptionClient
 
@@ -153,6 +159,9 @@ func (tx *Tx) Client() *Client {
 func (tx *Tx) init() {
 	tx.BQLHistoryRecord = NewBQLHistoryRecordClient(tx.config)
 	tx.Notification = NewNotificationClient(tx.config)
+	tx.PasskeyCredential = NewPasskeyCredentialClient(tx.config)
+	tx.PasskeySession = NewPasskeySessionClient(tx.config)
+	tx.PasskeyTransport = NewPasskeyTransportClient(tx.config)
 	tx.WebPushSubscription = NewWebPushSubscriptionClient(tx.config)
 }
 

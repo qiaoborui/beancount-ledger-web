@@ -14,6 +14,9 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/notification"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeycredential"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeysession"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeytransport"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/webpushsubscription"
 )
 
@@ -77,6 +80,9 @@ func checkColumn(t, c string) error {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
 			bqlhistoryrecord.Table:    bqlhistoryrecord.ValidColumn,
 			notification.Table:        notification.ValidColumn,
+			passkeycredential.Table:   passkeycredential.ValidColumn,
+			passkeysession.Table:      passkeysession.ValidColumn,
+			passkeytransport.Table:    passkeytransport.ValidColumn,
 			webpushsubscription.Table: webpushsubscription.ValidColumn,
 		})
 	})

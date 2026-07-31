@@ -23,6 +23,7 @@ type applicationDependencies struct {
 	bqlHistoryRepository bqlHistoryRepository
 	pushSubscriptions    pushSubscriptionRepository
 	notifications        notificationRepository
+	passkeys             passkeyRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
 	cache                *LedgerCache
@@ -48,6 +49,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		cfg:                  cfg,
 		runtimeStore:         dependencies.runtimeStore,
 		bqlHistoryRepository: dependencies.bqlHistoryRepository,
+		passkeys:             dependencies.passkeys,
 		indexStore:           dependencies.indexStore,
 		indexStoreErr:        dependencies.indexStoreErr,
 		cache:                dependencies.cache,
@@ -89,7 +91,11 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		dependencies.bqlHistoryRepository = newEntBQLHistoryRepository(storageAdapters.persistence.Client)
 		dependencies.pushSubscriptions = newEntPushSubscriptionRepository(storageAdapters.persistence.Client)
 		dependencies.notifications = newEntNotificationRepository(storageAdapters.persistence.Client)
+		dependencies.passkeys = newEntPasskeyRepository(storageAdapters.persistence.Client)
 		if err := backfillRelationalRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, cfg, dependencies.bqlHistoryRepository, dependencies.pushSubscriptions, dependencies.notifications); err != nil {
+			return fail(err)
+		}
+		if err := backfillPasskeyRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, dependencies.passkeys); err != nil {
 			return fail(err)
 		}
 	}

@@ -247,6 +247,13 @@ func (s *Server) webAuthnRelatedOrigins(c *gin.Context) {
 }
 
 func (s *Server) readPasskeyStore(ctx context.Context) passkeyStore {
+	if s.passkeys != nil {
+		credentials, err := s.passkeys.Credentials(ctx)
+		if err != nil {
+			return passkeyStore{Credentials: []StoredPasskey{}}
+		}
+		return passkeyStore{Credentials: credentials}
+	}
 	var store passkeyStore
 	ok, err := s.runtime().GetJSON(ctx, "auth", "passkeys", &store)
 	if err != nil || !ok {
@@ -267,6 +274,9 @@ func (s *Server) savePasskeySession(session *webauthn.SessionData) error {
 	if session == nil || strings.TrimSpace(session.Challenge) == "" {
 		return errors.New("No active passkey challenge")
 	}
+	if s.passkeys != nil {
+		return s.passkeys.SaveSession(context.Background(), session)
+	}
 	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
 		store := s.readPasskeyStore(lockCtx)
 		now := time.Now()
@@ -279,6 +289,9 @@ func (s *Server) savePasskeySession(session *webauthn.SessionData) error {
 func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData, error) {
 	if strings.TrimSpace(challenge) == "" {
 		return nil, errors.New("No active passkey challenge")
+	}
+	if s.passkeys != nil {
+		return s.passkeys.ConsumeSession(context.Background(), challenge)
 	}
 	var session *webauthn.SessionData
 	err := s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
@@ -299,6 +312,10 @@ func (s *Server) consumePasskeySession(challenge string) (*webauthn.SessionData,
 }
 
 func (s *Server) hasPasskeySession() bool {
+	if s.passkeys != nil {
+		hasSession, err := s.passkeys.HasSession(context.Background())
+		return err == nil && hasSession
+	}
 	hasSession := false
 	_ = s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
 		store := s.readPasskeyStore(lockCtx)
@@ -345,6 +362,12 @@ func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
 }
 
 func (s *Server) savePasskey(credential *webauthn.Credential) error {
+	if credential == nil {
+		return errors.New("passkey credential is required")
+	}
+	if s.passkeys != nil {
+		return s.passkeys.SaveCredential(context.Background(), storedPasskeyFromCredential(credential))
+	}
 	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
 		store := s.readPasskeyStore(lockCtx)
 		id := base64.RawURLEncoding.EncodeToString(credential.ID)
@@ -352,14 +375,7 @@ func (s *Server) savePasskey(credential *webauthn.Credential) error {
 		for _, transport := range credential.Transport {
 			transports = append(transports, string(transport))
 		}
-		stored := StoredPasskey{
-			ID:             id,
-			PublicKey:      base64.RawURLEncoding.EncodeToString(credential.PublicKey),
-			Counter:        credential.Authenticator.SignCount,
-			Transports:     transports,
-			BackupEligible: boolPtr(credential.Flags.BackupEligible),
-			BackupState:    boolPtr(credential.Flags.BackupState),
-		}
+		stored := StoredPasskey{ID: id, PublicKey: base64.RawURLEncoding.EncodeToString(credential.PublicKey), Counter: credential.Authenticator.SignCount, Transports: transports, BackupEligible: boolPtr(credential.Flags.BackupEligible), BackupState: boolPtr(credential.Flags.BackupState)}
 		replaced := false
 		for i := range store.Credentials {
 			if store.Credentials[i].ID == id {
@@ -380,6 +396,9 @@ func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
 }
 
 func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligible bool, backupState bool) error {
+	if s.passkeys != nil {
+		return s.passkeys.UpdateCredential(context.Background(), base64.RawURLEncoding.EncodeToString(id), counter, backupEligible, backupState)
+	}
 	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
 		store := s.readPasskeyStore(lockCtx)
 		encoded := base64.RawURLEncoding.EncodeToString(id)
@@ -393,6 +412,14 @@ func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligib
 		}
 		return errors.New("Unknown passkey")
 	})
+}
+
+func storedPasskeyFromCredential(credential *webauthn.Credential) StoredPasskey {
+	transports := make([]string, 0, len(credential.Transport))
+	for _, transport := range credential.Transport {
+		transports = append(transports, string(transport))
+	}
+	return StoredPasskey{ID: base64.RawURLEncoding.EncodeToString(credential.ID), PublicKey: base64.RawURLEncoding.EncodeToString(credential.PublicKey), Counter: credential.Authenticator.SignCount, Transports: transports, BackupEligible: boolPtr(credential.Flags.BackupEligible), BackupState: boolPtr(credential.Flags.BackupState)}
 }
 
 func (s *Server) passkeyUser() passkeyUser {

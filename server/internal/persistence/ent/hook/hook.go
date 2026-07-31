@@ -33,6 +33,42 @@ func (f NotificationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.NotificationMutation", m)
 }
 
+// The PasskeyCredentialFunc type is an adapter to allow the use of ordinary
+// function as PasskeyCredential mutator.
+type PasskeyCredentialFunc func(context.Context, *ent.PasskeyCredentialMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PasskeyCredentialFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PasskeyCredentialMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PasskeyCredentialMutation", m)
+}
+
+// The PasskeySessionFunc type is an adapter to allow the use of ordinary
+// function as PasskeySession mutator.
+type PasskeySessionFunc func(context.Context, *ent.PasskeySessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PasskeySessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PasskeySessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PasskeySessionMutation", m)
+}
+
+// The PasskeyTransportFunc type is an adapter to allow the use of ordinary
+// function as PasskeyTransport mutator.
+type PasskeyTransportFunc func(context.Context, *ent.PasskeyTransportMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PasskeyTransportFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PasskeyTransportMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PasskeyTransportMutation", m)
+}
+
 // The WebPushSubscriptionFunc type is an adapter to allow the use of ordinary
 // function as WebPushSubscription mutator.
 type WebPushSubscriptionFunc func(context.Context, *ent.WebPushSubscriptionMutation) (ent.Value, error)

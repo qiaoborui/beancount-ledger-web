@@ -12,5 +12,14 @@ type BQLHistoryRecord func(*sql.Selector)
 // Notification is the predicate function for notification builders.
 type Notification func(*sql.Selector)
 
+// PasskeyCredential is the predicate function for passkeycredential builders.
+type PasskeyCredential func(*sql.Selector)
+
+// PasskeySession is the predicate function for passkeysession builders.
+type PasskeySession func(*sql.Selector)
+
+// PasskeyTransport is the predicate function for passkeytransport builders.
+type PasskeyTransport func(*sql.Selector)
+
 // WebPushSubscription is the predicate function for webpushsubscription builders.
 type WebPushSubscription func(*sql.Selector)
