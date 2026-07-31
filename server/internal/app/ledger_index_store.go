@@ -17,10 +17,9 @@ import (
 )
 
 type LedgerIndexStore struct {
-	db                       *sql.DB
-	sourceKey                string
-	legacyBeanPayloadColumns bool
-	closeDB                  bool
+	db        *sql.DB
+	sourceKey string
+	closeDB   bool
 }
 
 type LedgerIndexRevision struct {
@@ -58,11 +57,6 @@ func NewLedgerIndexStoreWithDB(db *sql.DB, cfg Config) (*LedgerIndexStore, error
 	if err := store.EnsureSchema(ctx); err != nil {
 		return nil, err
 	}
-	legacyBeanPayloadColumns, err := hasLegacyBeanPayloadColumns(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	store.legacyBeanPayloadColumns = legacyBeanPayloadColumns
 	return store, nil
 }
 
@@ -444,7 +438,7 @@ func (s *LedgerIndexStore) activeSnapshot(ctx context.Context, includeBeanPayloa
 	}
 	snapshot := &LedgerSnapshot{LedgerVersion: revision.LedgerVersion, ParsedAt: revision.IndexedAt.UnixMilli()}
 	if includeBeanPayloads {
-		if err := loadBeanPayloads(ctx, s.db, revision.ID, s.legacyBeanPayloadColumns, snapshot); err != nil {
+		if err := loadBeanPayloads(ctx, s.db, revision.ID, snapshot); err != nil {
 			return nil, false, err
 		}
 	}

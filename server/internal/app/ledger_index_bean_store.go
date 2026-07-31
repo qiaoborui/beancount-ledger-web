@@ -3,17 +3,13 @@ package app
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
-	pgxstdlib "github.com/jackc/pgx/v5/stdlib"
 )
 
-func loadBeanPayloads(ctx context.Context, db *sql.DB, revisionID int64, legacyColumns bool, snapshot *LedgerSnapshot) error {
+func loadBeanPayloads(ctx context.Context, db *sql.DB, revisionID int64, snapshot *LedgerSnapshot) error {
 	entries, err := loadBeanEntries(ctx, db, revisionID)
 	if err != nil {
 		return err
@@ -24,26 +20,6 @@ func loadBeanPayloads(ctx context.Context, db *sql.DB, revisionID int64, legacyC
 	}
 	snapshot.BeanEntries = entries
 	snapshot.BeanErrors = errors
-	if legacyColumns && len(entries) == 0 && len(errors) == 0 {
-		return loadLegacyBeanPayloads(ctx, db, revisionID, snapshot)
-	}
-	return nil
-}
-
-func loadLegacyBeanPayloads(ctx context.Context, db *sql.DB, revisionID int64, snapshot *LedgerSnapshot) error {
-	var entriesJSON, errorsJSON []byte
-	if err := db.QueryRowContext(ctx, `
-SELECT bean_entries, bean_errors
-FROM ledger_index_revisions
-WHERE id = $1`, revisionID).Scan(&entriesJSON, &errorsJSON); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(entriesJSON, &snapshot.BeanEntries); err != nil {
-		return fmt.Errorf("decode legacy bean entries for revision %d: %w", revisionID, err)
-	}
-	if err := json.Unmarshal(errorsJSON, &snapshot.BeanErrors); err != nil {
-		return fmt.Errorf("decode legacy bean errors for revision %d: %w", revisionID, err)
-	}
 	return nil
 }
 
@@ -412,131 +388,4 @@ func copyBeanErrors(ctx context.Context, tx pgx.Tx, revisionID int64, parseError
 		return []any{revisionID, i, item.File, item.Line, item.Message}, nil
 	}))
 	return err
-}
-
-func hasLegacyBeanPayloadColumns(ctx context.Context, db *sql.DB) (bool, error) {
-	var entriesColumn, errorsColumn bool
-	rows, err := db.QueryContext(ctx, `
-SELECT column_name
-FROM information_schema.columns
-WHERE table_schema = current_schema() AND table_name = 'ledger_index_revisions' AND column_name IN ('bean_entries', 'bean_errors')`)
-	if err != nil {
-		return false, err
-	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return false, err
-		}
-		entriesColumn = entriesColumn || name == "bean_entries"
-		errorsColumn = errorsColumn || name == "bean_errors"
-	}
-	if err := rows.Close(); err != nil {
-		return false, err
-	}
-	if !entriesColumn || !errorsColumn {
-		if !entriesColumn && !errorsColumn {
-			return false, nil
-		}
-		return false, errors.New("legacy ledger bean payload columns are incomplete")
-	}
-	return true, nil
-}
-
-// MigrateLegacyBeanPayloads is an explicit maintenance operation. Normal API
-// and indexer startup deliberately leave legacy columns in place so a large
-// backfill and ALTER TABLE cannot block the live read model.
-func (s *LedgerIndexStore) MigrateLegacyBeanPayloads(ctx context.Context) error {
-	hasLegacyColumns, err := hasLegacyBeanPayloadColumns(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	if !hasLegacyColumns {
-		return nil
-	}
-	type legacyRevision struct {
-		id      int64
-		entries []BeanEntry
-		errors  []BeanParseError
-	}
-	legacyRows, err := s.db.QueryContext(ctx, `
-SELECT id, bean_entries, bean_errors
-FROM ledger_index_revisions
-ORDER BY id`)
-	if err != nil {
-		return err
-	}
-	legacy := []legacyRevision{}
-	for legacyRows.Next() {
-		var row legacyRevision
-		var entriesJSON, errorsJSON []byte
-		if err := legacyRows.Scan(&row.id, &entriesJSON, &errorsJSON); err != nil {
-			legacyRows.Close()
-			return err
-		}
-		if err := json.Unmarshal(entriesJSON, &row.entries); err != nil {
-			legacyRows.Close()
-			return fmt.Errorf("decode legacy bean entries for revision %d: %w", row.id, err)
-		}
-		if err := json.Unmarshal(errorsJSON, &row.errors); err != nil {
-			legacyRows.Close()
-			return fmt.Errorf("decode legacy bean errors for revision %d: %w", row.id, err)
-		}
-		legacy = append(legacy, row)
-	}
-	if err := legacyRows.Close(); err != nil {
-		return err
-	}
-
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	return conn.Raw(func(driverConn any) error {
-		stdlibConn, ok := driverConn.(*pgxstdlib.Conn)
-		if !ok {
-			return driver.ErrBadConn
-		}
-		tx, err := stdlibConn.Conn().Begin(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback(context.Background())
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "ledger-index-bean-payloads:"+s.sourceKey); err != nil {
-			return err
-		}
-		for _, revision := range legacy {
-			if err := clearBeanPayloadRowsPGX(ctx, tx, revision.id); err != nil {
-				return err
-			}
-			if err := copyBeanPayloads(ctx, tx, revision.id, revision.entries, revision.errors); err != nil {
-				return err
-			}
-		}
-		if _, err := tx.Exec(ctx, `ALTER TABLE ledger_index_revisions DROP COLUMN IF EXISTS bean_entries, DROP COLUMN IF EXISTS bean_errors`); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
-	})
-}
-
-func clearBeanPayloadRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
-	for _, table := range []string{
-		"ledger_index_bean_entry_lines",
-		"ledger_index_bean_entry_currencies",
-		"ledger_index_bean_entry_tags",
-		"ledger_index_bean_entry_links",
-		"ledger_index_bean_entry_metadata",
-		"ledger_index_bean_entry_custom_values",
-		"ledger_index_bean_entry_postings",
-		"ledger_index_bean_entries",
-		"ledger_index_bean_errors",
-	} {
-		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE revision_id = $1", table), revisionID); err != nil {
-			return err
-		}
-	}
-	return nil
 }

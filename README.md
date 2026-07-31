@@ -252,22 +252,6 @@ The indexer holds a Postgres advisory lock while publishing, so set
 The indexer fingerprints `main.bean` and its recursively included `.bean` files.
 Unreferenced files therefore stay outside the read-model refresh boundary.
 
-#### Legacy bean-payload maintenance
-
-API and indexer startup never perform a full legacy bean-payload backfill or
-drop columns. Deploy the compatibility release first, then run a forced index
-rebuild and verify it before removing the legacy JSON payloads during a
-maintenance window:
-
-```bash
-cd server
-LEDGER_INDEX_FORCE_REBUILD=true go run ./cmd/ledger-indexer
-go run ./cmd/ledger-index-migrate --confirm-drop-legacy-bean-payloads
-```
-
-The maintenance command rewrites the legacy payloads and drops their columns.
-Do not run it while normal API or indexer traffic is active.
-
 #### GitHub Actions indexer
 
 Install `Index Ledger Web` in the private ledger repository. It checks out the
