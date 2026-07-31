@@ -21,6 +21,8 @@ jobs:
     outputs:
       backend: ${{ steps.changes.outputs.backend }}
       web: ${{ steps.changes.outputs.web }}
+      cloud_run: ${{ steps.changes.outputs.cloud_run }}
+      zip_worker: ${{ steps.changes.outputs.zip_worker }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,9 +46,13 @@ jobs:
 
           backend=false
           web=false
+          cloud_run=false
+          zip_worker=false
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             backend=true
             web=true
+            cloud_run=true
+            zip_worker=true
           fi
           while IFS= read -r file; do
             case "$file" in
@@ -59,16 +65,42 @@ jobs:
                 web=true
                 ;;
             esac
+            case "$file" in
+              .dockerignore|.github/workflows/deploy-google-cloud.yml|docker/Dockerfile|server/*|server/**/*|web/*|web/**/*)
+                cloud_run=true
+                ;;
+            esac
+            case "$file" in
+              .dockerignore|.github/workflows/deploy-google-cloud.yml|docker/Dockerfile|server/*|server/**/*)
+                zip_worker=true
+                ;;
+            esac
           done <<< "$files"
 
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "web=$web" >> "$GITHUB_OUTPUT"
+          echo "cloud_run=$cloud_run" >> "$GITHUB_OUTPUT"
+          echo "zip_worker=$zip_worker" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --argjson cloud_run "$cloud_run" \
+            --argjson zip_worker "$zip_worker" \
+            '{cloud_run: $cloud_run, zip_worker: $zip_worker}' \
+            > cloud-run-plan.json
           {
             echo "## CI plan"
             echo
             echo "- Backend: \`$backend\`"
             echo "- Web: \`$web\`"
+            echo "- Cloud Run: \`$cloud_run\`"
+            echo "- ZIP worker: \`$zip_worker\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish Cloud Run deployment plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-run-plan
+          path: cloud-run-plan.json
+          retention-days: 1
 
   go:
     name: Backend

@@ -1,17 +1,14 @@
 name: Deploy Google Cloud
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
     branches: [main]
-    paths:
-      - ".dockerignore"
-      - ".github/workflows/deploy-google-cloud.yml"
-      - "docker/Dockerfile"
-      - "server/**"
-      - "web/**"
+    types: [completed]
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -28,10 +25,68 @@ env:
   DEEPSEEK_SECRET_NAME: ${{ vars.GCP_DEEPSEEK_SECRET }}
 
 jobs:
+  plan:
+    name: Plan Cloud Run deployment
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.plan.outputs.deploy }}
+      zip_worker: ${{ steps.plan.outputs.zip_worker }}
+    steps:
+      - name: Read validated CI change plan
+        id: plan
+        env:
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            deploy=true
+            zip_worker=true
+            reason="manual deployment"
+          else
+            gh run download "${CI_RUN_ID}" --name cloud-run-plan --dir cloud-run-plan
+            plan_file="cloud-run-plan/cloud-run-plan.json"
+            deploy="$(jq -r '.cloud_run' "${plan_file}")"
+            zip_worker="$(jq -r '.zip_worker' "${plan_file}")"
+            if [[ "${deploy}" != "true" && "${deploy}" != "false" ]] || [[ "${zip_worker}" != "true" && "${zip_worker}" != "false" ]]; then
+              echo "::error::CI change plan is invalid"
+              exit 1
+            fi
+
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            if [[ -z "${current_main}" ]]; then
+              echo "::error::could not resolve the current main branch commit"
+              exit 1
+            fi
+            if [[ "${CI_SHA}" != "${current_main}" ]]; then
+              deploy=false
+              zip_worker=false
+              reason="a newer main commit is already available"
+            else
+              reason="validated CI change plan"
+            fi
+          fi
+
+          echo "deploy=${deploy}" >> "$GITHUB_OUTPUT"
+          echo "zip_worker=${zip_worker}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Cloud Run deployment plan"
+            echo
+            echo "- Deploy: \`${deploy}\`"
+            echo "- Update ZIP worker: \`${zip_worker}\`"
+            echo "- Reason: ${reason}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     name: Verify and deploy Cloud Run
+    needs: plan
     if: >-
-      ${{ vars.GCP_PROJECT_ID != '' &&
+      ${{ needs.plan.outputs.deploy == 'true' &&
+          vars.GCP_PROJECT_ID != '' &&
           vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
           vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' &&
           vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' &&
@@ -43,35 +98,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 8.11.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Verify backend
-        working-directory: server
-        run: |
-          go test ./...
-          go build ./cmd/...
-
-      - name: Verify frontend
-        working-directory: web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run typecheck
-          pnpm run test
-          pnpm run build
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -110,6 +138,7 @@ jobs:
 
       - name: Build and push ZIP worker image
         id: build-zip-worker-image
+        if: ${{ needs.plan.outputs.zip_worker == 'true' }}
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -125,6 +154,7 @@ jobs:
 
       - name: Deploy private ZIP worker
         id: deploy-zip-worker
+        if: ${{ needs.plan.outputs.zip_worker == 'true' }}
         env:
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           GCP_ZIP_WORKER_SERVICE_ACCOUNT: ${{ vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT }}
@@ -191,8 +221,17 @@ jobs:
           WEBAUTHN_PUBLIC_ORIGIN: ${{ vars.WEBAUTHN_PUBLIC_ORIGIN || vars.PUBLIC_ORIGIN }}
           CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
-          ZIP_WORKER_URL: ${{ steps.deploy-zip-worker.outputs.url }}
+          DEPLOYED_WORKER_URL: ${{ steps.deploy-zip-worker.outputs.url }}
         run: |
+          ZIP_WORKER_URL="${DEPLOYED_WORKER_URL}"
+          if [[ -z "${ZIP_WORKER_URL}" ]]; then
+            ZIP_WORKER_URL="$(gcloud run services describe "${ZIP_WORKER_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          fi
+          if [[ "${ZIP_WORKER_URL}" != https://* ]]; then
+            echo "::error::ZIP worker URL was not published; run a manual deployment to create it"
+            exit 1
+          fi
+
           required_values=(
             GCP_PROJECT_ID
             GCP_REGION
