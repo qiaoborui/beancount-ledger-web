@@ -4,19 +4,47 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
+	"sync"
 	"time"
 )
 
 const (
 	agentSessionScope        = "ledger-agent-sessions"
 	agentSessionMaxAge       = 24 * time.Hour
-	agentSessionMessageLimit = 80
+	agentSessionMessageLimit = 96
+	agentSessionRecentTail   = 72
 )
 
 type agentSessionStore struct {
 	Version   int                 `json:"version"`
 	UpdatedAt time.Time           `json:"updatedAt"`
 	Messages  []agentModelMessage `json:"messages"`
+}
+
+type agentSessionRunLockContextKey struct{}
+
+var agentSessionRunLocks sync.Map // map[string]*sync.Mutex
+
+// withAgentSessionRunLock serializes the whole durable lifecycle for one
+// session, including model sampling and approval continuation. The runtime
+// store uses a process lock for files and a PostgreSQL advisory lock in hosted
+// deployments. Nested session writes reuse the held lock/transaction.
+func (s *Server) withAgentSessionRunLock(ctx context.Context, sessionID string, fn func(context.Context) error) error {
+	lockName := s.agentSessionLockName(sessionID)
+	if held, _ := ctx.Value(agentSessionRunLockContextKey{}).(string); held == lockName {
+		return fn(ctx)
+	}
+	if runtimeBackend(s.cfg) != "postgres" {
+		entry, _ := agentSessionRunLocks.LoadOrStore(lockName, &sync.Mutex{})
+		lock := entry.(*sync.Mutex)
+		lock.Lock()
+		defer lock.Unlock()
+		return fn(ctx)
+	}
+	return s.runtime().WithLock(ctx, lockName, func(lockCtx context.Context) error {
+		return fn(context.WithValue(lockCtx, agentSessionRunLockContextKey{}, lockName))
+	})
 }
 
 func (s *Server) readAgentSession(ctx context.Context, sessionID string) ([]agentModelMessage, bool, error) {
@@ -48,6 +76,9 @@ func (s *Server) writeAgentSession(ctx context.Context, sessionID string, messag
 	if s.agentSessions != nil {
 		return s.agentSessions.Write(ctx, ledgerClusterID(s.cfg), sessionID, messages)
 	}
+	if held, _ := ctx.Value(agentSessionRunLockContextKey{}).(string); held == s.agentSessionLockName(sessionID) {
+		return s.runtime().PutJSON(ctx, agentSessionScope, s.agentSessionStoreKey(sessionID), agentSessionStore{Version: 1, UpdatedAt: time.Now().UTC(), Messages: trimAgentSessionMessages(messages)})
+	}
 	return s.runtime().WithLock(ctx, s.agentSessionLockName(sessionID), func(lockCtx context.Context) error {
 		trimmed := trimAgentSessionMessages(messages)
 		return s.runtime().PutJSON(lockCtx, agentSessionScope, s.agentSessionStoreKey(sessionID), agentSessionStore{Version: 1, UpdatedAt: time.Now().UTC(), Messages: trimmed})
@@ -69,6 +100,14 @@ func (s *Server) appendAgentSessionMessage(ctx context.Context, sessionID string
 		messages := append(append([]agentModelMessage(nil), legacy.Messages...), message)
 		return s.agentSessions.Write(ctx, ledgerClusterID(s.cfg), sessionID, messages)
 	}
+	if held, _ := ctx.Value(agentSessionRunLockContextKey{}).(string); held == s.agentSessionLockName(sessionID) {
+		messages, found, err := s.readAgentSession(ctx, sessionID)
+		if err != nil || !found {
+			return err
+		}
+		messages = append(messages, message)
+		return s.runtime().PutJSON(ctx, agentSessionScope, s.agentSessionStoreKey(sessionID), agentSessionStore{Version: 1, UpdatedAt: time.Now().UTC(), Messages: trimAgentSessionMessages(messages)})
+	}
 	return s.runtime().WithLock(ctx, s.agentSessionLockName(sessionID), func(lockCtx context.Context) error {
 		messages, found, err := s.readAgentSession(lockCtx, sessionID)
 		if err != nil {
@@ -86,11 +125,31 @@ func trimAgentSessionMessages(messages []agentModelMessage) []agentModelMessage 
 	if len(messages) <= agentSessionMessageLimit {
 		return append([]agentModelMessage(nil), messages...)
 	}
-	start := len(messages) - agentSessionMessageLimit
-	for start < len(messages) && messages[start].Role == "tool" {
-		start++
+	start := len(messages) - agentSessionRecentTail
+	// A tool result must never be retained without the assistant call that
+	// requested it. Move the tail boundary back to that call; this preserves a
+	// valid provider transcript after compaction.
+	for start > 0 && messages[start].Role != "assistant" {
+		start--
 	}
-	return append([]agentModelMessage(nil), messages[start:]...)
+	if start == 0 {
+		return append([]agentModelMessage(nil), messages...)
+	}
+	compacted := agentModelMessage{Role: "system", Content: agentSessionCompactionNotice(messages[:start])}
+	trimmed := make([]agentModelMessage, 0, len(messages)-start+1)
+	trimmed = append(trimmed, compacted)
+	trimmed = append(trimmed, messages[start:]...)
+	return trimmed
+}
+
+func agentSessionCompactionNotice(discarded []agentModelMessage) string {
+	toolResults := 0
+	for _, message := range discarded {
+		if message.Role == "tool" {
+			toolResults++
+		}
+	}
+	return "较早的 Agent 历史已在持久会话中压缩（" + strconv.Itoa(len(discarded)) + " 条消息，其中 " + strconv.Itoa(toolResults) + " 条工具结果）。不要假设这些历史中的未展示事实；如需数据请重新调用只读工具。保留的最近消息和所有待确认操作仍是当前任务事实。"
 }
 
 func (s *Server) agentSessionStoreKey(sessionID string) string {
