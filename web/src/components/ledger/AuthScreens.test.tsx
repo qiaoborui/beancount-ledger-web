@@ -57,6 +57,13 @@ describe("LoginScreen", () => {
     expect(html).toContain("使用主密码");
   });
 
+  it("opens and focuses the main-password field for a quick unlock", () => {
+    const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered autoFocusInput onUnlock={() => {}} onPasswordUnlock={() => {}} />);
+
+    expect(html).toContain('placeholder="主密码"');
+    expect(html).toContain("autofocus");
+  });
+
   it("shows one in-progress Face ID action instead of inviting repeated clicks", () => {
     const loginHtml = renderToStaticMarkup(<LoginScreen password="" setPassword={() => {}} passkeyRegistered passkeyLoading onLogin={() => {}} onPasskeyLogin={() => {}} />);
     const unlockHtml = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered onUnlock={() => {}} unlocking />);

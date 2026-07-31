@@ -179,7 +179,7 @@ export function SensitiveUnlockPanel({
   }, [autoFocusInput, offline, offlineUnlockAvailable]);
 
   const canUsePasskey = !offline && passkeyRegistered;
-  const showPasswordInline = !offline && onPasswordUnlock && !quickUnlockEnabled && !passkeyRegistered;
+  const showPasswordInline = !offline && Boolean(onPasswordUnlock) && (autoFocusInput || (!quickUnlockEnabled && !passkeyRegistered));
   const shellClassName = surface === "dialog"
     ? "overflow-hidden rounded-md border border-line bg-panel px-5 py-6 shadow-[0_18px_50px_rgba(20,20,19,0.22)] sm:px-6"
     : "border-y border-line bg-panel px-4 py-12 text-center sm:px-6 lg:py-16";
@@ -218,9 +218,15 @@ export function SensitiveUnlockPanel({
 function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initiallyOpen }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; initiallyOpen: boolean }) {
   const [password, setPassword] = useState("");
   const [open, setOpen] = useState(initiallyOpen);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!open || !autoFocusInput) return;
+    const id = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [autoFocusInput, open]);
   return <div className="mx-auto mt-4 max-w-sm">
     {!open ? <button type="button" className="text-sm font-medium text-brand disabled:opacity-50" onClick={() => setOpen(true)} disabled={unlocking}>使用主密码</button> : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-      <Input autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
+      <Input ref={inputRef} autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
       <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "解锁"}</Button>
     </div>}
   </div>;
