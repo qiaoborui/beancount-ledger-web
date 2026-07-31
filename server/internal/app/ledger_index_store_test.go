@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestAccountMetadataValuesRoundTripWithoutJSON(t *testing.T) {
+func TestLedgerMetadataValuesRoundTripWithoutJSON(t *testing.T) {
 	tests := []struct {
 		name  string
 		value MetadataValue
@@ -23,14 +23,14 @@ func TestAccountMetadataValuesRoundTripWithoutJSON(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			kind, textValue, numberValue, booleanValue, err := indexAccountMetadataValue(test.value)
+			kind, textValue, numberValue, booleanValue, err := encodeLedgerMetadataValue(test.value)
 			if err != nil {
 				t.Fatal(err)
 			}
 			text, _ := textValue.(string)
 			number, _ := numberValue.(float64)
 			boolean, _ := booleanValue.(bool)
-			got, err := accountMetadataValue(kind, sql.NullString{String: text, Valid: textValue != nil}, sql.NullFloat64{Float64: number, Valid: numberValue != nil}, sql.NullBool{Bool: boolean, Valid: booleanValue != nil})
+			got, err := decodeLedgerMetadataValue(kind, sql.NullString{String: text, Valid: textValue != nil}, sql.NullFloat64{Float64: number, Valid: numberValue != nil}, sql.NullBool{Bool: boolean, Valid: booleanValue != nil})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -41,8 +41,8 @@ func TestAccountMetadataValuesRoundTripWithoutJSON(t *testing.T) {
 	}
 }
 
-func TestAccountMetadataValuesRejectUnsupportedType(t *testing.T) {
-	if _, _, _, _, err := indexAccountMetadataValue([]string{"unsupported"}); err == nil {
+func TestLedgerMetadataValuesRejectUnsupportedType(t *testing.T) {
+	if _, _, _, _, err := encodeLedgerMetadataValue([]string{"unsupported"}); err == nil {
 		t.Fatal("expected unsupported metadata value to fail")
 	}
 }
@@ -134,6 +134,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got := activeSnapshot.Transactions[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
 		t.Fatalf("active snapshot transaction annotations=%#v", got)
 	}
+	if got, want := activeSnapshot.Transactions[0].Metadata, map[string]MetadataValue{"orderId": "order-cafe", "statementHash": "hash-cafe", "imported": true, "amount": float64(12), "empty": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("active snapshot transaction metadata=%#v, want %#v", got, want)
+	}
 	if got, want := activeSnapshot.Accounts[0].Metadata, map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("active snapshot account metadata=%#v, want %#v", got, want)
 	}
@@ -146,6 +149,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 	if got := txns[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
 		t.Fatalf("range query transaction annotations=%#v", got)
+	}
+	if got, want := txns[0].Metadata, map[string]MetadataValue{"orderId": "order-cafe", "statementHash": "hash-cafe", "imported": true, "amount": float64(12), "empty": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("range query transaction metadata=%#v, want %#v", got, want)
 	}
 	balances, assertions, err := store.BalancesForRevision(ctx, secondID)
 	if err != nil {
@@ -186,6 +192,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got := thirdSnapshot.Transactions[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
 		t.Fatalf("reused transaction annotations=%#v", got)
 	}
+	if got, want := thirdSnapshot.Transactions[0].Metadata, map[string]MetadataValue{"orderId": "order-cafe", "statementHash": "hash-cafe", "imported": true, "amount": float64(12), "empty": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reused transaction metadata=%#v, want %#v", got, want)
+	}
 
 	forced := testIndexSnapshot("v3", []Transaction{
 		testIndexedTransaction("2026-05-01", "Cafe", "transactions/2026/05.bean", 10, "same", 1800),
@@ -208,6 +217,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got := forcedTransactions[1]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
 		t.Fatalf("forced rebuild transaction annotations=%#v", got)
 	}
+	if got, want := forcedTransactions[1].Metadata, map[string]MetadataValue{"orderId": "order-cafe", "statementHash": "hash-cafe", "imported": true, "amount": float64(12), "empty": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forced rebuild transaction metadata=%#v, want %#v", got, want)
+	}
 }
 
 func testIndexSnapshot(version string, txns []Transaction) *LedgerSnapshot {
@@ -228,6 +240,13 @@ func testIndexedTransaction(date, payee, file string, line int, hash string, amo
 	return Transaction{
 		Date:  date,
 		Payee: payee,
+		Metadata: map[string]MetadataValue{
+			"orderId":       "order-cafe",
+			"statementHash": "hash-cafe",
+			"imported":      true,
+			"amount":        float64(12),
+			"empty":         nil,
+		},
 		Tags:  []string{"work", "food"},
 		Links: []string{"receipt-cafe"},
 		Postings: []Posting{
