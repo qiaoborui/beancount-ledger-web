@@ -92,12 +92,18 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if len(activeSnapshot.Transactions) != 2 || activeSnapshot.Transactions[0].Source.GitSHA != "sha-2" {
 		t.Fatalf("active snapshot transaction source SHA=%#v", activeSnapshot.Transactions)
 	}
+	if got := activeSnapshot.Transactions[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
+		t.Fatalf("active snapshot transaction annotations=%#v", got)
+	}
 	txns, err := store.TransactionsForRevision(ctx, secondID, "2026-05-01", "2026-06-01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(txns) != 2 || txns[0].Payee != "Tea" || txns[1].Payee != "Cafe" {
 		t.Fatalf("unexpected indexed transactions: %#v", txns)
+	}
+	if got := txns[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
+		t.Fatalf("range query transaction annotations=%#v", got)
 	}
 	balances, assertions, err := store.BalancesForRevision(ctx, secondID)
 	if err != nil {
@@ -131,6 +137,13 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if postingCount != 4 {
 		t.Fatalf("reused-only posting count=%d, want 4", postingCount)
 	}
+	thirdSnapshot, ok, err := store.ActiveSnapshot(ctx)
+	if err != nil || !ok {
+		t.Fatalf("third active snapshot: ok=%v err=%v", ok, err)
+	}
+	if got := thirdSnapshot.Transactions[0]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
+		t.Fatalf("reused transaction annotations=%#v", got)
+	}
 
 	forced := testIndexSnapshot("v3", []Transaction{
 		testIndexedTransaction("2026-05-01", "Cafe", "transactions/2026/05.bean", 10, "same", 1800),
@@ -149,6 +162,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 	if len(forcedTransactions) != 2 || forcedTransactions[1].Postings[0].Amount != 1800 {
 		t.Fatalf("forced rebuild did not replace reconstructed transaction: %#v", forcedTransactions)
+	}
+	if got := forcedTransactions[1]; len(got.Tags) != 2 || got.Tags[0] != "work" || got.Tags[1] != "food" || len(got.Links) != 1 || got.Links[0] != "receipt-cafe" {
+		t.Fatalf("forced rebuild transaction annotations=%#v", got)
 	}
 }
 
@@ -170,6 +186,8 @@ func testIndexedTransaction(date, payee, file string, line int, hash string, amo
 	return Transaction{
 		Date:  date,
 		Payee: payee,
+		Tags:  []string{"work", "food"},
+		Links: []string{"receipt-cafe"},
 		Postings: []Posting{
 			{Account: "Expenses:Food", Amount: amount, Currency: "CNY"},
 			{Account: "Assets:Cash", Amount: -amount, Currency: "CNY"},
