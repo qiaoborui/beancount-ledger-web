@@ -16,6 +16,9 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/notification"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeycredential"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeysession"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeytransport"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/webpushsubscription"
 
 	stdsql "database/sql"
@@ -30,6 +33,12 @@ type Client struct {
 	BQLHistoryRecord *BQLHistoryRecordClient
 	// Notification is the client for interacting with the Notification builders.
 	Notification *NotificationClient
+	// PasskeyCredential is the client for interacting with the PasskeyCredential builders.
+	PasskeyCredential *PasskeyCredentialClient
+	// PasskeySession is the client for interacting with the PasskeySession builders.
+	PasskeySession *PasskeySessionClient
+	// PasskeyTransport is the client for interacting with the PasskeyTransport builders.
+	PasskeyTransport *PasskeyTransportClient
 	// WebPushSubscription is the client for interacting with the WebPushSubscription builders.
 	WebPushSubscription *WebPushSubscriptionClient
 }
@@ -45,6 +54,9 @@ func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.BQLHistoryRecord = NewBQLHistoryRecordClient(c.config)
 	c.Notification = NewNotificationClient(c.config)
+	c.PasskeyCredential = NewPasskeyCredentialClient(c.config)
+	c.PasskeySession = NewPasskeySessionClient(c.config)
+	c.PasskeyTransport = NewPasskeyTransportClient(c.config)
 	c.WebPushSubscription = NewWebPushSubscriptionClient(c.config)
 }
 
@@ -140,6 +152,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		config:              cfg,
 		BQLHistoryRecord:    NewBQLHistoryRecordClient(cfg),
 		Notification:        NewNotificationClient(cfg),
+		PasskeyCredential:   NewPasskeyCredentialClient(cfg),
+		PasskeySession:      NewPasskeySessionClient(cfg),
+		PasskeyTransport:    NewPasskeyTransportClient(cfg),
 		WebPushSubscription: NewWebPushSubscriptionClient(cfg),
 	}, nil
 }
@@ -162,6 +177,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		config:              cfg,
 		BQLHistoryRecord:    NewBQLHistoryRecordClient(cfg),
 		Notification:        NewNotificationClient(cfg),
+		PasskeyCredential:   NewPasskeyCredentialClient(cfg),
+		PasskeySession:      NewPasskeySessionClient(cfg),
+		PasskeyTransport:    NewPasskeyTransportClient(cfg),
 		WebPushSubscription: NewWebPushSubscriptionClient(cfg),
 	}, nil
 }
@@ -191,17 +209,23 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
-	c.BQLHistoryRecord.Use(hooks...)
-	c.Notification.Use(hooks...)
-	c.WebPushSubscription.Use(hooks...)
+	for _, n := range []interface{ Use(...Hook) }{
+		c.BQLHistoryRecord, c.Notification, c.PasskeyCredential, c.PasskeySession,
+		c.PasskeyTransport, c.WebPushSubscription,
+	} {
+		n.Use(hooks...)
+	}
 }
 
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
-	c.BQLHistoryRecord.Intercept(interceptors...)
-	c.Notification.Intercept(interceptors...)
-	c.WebPushSubscription.Intercept(interceptors...)
+	for _, n := range []interface{ Intercept(...Interceptor) }{
+		c.BQLHistoryRecord, c.Notification, c.PasskeyCredential, c.PasskeySession,
+		c.PasskeyTransport, c.WebPushSubscription,
+	} {
+		n.Intercept(interceptors...)
+	}
 }
 
 // Mutate implements the ent.Mutator interface.
@@ -211,6 +235,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.BQLHistoryRecord.mutate(ctx, m)
 	case *NotificationMutation:
 		return c.Notification.mutate(ctx, m)
+	case *PasskeyCredentialMutation:
+		return c.PasskeyCredential.mutate(ctx, m)
+	case *PasskeySessionMutation:
+		return c.PasskeySession.mutate(ctx, m)
+	case *PasskeyTransportMutation:
+		return c.PasskeyTransport.mutate(ctx, m)
 	case *WebPushSubscriptionMutation:
 		return c.WebPushSubscription.mutate(ctx, m)
 	default:
@@ -484,6 +514,405 @@ func (c *NotificationClient) mutate(ctx context.Context, m *NotificationMutation
 	}
 }
 
+// PasskeyCredentialClient is a client for the PasskeyCredential schema.
+type PasskeyCredentialClient struct {
+	config
+}
+
+// NewPasskeyCredentialClient returns a client for the PasskeyCredential from the given config.
+func NewPasskeyCredentialClient(c config) *PasskeyCredentialClient {
+	return &PasskeyCredentialClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `passkeycredential.Hooks(f(g(h())))`.
+func (c *PasskeyCredentialClient) Use(hooks ...Hook) {
+	c.hooks.PasskeyCredential = append(c.hooks.PasskeyCredential, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `passkeycredential.Intercept(f(g(h())))`.
+func (c *PasskeyCredentialClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PasskeyCredential = append(c.inters.PasskeyCredential, interceptors...)
+}
+
+// Create returns a builder for creating a PasskeyCredential entity.
+func (c *PasskeyCredentialClient) Create() *PasskeyCredentialCreate {
+	mutation := newPasskeyCredentialMutation(c.config, OpCreate)
+	return &PasskeyCredentialCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PasskeyCredential entities.
+func (c *PasskeyCredentialClient) CreateBulk(builders ...*PasskeyCredentialCreate) *PasskeyCredentialCreateBulk {
+	return &PasskeyCredentialCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PasskeyCredentialClient) MapCreateBulk(slice any, setFunc func(*PasskeyCredentialCreate, int)) *PasskeyCredentialCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PasskeyCredentialCreateBulk{err: fmt.Errorf("calling to PasskeyCredentialClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PasskeyCredentialCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PasskeyCredentialCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PasskeyCredential.
+func (c *PasskeyCredentialClient) Update() *PasskeyCredentialUpdate {
+	mutation := newPasskeyCredentialMutation(c.config, OpUpdate)
+	return &PasskeyCredentialUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PasskeyCredentialClient) UpdateOne(_m *PasskeyCredential) *PasskeyCredentialUpdateOne {
+	mutation := newPasskeyCredentialMutation(c.config, OpUpdateOne, withPasskeyCredential(_m))
+	return &PasskeyCredentialUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PasskeyCredentialClient) UpdateOneID(id string) *PasskeyCredentialUpdateOne {
+	mutation := newPasskeyCredentialMutation(c.config, OpUpdateOne, withPasskeyCredentialID(id))
+	return &PasskeyCredentialUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PasskeyCredential.
+func (c *PasskeyCredentialClient) Delete() *PasskeyCredentialDelete {
+	mutation := newPasskeyCredentialMutation(c.config, OpDelete)
+	return &PasskeyCredentialDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PasskeyCredentialClient) DeleteOne(_m *PasskeyCredential) *PasskeyCredentialDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PasskeyCredentialClient) DeleteOneID(id string) *PasskeyCredentialDeleteOne {
+	builder := c.Delete().Where(passkeycredential.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PasskeyCredentialDeleteOne{builder}
+}
+
+// Query returns a query builder for PasskeyCredential.
+func (c *PasskeyCredentialClient) Query() *PasskeyCredentialQuery {
+	return &PasskeyCredentialQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePasskeyCredential},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PasskeyCredential entity by its id.
+func (c *PasskeyCredentialClient) Get(ctx context.Context, id string) (*PasskeyCredential, error) {
+	return c.Query().Where(passkeycredential.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PasskeyCredentialClient) GetX(ctx context.Context, id string) *PasskeyCredential {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *PasskeyCredentialClient) Hooks() []Hook {
+	return c.hooks.PasskeyCredential
+}
+
+// Interceptors returns the client interceptors.
+func (c *PasskeyCredentialClient) Interceptors() []Interceptor {
+	return c.inters.PasskeyCredential
+}
+
+func (c *PasskeyCredentialClient) mutate(ctx context.Context, m *PasskeyCredentialMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PasskeyCredentialCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PasskeyCredentialUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PasskeyCredentialUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PasskeyCredentialDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PasskeyCredential mutation op: %q", m.Op())
+	}
+}
+
+// PasskeySessionClient is a client for the PasskeySession schema.
+type PasskeySessionClient struct {
+	config
+}
+
+// NewPasskeySessionClient returns a client for the PasskeySession from the given config.
+func NewPasskeySessionClient(c config) *PasskeySessionClient {
+	return &PasskeySessionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `passkeysession.Hooks(f(g(h())))`.
+func (c *PasskeySessionClient) Use(hooks ...Hook) {
+	c.hooks.PasskeySession = append(c.hooks.PasskeySession, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `passkeysession.Intercept(f(g(h())))`.
+func (c *PasskeySessionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PasskeySession = append(c.inters.PasskeySession, interceptors...)
+}
+
+// Create returns a builder for creating a PasskeySession entity.
+func (c *PasskeySessionClient) Create() *PasskeySessionCreate {
+	mutation := newPasskeySessionMutation(c.config, OpCreate)
+	return &PasskeySessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PasskeySession entities.
+func (c *PasskeySessionClient) CreateBulk(builders ...*PasskeySessionCreate) *PasskeySessionCreateBulk {
+	return &PasskeySessionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PasskeySessionClient) MapCreateBulk(slice any, setFunc func(*PasskeySessionCreate, int)) *PasskeySessionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PasskeySessionCreateBulk{err: fmt.Errorf("calling to PasskeySessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PasskeySessionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PasskeySessionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PasskeySession.
+func (c *PasskeySessionClient) Update() *PasskeySessionUpdate {
+	mutation := newPasskeySessionMutation(c.config, OpUpdate)
+	return &PasskeySessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PasskeySessionClient) UpdateOne(_m *PasskeySession) *PasskeySessionUpdateOne {
+	mutation := newPasskeySessionMutation(c.config, OpUpdateOne, withPasskeySession(_m))
+	return &PasskeySessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PasskeySessionClient) UpdateOneID(id string) *PasskeySessionUpdateOne {
+	mutation := newPasskeySessionMutation(c.config, OpUpdateOne, withPasskeySessionID(id))
+	return &PasskeySessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PasskeySession.
+func (c *PasskeySessionClient) Delete() *PasskeySessionDelete {
+	mutation := newPasskeySessionMutation(c.config, OpDelete)
+	return &PasskeySessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PasskeySessionClient) DeleteOne(_m *PasskeySession) *PasskeySessionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PasskeySessionClient) DeleteOneID(id string) *PasskeySessionDeleteOne {
+	builder := c.Delete().Where(passkeysession.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PasskeySessionDeleteOne{builder}
+}
+
+// Query returns a query builder for PasskeySession.
+func (c *PasskeySessionClient) Query() *PasskeySessionQuery {
+	return &PasskeySessionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePasskeySession},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PasskeySession entity by its id.
+func (c *PasskeySessionClient) Get(ctx context.Context, id string) (*PasskeySession, error) {
+	return c.Query().Where(passkeysession.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PasskeySessionClient) GetX(ctx context.Context, id string) *PasskeySession {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *PasskeySessionClient) Hooks() []Hook {
+	return c.hooks.PasskeySession
+}
+
+// Interceptors returns the client interceptors.
+func (c *PasskeySessionClient) Interceptors() []Interceptor {
+	return c.inters.PasskeySession
+}
+
+func (c *PasskeySessionClient) mutate(ctx context.Context, m *PasskeySessionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PasskeySessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PasskeySessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PasskeySessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PasskeySessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PasskeySession mutation op: %q", m.Op())
+	}
+}
+
+// PasskeyTransportClient is a client for the PasskeyTransport schema.
+type PasskeyTransportClient struct {
+	config
+}
+
+// NewPasskeyTransportClient returns a client for the PasskeyTransport from the given config.
+func NewPasskeyTransportClient(c config) *PasskeyTransportClient {
+	return &PasskeyTransportClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `passkeytransport.Hooks(f(g(h())))`.
+func (c *PasskeyTransportClient) Use(hooks ...Hook) {
+	c.hooks.PasskeyTransport = append(c.hooks.PasskeyTransport, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `passkeytransport.Intercept(f(g(h())))`.
+func (c *PasskeyTransportClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PasskeyTransport = append(c.inters.PasskeyTransport, interceptors...)
+}
+
+// Create returns a builder for creating a PasskeyTransport entity.
+func (c *PasskeyTransportClient) Create() *PasskeyTransportCreate {
+	mutation := newPasskeyTransportMutation(c.config, OpCreate)
+	return &PasskeyTransportCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PasskeyTransport entities.
+func (c *PasskeyTransportClient) CreateBulk(builders ...*PasskeyTransportCreate) *PasskeyTransportCreateBulk {
+	return &PasskeyTransportCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PasskeyTransportClient) MapCreateBulk(slice any, setFunc func(*PasskeyTransportCreate, int)) *PasskeyTransportCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PasskeyTransportCreateBulk{err: fmt.Errorf("calling to PasskeyTransportClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PasskeyTransportCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PasskeyTransportCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PasskeyTransport.
+func (c *PasskeyTransportClient) Update() *PasskeyTransportUpdate {
+	mutation := newPasskeyTransportMutation(c.config, OpUpdate)
+	return &PasskeyTransportUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PasskeyTransportClient) UpdateOne(_m *PasskeyTransport) *PasskeyTransportUpdateOne {
+	mutation := newPasskeyTransportMutation(c.config, OpUpdateOne, withPasskeyTransport(_m))
+	return &PasskeyTransportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PasskeyTransportClient) UpdateOneID(id string) *PasskeyTransportUpdateOne {
+	mutation := newPasskeyTransportMutation(c.config, OpUpdateOne, withPasskeyTransportID(id))
+	return &PasskeyTransportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PasskeyTransport.
+func (c *PasskeyTransportClient) Delete() *PasskeyTransportDelete {
+	mutation := newPasskeyTransportMutation(c.config, OpDelete)
+	return &PasskeyTransportDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PasskeyTransportClient) DeleteOne(_m *PasskeyTransport) *PasskeyTransportDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PasskeyTransportClient) DeleteOneID(id string) *PasskeyTransportDeleteOne {
+	builder := c.Delete().Where(passkeytransport.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PasskeyTransportDeleteOne{builder}
+}
+
+// Query returns a query builder for PasskeyTransport.
+func (c *PasskeyTransportClient) Query() *PasskeyTransportQuery {
+	return &PasskeyTransportQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePasskeyTransport},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PasskeyTransport entity by its id.
+func (c *PasskeyTransportClient) Get(ctx context.Context, id string) (*PasskeyTransport, error) {
+	return c.Query().Where(passkeytransport.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PasskeyTransportClient) GetX(ctx context.Context, id string) *PasskeyTransport {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *PasskeyTransportClient) Hooks() []Hook {
+	return c.hooks.PasskeyTransport
+}
+
+// Interceptors returns the client interceptors.
+func (c *PasskeyTransportClient) Interceptors() []Interceptor {
+	return c.inters.PasskeyTransport
+}
+
+func (c *PasskeyTransportClient) mutate(ctx context.Context, m *PasskeyTransportMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PasskeyTransportCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PasskeyTransportUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PasskeyTransportUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PasskeyTransportDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PasskeyTransport mutation op: %q", m.Op())
+	}
+}
+
 // WebPushSubscriptionClient is a client for the WebPushSubscription schema.
 type WebPushSubscriptionClient struct {
 	config
@@ -620,10 +1049,12 @@ func (c *WebPushSubscriptionClient) mutate(ctx context.Context, m *WebPushSubscr
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		BQLHistoryRecord, Notification, WebPushSubscription []ent.Hook
+		BQLHistoryRecord, Notification, PasskeyCredential, PasskeySession,
+		PasskeyTransport, WebPushSubscription []ent.Hook
 	}
 	inters struct {
-		BQLHistoryRecord, Notification, WebPushSubscription []ent.Interceptor
+		BQLHistoryRecord, Notification, PasskeyCredential, PasskeySession,
+		PasskeyTransport, WebPushSubscription []ent.Interceptor
 	}
 )
 

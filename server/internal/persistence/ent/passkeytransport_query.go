@@ -12,69 +12,69 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeytransport"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/predicate"
-	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/webpushsubscription"
 )
 
-// WebPushSubscriptionQuery is the builder for querying WebPushSubscription entities.
-type WebPushSubscriptionQuery struct {
+// PasskeyTransportQuery is the builder for querying PasskeyTransport entities.
+type PasskeyTransportQuery struct {
 	config
 	ctx        *QueryContext
-	order      []webpushsubscription.OrderOption
+	order      []passkeytransport.OrderOption
 	inters     []Interceptor
-	predicates []predicate.WebPushSubscription
+	predicates []predicate.PasskeyTransport
 	modifiers  []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
 }
 
-// Where adds a new predicate for the WebPushSubscriptionQuery builder.
-func (_q *WebPushSubscriptionQuery) Where(ps ...predicate.WebPushSubscription) *WebPushSubscriptionQuery {
+// Where adds a new predicate for the PasskeyTransportQuery builder.
+func (_q *PasskeyTransportQuery) Where(ps ...predicate.PasskeyTransport) *PasskeyTransportQuery {
 	_q.predicates = append(_q.predicates, ps...)
 	return _q
 }
 
 // Limit the number of records to be returned by this query.
-func (_q *WebPushSubscriptionQuery) Limit(limit int) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) Limit(limit int) *PasskeyTransportQuery {
 	_q.ctx.Limit = &limit
 	return _q
 }
 
 // Offset to start from.
-func (_q *WebPushSubscriptionQuery) Offset(offset int) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) Offset(offset int) *PasskeyTransportQuery {
 	_q.ctx.Offset = &offset
 	return _q
 }
 
 // Unique configures the query builder to filter duplicate records on query.
 // By default, unique is set to true, and can be disabled using this method.
-func (_q *WebPushSubscriptionQuery) Unique(unique bool) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) Unique(unique bool) *PasskeyTransportQuery {
 	_q.ctx.Unique = &unique
 	return _q
 }
 
 // Order specifies how the records should be ordered.
-func (_q *WebPushSubscriptionQuery) Order(o ...webpushsubscription.OrderOption) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) Order(o ...passkeytransport.OrderOption) *PasskeyTransportQuery {
 	_q.order = append(_q.order, o...)
 	return _q
 }
 
-// First returns the first WebPushSubscription entity from the query.
-// Returns a *NotFoundError when no WebPushSubscription was found.
-func (_q *WebPushSubscriptionQuery) First(ctx context.Context) (*WebPushSubscription, error) {
+// First returns the first PasskeyTransport entity from the query.
+// Returns a *NotFoundError when no PasskeyTransport was found.
+func (_q *PasskeyTransportQuery) First(ctx context.Context) (*PasskeyTransport, error) {
 	nodes, err := _q.Limit(1).All(setContextOp(ctx, _q.ctx, ent.OpQueryFirst))
 	if err != nil {
 		return nil, err
 	}
 	if len(nodes) == 0 {
-		return nil, &NotFoundError{webpushsubscription.Label}
+		return nil, &NotFoundError{passkeytransport.Label}
 	}
 	return nodes[0], nil
 }
 
 // FirstX is like First, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) FirstX(ctx context.Context) *WebPushSubscription {
+func (_q *PasskeyTransportQuery) FirstX(ctx context.Context) *PasskeyTransport {
 	node, err := _q.First(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -82,22 +82,22 @@ func (_q *WebPushSubscriptionQuery) FirstX(ctx context.Context) *WebPushSubscrip
 	return node
 }
 
-// FirstID returns the first WebPushSubscription ID from the query.
-// Returns a *NotFoundError when no WebPushSubscription ID was found.
-func (_q *WebPushSubscriptionQuery) FirstID(ctx context.Context) (id string, err error) {
+// FirstID returns the first PasskeyTransport ID from the query.
+// Returns a *NotFoundError when no PasskeyTransport ID was found.
+func (_q *PasskeyTransportQuery) FirstID(ctx context.Context) (id string, err error) {
 	var ids []string
 	if ids, err = _q.Limit(1).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryFirstID)); err != nil {
 		return
 	}
 	if len(ids) == 0 {
-		err = &NotFoundError{webpushsubscription.Label}
+		err = &NotFoundError{passkeytransport.Label}
 		return
 	}
 	return ids[0], nil
 }
 
 // FirstIDX is like FirstID, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) FirstIDX(ctx context.Context) string {
+func (_q *PasskeyTransportQuery) FirstIDX(ctx context.Context) string {
 	id, err := _q.FirstID(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -105,10 +105,10 @@ func (_q *WebPushSubscriptionQuery) FirstIDX(ctx context.Context) string {
 	return id
 }
 
-// Only returns a single WebPushSubscription entity found by the query, ensuring it only returns one.
-// Returns a *NotSingularError when more than one WebPushSubscription entity is found.
-// Returns a *NotFoundError when no WebPushSubscription entities are found.
-func (_q *WebPushSubscriptionQuery) Only(ctx context.Context) (*WebPushSubscription, error) {
+// Only returns a single PasskeyTransport entity found by the query, ensuring it only returns one.
+// Returns a *NotSingularError when more than one PasskeyTransport entity is found.
+// Returns a *NotFoundError when no PasskeyTransport entities are found.
+func (_q *PasskeyTransportQuery) Only(ctx context.Context) (*PasskeyTransport, error) {
 	nodes, err := _q.Limit(2).All(setContextOp(ctx, _q.ctx, ent.OpQueryOnly))
 	if err != nil {
 		return nil, err
@@ -117,14 +117,14 @@ func (_q *WebPushSubscriptionQuery) Only(ctx context.Context) (*WebPushSubscript
 	case 1:
 		return nodes[0], nil
 	case 0:
-		return nil, &NotFoundError{webpushsubscription.Label}
+		return nil, &NotFoundError{passkeytransport.Label}
 	default:
-		return nil, &NotSingularError{webpushsubscription.Label}
+		return nil, &NotSingularError{passkeytransport.Label}
 	}
 }
 
 // OnlyX is like Only, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) OnlyX(ctx context.Context) *WebPushSubscription {
+func (_q *PasskeyTransportQuery) OnlyX(ctx context.Context) *PasskeyTransport {
 	node, err := _q.Only(ctx)
 	if err != nil {
 		panic(err)
@@ -132,10 +132,10 @@ func (_q *WebPushSubscriptionQuery) OnlyX(ctx context.Context) *WebPushSubscript
 	return node
 }
 
-// OnlyID is like Only, but returns the only WebPushSubscription ID in the query.
-// Returns a *NotSingularError when more than one WebPushSubscription ID is found.
+// OnlyID is like Only, but returns the only PasskeyTransport ID in the query.
+// Returns a *NotSingularError when more than one PasskeyTransport ID is found.
 // Returns a *NotFoundError when no entities are found.
-func (_q *WebPushSubscriptionQuery) OnlyID(ctx context.Context) (id string, err error) {
+func (_q *PasskeyTransportQuery) OnlyID(ctx context.Context) (id string, err error) {
 	var ids []string
 	if ids, err = _q.Limit(2).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryOnlyID)); err != nil {
 		return
@@ -144,15 +144,15 @@ func (_q *WebPushSubscriptionQuery) OnlyID(ctx context.Context) (id string, err 
 	case 1:
 		id = ids[0]
 	case 0:
-		err = &NotFoundError{webpushsubscription.Label}
+		err = &NotFoundError{passkeytransport.Label}
 	default:
-		err = &NotSingularError{webpushsubscription.Label}
+		err = &NotSingularError{passkeytransport.Label}
 	}
 	return
 }
 
 // OnlyIDX is like OnlyID, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) OnlyIDX(ctx context.Context) string {
+func (_q *PasskeyTransportQuery) OnlyIDX(ctx context.Context) string {
 	id, err := _q.OnlyID(ctx)
 	if err != nil {
 		panic(err)
@@ -160,18 +160,18 @@ func (_q *WebPushSubscriptionQuery) OnlyIDX(ctx context.Context) string {
 	return id
 }
 
-// All executes the query and returns a list of WebPushSubscriptions.
-func (_q *WebPushSubscriptionQuery) All(ctx context.Context) ([]*WebPushSubscription, error) {
+// All executes the query and returns a list of PasskeyTransports.
+func (_q *PasskeyTransportQuery) All(ctx context.Context) ([]*PasskeyTransport, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryAll)
 	if err := _q.prepareQuery(ctx); err != nil {
 		return nil, err
 	}
-	qr := querierAll[[]*WebPushSubscription, *WebPushSubscriptionQuery]()
-	return withInterceptors[[]*WebPushSubscription](ctx, _q, qr, _q.inters)
+	qr := querierAll[[]*PasskeyTransport, *PasskeyTransportQuery]()
+	return withInterceptors[[]*PasskeyTransport](ctx, _q, qr, _q.inters)
 }
 
 // AllX is like All, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) AllX(ctx context.Context) []*WebPushSubscription {
+func (_q *PasskeyTransportQuery) AllX(ctx context.Context) []*PasskeyTransport {
 	nodes, err := _q.All(ctx)
 	if err != nil {
 		panic(err)
@@ -179,20 +179,20 @@ func (_q *WebPushSubscriptionQuery) AllX(ctx context.Context) []*WebPushSubscrip
 	return nodes
 }
 
-// IDs executes the query and returns a list of WebPushSubscription IDs.
-func (_q *WebPushSubscriptionQuery) IDs(ctx context.Context) (ids []string, err error) {
+// IDs executes the query and returns a list of PasskeyTransport IDs.
+func (_q *PasskeyTransportQuery) IDs(ctx context.Context) (ids []string, err error) {
 	if _q.ctx.Unique == nil && _q.path != nil {
 		_q.Unique(true)
 	}
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryIDs)
-	if err = _q.Select(webpushsubscription.FieldID).Scan(ctx, &ids); err != nil {
+	if err = _q.Select(passkeytransport.FieldID).Scan(ctx, &ids); err != nil {
 		return nil, err
 	}
 	return ids, nil
 }
 
 // IDsX is like IDs, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) IDsX(ctx context.Context) []string {
+func (_q *PasskeyTransportQuery) IDsX(ctx context.Context) []string {
 	ids, err := _q.IDs(ctx)
 	if err != nil {
 		panic(err)
@@ -201,16 +201,16 @@ func (_q *WebPushSubscriptionQuery) IDsX(ctx context.Context) []string {
 }
 
 // Count returns the count of the given query.
-func (_q *WebPushSubscriptionQuery) Count(ctx context.Context) (int, error) {
+func (_q *PasskeyTransportQuery) Count(ctx context.Context) (int, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryCount)
 	if err := _q.prepareQuery(ctx); err != nil {
 		return 0, err
 	}
-	return withInterceptors[int](ctx, _q, querierCount[*WebPushSubscriptionQuery](), _q.inters)
+	return withInterceptors[int](ctx, _q, querierCount[*PasskeyTransportQuery](), _q.inters)
 }
 
 // CountX is like Count, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) CountX(ctx context.Context) int {
+func (_q *PasskeyTransportQuery) CountX(ctx context.Context) int {
 	count, err := _q.Count(ctx)
 	if err != nil {
 		panic(err)
@@ -219,7 +219,7 @@ func (_q *WebPushSubscriptionQuery) CountX(ctx context.Context) int {
 }
 
 // Exist returns true if the query has elements in the graph.
-func (_q *WebPushSubscriptionQuery) Exist(ctx context.Context) (bool, error) {
+func (_q *PasskeyTransportQuery) Exist(ctx context.Context) (bool, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryExist)
 	switch _, err := _q.FirstID(ctx); {
 	case IsNotFound(err):
@@ -232,7 +232,7 @@ func (_q *WebPushSubscriptionQuery) Exist(ctx context.Context) (bool, error) {
 }
 
 // ExistX is like Exist, but panics if an error occurs.
-func (_q *WebPushSubscriptionQuery) ExistX(ctx context.Context) bool {
+func (_q *PasskeyTransportQuery) ExistX(ctx context.Context) bool {
 	exist, err := _q.Exist(ctx)
 	if err != nil {
 		panic(err)
@@ -240,18 +240,18 @@ func (_q *WebPushSubscriptionQuery) ExistX(ctx context.Context) bool {
 	return exist
 }
 
-// Clone returns a duplicate of the WebPushSubscriptionQuery builder, including all associated steps. It can be
+// Clone returns a duplicate of the PasskeyTransportQuery builder, including all associated steps. It can be
 // used to prepare common query builders and use them differently after the clone is made.
-func (_q *WebPushSubscriptionQuery) Clone() *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) Clone() *PasskeyTransportQuery {
 	if _q == nil {
 		return nil
 	}
-	return &WebPushSubscriptionQuery{
+	return &PasskeyTransportQuery{
 		config:     _q.config,
 		ctx:        _q.ctx.Clone(),
-		order:      append([]webpushsubscription.OrderOption{}, _q.order...),
+		order:      append([]passkeytransport.OrderOption{}, _q.order...),
 		inters:     append([]Interceptor{}, _q.inters...),
-		predicates: append([]predicate.WebPushSubscription{}, _q.predicates...),
+		predicates: append([]predicate.PasskeyTransport{}, _q.predicates...),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -264,19 +264,19 @@ func (_q *WebPushSubscriptionQuery) Clone() *WebPushSubscriptionQuery {
 // Example:
 //
 //	var v []struct {
-//		Endpoint string `json:"endpoint,omitempty"`
+//		CredentialID string `json:"credential_id,omitempty"`
 //		Count int `json:"count,omitempty"`
 //	}
 //
-//	client.WebPushSubscription.Query().
-//		GroupBy(webpushsubscription.FieldEndpoint).
+//	client.PasskeyTransport.Query().
+//		GroupBy(passkeytransport.FieldCredentialID).
 //		Aggregate(ent.Count()).
 //		Scan(ctx, &v)
-func (_q *WebPushSubscriptionQuery) GroupBy(field string, fields ...string) *WebPushSubscriptionGroupBy {
+func (_q *PasskeyTransportQuery) GroupBy(field string, fields ...string) *PasskeyTransportGroupBy {
 	_q.ctx.Fields = append([]string{field}, fields...)
-	grbuild := &WebPushSubscriptionGroupBy{build: _q}
+	grbuild := &PasskeyTransportGroupBy{build: _q}
 	grbuild.flds = &_q.ctx.Fields
-	grbuild.label = webpushsubscription.Label
+	grbuild.label = passkeytransport.Label
 	grbuild.scan = grbuild.Scan
 	return grbuild
 }
@@ -287,26 +287,26 @@ func (_q *WebPushSubscriptionQuery) GroupBy(field string, fields ...string) *Web
 // Example:
 //
 //	var v []struct {
-//		Endpoint string `json:"endpoint,omitempty"`
+//		CredentialID string `json:"credential_id,omitempty"`
 //	}
 //
-//	client.WebPushSubscription.Query().
-//		Select(webpushsubscription.FieldEndpoint).
+//	client.PasskeyTransport.Query().
+//		Select(passkeytransport.FieldCredentialID).
 //		Scan(ctx, &v)
-func (_q *WebPushSubscriptionQuery) Select(fields ...string) *WebPushSubscriptionSelect {
+func (_q *PasskeyTransportQuery) Select(fields ...string) *PasskeyTransportSelect {
 	_q.ctx.Fields = append(_q.ctx.Fields, fields...)
-	sbuild := &WebPushSubscriptionSelect{WebPushSubscriptionQuery: _q}
-	sbuild.label = webpushsubscription.Label
+	sbuild := &PasskeyTransportSelect{PasskeyTransportQuery: _q}
+	sbuild.label = passkeytransport.Label
 	sbuild.flds, sbuild.scan = &_q.ctx.Fields, sbuild.Scan
 	return sbuild
 }
 
-// Aggregate returns a WebPushSubscriptionSelect configured with the given aggregations.
-func (_q *WebPushSubscriptionQuery) Aggregate(fns ...AggregateFunc) *WebPushSubscriptionSelect {
+// Aggregate returns a PasskeyTransportSelect configured with the given aggregations.
+func (_q *PasskeyTransportQuery) Aggregate(fns ...AggregateFunc) *PasskeyTransportSelect {
 	return _q.Select().Aggregate(fns...)
 }
 
-func (_q *WebPushSubscriptionQuery) prepareQuery(ctx context.Context) error {
+func (_q *PasskeyTransportQuery) prepareQuery(ctx context.Context) error {
 	for _, inter := range _q.inters {
 		if inter == nil {
 			return fmt.Errorf("ent: uninitialized interceptor (forgotten import ent/runtime?)")
@@ -318,7 +318,7 @@ func (_q *WebPushSubscriptionQuery) prepareQuery(ctx context.Context) error {
 		}
 	}
 	for _, f := range _q.ctx.Fields {
-		if !webpushsubscription.ValidColumn(f) {
+		if !passkeytransport.ValidColumn(f) {
 			return &ValidationError{Name: f, err: fmt.Errorf("ent: invalid field %q for query", f)}
 		}
 	}
@@ -332,16 +332,16 @@ func (_q *WebPushSubscriptionQuery) prepareQuery(ctx context.Context) error {
 	return nil
 }
 
-func (_q *WebPushSubscriptionQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*WebPushSubscription, error) {
+func (_q *PasskeyTransportQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*PasskeyTransport, error) {
 	var (
-		nodes = []*WebPushSubscription{}
+		nodes = []*PasskeyTransport{}
 		_spec = _q.querySpec()
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
-		return (*WebPushSubscription).scanValues(nil, columns)
+		return (*PasskeyTransport).scanValues(nil, columns)
 	}
 	_spec.Assign = func(columns []string, values []any) error {
-		node := &WebPushSubscription{config: _q.config}
+		node := &PasskeyTransport{config: _q.config}
 		nodes = append(nodes, node)
 		return node.assignValues(columns, values)
 	}
@@ -360,7 +360,7 @@ func (_q *WebPushSubscriptionQuery) sqlAll(ctx context.Context, hooks ...queryHo
 	return nodes, nil
 }
 
-func (_q *WebPushSubscriptionQuery) sqlCount(ctx context.Context) (int, error) {
+func (_q *PasskeyTransportQuery) sqlCount(ctx context.Context) (int, error) {
 	_spec := _q.querySpec()
 	if len(_q.modifiers) > 0 {
 		_spec.Modifiers = _q.modifiers
@@ -372,8 +372,8 @@ func (_q *WebPushSubscriptionQuery) sqlCount(ctx context.Context) (int, error) {
 	return sqlgraph.CountNodes(ctx, _q.driver, _spec)
 }
 
-func (_q *WebPushSubscriptionQuery) querySpec() *sqlgraph.QuerySpec {
-	_spec := sqlgraph.NewQuerySpec(webpushsubscription.Table, webpushsubscription.Columns, sqlgraph.NewFieldSpec(webpushsubscription.FieldID, field.TypeString))
+func (_q *PasskeyTransportQuery) querySpec() *sqlgraph.QuerySpec {
+	_spec := sqlgraph.NewQuerySpec(passkeytransport.Table, passkeytransport.Columns, sqlgraph.NewFieldSpec(passkeytransport.FieldID, field.TypeString))
 	_spec.From = _q.sql
 	if unique := _q.ctx.Unique; unique != nil {
 		_spec.Unique = *unique
@@ -382,9 +382,9 @@ func (_q *WebPushSubscriptionQuery) querySpec() *sqlgraph.QuerySpec {
 	}
 	if fields := _q.ctx.Fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
-		_spec.Node.Columns = append(_spec.Node.Columns, webpushsubscription.FieldID)
+		_spec.Node.Columns = append(_spec.Node.Columns, passkeytransport.FieldID)
 		for i := range fields {
-			if fields[i] != webpushsubscription.FieldID {
+			if fields[i] != passkeytransport.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
 		}
@@ -412,12 +412,12 @@ func (_q *WebPushSubscriptionQuery) querySpec() *sqlgraph.QuerySpec {
 	return _spec
 }
 
-func (_q *WebPushSubscriptionQuery) sqlQuery(ctx context.Context) *sql.Selector {
+func (_q *PasskeyTransportQuery) sqlQuery(ctx context.Context) *sql.Selector {
 	builder := sql.Dialect(_q.driver.Dialect())
-	t1 := builder.Table(webpushsubscription.Table)
+	t1 := builder.Table(passkeytransport.Table)
 	columns := _q.ctx.Fields
 	if len(columns) == 0 {
-		columns = webpushsubscription.Columns
+		columns = passkeytransport.Columns
 	}
 	selector := builder.Select(t1.Columns(columns...)...).From(t1)
 	if _q.sql != nil {
@@ -450,7 +450,7 @@ func (_q *WebPushSubscriptionQuery) sqlQuery(ctx context.Context) *sql.Selector 
 // ForUpdate locks the selected rows against concurrent updates, and prevent them from being
 // updated, deleted or "selected ... for update" by other sessions, until the transaction is
 // either committed or rolled-back.
-func (_q *WebPushSubscriptionQuery) ForUpdate(opts ...sql.LockOption) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) ForUpdate(opts ...sql.LockOption) *PasskeyTransportQuery {
 	if _q.driver.Dialect() == dialect.Postgres {
 		_q.Unique(false)
 	}
@@ -463,7 +463,7 @@ func (_q *WebPushSubscriptionQuery) ForUpdate(opts ...sql.LockOption) *WebPushSu
 // ForShare behaves similarly to ForUpdate, except that it acquires a shared mode lock
 // on any rows that are read. Other sessions can read the rows, but cannot modify them
 // until your transaction commits.
-func (_q *WebPushSubscriptionQuery) ForShare(opts ...sql.LockOption) *WebPushSubscriptionQuery {
+func (_q *PasskeyTransportQuery) ForShare(opts ...sql.LockOption) *PasskeyTransportQuery {
 	if _q.driver.Dialect() == dialect.Postgres {
 		_q.Unique(false)
 	}
@@ -473,28 +473,28 @@ func (_q *WebPushSubscriptionQuery) ForShare(opts ...sql.LockOption) *WebPushSub
 	return _q
 }
 
-// WebPushSubscriptionGroupBy is the group-by builder for WebPushSubscription entities.
-type WebPushSubscriptionGroupBy struct {
+// PasskeyTransportGroupBy is the group-by builder for PasskeyTransport entities.
+type PasskeyTransportGroupBy struct {
 	selector
-	build *WebPushSubscriptionQuery
+	build *PasskeyTransportQuery
 }
 
 // Aggregate adds the given aggregation functions to the group-by query.
-func (_g *WebPushSubscriptionGroupBy) Aggregate(fns ...AggregateFunc) *WebPushSubscriptionGroupBy {
+func (_g *PasskeyTransportGroupBy) Aggregate(fns ...AggregateFunc) *PasskeyTransportGroupBy {
 	_g.fns = append(_g.fns, fns...)
 	return _g
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (_g *WebPushSubscriptionGroupBy) Scan(ctx context.Context, v any) error {
+func (_g *PasskeyTransportGroupBy) Scan(ctx context.Context, v any) error {
 	ctx = setContextOp(ctx, _g.build.ctx, ent.OpQueryGroupBy)
 	if err := _g.build.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*WebPushSubscriptionQuery, *WebPushSubscriptionGroupBy](ctx, _g.build, _g, _g.build.inters, v)
+	return scanWithInterceptors[*PasskeyTransportQuery, *PasskeyTransportGroupBy](ctx, _g.build, _g, _g.build.inters, v)
 }
 
-func (_g *WebPushSubscriptionGroupBy) sqlScan(ctx context.Context, root *WebPushSubscriptionQuery, v any) error {
+func (_g *PasskeyTransportGroupBy) sqlScan(ctx context.Context, root *PasskeyTransportQuery, v any) error {
 	selector := root.sqlQuery(ctx).Select()
 	aggregation := make([]string, 0, len(_g.fns))
 	for _, fn := range _g.fns {
@@ -521,28 +521,28 @@ func (_g *WebPushSubscriptionGroupBy) sqlScan(ctx context.Context, root *WebPush
 	return sql.ScanSlice(rows, v)
 }
 
-// WebPushSubscriptionSelect is the builder for selecting fields of WebPushSubscription entities.
-type WebPushSubscriptionSelect struct {
-	*WebPushSubscriptionQuery
+// PasskeyTransportSelect is the builder for selecting fields of PasskeyTransport entities.
+type PasskeyTransportSelect struct {
+	*PasskeyTransportQuery
 	selector
 }
 
 // Aggregate adds the given aggregation functions to the selector query.
-func (_s *WebPushSubscriptionSelect) Aggregate(fns ...AggregateFunc) *WebPushSubscriptionSelect {
+func (_s *PasskeyTransportSelect) Aggregate(fns ...AggregateFunc) *PasskeyTransportSelect {
 	_s.fns = append(_s.fns, fns...)
 	return _s
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (_s *WebPushSubscriptionSelect) Scan(ctx context.Context, v any) error {
+func (_s *PasskeyTransportSelect) Scan(ctx context.Context, v any) error {
 	ctx = setContextOp(ctx, _s.ctx, ent.OpQuerySelect)
 	if err := _s.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*WebPushSubscriptionQuery, *WebPushSubscriptionSelect](ctx, _s.WebPushSubscriptionQuery, _s, _s.inters, v)
+	return scanWithInterceptors[*PasskeyTransportQuery, *PasskeyTransportSelect](ctx, _s.PasskeyTransportQuery, _s, _s.inters, v)
 }
 
-func (_s *WebPushSubscriptionSelect) sqlScan(ctx context.Context, root *WebPushSubscriptionQuery, v any) error {
+func (_s *PasskeyTransportSelect) sqlScan(ctx context.Context, root *PasskeyTransportQuery, v any) error {
 	selector := root.sqlQuery(ctx)
 	aggregation := make([]string, 0, len(_s.fns))
 	for _, fn := range _s.fns {

@@ -75,6 +75,54 @@ var (
 			},
 		},
 	}
+	// PasskeyCredentialsColumns holds the columns for the "passkey_credentials" table.
+	PasskeyCredentialsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "public_key", Type: field.TypeBytes},
+		{Name: "sign_count", Type: field.TypeUint64},
+		{Name: "backup_eligible", Type: field.TypeBool, Nullable: true},
+		{Name: "backup_state", Type: field.TypeBool, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// PasskeyCredentialsTable holds the schema information for the "passkey_credentials" table.
+	PasskeyCredentialsTable = &schema.Table{
+		Name:       "passkey_credentials",
+		Columns:    PasskeyCredentialsColumns,
+		PrimaryKey: []*schema.Column{PasskeyCredentialsColumns[0]},
+	}
+	// PasskeySessionsColumns holds the columns for the "passkey_sessions" table.
+	PasskeySessionsColumns = []*schema.Column{
+		{Name: "challenge", Type: field.TypeString},
+		{Name: "data", Type: field.TypeJSON},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "expires_at", Type: field.TypeTime},
+	}
+	// PasskeySessionsTable holds the schema information for the "passkey_sessions" table.
+	PasskeySessionsTable = &schema.Table{
+		Name:       "passkey_sessions",
+		Columns:    PasskeySessionsColumns,
+		PrimaryKey: []*schema.Column{PasskeySessionsColumns[0]},
+	}
+	// PasskeyTransportsColumns holds the columns for the "passkey_transports" table.
+	PasskeyTransportsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "credential_id", Type: field.TypeString},
+		{Name: "transport", Type: field.TypeString},
+	}
+	// PasskeyTransportsTable holds the schema information for the "passkey_transports" table.
+	PasskeyTransportsTable = &schema.Table{
+		Name:       "passkey_transports",
+		Columns:    PasskeyTransportsColumns,
+		PrimaryKey: []*schema.Column{PasskeyTransportsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "passkeytransport_credential_id_transport",
+				Unique:  true,
+				Columns: []*schema.Column{PasskeyTransportsColumns[1], PasskeyTransportsColumns[2]},
+			},
+		},
+	}
 	// WebPushSubscriptionsColumns holds the columns for the "web_push_subscriptions" table.
 	WebPushSubscriptionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -96,6 +144,9 @@ var (
 	Tables = []*schema.Table{
 		BqlHistoryRecordsTable,
 		NotificationsTable,
+		PasskeyCredentialsTable,
+		PasskeySessionsTable,
+		PasskeyTransportsTable,
 		WebPushSubscriptionsTable,
 	}
 )
@@ -106,6 +157,15 @@ func init() {
 	}
 	NotificationsTable.Annotation = &entsql.Annotation{
 		Table: "notifications",
+	}
+	PasskeyCredentialsTable.Annotation = &entsql.Annotation{
+		Table: "passkey_credentials",
+	}
+	PasskeySessionsTable.Annotation = &entsql.Annotation{
+		Table: "passkey_sessions",
+	}
+	PasskeyTransportsTable.Annotation = &entsql.Annotation{
+		Table: "passkey_transports",
 	}
 	WebPushSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "web_push_subscriptions",
