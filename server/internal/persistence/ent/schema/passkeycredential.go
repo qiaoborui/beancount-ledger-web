@@ -20,9 +20,11 @@ func (PasskeyCredential) Fields() []ent.Field {
 		field.String("id").Immutable(),
 		field.Bytes("public_key").Sensitive(),
 		field.Uint64("sign_count"),
+		field.String("name").Default(""),
 		field.Bool("backup_eligible").Optional().Nillable(),
 		field.Bool("backup_state").Optional().Nillable(),
 		field.Time("created_at").Immutable(),
 		field.Time("updated_at"),
+		field.Time("last_used_at").Optional().Nillable(),
 	}
 }

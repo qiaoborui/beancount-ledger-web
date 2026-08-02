@@ -15,6 +15,8 @@ const (
 	FieldPublicKey = "public_key"
 	// FieldSignCount holds the string denoting the sign_count field in the database.
 	FieldSignCount = "sign_count"
+	// FieldName holds the string denoting the name field in the database.
+	FieldName = "name"
 	// FieldBackupEligible holds the string denoting the backup_eligible field in the database.
 	FieldBackupEligible = "backup_eligible"
 	// FieldBackupState holds the string denoting the backup_state field in the database.
@@ -23,6 +25,8 @@ const (
 	FieldCreatedAt = "created_at"
 	// FieldUpdatedAt holds the string denoting the updated_at field in the database.
 	FieldUpdatedAt = "updated_at"
+	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
+	FieldLastUsedAt = "last_used_at"
 	// Table holds the table name of the passkeycredential in the database.
 	Table = "passkey_credentials"
 )
@@ -32,10 +36,12 @@ var Columns = []string{
 	FieldID,
 	FieldPublicKey,
 	FieldSignCount,
+	FieldName,
 	FieldBackupEligible,
 	FieldBackupState,
 	FieldCreatedAt,
 	FieldUpdatedAt,
+	FieldLastUsedAt,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -48,6 +54,11 @@ func ValidColumn(column string) bool {
 	return false
 }
 
+var (
+	// DefaultName holds the default value on creation for the "name" field.
+	DefaultName string
+)
+
 // OrderOption defines the ordering options for the PasskeyCredential queries.
 type OrderOption func(*sql.Selector)
 
@@ -59,6 +70,11 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 // BySignCount orders the results by the sign_count field.
 func BySignCount(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSignCount, opts...).ToFunc()
+}
+
+// ByName orders the results by the name field.
+func ByName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldName, opts...).ToFunc()
 }
 
 // ByBackupEligible orders the results by the backup_eligible field.
@@ -79,4 +95,9 @@ func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByUpdatedAt orders the results by the updated_at field.
 func ByUpdatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUpdatedAt, opts...).ToFunc()
+}
+
+// ByLastUsedAt orders the results by the last_used_at field.
+func ByLastUsedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLastUsedAt, opts...).ToFunc()
 }

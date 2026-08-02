@@ -59,7 +59,7 @@ describe("createLedgerAuthActions", () => {
       if (url.endsWith("/api/passkey/login/options")) return jsonResponse({ challenge: "login-challenge" });
       if (url.endsWith("/api/passkey/login/verify")) return jsonResponse({ ok: true });
       if (url.endsWith("/api/passkey/register/options")) return jsonResponse({ challenge: "register-challenge" });
-      if (url.endsWith("/api/passkey/register/verify")) return jsonResponse({ ok: true });
+      if (url.endsWith("/api/passkey/register/verify")) return jsonResponse({ ok: true, credential: { id: "credential", name: "Passkey 2", transports: ["internal"], backupEligible: true, backupState: true } });
       if (url.endsWith("/api/auth/login")) return jsonResponse({ ok: true });
       return jsonResponse({}, { status: 404 });
     }) as typeof fetch;
@@ -90,6 +90,32 @@ describe("createLedgerAuthActions", () => {
     expect(args.setAuthed).toHaveBeenCalledWith(true);
     expect(args.load).toHaveBeenCalledWith(true, { sensitiveUnlocked: true });
     expect(args.clearToast).toHaveBeenCalled();
+  });
+
+  it("returns the newly registered credential so settings can name it", async () => {
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    const credential = await actions.registerPasskey();
+
+    expect(credential).toMatchObject({ id: "credential", name: "Passkey 2" });
+    expect(args.setPasskeyRegistered).toHaveBeenCalledWith(true);
+    expect(args.showToast).toHaveBeenCalledWith("success", "Passkey 已添加");
+  });
+
+  it("accepts a successful registration response from an older backend without a credential summary", async () => {
+    window.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/passkey/register/options")) return jsonResponse({ challenge: "register-challenge" });
+      if (url.endsWith("/api/passkey/register/verify")) return jsonResponse({ ok: true });
+      return jsonResponse({}, { status: 404 });
+    }) as typeof fetch;
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    await expect(actions.registerPasskey()).resolves.toBeNull();
+    expect(args.setPasskeyRegistered).toHaveBeenCalledWith(true);
+    expect(args.showToast).toHaveBeenCalledWith("success", "Passkey 已添加");
   });
 
   it("uses prefetched passkey options so the user click can open the browser prompt immediately", async () => {

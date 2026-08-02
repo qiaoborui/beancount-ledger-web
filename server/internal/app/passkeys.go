@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,12 +19,26 @@ import (
 )
 
 type StoredPasskey struct {
-	ID             string   `json:"id"`
-	PublicKey      string   `json:"publicKey"`
-	Counter        uint32   `json:"counter"`
-	Transports     []string `json:"transports,omitempty"`
-	BackupEligible *bool    `json:"backupEligible,omitempty"`
-	BackupState    *bool    `json:"backupState,omitempty"`
+	ID             string     `json:"id"`
+	PublicKey      string     `json:"publicKey"`
+	Counter        uint32     `json:"counter"`
+	Name           string     `json:"name,omitempty"`
+	Transports     []string   `json:"transports,omitempty"`
+	BackupEligible *bool      `json:"backupEligible,omitempty"`
+	BackupState    *bool      `json:"backupState,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt,omitempty"`
+	LastUsedAt     *time.Time `json:"lastUsedAt,omitempty"`
+}
+
+type PasskeyCredentialSummary struct {
+	ID             string     `json:"id"`
+	Name           string     `json:"name"`
+	Transports     []string   `json:"transports,omitempty"`
+	BackupEligible *bool      `json:"backupEligible,omitempty"`
+	BackupState    *bool      `json:"backupState,omitempty"`
+	CreatedAt      *time.Time `json:"createdAt,omitempty"`
+	LastUsedAt     *time.Time `json:"lastUsedAt,omitempty"`
 }
 
 type passkeyStore struct {
@@ -44,6 +60,8 @@ type passkeyUser struct {
 
 const passkeySessionTTL = 10 * time.Minute
 
+var errPasskeyNotFound = errors.New("Passkey not found")
+
 func (u passkeyUser) WebAuthnID() []byte {
 	if len(u.id) > 0 {
 		return u.id
@@ -64,8 +82,78 @@ func (u passkeyUser) WebAuthnCredentials() []webauthn.Credential {
 }
 
 func (s *Server) passkeyStatus(c *gin.Context) {
-	store := s.readPasskeyStore(context.Background())
-	c.JSON(http.StatusOK, gin.H{"registered": len(store.Credentials) > 0})
+	store := s.readPasskeyStore(c.Request.Context())
+	c.JSON(http.StatusOK, gin.H{"registered": len(store.Credentials) > 0, "count": len(store.Credentials)})
+}
+
+func (s *Server) passkeyCredentials(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	store, err := s.readPasskeyStoreStrict(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"credentials": passkeyCredentialSummaries(store.Credentials)})
+}
+
+func (s *Server) renamePasskeyCredential(c *gin.Context) {
+	if !s.limiter.Check(c, "passkey.credentials.rename", 30, 5*time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input PasskeyRenameRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	name := strings.TrimSpace(input.Name)
+	if err := s.renameStoredPasskey(c.Request.Context(), c.Param("id"), name); err != nil {
+		passkeyManagementError(c, err)
+		return
+	}
+	store, err := s.readPasskeyStoreStrict(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return
+	}
+	for _, credential := range passkeyCredentialSummaries(store.Credentials) {
+		if credential.ID == c.Param("id") {
+			c.JSON(http.StatusOK, credential)
+			return
+		}
+	}
+	passkeyManagementError(c, errPasskeyNotFound)
+}
+
+func (s *Server) deletePasskeyCredential(c *gin.Context) {
+	if !s.limiter.Check(c, "passkey.credentials.delete", 10, 5*time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input PasskeyDeleteRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	ok, err := verifyPassword(input.Password)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
+		return
+	}
+	remaining, err := s.deleteStoredPasskey(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		passkeyManagementError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "remaining": remaining})
 }
 
 func (s *Server) passkeyRegisterOptions(c *gin.Context) {
@@ -134,11 +222,12 @@ func (s *Server) passkeyRegisterVerify(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.savePasskey(credential); err != nil {
+	stored, err := s.savePasskey(credential)
+	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "credential": passkeyCredentialSummary(stored)})
 }
 
 func (s *Server) passkeyLoginOptions(c *gin.Context) {
@@ -247,23 +336,34 @@ func (s *Server) webAuthnRelatedOrigins(c *gin.Context) {
 }
 
 func (s *Server) readPasskeyStore(ctx context.Context) passkeyStore {
+	store, err := s.readPasskeyStoreStrict(ctx)
+	if err != nil {
+		return passkeyStore{Credentials: []StoredPasskey{}}
+	}
+	return store
+}
+
+func (s *Server) readPasskeyStoreStrict(ctx context.Context) (passkeyStore, error) {
 	if s.passkeys != nil {
 		credentials, err := s.passkeys.Credentials(ctx)
 		if err != nil {
-			return passkeyStore{Credentials: []StoredPasskey{}}
+			return passkeyStore{}, err
 		}
-		return passkeyStore{Credentials: credentials}
+		return passkeyStore{Credentials: credentials}, nil
 	}
 	var store passkeyStore
 	ok, err := s.runtime().GetJSON(ctx, "auth", "passkeys", &store)
-	if err != nil || !ok {
-		return passkeyStore{Credentials: []StoredPasskey{}}
+	if err != nil {
+		return passkeyStore{}, err
+	}
+	if !ok {
+		return passkeyStore{Credentials: []StoredPasskey{}}, nil
 	}
 	if store.Credentials == nil {
 		store.Credentials = []StoredPasskey{}
 	}
 	store.normalizePasskeySessions(time.Now())
-	return store
+	return store, nil
 }
 
 func (s *Server) writePasskeyStore(ctx context.Context, store passkeyStore) error {
@@ -361,34 +461,51 @@ func (store *passkeyStore) normalizePasskeySessions(now time.Time) {
 	}
 }
 
-func (s *Server) savePasskey(credential *webauthn.Credential) error {
+func (s *Server) savePasskey(credential *webauthn.Credential) (StoredPasskey, error) {
 	if credential == nil {
-		return errors.New("passkey credential is required")
+		return StoredPasskey{}, errors.New("passkey credential is required")
 	}
+	store := s.readPasskeyStore(context.Background())
+	now := time.Now().UTC()
+	stored := storedPasskeyFromCredential(credential)
+	stored.Name = nextDefaultPasskeyName(store.Credentials)
+	stored.CreatedAt = now
+	stored.UpdatedAt = now
 	if s.passkeys != nil {
-		return s.passkeys.SaveCredential(context.Background(), storedPasskeyFromCredential(credential))
-	}
-	return s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
-		store := s.readPasskeyStore(lockCtx)
-		id := base64.RawURLEncoding.EncodeToString(credential.ID)
-		transports := make([]string, 0, len(credential.Transport))
-		for _, transport := range credential.Transport {
-			transports = append(transports, string(transport))
+		if err := s.passkeys.SaveCredential(context.Background(), stored); err != nil {
+			return StoredPasskey{}, err
 		}
-		stored := StoredPasskey{ID: id, PublicKey: base64.RawURLEncoding.EncodeToString(credential.PublicKey), Counter: credential.Authenticator.SignCount, Transports: transports, BackupEligible: boolPtr(credential.Flags.BackupEligible), BackupState: boolPtr(credential.Flags.BackupState)}
+		return stored, nil
+	}
+	err := s.runtime().WithLock(context.Background(), "passkeys", func(lockCtx context.Context) error {
+		store := s.readPasskeyStore(lockCtx)
 		replaced := false
 		for i := range store.Credentials {
-			if store.Credentials[i].ID == id {
+			if store.Credentials[i].ID == stored.ID {
+				stored.Name = store.Credentials[i].Name
+				stored.CreatedAt = store.Credentials[i].CreatedAt
+				stored.LastUsedAt = store.Credentials[i].LastUsedAt
+				if stored.Name == "" {
+					stored.Name = nextDefaultPasskeyName(store.Credentials)
+				}
+				if stored.CreatedAt.IsZero() {
+					stored.CreatedAt = now
+				}
 				store.Credentials[i] = stored
 				replaced = true
 				break
 			}
 		}
 		if !replaced {
+			stored.Name = nextDefaultPasskeyName(store.Credentials)
 			store.Credentials = append(store.Credentials, stored)
 		}
 		return s.writePasskeyStore(lockCtx, store)
 	})
+	if err != nil {
+		return StoredPasskey{}, err
+	}
+	return stored, nil
 }
 
 func (s *Server) updatePasskeyCounter(id []byte, counter uint32) error {
@@ -404,14 +521,138 @@ func (s *Server) updatePasskeyAfterLogin(id []byte, counter uint32, backupEligib
 		encoded := base64.RawURLEncoding.EncodeToString(id)
 		for i := range store.Credentials {
 			if store.Credentials[i].ID == encoded {
+				now := time.Now().UTC()
 				store.Credentials[i].Counter = counter
 				store.Credentials[i].BackupEligible = boolPtr(backupEligible)
 				store.Credentials[i].BackupState = boolPtr(backupState)
+				store.Credentials[i].LastUsedAt = &now
+				store.Credentials[i].UpdatedAt = now
 				return s.writePasskeyStore(lockCtx, store)
 			}
 		}
-		return errors.New("Unknown passkey")
+		return errPasskeyNotFound
 	})
+}
+
+func (s *Server) renameStoredPasskey(ctx context.Context, id string, name string) error {
+	if s.passkeys != nil {
+		return s.passkeys.RenameCredential(ctx, id, name)
+	}
+	return s.runtime().WithLock(ctx, "passkeys", func(lockCtx context.Context) error {
+		store, err := s.readPasskeyStoreStrict(lockCtx)
+		if err != nil {
+			return err
+		}
+		for i := range store.Credentials {
+			if store.Credentials[i].ID != id {
+				continue
+			}
+			store.Credentials[i].Name = name
+			store.Credentials[i].UpdatedAt = time.Now().UTC()
+			return s.writePasskeyStore(lockCtx, store)
+		}
+		return errPasskeyNotFound
+	})
+}
+
+func (s *Server) deleteStoredPasskey(ctx context.Context, id string) (int, error) {
+	if s.passkeys != nil {
+		return s.passkeys.DeleteCredential(ctx, id)
+	}
+	remaining := 0
+	err := s.runtime().WithLock(ctx, "passkeys", func(lockCtx context.Context) error {
+		store, err := s.readPasskeyStoreStrict(lockCtx)
+		if err != nil {
+			return err
+		}
+		for i := range store.Credentials {
+			if store.Credentials[i].ID != id {
+				continue
+			}
+			store.Credentials = append(store.Credentials[:i], store.Credentials[i+1:]...)
+			if err := s.writePasskeyStore(lockCtx, store); err != nil {
+				return err
+			}
+			remaining = len(store.Credentials)
+			return nil
+		}
+		return errPasskeyNotFound
+	})
+	return remaining, err
+}
+
+func passkeyCredentialSummaries(credentials []StoredPasskey) []PasskeyCredentialSummary {
+	ordered := append([]StoredPasskey(nil), credentials...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := ordered[i], ordered[j]
+		if left.LastUsedAt != nil || right.LastUsedAt != nil {
+			if left.LastUsedAt == nil {
+				return false
+			}
+			if right.LastUsedAt == nil {
+				return true
+			}
+			if !left.LastUsedAt.Equal(*right.LastUsedAt) {
+				return left.LastUsedAt.After(*right.LastUsedAt)
+			}
+		}
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+		return left.ID < right.ID
+	})
+	out := make([]PasskeyCredentialSummary, 0, len(ordered))
+	for _, credential := range ordered {
+		out = append(out, passkeyCredentialSummary(credential))
+	}
+	return out
+}
+
+func passkeyCredentialSummary(credential StoredPasskey) PasskeyCredentialSummary {
+	name := strings.TrimSpace(credential.Name)
+	if name == "" {
+		name = "未命名 Passkey"
+	}
+	var createdAt *time.Time
+	if !credential.CreatedAt.IsZero() {
+		value := credential.CreatedAt.UTC()
+		createdAt = &value
+	}
+	var lastUsedAt *time.Time
+	if credential.LastUsedAt != nil && !credential.LastUsedAt.IsZero() {
+		value := credential.LastUsedAt.UTC()
+		lastUsedAt = &value
+	}
+	return PasskeyCredentialSummary{
+		ID:             credential.ID,
+		Name:           name,
+		Transports:     append([]string(nil), credential.Transports...),
+		BackupEligible: credential.BackupEligible,
+		BackupState:    credential.BackupState,
+		CreatedAt:      createdAt,
+		LastUsedAt:     lastUsedAt,
+	}
+}
+
+func nextDefaultPasskeyName(credentials []StoredPasskey) string {
+	used := make(map[string]struct{}, len(credentials))
+	for _, credential := range credentials {
+		used[strings.TrimSpace(credential.Name)] = struct{}{}
+	}
+	for position := 1; ; position++ {
+		name := fmt.Sprintf("Passkey %d", position)
+		if _, exists := used[name]; !exists {
+			return name
+		}
+	}
+}
+
+func passkeyManagementError(c *gin.Context, err error) {
+	if errors.Is(err, errPasskeyNotFound) {
+		errorJSON(c, http.StatusNotFound, err)
+		return
+	}
+	errorJSON(c, http.StatusInternalServerError, err)
 }
 
 func storedPasskeyFromCredential(credential *webauthn.Credential) StoredPasskey {

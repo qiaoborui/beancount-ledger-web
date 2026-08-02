@@ -68,6 +68,9 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	authState.GET("/auth/me", s.me)
 	authState.GET("/quick-unlock/status", s.quickUnlockStatus)
 	authState.GET("/passkey/status", s.passkeyStatus)
+	authState.GET("/passkey/credentials", s.passkeyCredentials)
+	authState.PATCH("/passkey/credentials/:id", s.renamePasskeyCredential)
+	authState.DELETE("/passkey/credentials/:id", s.deletePasskeyCredential)
 
 	api.POST("/quick-unlock/register", s.quickUnlockRegister)
 	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
@@ -172,7 +175,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "passkey-management-v1"},
 	}
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)

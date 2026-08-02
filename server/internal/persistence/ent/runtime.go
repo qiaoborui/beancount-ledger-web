@@ -2,8 +2,19 @@
 
 package ent
 
+import (
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/passkeycredential"
+	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/schema"
+)
+
 // The init function reads all schema descriptors with runtime code
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	passkeycredentialFields := schema.PasskeyCredential{}.Fields()
+	_ = passkeycredentialFields
+	// passkeycredentialDescName is the schema descriptor for name field.
+	passkeycredentialDescName := passkeycredentialFields[3].Descriptor()
+	// passkeycredential.DefaultName holds the default value on creation for the name field.
+	passkeycredential.DefaultName = passkeycredentialDescName.Default.(string)
 }

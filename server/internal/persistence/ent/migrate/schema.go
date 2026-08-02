@@ -398,10 +398,12 @@ var (
 		{Name: "id", Type: field.TypeString},
 		{Name: "public_key", Type: field.TypeBytes},
 		{Name: "sign_count", Type: field.TypeUint64},
+		{Name: "name", Type: field.TypeString, Default: ""},
 		{Name: "backup_eligible", Type: field.TypeBool, Nullable: true},
 		{Name: "backup_state", Type: field.TypeBool, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
 	}
 	// PasskeyCredentialsTable holds the schema information for the "passkey_credentials" table.
 	PasskeyCredentialsTable = &schema.Table{
