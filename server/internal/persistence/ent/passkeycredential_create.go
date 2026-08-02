@@ -35,6 +35,20 @@ func (_c *PasskeyCredentialCreate) SetSignCount(v uint64) *PasskeyCredentialCrea
 	return _c
 }
 
+// SetName sets the "name" field.
+func (_c *PasskeyCredentialCreate) SetName(v string) *PasskeyCredentialCreate {
+	_c.mutation.SetName(v)
+	return _c
+}
+
+// SetNillableName sets the "name" field if the given value is not nil.
+func (_c *PasskeyCredentialCreate) SetNillableName(v *string) *PasskeyCredentialCreate {
+	if v != nil {
+		_c.SetName(*v)
+	}
+	return _c
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (_c *PasskeyCredentialCreate) SetBackupEligible(v bool) *PasskeyCredentialCreate {
 	_c.mutation.SetBackupEligible(v)
@@ -75,6 +89,20 @@ func (_c *PasskeyCredentialCreate) SetUpdatedAt(v time.Time) *PasskeyCredentialC
 	return _c
 }
 
+// SetLastUsedAt sets the "last_used_at" field.
+func (_c *PasskeyCredentialCreate) SetLastUsedAt(v time.Time) *PasskeyCredentialCreate {
+	_c.mutation.SetLastUsedAt(v)
+	return _c
+}
+
+// SetNillableLastUsedAt sets the "last_used_at" field if the given value is not nil.
+func (_c *PasskeyCredentialCreate) SetNillableLastUsedAt(v *time.Time) *PasskeyCredentialCreate {
+	if v != nil {
+		_c.SetLastUsedAt(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *PasskeyCredentialCreate) SetID(v string) *PasskeyCredentialCreate {
 	_c.mutation.SetID(v)
@@ -88,6 +116,7 @@ func (_c *PasskeyCredentialCreate) Mutation() *PasskeyCredentialMutation {
 
 // Save creates the PasskeyCredential in the database.
 func (_c *PasskeyCredentialCreate) Save(ctx context.Context) (*PasskeyCredential, error) {
+	_c.defaults()
 	return withHooks(ctx, _c.sqlSave, _c.mutation, _c.hooks)
 }
 
@@ -113,6 +142,14 @@ func (_c *PasskeyCredentialCreate) ExecX(ctx context.Context) {
 	}
 }
 
+// defaults sets the default values of the builder before save.
+func (_c *PasskeyCredentialCreate) defaults() {
+	if _, ok := _c.mutation.Name(); !ok {
+		v := passkeycredential.DefaultName
+		_c.mutation.SetName(v)
+	}
+}
+
 // check runs all checks and user-defined validators on the builder.
 func (_c *PasskeyCredentialCreate) check() error {
 	if _, ok := _c.mutation.PublicKey(); !ok {
@@ -120,6 +157,9 @@ func (_c *PasskeyCredentialCreate) check() error {
 	}
 	if _, ok := _c.mutation.SignCount(); !ok {
 		return &ValidationError{Name: "sign_count", err: errors.New(`ent: missing required field "PasskeyCredential.sign_count"`)}
+	}
+	if _, ok := _c.mutation.Name(); !ok {
+		return &ValidationError{Name: "name", err: errors.New(`ent: missing required field "PasskeyCredential.name"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "PasskeyCredential.created_at"`)}
@@ -171,6 +211,10 @@ func (_c *PasskeyCredentialCreate) createSpec() (*PasskeyCredential, *sqlgraph.C
 		_spec.SetField(passkeycredential.FieldSignCount, field.TypeUint64, value)
 		_node.SignCount = value
 	}
+	if value, ok := _c.mutation.Name(); ok {
+		_spec.SetField(passkeycredential.FieldName, field.TypeString, value)
+		_node.Name = value
+	}
 	if value, ok := _c.mutation.BackupEligible(); ok {
 		_spec.SetField(passkeycredential.FieldBackupEligible, field.TypeBool, value)
 		_node.BackupEligible = &value
@@ -186,6 +230,10 @@ func (_c *PasskeyCredentialCreate) createSpec() (*PasskeyCredential, *sqlgraph.C
 	if value, ok := _c.mutation.UpdatedAt(); ok {
 		_spec.SetField(passkeycredential.FieldUpdatedAt, field.TypeTime, value)
 		_node.UpdatedAt = value
+	}
+	if value, ok := _c.mutation.LastUsedAt(); ok {
+		_spec.SetField(passkeycredential.FieldLastUsedAt, field.TypeTime, value)
+		_node.LastUsedAt = &value
 	}
 	return _node, _spec
 }
@@ -269,6 +317,18 @@ func (u *PasskeyCredentialUpsert) AddSignCount(v uint64) *PasskeyCredentialUpser
 	return u
 }
 
+// SetName sets the "name" field.
+func (u *PasskeyCredentialUpsert) SetName(v string) *PasskeyCredentialUpsert {
+	u.Set(passkeycredential.FieldName, v)
+	return u
+}
+
+// UpdateName sets the "name" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsert) UpdateName() *PasskeyCredentialUpsert {
+	u.SetExcluded(passkeycredential.FieldName)
+	return u
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (u *PasskeyCredentialUpsert) SetBackupEligible(v bool) *PasskeyCredentialUpsert {
 	u.Set(passkeycredential.FieldBackupEligible, v)
@@ -314,6 +374,24 @@ func (u *PasskeyCredentialUpsert) SetUpdatedAt(v time.Time) *PasskeyCredentialUp
 // UpdateUpdatedAt sets the "updated_at" field to the value that was provided on create.
 func (u *PasskeyCredentialUpsert) UpdateUpdatedAt() *PasskeyCredentialUpsert {
 	u.SetExcluded(passkeycredential.FieldUpdatedAt)
+	return u
+}
+
+// SetLastUsedAt sets the "last_used_at" field.
+func (u *PasskeyCredentialUpsert) SetLastUsedAt(v time.Time) *PasskeyCredentialUpsert {
+	u.Set(passkeycredential.FieldLastUsedAt, v)
+	return u
+}
+
+// UpdateLastUsedAt sets the "last_used_at" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsert) UpdateLastUsedAt() *PasskeyCredentialUpsert {
+	u.SetExcluded(passkeycredential.FieldLastUsedAt)
+	return u
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (u *PasskeyCredentialUpsert) ClearLastUsedAt() *PasskeyCredentialUpsert {
+	u.SetNull(passkeycredential.FieldLastUsedAt)
 	return u
 }
 
@@ -403,6 +481,20 @@ func (u *PasskeyCredentialUpsertOne) UpdateSignCount() *PasskeyCredentialUpsertO
 	})
 }
 
+// SetName sets the "name" field.
+func (u *PasskeyCredentialUpsertOne) SetName(v string) *PasskeyCredentialUpsertOne {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.SetName(v)
+	})
+}
+
+// UpdateName sets the "name" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsertOne) UpdateName() *PasskeyCredentialUpsertOne {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.UpdateName()
+	})
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (u *PasskeyCredentialUpsertOne) SetBackupEligible(v bool) *PasskeyCredentialUpsertOne {
 	return u.Update(func(s *PasskeyCredentialUpsert) {
@@ -456,6 +548,27 @@ func (u *PasskeyCredentialUpsertOne) SetUpdatedAt(v time.Time) *PasskeyCredentia
 func (u *PasskeyCredentialUpsertOne) UpdateUpdatedAt() *PasskeyCredentialUpsertOne {
 	return u.Update(func(s *PasskeyCredentialUpsert) {
 		s.UpdateUpdatedAt()
+	})
+}
+
+// SetLastUsedAt sets the "last_used_at" field.
+func (u *PasskeyCredentialUpsertOne) SetLastUsedAt(v time.Time) *PasskeyCredentialUpsertOne {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.SetLastUsedAt(v)
+	})
+}
+
+// UpdateLastUsedAt sets the "last_used_at" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsertOne) UpdateLastUsedAt() *PasskeyCredentialUpsertOne {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.UpdateLastUsedAt()
+	})
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (u *PasskeyCredentialUpsertOne) ClearLastUsedAt() *PasskeyCredentialUpsertOne {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.ClearLastUsedAt()
 	})
 }
 
@@ -516,6 +629,7 @@ func (_c *PasskeyCredentialCreateBulk) Save(ctx context.Context) ([]*PasskeyCred
 	for i := range _c.builders {
 		func(i int, root context.Context) {
 			builder := _c.builders[i]
+			builder.defaults()
 			var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
 				mutation, ok := m.(*PasskeyCredentialMutation)
 				if !ok {
@@ -711,6 +825,20 @@ func (u *PasskeyCredentialUpsertBulk) UpdateSignCount() *PasskeyCredentialUpsert
 	})
 }
 
+// SetName sets the "name" field.
+func (u *PasskeyCredentialUpsertBulk) SetName(v string) *PasskeyCredentialUpsertBulk {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.SetName(v)
+	})
+}
+
+// UpdateName sets the "name" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsertBulk) UpdateName() *PasskeyCredentialUpsertBulk {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.UpdateName()
+	})
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (u *PasskeyCredentialUpsertBulk) SetBackupEligible(v bool) *PasskeyCredentialUpsertBulk {
 	return u.Update(func(s *PasskeyCredentialUpsert) {
@@ -764,6 +892,27 @@ func (u *PasskeyCredentialUpsertBulk) SetUpdatedAt(v time.Time) *PasskeyCredenti
 func (u *PasskeyCredentialUpsertBulk) UpdateUpdatedAt() *PasskeyCredentialUpsertBulk {
 	return u.Update(func(s *PasskeyCredentialUpsert) {
 		s.UpdateUpdatedAt()
+	})
+}
+
+// SetLastUsedAt sets the "last_used_at" field.
+func (u *PasskeyCredentialUpsertBulk) SetLastUsedAt(v time.Time) *PasskeyCredentialUpsertBulk {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.SetLastUsedAt(v)
+	})
+}
+
+// UpdateLastUsedAt sets the "last_used_at" field to the value that was provided on create.
+func (u *PasskeyCredentialUpsertBulk) UpdateLastUsedAt() *PasskeyCredentialUpsertBulk {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.UpdateLastUsedAt()
+	})
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (u *PasskeyCredentialUpsertBulk) ClearLastUsedAt() *PasskeyCredentialUpsertBulk {
+	return u.Update(func(s *PasskeyCredentialUpsert) {
+		s.ClearLastUsedAt()
 	})
 }
 

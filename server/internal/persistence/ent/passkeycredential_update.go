@@ -55,6 +55,20 @@ func (_u *PasskeyCredentialUpdate) AddSignCount(v int64) *PasskeyCredentialUpdat
 	return _u
 }
 
+// SetName sets the "name" field.
+func (_u *PasskeyCredentialUpdate) SetName(v string) *PasskeyCredentialUpdate {
+	_u.mutation.SetName(v)
+	return _u
+}
+
+// SetNillableName sets the "name" field if the given value is not nil.
+func (_u *PasskeyCredentialUpdate) SetNillableName(v *string) *PasskeyCredentialUpdate {
+	if v != nil {
+		_u.SetName(*v)
+	}
+	return _u
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (_u *PasskeyCredentialUpdate) SetBackupEligible(v bool) *PasskeyCredentialUpdate {
 	_u.mutation.SetBackupEligible(v)
@@ -109,6 +123,26 @@ func (_u *PasskeyCredentialUpdate) SetNillableUpdatedAt(v *time.Time) *PasskeyCr
 	return _u
 }
 
+// SetLastUsedAt sets the "last_used_at" field.
+func (_u *PasskeyCredentialUpdate) SetLastUsedAt(v time.Time) *PasskeyCredentialUpdate {
+	_u.mutation.SetLastUsedAt(v)
+	return _u
+}
+
+// SetNillableLastUsedAt sets the "last_used_at" field if the given value is not nil.
+func (_u *PasskeyCredentialUpdate) SetNillableLastUsedAt(v *time.Time) *PasskeyCredentialUpdate {
+	if v != nil {
+		_u.SetLastUsedAt(*v)
+	}
+	return _u
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (_u *PasskeyCredentialUpdate) ClearLastUsedAt() *PasskeyCredentialUpdate {
+	_u.mutation.ClearLastUsedAt()
+	return _u
+}
+
 // Mutation returns the PasskeyCredentialMutation object of the builder.
 func (_u *PasskeyCredentialUpdate) Mutation() *PasskeyCredentialMutation {
 	return _u.mutation
@@ -159,6 +193,9 @@ func (_u *PasskeyCredentialUpdate) sqlSave(ctx context.Context) (_node int, err 
 	if value, ok := _u.mutation.AddedSignCount(); ok {
 		_spec.AddField(passkeycredential.FieldSignCount, field.TypeUint64, value)
 	}
+	if value, ok := _u.mutation.Name(); ok {
+		_spec.SetField(passkeycredential.FieldName, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.BackupEligible(); ok {
 		_spec.SetField(passkeycredential.FieldBackupEligible, field.TypeBool, value)
 	}
@@ -173,6 +210,12 @@ func (_u *PasskeyCredentialUpdate) sqlSave(ctx context.Context) (_node int, err 
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(passkeycredential.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.LastUsedAt(); ok {
+		_spec.SetField(passkeycredential.FieldLastUsedAt, field.TypeTime, value)
+	}
+	if _u.mutation.LastUsedAtCleared() {
+		_spec.ClearField(passkeycredential.FieldLastUsedAt, field.TypeTime)
 	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
@@ -218,6 +261,20 @@ func (_u *PasskeyCredentialUpdateOne) SetNillableSignCount(v *uint64) *PasskeyCr
 // AddSignCount adds value to the "sign_count" field.
 func (_u *PasskeyCredentialUpdateOne) AddSignCount(v int64) *PasskeyCredentialUpdateOne {
 	_u.mutation.AddSignCount(v)
+	return _u
+}
+
+// SetName sets the "name" field.
+func (_u *PasskeyCredentialUpdateOne) SetName(v string) *PasskeyCredentialUpdateOne {
+	_u.mutation.SetName(v)
+	return _u
+}
+
+// SetNillableName sets the "name" field if the given value is not nil.
+func (_u *PasskeyCredentialUpdateOne) SetNillableName(v *string) *PasskeyCredentialUpdateOne {
+	if v != nil {
+		_u.SetName(*v)
+	}
 	return _u
 }
 
@@ -272,6 +329,26 @@ func (_u *PasskeyCredentialUpdateOne) SetNillableUpdatedAt(v *time.Time) *Passke
 	if v != nil {
 		_u.SetUpdatedAt(*v)
 	}
+	return _u
+}
+
+// SetLastUsedAt sets the "last_used_at" field.
+func (_u *PasskeyCredentialUpdateOne) SetLastUsedAt(v time.Time) *PasskeyCredentialUpdateOne {
+	_u.mutation.SetLastUsedAt(v)
+	return _u
+}
+
+// SetNillableLastUsedAt sets the "last_used_at" field if the given value is not nil.
+func (_u *PasskeyCredentialUpdateOne) SetNillableLastUsedAt(v *time.Time) *PasskeyCredentialUpdateOne {
+	if v != nil {
+		_u.SetLastUsedAt(*v)
+	}
+	return _u
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (_u *PasskeyCredentialUpdateOne) ClearLastUsedAt() *PasskeyCredentialUpdateOne {
+	_u.mutation.ClearLastUsedAt()
 	return _u
 }
 
@@ -355,6 +432,9 @@ func (_u *PasskeyCredentialUpdateOne) sqlSave(ctx context.Context) (_node *Passk
 	if value, ok := _u.mutation.AddedSignCount(); ok {
 		_spec.AddField(passkeycredential.FieldSignCount, field.TypeUint64, value)
 	}
+	if value, ok := _u.mutation.Name(); ok {
+		_spec.SetField(passkeycredential.FieldName, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.BackupEligible(); ok {
 		_spec.SetField(passkeycredential.FieldBackupEligible, field.TypeBool, value)
 	}
@@ -369,6 +449,12 @@ func (_u *PasskeyCredentialUpdateOne) sqlSave(ctx context.Context) (_node *Passk
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(passkeycredential.FieldUpdatedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.LastUsedAt(); ok {
+		_spec.SetField(passkeycredential.FieldLastUsedAt, field.TypeTime, value)
+	}
+	if _u.mutation.LastUsedAtCleared() {
+		_spec.ClearField(passkeycredential.FieldLastUsedAt, field.TypeTime)
 	}
 	_node = &PasskeyCredential{config: _u.config}
 	_spec.Assign = _node.assignValues

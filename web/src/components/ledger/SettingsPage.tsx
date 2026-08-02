@@ -6,6 +6,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatus, applyApiEndpointProbe, createApiEndpointId, displayApiEndpointUrl, hasKnownApiEndpointAuthentication, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, withActiveApiEndpoint, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
 import { getWebPushPresentation, useWebPush } from "./hooks/useWebPush";
+import { PasskeySettingsPanel } from "./PasskeySettingsPanel";
+import type { PasskeyCredentialSummary } from "./passkeys";
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
 
@@ -58,6 +60,8 @@ export function SettingsPage({
   onEnableQuickUnlock,
   onDisableQuickUnlock,
   onEnableOfflineUnlock,
+  onRegisterPasskey,
+  onPasskeyRegisteredChange,
   showToast,
 }: {
   settings: PrivacySettings;
@@ -75,6 +79,8 @@ export function SettingsPage({
   onEnableQuickUnlock: (secret: string, mode: QuickUnlockMode) => void | Promise<void>;
   onDisableQuickUnlock: () => void | Promise<void>;
   onEnableOfflineUnlock: (secret: string) => void | Promise<void>;
+  onRegisterPasskey: (endpoint?: ApiEndpoint) => Promise<PasskeyCredentialSummary | null>;
+  onPasskeyRegisteredChange: (registered: boolean) => void;
   showToast: ToastFn;
 }) {
   function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
@@ -85,6 +91,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <PasskeySettingsPanel onRegister={onRegisterPasskey} onRegisteredChange={onPasskeyRegisteredChange} showToast={showToast} />
     <NotificationSettingsPanel showToast={showToast} />
     <ApiEndpointSettingsPanel showToast={showToast} />
     <QuickUnlockSettings enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} showToast={showToast} />

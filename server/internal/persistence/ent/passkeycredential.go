@@ -21,6 +21,8 @@ type PasskeyCredential struct {
 	PublicKey []byte `json:"-"`
 	// SignCount holds the value of the "sign_count" field.
 	SignCount uint64 `json:"sign_count,omitempty"`
+	// Name holds the value of the "name" field.
+	Name string `json:"name,omitempty"`
 	// BackupEligible holds the value of the "backup_eligible" field.
 	BackupEligible *bool `json:"backup_eligible,omitempty"`
 	// BackupState holds the value of the "backup_state" field.
@@ -28,7 +30,9 @@ type PasskeyCredential struct {
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// LastUsedAt holds the value of the "last_used_at" field.
+	LastUsedAt   *time.Time `json:"last_used_at,omitempty"`
 	selectValues sql.SelectValues
 }
 
@@ -43,9 +47,9 @@ func (*PasskeyCredential) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case passkeycredential.FieldSignCount:
 			values[i] = new(sql.NullInt64)
-		case passkeycredential.FieldID:
+		case passkeycredential.FieldID, passkeycredential.FieldName:
 			values[i] = new(sql.NullString)
-		case passkeycredential.FieldCreatedAt, passkeycredential.FieldUpdatedAt:
+		case passkeycredential.FieldCreatedAt, passkeycredential.FieldUpdatedAt, passkeycredential.FieldLastUsedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -80,6 +84,12 @@ func (_m *PasskeyCredential) assignValues(columns []string, values []any) error 
 			} else if value.Valid {
 				_m.SignCount = uint64(value.Int64)
 			}
+		case passkeycredential.FieldName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field name", values[i])
+			} else if value.Valid {
+				_m.Name = value.String
+			}
 		case passkeycredential.FieldBackupEligible:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field backup_eligible", values[i])
@@ -105,6 +115,13 @@ func (_m *PasskeyCredential) assignValues(columns []string, values []any) error 
 				return fmt.Errorf("unexpected type %T for field updated_at", values[i])
 			} else if value.Valid {
 				_m.UpdatedAt = value.Time
+			}
+		case passkeycredential.FieldLastUsedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field last_used_at", values[i])
+			} else if value.Valid {
+				_m.LastUsedAt = new(time.Time)
+				*_m.LastUsedAt = value.Time
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -147,6 +164,9 @@ func (_m *PasskeyCredential) String() string {
 	builder.WriteString("sign_count=")
 	builder.WriteString(fmt.Sprintf("%v", _m.SignCount))
 	builder.WriteString(", ")
+	builder.WriteString("name=")
+	builder.WriteString(_m.Name)
+	builder.WriteString(", ")
 	if v := _m.BackupEligible; v != nil {
 		builder.WriteString("backup_eligible=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
@@ -162,6 +182,11 @@ func (_m *PasskeyCredential) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("updated_at=")
 	builder.WriteString(_m.UpdatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	if v := _m.LastUsedAt; v != nil {
+		builder.WriteString("last_used_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
 	builder.WriteByte(')')
 	return builder.String()
 }

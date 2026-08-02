@@ -11781,10 +11781,12 @@ type PasskeyCredentialMutation struct {
 	public_key      *[]byte
 	sign_count      *uint64
 	addsign_count   *int64
+	name            *string
 	backup_eligible *bool
 	backup_state    *bool
 	created_at      *time.Time
 	updated_at      *time.Time
+	last_used_at    *time.Time
 	clearedFields   map[string]struct{}
 	done            bool
 	oldValue        func(context.Context) (*PasskeyCredential, error)
@@ -11987,6 +11989,42 @@ func (m *PasskeyCredentialMutation) ResetSignCount() {
 	m.addsign_count = nil
 }
 
+// SetName sets the "name" field.
+func (m *PasskeyCredentialMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *PasskeyCredentialMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the PasskeyCredential entity.
+// If the PasskeyCredential object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PasskeyCredentialMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *PasskeyCredentialMutation) ResetName() {
+	m.name = nil
+}
+
 // SetBackupEligible sets the "backup_eligible" field.
 func (m *PasskeyCredentialMutation) SetBackupEligible(b bool) {
 	m.backup_eligible = &b
@@ -12157,6 +12195,55 @@ func (m *PasskeyCredentialMutation) ResetUpdatedAt() {
 	m.updated_at = nil
 }
 
+// SetLastUsedAt sets the "last_used_at" field.
+func (m *PasskeyCredentialMutation) SetLastUsedAt(t time.Time) {
+	m.last_used_at = &t
+}
+
+// LastUsedAt returns the value of the "last_used_at" field in the mutation.
+func (m *PasskeyCredentialMutation) LastUsedAt() (r time.Time, exists bool) {
+	v := m.last_used_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastUsedAt returns the old "last_used_at" field's value of the PasskeyCredential entity.
+// If the PasskeyCredential object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PasskeyCredentialMutation) OldLastUsedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastUsedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastUsedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastUsedAt: %w", err)
+	}
+	return oldValue.LastUsedAt, nil
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (m *PasskeyCredentialMutation) ClearLastUsedAt() {
+	m.last_used_at = nil
+	m.clearedFields[passkeycredential.FieldLastUsedAt] = struct{}{}
+}
+
+// LastUsedAtCleared returns if the "last_used_at" field was cleared in this mutation.
+func (m *PasskeyCredentialMutation) LastUsedAtCleared() bool {
+	_, ok := m.clearedFields[passkeycredential.FieldLastUsedAt]
+	return ok
+}
+
+// ResetLastUsedAt resets all changes to the "last_used_at" field.
+func (m *PasskeyCredentialMutation) ResetLastUsedAt() {
+	m.last_used_at = nil
+	delete(m.clearedFields, passkeycredential.FieldLastUsedAt)
+}
+
 // Where appends a list predicates to the PasskeyCredentialMutation builder.
 func (m *PasskeyCredentialMutation) Where(ps ...predicate.PasskeyCredential) {
 	m.predicates = append(m.predicates, ps...)
@@ -12191,12 +12278,15 @@ func (m *PasskeyCredentialMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PasskeyCredentialMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 8)
 	if m.public_key != nil {
 		fields = append(fields, passkeycredential.FieldPublicKey)
 	}
 	if m.sign_count != nil {
 		fields = append(fields, passkeycredential.FieldSignCount)
+	}
+	if m.name != nil {
+		fields = append(fields, passkeycredential.FieldName)
 	}
 	if m.backup_eligible != nil {
 		fields = append(fields, passkeycredential.FieldBackupEligible)
@@ -12210,6 +12300,9 @@ func (m *PasskeyCredentialMutation) Fields() []string {
 	if m.updated_at != nil {
 		fields = append(fields, passkeycredential.FieldUpdatedAt)
 	}
+	if m.last_used_at != nil {
+		fields = append(fields, passkeycredential.FieldLastUsedAt)
+	}
 	return fields
 }
 
@@ -12222,6 +12315,8 @@ func (m *PasskeyCredentialMutation) Field(name string) (ent.Value, bool) {
 		return m.PublicKey()
 	case passkeycredential.FieldSignCount:
 		return m.SignCount()
+	case passkeycredential.FieldName:
+		return m.Name()
 	case passkeycredential.FieldBackupEligible:
 		return m.BackupEligible()
 	case passkeycredential.FieldBackupState:
@@ -12230,6 +12325,8 @@ func (m *PasskeyCredentialMutation) Field(name string) (ent.Value, bool) {
 		return m.CreatedAt()
 	case passkeycredential.FieldUpdatedAt:
 		return m.UpdatedAt()
+	case passkeycredential.FieldLastUsedAt:
+		return m.LastUsedAt()
 	}
 	return nil, false
 }
@@ -12243,6 +12340,8 @@ func (m *PasskeyCredentialMutation) OldField(ctx context.Context, name string) (
 		return m.OldPublicKey(ctx)
 	case passkeycredential.FieldSignCount:
 		return m.OldSignCount(ctx)
+	case passkeycredential.FieldName:
+		return m.OldName(ctx)
 	case passkeycredential.FieldBackupEligible:
 		return m.OldBackupEligible(ctx)
 	case passkeycredential.FieldBackupState:
@@ -12251,6 +12350,8 @@ func (m *PasskeyCredentialMutation) OldField(ctx context.Context, name string) (
 		return m.OldCreatedAt(ctx)
 	case passkeycredential.FieldUpdatedAt:
 		return m.OldUpdatedAt(ctx)
+	case passkeycredential.FieldLastUsedAt:
+		return m.OldLastUsedAt(ctx)
 	}
 	return nil, fmt.Errorf("unknown PasskeyCredential field %s", name)
 }
@@ -12273,6 +12374,13 @@ func (m *PasskeyCredentialMutation) SetField(name string, value ent.Value) error
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetSignCount(v)
+		return nil
+	case passkeycredential.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
 		return nil
 	case passkeycredential.FieldBackupEligible:
 		v, ok := value.(bool)
@@ -12301,6 +12409,13 @@ func (m *PasskeyCredentialMutation) SetField(name string, value ent.Value) error
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUpdatedAt(v)
+		return nil
+	case passkeycredential.FieldLastUsedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastUsedAt(v)
 		return nil
 	}
 	return fmt.Errorf("unknown PasskeyCredential field %s", name)
@@ -12353,6 +12468,9 @@ func (m *PasskeyCredentialMutation) ClearedFields() []string {
 	if m.FieldCleared(passkeycredential.FieldBackupState) {
 		fields = append(fields, passkeycredential.FieldBackupState)
 	}
+	if m.FieldCleared(passkeycredential.FieldLastUsedAt) {
+		fields = append(fields, passkeycredential.FieldLastUsedAt)
+	}
 	return fields
 }
 
@@ -12373,6 +12491,9 @@ func (m *PasskeyCredentialMutation) ClearField(name string) error {
 	case passkeycredential.FieldBackupState:
 		m.ClearBackupState()
 		return nil
+	case passkeycredential.FieldLastUsedAt:
+		m.ClearLastUsedAt()
+		return nil
 	}
 	return fmt.Errorf("unknown PasskeyCredential nullable field %s", name)
 }
@@ -12387,6 +12508,9 @@ func (m *PasskeyCredentialMutation) ResetField(name string) error {
 	case passkeycredential.FieldSignCount:
 		m.ResetSignCount()
 		return nil
+	case passkeycredential.FieldName:
+		m.ResetName()
+		return nil
 	case passkeycredential.FieldBackupEligible:
 		m.ResetBackupEligible()
 		return nil
@@ -12398,6 +12522,9 @@ func (m *PasskeyCredentialMutation) ResetField(name string) error {
 		return nil
 	case passkeycredential.FieldUpdatedAt:
 		m.ResetUpdatedAt()
+		return nil
+	case passkeycredential.FieldLastUsedAt:
+		m.ResetLastUsedAt()
 		return nil
 	}
 	return fmt.Errorf("unknown PasskeyCredential field %s", name)

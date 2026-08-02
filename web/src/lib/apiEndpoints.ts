@@ -6,6 +6,7 @@ export type ApiEndpoint = {
   clusterId?: string;
   apiVersion?: number;
   ledgerVersion?: string;
+  capabilities?: string[];
 };
 
 export type ApiEndpointSettings = {
@@ -259,6 +260,7 @@ export function applyApiEndpointProbe(settings: ApiEndpointSettings, endpointId:
       clusterId: resultClusterId,
       apiVersion: result.apiVersion,
       ledgerVersion: result.ledgerVersion,
+      capabilities: result.capabilities,
     } : endpoint),
   };
 }
@@ -398,6 +400,7 @@ function sanitizeApiEndpointSettings(raw: Partial<ApiEndpointSettings>): ApiEndp
     clusterId: typeof rawSameOrigin?.clusterId === "string" ? rawSameOrigin.clusterId : undefined,
     apiVersion: typeof rawSameOrigin?.apiVersion === "number" ? rawSameOrigin.apiVersion : undefined,
     ledgerVersion: typeof rawSameOrigin?.ledgerVersion === "string" ? rawSameOrigin.ledgerVersion : undefined,
+    capabilities: sanitizeCapabilities(rawSameOrigin?.capabilities),
   }];
   for (const endpoint of customEndpoints) {
     if (!endpoint || typeof endpoint !== "object") continue;
@@ -422,6 +425,7 @@ function sanitizeApiEndpointSettings(raw: Partial<ApiEndpointSettings>): ApiEndp
       clusterId: typeof endpoint.clusterId === "string" ? endpoint.clusterId : undefined,
       apiVersion: typeof endpoint.apiVersion === "number" ? endpoint.apiVersion : undefined,
       ledgerVersion: typeof endpoint.ledgerVersion === "string" ? endpoint.ledgerVersion : undefined,
+      capabilities: sanitizeCapabilities(endpoint.capabilities),
     });
   }
   const activeId = typeof raw.activeId === "string" && endpoints.some((endpoint) => endpoint.id === raw.activeId)
@@ -434,6 +438,11 @@ function sanitizeApiEndpointSettings(raw: Partial<ApiEndpointSettings>): ApiEndp
     apiVersion: typeof raw.apiVersion === "number" ? raw.apiVersion : undefined,
     endpoints,
   };
+}
+
+function sanitizeCapabilities(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((capability): capability is string => typeof capability === "string");
 }
 
 function apiFetchTarget(input: RequestInfo | URL, init?: RequestInit): { pathWithSearch: string; method: string } | null {

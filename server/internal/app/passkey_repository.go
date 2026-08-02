@@ -23,6 +23,8 @@ type passkeyRepository interface {
 	HasSession(context.Context) (bool, error)
 	SaveCredential(context.Context, StoredPasskey) error
 	UpdateCredential(context.Context, string, uint32, bool, bool) error
+	RenameCredential(context.Context, string, string) error
+	DeleteCredential(context.Context, string) (int, error)
 	Backfill(context.Context, passkeyStore) error
 }
 
@@ -56,9 +58,13 @@ func (r *entPasskeyRepository) Credentials(ctx context.Context) ([]StoredPasskey
 			ID:             credential.ID,
 			PublicKey:      base64.RawURLEncoding.EncodeToString(credential.PublicKey),
 			Counter:        uint32(credential.SignCount),
+			Name:           credential.Name,
 			Transports:     byCredential[credential.ID],
 			BackupEligible: credential.BackupEligible,
 			BackupState:    credential.BackupState,
+			CreatedAt:      credential.CreatedAt,
+			UpdatedAt:      credential.UpdatedAt,
+			LastUsedAt:     credential.LastUsedAt,
 		})
 	}
 	return out, nil
@@ -143,7 +149,11 @@ func (r *entPasskeyRepository) SaveCredential(ctx context.Context, stored Stored
 	defer tx.Rollback()
 	existing, err := tx.PasskeyCredential.Query().Where(passkeycredential.IDEQ(stored.ID)).Only(ctx)
 	if ent.IsNotFound(err) {
-		if _, err := tx.PasskeyCredential.Create().SetID(stored.ID).SetPublicKey(publicKey).SetSignCount(uint64(stored.Counter)).SetNillableBackupEligible(stored.BackupEligible).SetNillableBackupState(stored.BackupState).SetCreatedAt(now).SetUpdatedAt(now).Save(ctx); err != nil {
+		createdAt := stored.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		if _, err := tx.PasskeyCredential.Create().SetID(stored.ID).SetPublicKey(publicKey).SetSignCount(uint64(stored.Counter)).SetName(stored.Name).SetNillableBackupEligible(stored.BackupEligible).SetNillableBackupState(stored.BackupState).SetCreatedAt(createdAt).SetUpdatedAt(now).SetNillableLastUsedAt(stored.LastUsedAt).Save(ctx); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -176,14 +186,55 @@ func (r *entPasskeyRepository) SaveCredential(ctx context.Context, stored Stored
 }
 
 func (r *entPasskeyRepository) UpdateCredential(ctx context.Context, id string, counter uint32, backupEligible bool, backupState bool) error {
-	updated, err := r.client.PasskeyCredential.Update().Where(passkeycredential.IDEQ(id)).SetSignCount(uint64(counter)).SetBackupEligible(backupEligible).SetBackupState(backupState).SetUpdatedAt(time.Now().UTC()).Save(ctx)
+	now := time.Now().UTC()
+	updated, err := r.client.PasskeyCredential.Update().Where(passkeycredential.IDEQ(id)).SetSignCount(uint64(counter)).SetBackupEligible(backupEligible).SetBackupState(backupState).SetUpdatedAt(now).SetLastUsedAt(now).Save(ctx)
 	if err != nil {
 		return err
 	}
 	if updated == 0 {
-		return errors.New("Unknown passkey")
+		return errPasskeyNotFound
 	}
 	return nil
+}
+
+func (r *entPasskeyRepository) RenameCredential(ctx context.Context, id string, name string) error {
+	updated, err := r.client.PasskeyCredential.Update().Where(passkeycredential.IDEQ(id)).SetName(name).SetUpdatedAt(time.Now().UTC()).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return errPasskeyNotFound
+	}
+	return nil
+}
+
+func (r *entPasskeyRepository) DeleteCredential(ctx context.Context, id string) (int, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	credential, err := tx.PasskeyCredential.Query().Where(passkeycredential.IDEQ(id)).Only(ctx)
+	if ent.IsNotFound(err) {
+		return 0, errPasskeyNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.PasskeyTransport.Delete().Where(passkeytransport.CredentialIDEQ(id)).Exec(ctx); err != nil {
+		return 0, err
+	}
+	if err := tx.PasskeyCredential.DeleteOne(credential).Exec(ctx); err != nil {
+		return 0, err
+	}
+	remaining, err := tx.PasskeyCredential.Query().Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return remaining, nil
 }
 
 func (r *entPasskeyRepository) Backfill(ctx context.Context, legacy passkeyStore) error {

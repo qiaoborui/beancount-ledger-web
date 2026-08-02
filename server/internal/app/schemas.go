@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type validator interface {
@@ -28,6 +29,14 @@ type QuickUnlockVerifyRequest struct {
 
 type QuickUnlockRevokeRequest struct {
 	DeviceID string `json:"deviceId"`
+}
+
+type PasskeyRenameRequest struct {
+	Name string `json:"name"`
+}
+
+type PasskeyDeleteRequest struct {
+	Password string `json:"password"`
 }
 
 type ReverseTransactionRequest struct {
@@ -120,6 +129,27 @@ func (r QuickUnlockVerifyRequest) Validate() error {
 func (r QuickUnlockRevokeRequest) Validate() error {
 	if !deviceIDPattern.MatchString(r.DeviceID) {
 		return fmt.Errorf("deviceId is invalid")
+	}
+	return nil
+}
+
+func (r PasskeyRenameRequest) Validate() error {
+	name := strings.TrimSpace(r.Name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if utf8.RuneCountInString(name) > 64 {
+		return fmt.Errorf("name is too long")
+	}
+	return nil
+}
+
+func (r PasskeyDeleteRequest) Validate() error {
+	if strings.TrimSpace(r.Password) == "" {
+		return fmt.Errorf("password is required")
+	}
+	if len(r.Password) > 1024 {
+		return fmt.Errorf("password is too long")
 	}
 	return nil
 }

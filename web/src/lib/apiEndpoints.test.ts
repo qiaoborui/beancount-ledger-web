@@ -109,6 +109,18 @@ describe("api endpoint settings", () => {
     expect(() => applyApiEndpointProbe(settings, "backup", { id: "backup", ok: true, apiVersion: 1, clusterId: "other-ledger" })).toThrow("另一个账本");
   });
 
+  it("stores advertised backend capabilities after a successful probe", () => {
+    const updated = applyApiEndpointProbe(endpointSettings(), "backup", {
+      id: "backup",
+      ok: true,
+      apiVersion: 1,
+      clusterId: "ledger-one",
+      capabilities: ["passkey-management-v1"],
+    });
+
+    expect(updated.endpoints.find((endpoint) => endpoint.id === "backup")?.capabilities).toEqual(["passkey-management-v1"]);
+  });
+
   it("uses different storage keys for different ledgers", () => {
     expect(apiEndpointScopedStorageKey("cache", endpointSettings())).not.toBe(apiEndpointScopedStorageKey("cache", {
       ...endpointSettings(),

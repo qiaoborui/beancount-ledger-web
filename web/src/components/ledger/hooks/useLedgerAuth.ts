@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { fetchJson, readJson } from "@/lib/clientFetch";
-import { apiEndpointAuthScope, apiFetch } from "@/lib/apiEndpoints";
+import { apiEndpointAuthScope, apiFetch, currentApiEndpoint, readApiEndpointSettings, type ApiEndpoint } from "@/lib/apiEndpoints";
 import { rememberLedgerAuthenticated } from "../authState";
+import type { PasskeyCredentialSummary } from "../passkeys";
 import { unlockWithQuickLedgerSecret } from "../quickUnlock";
 
 type LedgerAuthLoad = (forceFresh?: boolean, options?: { sensitiveUnlocked?: boolean }) => void | Promise<void>;
@@ -25,7 +26,7 @@ type LedgerAuthInFlight = {
   passkeyOptionsRequest: Promise<void> | null;
   passkeyOptionsRequestEndpointId: string | null;
   quickUnlock: Promise<void> | null;
-  passkeyRegistration: Promise<void> | null;
+  passkeyRegistration: Promise<PasskeyCredentialSummary | null> | null;
 };
 
 type PreparedPasskeyLogin = {
@@ -187,25 +188,33 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
-  async function registerPasskey() {
+  async function registerPasskey(endpoint: ApiEndpoint = currentApiEndpoint(readApiEndpointSettings())) {
     if (inFlight.passkeyRegistration) return inFlight.passkeyRegistration;
     inFlight.passkeyRegistration = (async () => {
-      showToast("info", "正在启用 Face ID...");
+      showToast("info", "正在添加 Passkey...");
       try {
-        const options = await fetchJson<PublicKeyCredentialCreationOptionsJSON & { error?: string }>("/api/passkey/register/options", { method: "POST" });
+        const optionsResponse = await apiFetch("/api/passkey/register/options", { method: "POST" }, { kind: "auth", endpoint });
+        const options = await readJson<PublicKeyCredentialCreationOptionsJSON & { error?: string }>(optionsResponse);
+        if (!optionsResponse.ok) throw new Error(options.error || "无法开始添加 Passkey");
         if (options.error) throw new Error(options.error);
         const response = await startRegistration({ optionsJSON: options });
-        const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
-        const data = await readJson<{ error?: string }>(verify);
+        const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth", endpoint });
+        const data = await readJson<{ error?: string; credential?: PasskeyCredentialSummary }>(verify);
         if (!verify.ok) throw new Error(data.error || "Face ID 启用失败");
         setPasskeyRegistered(true);
-        showToast("success", "Face ID / Passkey 已启用");
+        showToast("success", "Passkey 已添加");
+        return data.credential ?? null;
       } catch (error) {
+        if (error instanceof DOMException && error.name === "NotAllowedError") {
+          showToast("info", "已取消添加 Passkey");
+          return null;
+        }
         showToast("error", error instanceof Error ? error.message : String(error));
+        return null;
       }
     })();
     try {
-      await inFlight.passkeyRegistration;
+      return await inFlight.passkeyRegistration;
     } finally {
       inFlight.passkeyRegistration = null;
     }

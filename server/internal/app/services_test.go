@@ -184,6 +184,62 @@ func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 	}
 }
 
+func TestPasskeyCredentialManagementLifecycle(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	mustWrite(t, filepath.Join(cfg.RuntimeDir, "passkeys.json"), `{"credentials":[{"id":"AQID","publicKey":"BAUG","counter":7,"name":"MacBook Touch ID","transports":["internal"],"backupEligible":true,"backupState":true,"createdAt":"2026-07-12T08:00:00Z"},{"id":"BAUG","publicKey":"BwgJ","counter":3,"name":"YubiKey 5 NFC","transports":["usb","nfc"],"backupEligible":false,"backupState":false,"createdAt":"2026-06-03T08:00:00Z"}]}`)
+	router := testRouter(t, cfg)
+
+	unauthorized := requestWithCookies(router, http.MethodGet, "/api/passkey/credentials", "", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized list=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+
+	cookies := loginCookies(t, router)
+	list := requestWithCookies(router, http.MethodGet, "/api/passkey/credentials", "", cookies)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list=%d body=%s", list.Code, list.Body.String())
+	}
+	if got := list.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("list Cache-Control=%q", got)
+	}
+	var listBody struct {
+		Credentials []PasskeyCredentialSummary `json:"credentials"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(listBody.Credentials) != 2 || listBody.Credentials[0].Name != "MacBook Touch ID" {
+		t.Fatalf("unexpected credentials: %#v", listBody.Credentials)
+	}
+	if strings.Contains(list.Body.String(), "publicKey") || strings.Contains(list.Body.String(), "counter") {
+		t.Fatalf("management response exposed authentication material: %s", list.Body.String())
+	}
+
+	rename := requestWithCookies(router, http.MethodPatch, "/api/passkey/credentials/AQID", `{"name":"  iPhone Passkey  "}`, cookies)
+	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), `"name":"iPhone Passkey"`) {
+		t.Fatalf("rename=%d body=%s", rename.Code, rename.Body.String())
+	}
+
+	badDelete := requestWithCookies(router, http.MethodDelete, "/api/passkey/credentials/AQID", `{"password":"bad"}`, cookies)
+	if badDelete.Code != http.StatusUnauthorized {
+		t.Fatalf("bad delete=%d body=%s", badDelete.Code, badDelete.Body.String())
+	}
+
+	deleted := requestWithCookies(router, http.MethodDelete, "/api/passkey/credentials/AQID", `{"password":"secret"}`, cookies)
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"remaining":1`) {
+		t.Fatalf("delete=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	deletedLast := requestWithCookies(router, http.MethodDelete, "/api/passkey/credentials/BAUG", `{"password":"secret"}`, cookies)
+	if deletedLast.Code != http.StatusOK || !strings.Contains(deletedLast.Body.String(), `"remaining":0`) {
+		t.Fatalf("delete last=%d body=%s", deletedLast.Code, deletedLast.Body.String())
+	}
+	status := requestWithCookies(router, http.MethodGet, "/api/passkey/status", "", cookies)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"registered":false`) || !strings.Contains(status.Body.String(), `"count":0`) {
+		t.Fatalf("status=%d body=%s", status.Code, status.Body.String())
+	}
+}
+
 func TestPasskeyVerifyRoutesRequireActiveChallenge(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")

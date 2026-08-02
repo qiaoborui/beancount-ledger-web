@@ -74,6 +74,11 @@ func SignCount(v uint64) predicate.PasskeyCredential {
 	return predicate.PasskeyCredential(sql.FieldEQ(FieldSignCount, v))
 }
 
+// Name applies equality check predicate on the "name" field. It's identical to NameEQ.
+func Name(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldEQ(FieldName, v))
+}
+
 // BackupEligible applies equality check predicate on the "backup_eligible" field. It's identical to BackupEligibleEQ.
 func BackupEligible(v bool) predicate.PasskeyCredential {
 	return predicate.PasskeyCredential(sql.FieldEQ(FieldBackupEligible, v))
@@ -92,6 +97,11 @@ func CreatedAt(v time.Time) predicate.PasskeyCredential {
 // UpdatedAt applies equality check predicate on the "updated_at" field. It's identical to UpdatedAtEQ.
 func UpdatedAt(v time.Time) predicate.PasskeyCredential {
 	return predicate.PasskeyCredential(sql.FieldEQ(FieldUpdatedAt, v))
+}
+
+// LastUsedAt applies equality check predicate on the "last_used_at" field. It's identical to LastUsedAtEQ.
+func LastUsedAt(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldEQ(FieldLastUsedAt, v))
 }
 
 // PublicKeyEQ applies the EQ predicate on the "public_key" field.
@@ -172,6 +182,71 @@ func SignCountLT(v uint64) predicate.PasskeyCredential {
 // SignCountLTE applies the LTE predicate on the "sign_count" field.
 func SignCountLTE(v uint64) predicate.PasskeyCredential {
 	return predicate.PasskeyCredential(sql.FieldLTE(FieldSignCount, v))
+}
+
+// NameEQ applies the EQ predicate on the "name" field.
+func NameEQ(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldEQ(FieldName, v))
+}
+
+// NameNEQ applies the NEQ predicate on the "name" field.
+func NameNEQ(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldNEQ(FieldName, v))
+}
+
+// NameIn applies the In predicate on the "name" field.
+func NameIn(vs ...string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldIn(FieldName, vs...))
+}
+
+// NameNotIn applies the NotIn predicate on the "name" field.
+func NameNotIn(vs ...string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldNotIn(FieldName, vs...))
+}
+
+// NameGT applies the GT predicate on the "name" field.
+func NameGT(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldGT(FieldName, v))
+}
+
+// NameGTE applies the GTE predicate on the "name" field.
+func NameGTE(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldGTE(FieldName, v))
+}
+
+// NameLT applies the LT predicate on the "name" field.
+func NameLT(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldLT(FieldName, v))
+}
+
+// NameLTE applies the LTE predicate on the "name" field.
+func NameLTE(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldLTE(FieldName, v))
+}
+
+// NameContains applies the Contains predicate on the "name" field.
+func NameContains(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldContains(FieldName, v))
+}
+
+// NameHasPrefix applies the HasPrefix predicate on the "name" field.
+func NameHasPrefix(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldHasPrefix(FieldName, v))
+}
+
+// NameHasSuffix applies the HasSuffix predicate on the "name" field.
+func NameHasSuffix(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldHasSuffix(FieldName, v))
+}
+
+// NameEqualFold applies the EqualFold predicate on the "name" field.
+func NameEqualFold(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldEqualFold(FieldName, v))
+}
+
+// NameContainsFold applies the ContainsFold predicate on the "name" field.
+func NameContainsFold(v string) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldContainsFold(FieldName, v))
 }
 
 // BackupEligibleEQ applies the EQ predicate on the "backup_eligible" field.
@@ -292,6 +367,56 @@ func UpdatedAtLT(v time.Time) predicate.PasskeyCredential {
 // UpdatedAtLTE applies the LTE predicate on the "updated_at" field.
 func UpdatedAtLTE(v time.Time) predicate.PasskeyCredential {
 	return predicate.PasskeyCredential(sql.FieldLTE(FieldUpdatedAt, v))
+}
+
+// LastUsedAtEQ applies the EQ predicate on the "last_used_at" field.
+func LastUsedAtEQ(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldEQ(FieldLastUsedAt, v))
+}
+
+// LastUsedAtNEQ applies the NEQ predicate on the "last_used_at" field.
+func LastUsedAtNEQ(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldNEQ(FieldLastUsedAt, v))
+}
+
+// LastUsedAtIn applies the In predicate on the "last_used_at" field.
+func LastUsedAtIn(vs ...time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldIn(FieldLastUsedAt, vs...))
+}
+
+// LastUsedAtNotIn applies the NotIn predicate on the "last_used_at" field.
+func LastUsedAtNotIn(vs ...time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldNotIn(FieldLastUsedAt, vs...))
+}
+
+// LastUsedAtGT applies the GT predicate on the "last_used_at" field.
+func LastUsedAtGT(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldGT(FieldLastUsedAt, v))
+}
+
+// LastUsedAtGTE applies the GTE predicate on the "last_used_at" field.
+func LastUsedAtGTE(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldGTE(FieldLastUsedAt, v))
+}
+
+// LastUsedAtLT applies the LT predicate on the "last_used_at" field.
+func LastUsedAtLT(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldLT(FieldLastUsedAt, v))
+}
+
+// LastUsedAtLTE applies the LTE predicate on the "last_used_at" field.
+func LastUsedAtLTE(v time.Time) predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldLTE(FieldLastUsedAt, v))
+}
+
+// LastUsedAtIsNil applies the IsNil predicate on the "last_used_at" field.
+func LastUsedAtIsNil() predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldIsNull(FieldLastUsedAt))
+}
+
+// LastUsedAtNotNil applies the NotNil predicate on the "last_used_at" field.
+func LastUsedAtNotNil() predicate.PasskeyCredential {
+	return predicate.PasskeyCredential(sql.FieldNotNull(FieldLastUsedAt))
 }
 
 // And groups predicates with the AND operator between them.
