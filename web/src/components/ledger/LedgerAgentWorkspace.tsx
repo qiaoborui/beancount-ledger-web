@@ -36,6 +36,7 @@ type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
 type AgentSession = { id: string; serverSessionId: string; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
 const MAX_STORED_SESSIONS = 30;
 const AGENT_TIMELINE_PAGE_SIZE = 80;
+const AGENT_TIMELINE_REFRESH_MS = 1500;
 type AgentTimelinePage = { items: TimelineItem[]; nextBefore: number | null };
 type TimelinePagination = { loading: boolean; nextBefore: number | null };
 
@@ -172,6 +173,12 @@ export function LedgerAgentWorkspace({
   // sessionId changes after a legacy session receives its durable server id.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, sessionId]);
+
+  useEffect(() => {
+    if (!timelineNeedsServerRefresh(timeline)) return;
+    const timer = window.setTimeout(() => void loadTimelinePage(sessionId), AGENT_TIMELINE_REFRESH_MS);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, timeline]);
 
   useEffect(() => {
     if (!request || request.id === requestRef.current) return;
@@ -717,6 +724,11 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
     }
     return false;
   });
+}
+
+export function timelineNeedsServerRefresh(timeline: TimelineItem[]) {
+  const last = timeline.at(-1);
+  return Boolean(last && !(last.kind === "message" && last.role === "assistant"));
 }
 
 function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] }) {

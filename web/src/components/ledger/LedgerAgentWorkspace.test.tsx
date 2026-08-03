@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { normalizeBQLChartValue, restoreSessions, restoreTimeline } from "./LedgerAgentWorkspace";
+import { normalizeBQLChartValue, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
@@ -67,6 +67,12 @@ describe("LedgerAgentWorkspace", () => {
     expect(timeline).toHaveLength(81);
     expect(source).not.toContain("MAX_STORED_TIMELINE_ITEMS");
     expect(source).toContain("AGENT_TIMELINE_PAGE_SIZE");
+  });
+
+  it("keeps refreshing a restored timeline until the final assistant response arrives", () => {
+    expect(timelineNeedsServerRefresh([{ kind: "message", id: "user", role: "user", content: "查看持仓" }])).toBe(true);
+    expect(timelineNeedsServerRefresh([{ kind: "tool", id: "tool", tool: { id: "tool", name: "get_accounts", title: "读取账户表", status: "completed" } }])).toBe(true);
+    expect(timelineNeedsServerRefresh([{ kind: "message", id: "assistant", role: "assistant", content: "已完成" }])).toBe(false);
   });
 
   it("restores independently switchable Agent sessions", () => {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const agentTurnDetachedTimeout = 5 * time.Minute
 
 func (s *Server) aiParse(c *gin.Context) {
 	if !s.limiter.Check(c, "ai.parse", 20, 5*time.Minute) {
@@ -52,17 +55,17 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
+	turnCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agentTurnDetachedTimeout)
+	defer cancel()
 	input.SessionID = normalizeAgentSessionID(input.SessionID)
 	input.Context.SensitiveUnlocked = isSensitiveUnlocked(c)
-	if err := s.appendAgentTimelineItem(c.Request.Context(), input.SessionID, agentTimelineMessage("user", input.Message)); err != nil {
+	if err := s.appendAgentTimelineItem(turnCtx, input.SessionID, agentTimelineMessage("user", input.Message)); err != nil {
 		errorJSON(c, http.StatusInternalServerError, err)
 		return
 	}
 	prepareSSE(c)
 	start := time.Now()
-	err := s.runAgentTurn(c.Request.Context(), input, func(event string, payload any) error {
-		return writeSSEEvent(c, event, payload)
-	})
+	err := s.runAgentTurn(turnCtx, input, durableSSEEventWriter(c))
 	logDuration("ai.agent.turn", start, nil)
 	if err != nil {
 		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
@@ -80,12 +83,12 @@ func (s *Server) aiAgentApproval(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
+	turnCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agentTurnDetachedTimeout)
+	defer cancel()
 	prepareSSE(c)
 	pageContext := AgentPageContext{SensitiveUnlocked: isSensitiveUnlocked(c)}
 	start := time.Now()
-	err := s.resolveAgentApproval(c.Request.Context(), input, pageContext, func(event string, payload any) error {
-		return writeSSEEvent(c, event, payload)
-	})
+	err := s.resolveAgentApproval(turnCtx, input, pageContext, durableSSEEventWriter(c))
 	logDuration("ai.agent.approval", start, nil)
 	if err != nil {
 		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
@@ -132,4 +135,20 @@ func writeSSEEvent(c *gin.Context, event string, payload any) error {
 	}
 	c.Writer.Flush()
 	return nil
+}
+
+// durableSSEEventWriter treats the stream as an optional live view. A browser
+// reload may close it at any time, but the Agent run must keep writing its
+// durable session and timeline through its own bounded context.
+func durableSSEEventWriter(c *gin.Context) agentEventWriter {
+	connected := true
+	return func(event string, payload any) error {
+		if !connected {
+			return nil
+		}
+		if err := writeSSEEvent(c, event, payload); err != nil {
+			connected = false
+		}
+		return nil
+	}
 }

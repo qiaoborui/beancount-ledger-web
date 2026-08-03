@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAIParseRouteUsesOpenAICompatibleChatCompletions(t *testing.T) {
@@ -122,6 +123,68 @@ func (m *queuedAgentModel) Complete(_ context.Context, _ string, messages []agen
 type capturedAgentEvent struct {
 	name    string
 	payload any
+}
+
+type cancellationAwareAgentModel struct {
+	calls         int
+	secondStarted chan struct{}
+	release       chan struct{}
+}
+
+func (m *cancellationAwareAgentModel) Complete(ctx context.Context, _ string, _ []agentModelMessage, _ []agentToolSpec) (agentModelResult, error) {
+	m.calls++
+	if m.calls == 1 {
+		return agentModelResult{ToolCalls: []agentModelToolCall{{ID: "cancel-tool", Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}}, nil
+	}
+	close(m.secondStarted)
+	select {
+	case <-ctx.Done():
+		return agentModelResult{}, ctx.Err()
+	case <-m.release:
+		return agentModelResult{Content: "刷新后也应保留的最终答复。"}, nil
+	}
+}
+
+func TestAgentTurnCompletesAfterClientRequestIsCancelled(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	model := &cancellationAwareAgentModel{secondStarted: make(chan struct{}), release: make(chan struct{})}
+	server.agentModel = model
+	router := newRouter(server.cfg, server)
+	requestContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/agent/turn", strings.NewReader(`{"sessionId":"cancel-session","message":"读取 BQL 能力"}`)).WithContext(requestContext)
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		router.ServeHTTP(res, req)
+		close(done)
+	}()
+	select {
+	case <-model.secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("agent did not reach its second model call")
+	}
+	cancel()
+	select {
+	case <-done:
+		t.Fatal("client cancellation must not stop the durable Agent turn")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(model.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("agent turn did not finish after the model was released")
+	}
+	page, err := server.agentTimelinePage(context.Background(), "cancel-session", 0, agentTimelinePageLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) == 0 || page.Items[len(page.Items)-1].Role != "assistant" || page.Items[len(page.Items)-1].Content != "刷新后也应保留的最终答复。" {
+		t.Fatalf("cancelled request must still persist the final timeline item: %#v", page.Items)
+	}
 }
 
 func TestLedgerAgentExecutesReadToolsAndReturnsFinalMessage(t *testing.T) {
