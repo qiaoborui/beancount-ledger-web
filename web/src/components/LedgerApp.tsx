@@ -45,7 +45,7 @@ import { useToast } from "./ledger/hooks/useToast";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
 import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
-import { OnboardingPrototype } from "./ledger/OnboardingPrototype";
+import { OnboardingPrototype, type OnboardingPayload } from "./ledger/OnboardingPrototype";
 import { Toast } from "./ledger/shared";
 import { haptic } from "./ledger/haptics";
 import { TimeRangePicker } from "./ledger/TimeRangePicker";
@@ -196,6 +196,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [agentRequest, setAgentRequest] = useState<LedgerAgentRequest | null>(null);
   const [agentBQLQuery, setAgentBQLQuery] = useState<{ id: number; query: string } | null>(null);
   const [indexInfo, setIndexInfo] = useState<LedgerIndexInfo | null>(null);
+  const [onboardingState, setOnboardingState] = useState<"checking" | "uninitialized" | "ready">("checking");
+  const [onboardingCreating, setOnboardingCreating] = useState(false);
+  const [onboardingWaiting, setOnboardingWaiting] = useState(false);
+  const [onboardingError, setOnboardingError] = useState("");
+  const [onboardingGitSHA, setOnboardingGitSHA] = useState("");
   const [creditSummaryVisible, setCreditSummaryVisible] = useState(true);
   const [passkeyRegistered, setPasskeyRegistered] = useState<boolean | null>(null);
   const [quickUnlockEnabled, setQuickUnlockEnabled] = useState(() => hasQuickLedgerUnlock());
@@ -305,6 +310,48 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     showToast,
     clearToast,
   });
+
+  useEffect(() => {
+    if (!authed) {
+      setOnboardingState("checking");
+      setOnboardingWaiting(false);
+      setOnboardingGitSHA("");
+      return;
+    }
+    let cancelled = false;
+    void fetchJson<{ state?: string }>("/api/onboarding", undefined, undefined, { kind: "read" }).then((result) => {
+      if (!cancelled) setOnboardingState(result.state === "uninitialized" ? "uninitialized" : "ready");
+    }).catch(() => { if (!cancelled) setOnboardingState("ready"); });
+    return () => { cancelled = true; };
+  }, [authed]);
+
+  const initializeOnboarding = useCallback(async (payload: OnboardingPayload) => {
+    setOnboardingCreating(true); setOnboardingError("");
+    try {
+      const result = await fetchJson<{ gitSHA?: string }>("/api/onboarding/initialize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, undefined, { kind: "write" });
+      setOnboardingGitSHA(result.gitSHA ?? "");
+      setOnboardingWaiting(true);
+    } catch (error) {
+      setOnboardingError(error instanceof Error ? error.message : "无法创建账本");
+    } finally { setOnboardingCreating(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!onboardingWaiting) return;
+    let cancelled = false;
+    const poll = async () => {
+      const info = await fetchLedgerIndexInfo();
+      if (cancelled || !info) return;
+      setIndexInfo(info);
+      if (info.error) { setOnboardingError(info.error); setOnboardingWaiting(false); return; }
+      if (info.active && (!onboardingGitSHA || info.gitSHA === onboardingGitSHA)) {
+        setOnboardingWaiting(false); setOnboardingState("ready"); void load(true);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 2000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [load, onboardingGitSHA, onboardingWaiting]);
 
   const unlockPasskeySensitive = async () => {
     setUnlocking(true);
@@ -573,6 +620,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
+  if (onboardingState === "checking") return <AppSkeleton />;
+  if (onboardingState === "uninitialized") return <OnboardingPrototype onCreate={initializeOnboarding} creating={onboardingCreating} waiting={onboardingWaiting} error={onboardingError} />;
 
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
   const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;

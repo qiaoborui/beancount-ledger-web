@@ -60,10 +60,15 @@ func (s *Server) initializeLedger(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
+	if !githubAPIEnabled(s.cfg) {
+		errorJSON(c, http.StatusBadRequest, errors.New("新账本初始化只支持 GitHub API 账本存储"))
+		return
+	}
 	var input LedgerOnboardingRequest
 	if !bindJSON(c, &input) {
 		return
 	}
+	input.Normalize()
 	if err := input.Validate(); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -73,7 +78,7 @@ func (s *Server) initializeLedger(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	err = s.writer.RunTransactionWithSource("onboarding-initialize", func(tx *LedgerWriteTransaction) error {
+	gitSHA, err := s.writer.RunTransactionWithSourceResult("onboarding-initialize", func(tx *LedgerWriteTransaction) error {
 		if exists, err := tx.Exists("main.bean"); err != nil {
 			return err
 		} else if exists {
@@ -90,13 +95,25 @@ func (s *Server) initializeLedger(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"ok": true, "state": "indexing"})
+	c.JSON(http.StatusAccepted, gin.H{"ok": true, "state": "indexing", "gitSHA": gitSHA})
 }
 
-func (r LedgerOnboardingRequest) Validate() error {
+func (r *LedgerOnboardingRequest) Normalize() {
 	r.Title = strings.TrimSpace(r.Title)
 	r.Currency = strings.ToUpper(strings.TrimSpace(r.Currency))
 	r.StartDate = strings.TrimSpace(r.StartDate)
+	for index := range r.Assets {
+		r.Assets[index].Account = strings.TrimSpace(r.Assets[index].Account)
+		r.Assets[index].Currency = strings.ToUpper(strings.TrimSpace(r.Assets[index].Currency))
+		r.Assets[index].OpeningBalance = strings.TrimSpace(r.Assets[index].OpeningBalance)
+	}
+	for index := range r.Categories {
+		r.Categories[index] = strings.TrimSpace(r.Categories[index])
+	}
+}
+
+func (r LedgerOnboardingRequest) Validate() error {
+	r.Normalize()
 	if r.Title == "" || len(r.Title) > 120 {
 		return errors.New("账本名称需为 1–120 个字符")
 	}
@@ -105,6 +122,9 @@ func (r LedgerOnboardingRequest) Validate() error {
 	}
 	if err := validateDate("startDate", r.StartDate); err != nil {
 		return err
+	}
+	if len(r.Assets) == 0 {
+		return errors.New("请至少添加一个资金账户")
 	}
 	seen := map[string]bool{}
 	for i, asset := range r.Assets {
@@ -132,6 +152,10 @@ func (r LedgerOnboardingRequest) Validate() error {
 		if !strings.HasPrefix(account, "Expenses:") && !strings.HasPrefix(account, "Income:") {
 			return errors.New("分类必须属于 Expenses 或 Income")
 		}
+		if seen[account] {
+			return fmt.Errorf("账户重复：%s", account)
+		}
+		seen[account] = true
 	}
 	return nil
 }
@@ -153,7 +177,7 @@ func starterLedgerFiles(input LedgerOnboardingRequest) (map[string]string, error
 	}
 	var opening []string
 	for _, asset := range input.Assets {
-		if strings.TrimSpace(asset.OpeningBalance) == "" || asset.OpeningBalance == "0" {
+		if isZeroDecimal(asset.OpeningBalance) {
 			continue
 		}
 		amount := asset.OpeningBalance
@@ -167,6 +191,12 @@ func starterLedgerFiles(input LedgerOnboardingRequest) (map[string]string, error
 		transactions = fmt.Sprintf("%s * \"期初余额\"\n%s\n", input.StartDate, strings.Join(opening, "\n"))
 	}
 	return map[string]string{"main.bean": fmt.Sprintf("option \"title\" %q\noption \"operating_currency\" %q\noption \"booking_method\" \"FIFO\"\n\ninclude \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"prices.bean\"\ninclude \"transactions/%s.bean\"\n", input.Title, currency, year), "commodities.bean": fmt.Sprintf("%s commodity %s\n", input.StartDate, currency), "accounts.bean": strings.Join(accountLines, "\n") + "\n", "prices.bean": "", "transactions/" + year + ".bean": transactions}, nil
+}
+
+func isZeroDecimal(value string) bool {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "-")
+	value = strings.ReplaceAll(value, ".", "")
+	return value == "" || strings.Trim(value, "0") == ""
 }
 func accountCurrency(account string, assets []LedgerOnboardingAsset, fallback string) string {
 	for _, asset := range assets {
