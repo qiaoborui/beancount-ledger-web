@@ -27,6 +27,9 @@ func run() (err error) {
 	if err := app.ValidateSelfHostedConfig(cfg); err != nil {
 		return err
 	}
+	if err := app.EnsureLedgerFilesystemLock(cfg); err != nil {
+		return err
+	}
 	application, err := app.NewApplication(cfg)
 	if err != nil {
 		return err

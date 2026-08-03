@@ -39,6 +39,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: selfhost-server
+      args:
+        LEDGER_UID: "${LEDGER_UID:-1000}"
+        LEDGER_GID: "${LEDGER_GID:-1000}"
     restart: unless-stopped
     depends_on:
       database:
@@ -52,32 +55,44 @@ services:
         target: /data/ledger
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   indexer:
     build:
       context: ..
       dockerfile: docker/Dockerfile
       target: indexer
+      args:
+        LEDGER_UID: "${LEDGER_UID:-1000}"
+        LEDGER_GID: "${LEDGER_GID:-1000}"
     restart: unless-stopped
     depends_on:
       database:
         condition: service_healthy
+      server:
+        condition: service_started
     environment:
       <<: *ledger-env
       LEDGER_INDEX_INTERVAL_SECONDS: "${LEDGER_INDEX_INTERVAL_SECONDS:-60}"
+      LEDGER_INDEX_RETRY_INITIAL_SECONDS: "${LEDGER_INDEX_RETRY_INITIAL_SECONDS:-5}"
+      LEDGER_INDEX_RETRY_MAX_SECONDS: "${LEDGER_INDEX_RETRY_MAX_SECONDS:-60}"
     volumes:
       - type: bind
         source: ${LEDGER_HOST_PATH:?set an absolute LEDGER_HOST_PATH in .env.selfhost}
         target: /data/ledger
         read_only: true
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        while true; do
-          /app/ledger-indexer || true
-          sleep "$${LEDGER_INDEX_INTERVAL_SECONDS}"
-        done
+    command: ["/app/ledger-indexer-daemon"]
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   frontend:
     build:
@@ -102,7 +117,8 @@ services:
       CADDY_TLS_DIRECTIVE: "${CADDY_TLS_DIRECTIVE:-}"
       CADDY_FRONTEND_UPSTREAM: frontend:80
     ports:
-      - "${SELFHOST_HTTP_PORT:-8080}:80"
+      - "${SELFHOST_HTTP_BIND_ADDRESS:-127.0.0.1}:${SELFHOST_HTTP_PORT:-8080}:80"
+      - "${SELFHOST_HTTPS_BIND_ADDRESS:-127.0.0.1}:${SELFHOST_HTTPS_PORT:-8443}:443"
     volumes:
       - caddy_data:/data
       - caddy_config:/config

@@ -9,6 +9,7 @@ COPY server/ ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-selfhost ./cmd/ledger-selfhost
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-indexer-daemon ./cmd/ledger-indexer-daemon
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/zip-worker ./cmd/zip-worker
 
 # ── API runtime ──
@@ -46,6 +47,8 @@ CMD ["/app/zip-worker"]
 FROM debian:bookworm-slim AS indexer
 WORKDIR /app
 ENV GIN_MODE=release
+ARG LEDGER_UID=1000
+ARG LEDGER_GID=1000
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -57,7 +60,12 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && pip3 install --break-system-packages beancount==3.2.3
 
+RUN groupadd --gid "$LEDGER_GID" ledger \
+  && useradd --uid "$LEDGER_UID" --gid ledger --create-home --shell /usr/sbin/nologin ledger
+
 COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
+COPY --from=go-builder /app/ledger-indexer-daemon /app/ledger-indexer-daemon
+USER ledger
 CMD ["/app/ledger-indexer"]
 
 # ── Complete self-hosted API ──

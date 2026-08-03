@@ -30,9 +30,15 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if store == nil {
 		return LedgerIndexResult{}, errors.New("ledger index store is required")
 	}
-	return store.withIndexLock(ctx, func() (LedgerIndexResult, error) {
-		return runLedgerIndexOnceWithStore(ctx, cfg, store)
+	var result LedgerIndexResult
+	err := withLedgerFilesystemLock(ctx, cfg, ledgerFilesystemSharedLock, func() error {
+		var err error
+		result, err = store.withIndexLock(ctx, func() (LedgerIndexResult, error) {
+			return runLedgerIndexOnceWithStore(ctx, cfg, store)
+		})
+		return err
 	})
+	return result, err
 }
 
 func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerIndexStore) (LedgerIndexResult, error) {

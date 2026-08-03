@@ -16,6 +16,7 @@ type Config struct {
 	AppRoot                     string
 	LedgerClusterID             string
 	LedgerRoot                  string
+	LedgerLockFile              string
 	RuntimeDir                  string
 	StaticDir                   string
 	ServeStatic                 bool
@@ -59,6 +60,10 @@ func LoadConfig() Config {
 		storage = "github_api"
 	}
 	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
+	ledgerLockFile := strings.TrimSpace(os.Getenv("LEDGER_LOCK_FILE"))
+	if ledgerLockFile == "" && ledgerRoot != "" {
+		ledgerLockFile = filepath.Join(ledgerRoot, ".ledger-web.lock")
+	}
 	runtimeDir := os.Getenv("RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = filepath.Join(os.TempDir(), "beancount-ledger-web", "runtime")
@@ -69,6 +74,7 @@ func LoadConfig() Config {
 		AppRoot:                     "",
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		LedgerRoot:                  filepath.Clean(ledgerRoot),
+		LedgerLockFile:              filepath.Clean(ledgerLockFile),
 		RuntimeDir:                  filepath.Clean(runtimeDir),
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
@@ -135,6 +141,11 @@ func LoadIndexerConfig() Config {
 	cfg.ReadModelStrict = true
 	ledgerRoot := strings.TrimSpace(os.Getenv("LEDGER_ROOT"))
 	cfg.LedgerRoot = filepath.Clean(ledgerRoot)
+	lockFile := strings.TrimSpace(os.Getenv("LEDGER_LOCK_FILE"))
+	if lockFile == "" && ledgerRoot != "" {
+		lockFile = filepath.Join(ledgerRoot, ".ledger-web.lock")
+	}
+	cfg.LedgerLockFile = filepath.Clean(lockFile)
 	return cfg
 }
 
@@ -270,6 +281,9 @@ func ValidateSelfHostedConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
 		return errors.New("LEDGER_ROOT is required for self-hosted ledger-web")
 	}
+	if _, err := ledgerFilesystemLockPath(cfg); err != nil {
+		return errors.New("LEDGER_LOCK_FILE is required for self-hosted ledger-web")
+	}
 	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
 		return errors.New("self-hosted ledger-web requires the Postgres read model in strict mode")
 	}
@@ -290,6 +304,9 @@ func ValidateIndexerConfig(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
 		return errors.New("LEDGER_ROOT is required for ledger-indexer")
+	}
+	if _, err := ledgerFilesystemLockPath(cfg); err != nil {
+		return errors.New("LEDGER_LOCK_FILE is required for ledger-indexer")
 	}
 	if !ledgerReadModelEnabled(cfg) {
 		return errors.New("ledger-indexer requires the Postgres read model")

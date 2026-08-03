@@ -121,22 +121,24 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
-	if err := apply(tx); err != nil {
-		tx.Restore()
-		return err
-	}
-	if err := runBeanCheck(w.cfg); err != nil {
-		tx.Restore()
-		return err
-	}
-	if w.cache != nil {
-		w.cache.MarkDirty()
-	}
-	if strings.TrimSpace(source) == "" {
-		source = ledgerWriteSourceDefault
-	}
-	return nil
+	return withLedgerFilesystemLock(context.Background(), w.cfg, ledgerFilesystemExclusiveLock, func() error {
+		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
+		if err := apply(tx); err != nil {
+			tx.Restore()
+			return err
+		}
+		if err := runBeanCheck(w.cfg); err != nil {
+			tx.Restore()
+			return err
+		}
+		if w.cache != nil {
+			w.cache.MarkDirty()
+		}
+		if strings.TrimSpace(source) == "" {
+			source = ledgerWriteSourceDefault
+		}
+		return nil
+	})
 }
 
 func (w *LedgerWriter) runGitHubAPITransaction(source string, apply func(*LedgerWriteTransaction) error) error {
