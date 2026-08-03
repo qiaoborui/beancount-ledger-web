@@ -152,22 +152,22 @@ func (s *Server) initializeLedger(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "state": "indexing", "gitSHA": gitSHA})
 }
 
-func (s *Server) onboardingPlan(c *gin.Context) {
-	if !s.limiter.Check(c, "onboarding.plan", 20, 5*time.Minute) {
+// onboardingAgent keeps the first-ledger conversation separate from the normal
+// ledger Agent: a new repository has no indexed accounts to inspect yet. Its
+// tools only mutate the request-scoped draft; initializeLedger remains the
+// sole path that can write the GitHub ledger.
+func (s *Server) onboardingAgent(c *gin.Context) {
+	if !s.limiter.Check(c, "onboarding.agent", 30, 5*time.Minute) {
 		return
 	}
 	if !requireSensitive(c) {
 		return
 	}
-	var input LedgerOnboardingPlanRequest
+	var input LedgerOnboardingAgentRequest
 	if !bindJSON(c, &input) {
 		return
 	}
-	if err := input.Validate(); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.planOnboarding(input)
+	result, err := s.runOnboardingAgent(c.Request.Context(), input)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

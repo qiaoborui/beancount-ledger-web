@@ -1,9 +1,9 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,25 +80,37 @@ func TestOnboardingAccountPathsAreAgentSuppliedAndRootBound(t *testing.T) {
 	}
 }
 
-func TestOnboardingAgentProducesAValidatedPlan(t *testing.T) {
-	fakeAI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/chat/completions" {
-			t.Fatalf("unexpected AI path: %s", request.URL.Path)
-		}
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"{\"reply\":\"我已整理好一份起步方案。\",\"complete\":true,\"plan\":{\"title\":\"我的生活账本\",\"currency\":\"CNY\",\"startDate\":\"2026-08-03\",\"fundingSpaces\":[{\"kind\":\"digital_wallet\",\"name\":\"微信\",\"account\":\"Assets:Wallet:WeChat\",\"currency\":\"CNY\",\"openingBalance\":\"\"}],\"liabilities\":[],\"incomeCategories\":[{\"templateKey\":\"salary\",\"account\":\"Income:Work:Salary\"}],\"expenseCategories\":[{\"templateKey\":\"groceries\",\"account\":\"Expenses:Food:Groceries\"}]}}"}}]}`))
-	}))
-	defer fakeAI.Close()
-	t.Setenv("LEDGER_AI_PROVIDER", "openai")
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+func TestOnboardingAgentUsesToolsAndOnlyPresentsAValidDraft(t *testing.T) {
+	server := &Server{agentModel: &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "wallet", Type: "function", Function: agentModelFunctionCall{Name: "upsert_funding_space", Arguments: `{"kind":"digital_wallet","name":"微信","account":"Assets:Wallet:WeChat"}`}}}},
+		{ToolCalls: []agentModelToolCall{{ID: "income", Type: "function", Function: agentModelFunctionCall{Name: "upsert_income_category", Arguments: `{"templateKey":"salary","account":"Income:Work:Salary"}`}}, {ID: "expense", Type: "function", Function: agentModelFunctionCall{Name: "upsert_expense_category", Arguments: `{"templateKey":"groceries","account":"Expenses:Food:Groceries"}`}}}},
+		{ToolCalls: []agentModelToolCall{{ID: "present", Type: "function", Function: agentModelFunctionCall{Name: "present_onboarding_plan", Arguments: `{}`}}}},
+		{Content: "我已经整理好了。你可以查看财务地图并确认创建。"},
+	}}}
 
-	result, err := (&Server{}).planOnboarding(LedgerOnboardingPlanRequest{Message: "我平时用微信，工资是主要收入"})
+	result, err := server.runOnboardingAgent(context.Background(), LedgerOnboardingAgentRequest{Start: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Complete || result.Plan == nil || result.Plan.FundingSpaces[0].Name != "微信" {
-		t.Fatalf("unexpected onboarding plan: %#v", result)
+	if !result.Ready || len(result.Draft.FundingSpaces) != 1 || result.Draft.FundingSpaces[0].Account != "Assets:Wallet:WeChat" {
+		t.Fatalf("unexpected onboarding agent result: %#v", result)
+	}
+	if err := result.Draft.Validate(); err != nil {
+		t.Fatalf("agent returned an invalid ready draft: %v", err)
+	}
+}
+
+func TestOnboardingAgentNeverMarksAnIncompleteDraftReady(t *testing.T) {
+	server := &Server{agentModel: &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "present", Type: "function", Function: agentModelFunctionCall{Name: "present_onboarding_plan", Arguments: `{}`}}}},
+		{Content: "先告诉我你平时把钱放在哪里。"},
+	}}}
+	result, err := server.runOnboardingAgent(context.Background(), LedgerOnboardingAgentRequest{Start: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Ready || len(result.Draft.FundingSpaces) != 0 {
+		t.Fatalf("incomplete draft must not be ready: %#v", result)
 	}
 }
 

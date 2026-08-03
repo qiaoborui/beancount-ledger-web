@@ -19,6 +19,16 @@ x-runtime-env: &runtime-env
   WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
   WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
   LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
+  # Optional OpenAI-compatible provider used by the onboarding Agent and the
+  # existing ledger Agent. Keep credentials in the host environment or a
+  # private deployment env file, never in this repository.
+  LEDGER_AI_PROVIDER: "${LEDGER_AI_PROVIDER:-}"
+  OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+  OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+  OPENAI_MODEL: "${OPENAI_MODEL:-}"
+  DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+  DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-}"
+  DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-}"
 
 services:
   database:
