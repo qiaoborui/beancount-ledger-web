@@ -7,6 +7,9 @@ const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.ur
 describe("LedgerAgentWorkspace", () => {
   it("supports docked and mobile full-screen layouts", () => {
     expect(source).toContain("ledger-agent-dock");
+    expect(source).toContain('presentation = "dock"');
+    expect(source).toContain('presentation === "page"');
+    expect(source).toContain("账本 Agent 工作区");
     expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
     expect(source).toContain("createPortal(panel");
