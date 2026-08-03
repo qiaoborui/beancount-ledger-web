@@ -190,7 +190,7 @@ func clearAuthCookie(c *gin.Context, name string) {
 
 func authCookiePolicy(c *gin.Context) (http.SameSite, bool, bool) {
 	sameSite := http.SameSiteLaxMode
-	secure := gin.Mode() == gin.ReleaseMode
+	secure := authTransportMode() != "http"
 	partitioned := false
 	if requestUsesConfiguredCrossOrigin(c) {
 		sameSite = http.SameSiteNoneMode
@@ -198,6 +198,17 @@ func authCookiePolicy(c *gin.Context) (http.SameSite, bool, bool) {
 		partitioned = true
 	}
 	return sameSite, secure, partitioned
+}
+
+// authTransportMode is deliberately deployment-scoped. A hostname must not
+// offer both HTTP and HTTPS login: their cookies share the same name/path and
+// an HTTP login could overwrite the Secure HTTPS session.
+func authTransportMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LEDGER_AUTH_TRANSPORT")))
+	if mode == "" {
+		return "https"
+	}
+	return mode
 }
 
 func sameOriginMiddleware() gin.HandlerFunc {

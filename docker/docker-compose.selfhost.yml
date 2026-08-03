@@ -15,6 +15,10 @@ x-ledger-env: &ledger-env
   AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env.selfhost}
   APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env.selfhost}
   LEDGER_AUTH_DISABLED: "${LEDGER_AUTH_DISABLED:-false}"
+
+  # Select one deployment transport. HTTP is an explicit same-origin
+  # password-only compatibility mode; HTTPS is the default.
+  LEDGER_AUTH_TRANSPORT: "${LEDGER_AUTH_TRANSPORT:-https}"
   PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
   WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
   WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
