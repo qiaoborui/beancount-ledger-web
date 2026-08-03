@@ -66,6 +66,8 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	authState := api.Group("", noStore())
 
 	authState.GET("/auth/me", s.me)
+	authState.GET("/onboarding", s.onboardingStatus)
+	authState.POST("/onboarding/initialize", s.initializeLedger)
 	authState.GET("/quick-unlock/status", s.quickUnlockStatus)
 	authState.GET("/passkey/status", s.passkeyStatus)
 	authState.GET("/passkey/credentials", s.passkeyCredentials)

@@ -376,6 +376,8 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/auth/lock":                    true,
 		"POST /api/auth/logout":                  true,
 		"GET /api/auth/me":                       true,
+		"GET /api/onboarding":                    true,
+		"POST /api/onboarding/initialize":        true,
 		"GET /api/quick-unlock/status":           true,
 		"POST /api/quick-unlock/register":        true,
 		"POST /api/quick-unlock/verify":          true,
