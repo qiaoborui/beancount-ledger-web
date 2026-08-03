@@ -9,19 +9,22 @@ for browsing, reviewing, and safely updating it.
 
 - Browse accounts, transactions, balances, budgets, and reports
 - Draft transactions from natural language, then preview before writing
-- Validate every local ledger write with `bean-check` and roll back failures
+- Validate each ledger write with `bean-check` before its GitHub commit
 - Review imports from supported payment statements before committing them
 - Use password login, passkeys on secure origins, and optional web push
 - Run entirely on your own Docker host, or use the hosted GitHub-backed setup
 
 ## Self-hosted Compose
 
-The complete self-hosted stack includes your ledger bind mount, Postgres, API,
-indexer, frontend, and Caddy.
+The complete self-hosted stack includes Postgres, API, indexer, frontend, and
+Caddy. Your private GitHub ledger remains the source of truth: the API writes
+through the GitHub API, while only the indexer has a local checkout for
+publishing the Postgres read model.
 
 ```bash
 cp .env.selfhost.example .env.selfhost
-# Edit .env.selfhost with your ledger path, UID/GID, and secrets.
+# Set GitHub repository credentials, a separate read-only indexer token,
+# checkout path, UID/GID, and application secrets.
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
 
