@@ -19,7 +19,6 @@ type LedgerNavItem = {
 };
 
 export const ledgerNavItems: LedgerNavItem[] = [
-  { href: "/", label: "首页", icon: Home, mobilePrimary: true, group: "observe" },
   { href: "/agent", label: "账本 Agent", icon: Bot, mobilePrimary: false, group: "observe" },
   { href: "/home", label: "财务概览", icon: Home, mobilePrimary: false, group: "observe" },
   { href: "/dashboard", label: "收支分析", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
