@@ -6,8 +6,8 @@ describe("OnboardingPrototype", () => {
   it("starts with a plain-language personal finance workflow", () => {
     const html = renderToStaticMarkup(<OnboardingPrototype onCreate={vi.fn()} />);
 
-    expect(html).toContain("从一张财务地图开始");
-    expect(html).toContain("日常记账货币");
+    expect(html).toContain("从一段对话开始");
+    expect(html).toContain("建账 Agent");
     expect(html).toContain("钱在哪里");
     expect(html).not.toContain("Assets:");
     expect(html).not.toContain("Expenses:");
@@ -17,6 +17,6 @@ describe("OnboardingPrototype", () => {
     const html = renderToStaticMarkup(<OnboardingPrototype onCreate={vi.fn()} waiting error="bean-check 失败，请检查账户名" />);
 
     expect(html).toContain("bean-check 失败，请检查账户名");
-    expect(html).toContain("disabled");
+    expect(html).toContain("和建账 Agent 说说你的情况");
   });
 });

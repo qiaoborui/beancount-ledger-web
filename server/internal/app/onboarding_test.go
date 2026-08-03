@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,18 +18,18 @@ func starterOnboardingRequest() LedgerOnboardingRequest {
 		Currency:  " cny ",
 		StartDate: " 2026-08-03 ",
 		FundingSpaces: []LedgerOnboardingFundingSpace{
-			{Kind: "cash", Name: " 钱包 ", OpeningBalance: "500.00"},
-			{Kind: "bank_card", Name: "招商银行", OpeningBalance: "12800"},
+			{Kind: "cash", Name: " 钱包 ", Account: "Assets:Cash:Wallet", OpeningBalance: "500.00"},
+			{Kind: "bank_card", Name: "招商银行", Account: "Assets:Bank:ChinaMerchants", OpeningBalance: "12800"},
 		},
-		Liabilities: []LedgerOnboardingLiability{{Kind: "credit_card", Name: "信用卡", OpeningBalance: "1200"}},
+		Liabilities: []LedgerOnboardingLiability{{Kind: "credit_card", Name: "信用卡", Account: "Liabilities:CreditCard:Primary", OpeningBalance: "1200"}},
 		IncomeCategories: []LedgerOnboardingCategory{
-			{TemplateKey: "salary"},
-			{CustomName: "稿费"},
+			{TemplateKey: "salary", Account: "Income:Work:Salary"},
+			{CustomName: "稿费", Account: "Income:Writing"},
 		},
 		ExpenseCategories: []LedgerOnboardingCategory{
-			{TemplateKey: "coffee"},
-			{TemplateKey: "rent"},
-			{CustomName: "宠物用品"},
+			{TemplateKey: "coffee", Account: "Expenses:Food:Coffee"},
+			{TemplateKey: "rent", Account: "Expenses:Home:Rent"},
+			{CustomName: "宠物用品", Account: "Expenses:Family:Pet"},
 		},
 	}
 }
@@ -49,16 +50,16 @@ func TestStarterLedgerFilesCreatesBalancedSemanticGitLedger(t *testing.T) {
 	}
 	accounts := files["accounts.bean"]
 	for _, want := range []string{
-		"open Assets:Cash:U94b1u5305 CNY",
+		"open Assets:Cash:Wallet CNY",
 		`alias: "钱包"`,
-		"open Assets:Bank:U62dbu5546u94f6u884c CNY",
-		"open Liabilities:CreditCard:U4fe1u7528u5361 CNY",
-		"open Income:Salary CNY",
+		"open Assets:Bank:ChinaMerchants CNY",
+		"open Liabilities:CreditCard:Primary CNY",
+		"open Income:Work:Salary CNY",
 		`alias: "工资"`,
-		"open Income:Custom:U7a3fu8d39 CNY",
+		"open Income:Writing CNY",
 		"open Expenses:Food:Coffee CNY",
 		"open Expenses:Home:Rent CNY",
-		"open Expenses:Custom:U5ba0u7269u7528u54c1 CNY",
+		"open Expenses:Family:Pet CNY",
 		"open Equity:Opening-Balances CNY",
 	} {
 		if !strings.Contains(accounts, want) {
@@ -66,8 +67,38 @@ func TestStarterLedgerFilesCreatesBalancedSemanticGitLedger(t *testing.T) {
 		}
 	}
 	opening := files["transactions/2026.bean"]
-	if !strings.Contains(opening, "Assets:Cash:U94b1u5305 500.00 CNY") || !strings.Contains(opening, "Liabilities:CreditCard:U4fe1u7528u5361 -1200 CNY") || strings.Count(opening, "Equity:Opening-Balances") != 3 {
+	if !strings.Contains(opening, "Assets:Cash:Wallet 500.00 CNY") || !strings.Contains(opening, "Liabilities:CreditCard:Primary -1200 CNY") || strings.Count(opening, "Equity:Opening-Balances") != 3 {
 		t.Fatalf("opening balances=%q", opening)
+	}
+}
+
+func TestOnboardingAccountPathsAreAgentSuppliedAndRootBound(t *testing.T) {
+	input := starterOnboardingRequest()
+	input.FundingSpaces[0].Account = "Assets:Bank:Wallet"
+	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "Assets:Cash") {
+		t.Fatalf("expected invalid funding account root error, got %v", err)
+	}
+}
+
+func TestOnboardingAgentProducesAValidatedPlan(t *testing.T) {
+	fakeAI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected AI path: %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"{\"reply\":\"我已整理好一份起步方案。\",\"complete\":true,\"plan\":{\"title\":\"我的生活账本\",\"currency\":\"CNY\",\"startDate\":\"2026-08-03\",\"fundingSpaces\":[{\"kind\":\"digital_wallet\",\"name\":\"微信\",\"account\":\"Assets:Wallet:WeChat\",\"currency\":\"CNY\",\"openingBalance\":\"\"}],\"liabilities\":[],\"incomeCategories\":[{\"templateKey\":\"salary\",\"account\":\"Income:Work:Salary\"}],\"expenseCategories\":[{\"templateKey\":\"groceries\",\"account\":\"Expenses:Food:Groceries\"}]}}"}}]}`))
+	}))
+	defer fakeAI.Close()
+	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", fakeAI.URL)
+
+	result, err := (&Server{}).planOnboarding(LedgerOnboardingPlanRequest{Message: "我平时用微信，工资是主要收入"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Complete || result.Plan == nil || result.Plan.FundingSpaces[0].Name != "微信" {
+		t.Fatalf("unexpected onboarding plan: %#v", result)
 	}
 }
 
@@ -77,10 +108,10 @@ func TestOnboardingCustomNamesUseStableSafeSegmentsAndResolveCollisions(t *testi
 		Currency:  "CNY",
 		StartDate: "2026-08-03",
 		FundingSpaces: []LedgerOnboardingFundingSpace{
-			{Kind: "bank_card", Name: "My Card"},
-			{Kind: "bank_card", Name: "my card"},
+			{Kind: "bank_card", Name: "My Card", Account: "Assets:Bank:MyCard"},
+			{Kind: "bank_card", Name: "my card", Account: "Assets:Bank:MyCard2"},
 		},
-		IncomeCategories: []LedgerOnboardingCategory{{CustomName: "A"}, {CustomName: "a"}},
+		IncomeCategories: []LedgerOnboardingCategory{{CustomName: "A", Account: "Income:Custom:A"}, {CustomName: "a", Account: "Income:Custom:A2"}},
 	}
 	if err := input.Validate(); err != nil {
 		t.Fatal(err)
@@ -104,7 +135,7 @@ func TestOnboardingCustomNamesUseStableSafeSegmentsAndResolveCollisions(t *testi
 		}
 	}
 	joined := strings.Join(accounts, "\n")
-	for _, want := range []string{"Assets:Bank:My-card", "Assets:Bank:My-card-2", "Income:Custom:A", "Income:Custom:A-2"} {
+	for _, want := range []string{"Assets:Bank:MyCard", "Assets:Bank:MyCard2", "Income:Custom:A", "Income:Custom:A2"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("generated accounts missing %q:\n%s", want, joined)
 		}
@@ -200,7 +231,7 @@ func TestOnboardingRoutesInitializeAnEmptyGitHubLedger(t *testing.T) {
 		t.Fatalf("onboarding status=%d body=%s", status.Code, status.Body.String())
 	}
 
-	created := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","currency":"CNY","openingBalance":"500"}],"liabilities":[],"incomeCategories":[{"templateKey":"salary"}],"expenseCategories":[{"templateKey":"coffee"}]}`, cookies)
+	created := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","account":"Assets:Cash:Wallet","currency":"CNY","openingBalance":"500"}],"liabilities":[],"incomeCategories":[{"templateKey":"salary","account":"Income:Work:Salary"}],"expenseCategories":[{"templateKey":"coffee","account":"Expenses:Food:Coffee"}]}`, cookies)
 	if created.Code != http.StatusAccepted || !strings.Contains(created.Body.String(), `"gitSHA":"new-commit-1"`) {
 		t.Fatalf("onboarding initialize=%d body=%s", created.Code, created.Body.String())
 	}
@@ -208,7 +239,7 @@ func TestOnboardingRoutesInitializeAnEmptyGitHubLedger(t *testing.T) {
 		t.Fatalf("main.bean=%q", got)
 	}
 
-	again := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"second","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"备用金"}],"incomeCategories":[],"expenseCategories":[]}`, cookies)
+	again := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"second","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"备用金","account":"Assets:Cash:Reserve"}],"incomeCategories":[],"expenseCategories":[]}`, cookies)
 	if again.Code != http.StatusBadRequest || !strings.Contains(again.Body.String(), "不会覆盖") {
 		t.Fatalf("second onboarding initialize=%d body=%s", again.Code, again.Body.String())
 	}

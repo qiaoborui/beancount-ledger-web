@@ -17,6 +17,7 @@ import (
 type LedgerOnboardingFundingSpace struct {
 	Kind           string `json:"kind"`
 	Name           string `json:"name"`
+	Account        string `json:"account"`
 	Currency       string `json:"currency"`
 	OpeningBalance string `json:"openingBalance"`
 }
@@ -24,6 +25,7 @@ type LedgerOnboardingFundingSpace struct {
 type LedgerOnboardingLiability struct {
 	Kind           string `json:"kind"`
 	Name           string `json:"name"`
+	Account        string `json:"account"`
 	Currency       string `json:"currency"`
 	OpeningBalance string `json:"openingBalance"`
 }
@@ -31,6 +33,7 @@ type LedgerOnboardingLiability struct {
 type LedgerOnboardingCategory struct {
 	TemplateKey string `json:"templateKey"`
 	CustomName  string `json:"customName"`
+	Account     string `json:"account"`
 }
 
 type LedgerOnboardingRequest struct {
@@ -149,6 +152,29 @@ func (s *Server) initializeLedger(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "state": "indexing", "gitSHA": gitSHA})
 }
 
+func (s *Server) onboardingPlan(c *gin.Context) {
+	if !s.limiter.Check(c, "onboarding.plan", 20, 5*time.Minute) {
+		return
+	}
+	if !requireSensitive(c) {
+		return
+	}
+	var input LedgerOnboardingPlanRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	if err := input.Validate(); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.planOnboarding(input)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (r *LedgerOnboardingRequest) Normalize() {
 	r.Title = strings.TrimSpace(r.Title)
 	r.Currency = strings.ToUpper(strings.TrimSpace(r.Currency))
@@ -156,22 +182,26 @@ func (r *LedgerOnboardingRequest) Normalize() {
 	for index := range r.FundingSpaces {
 		r.FundingSpaces[index].Kind = strings.TrimSpace(r.FundingSpaces[index].Kind)
 		r.FundingSpaces[index].Name = strings.TrimSpace(r.FundingSpaces[index].Name)
+		r.FundingSpaces[index].Account = strings.TrimSpace(r.FundingSpaces[index].Account)
 		r.FundingSpaces[index].Currency = strings.ToUpper(strings.TrimSpace(r.FundingSpaces[index].Currency))
 		r.FundingSpaces[index].OpeningBalance = strings.TrimSpace(r.FundingSpaces[index].OpeningBalance)
 	}
 	for index := range r.Liabilities {
 		r.Liabilities[index].Kind = strings.TrimSpace(r.Liabilities[index].Kind)
 		r.Liabilities[index].Name = strings.TrimSpace(r.Liabilities[index].Name)
+		r.Liabilities[index].Account = strings.TrimSpace(r.Liabilities[index].Account)
 		r.Liabilities[index].Currency = strings.ToUpper(strings.TrimSpace(r.Liabilities[index].Currency))
 		r.Liabilities[index].OpeningBalance = strings.TrimSpace(r.Liabilities[index].OpeningBalance)
 	}
 	for index := range r.IncomeCategories {
 		r.IncomeCategories[index].TemplateKey = strings.TrimSpace(r.IncomeCategories[index].TemplateKey)
 		r.IncomeCategories[index].CustomName = strings.TrimSpace(r.IncomeCategories[index].CustomName)
+		r.IncomeCategories[index].Account = strings.TrimSpace(r.IncomeCategories[index].Account)
 	}
 	for index := range r.ExpenseCategories {
 		r.ExpenseCategories[index].TemplateKey = strings.TrimSpace(r.ExpenseCategories[index].TemplateKey)
 		r.ExpenseCategories[index].CustomName = strings.TrimSpace(r.ExpenseCategories[index].CustomName)
+		r.ExpenseCategories[index].Account = strings.TrimSpace(r.ExpenseCategories[index].Account)
 	}
 }
 
@@ -201,6 +231,9 @@ func (r LedgerOnboardingRequest) Validate() error {
 			return fmt.Errorf("钱在哪里重复：%s", space.Name)
 		}
 		seenNames["funding:"+space.Name] = true
+		if err := validateOnboardingAccount(fmt.Sprintf("fundingSpaces[%d].account", i), space.Account, fundingSpacePrefixes[space.Kind]); err != nil {
+			return err
+		}
 		if err := validateOnboardingAmount(fmt.Sprintf("fundingSpaces[%d]", i), space.Currency, space.OpeningBalance); err != nil {
 			return err
 		}
@@ -216,14 +249,17 @@ func (r LedgerOnboardingRequest) Validate() error {
 			return fmt.Errorf("欠款账户重复：%s", liability.Name)
 		}
 		seenNames["liability:"+liability.Name] = true
+		if err := validateOnboardingAccount(fmt.Sprintf("liabilities[%d].account", i), liability.Account, liabilityPrefixes[liability.Kind]); err != nil {
+			return err
+		}
 		if err := validateOnboardingAmount(fmt.Sprintf("liabilities[%d]", i), liability.Currency, liability.OpeningBalance); err != nil {
 			return err
 		}
 	}
-	if err := validateOnboardingCategories("incomeCategories", r.IncomeCategories, onboardingIncomeTemplates); err != nil {
+	if err := validateOnboardingCategories("incomeCategories", r.IncomeCategories, onboardingIncomeTemplates, "Income"); err != nil {
 		return err
 	}
-	if err := validateOnboardingCategories("expenseCategories", r.ExpenseCategories, onboardingExpenseTemplates); err != nil {
+	if err := validateOnboardingCategories("expenseCategories", r.ExpenseCategories, onboardingExpenseTemplates, "Expenses"); err != nil {
 		return err
 	}
 	return nil
@@ -247,6 +283,22 @@ func validateOnboardingName(field, value string) error {
 	if value == "" || len([]rune(value)) > 80 {
 		return fmt.Errorf("%s 需为 1–80 个字符", field)
 	}
+	for _, character := range value {
+		if unicode.Is(unicode.Han, character) || (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || unicode.IsSpace(character) {
+			continue
+		}
+		return fmt.Errorf("%s 仅支持中文、英文、数字、空格和连字符", field)
+	}
+	return nil
+}
+
+func validateOnboardingAccount(field, account, root string) error {
+	if err := validateAccount(field, account); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(account, root+":") {
+		return fmt.Errorf("%s 必须位于 %s 下", field, root)
+	}
 	return nil
 }
 
@@ -263,7 +315,7 @@ func validateOnboardingAmount(field, currency, balance string) error {
 	return nil
 }
 
-func validateOnboardingCategories(field string, categories []LedgerOnboardingCategory, templates []onboardingCategoryTemplate) error {
+func validateOnboardingCategories(field string, categories []LedgerOnboardingCategory, templates []onboardingCategoryTemplate, root string) error {
 	known := map[string]bool{}
 	for _, template := range templates {
 		known[template.Key] = true
@@ -286,6 +338,9 @@ func validateOnboardingCategories(field string, categories []LedgerOnboardingCat
 			return fmt.Errorf("%s 包含重复分类", field)
 		}
 		seen[key] = true
+		if err := validateOnboardingAccount(fmt.Sprintf("%s[%d].account", field, i), category.Account, root); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -333,26 +388,21 @@ type starterLedgerAccount struct {
 
 func starterLedgerAccounts(input LedgerOnboardingRequest) ([]starterLedgerAccount, error) {
 	accounts := []starterLedgerAccount{{Account: "Equity:Opening-Balances", Alias: "期初余额"}}
-	usedSegments := map[string]map[string]bool{}
 	for _, space := range input.FundingSpaces {
-		prefix := fundingSpacePrefixes[space.Kind]
-		segment := uniqueAccountSegment(safeAccountSegment(space.Name), usedSegments, prefix)
-		accounts = append(accounts, starterLedgerAccount{Account: prefix + ":" + segment, Alias: space.Name, Currency: space.Currency, OpeningBalance: space.OpeningBalance})
+		accounts = append(accounts, starterLedgerAccount{Account: space.Account, Alias: space.Name, Currency: space.Currency, OpeningBalance: space.OpeningBalance})
 	}
 	for _, liability := range input.Liabilities {
-		prefix := liabilityPrefixes[liability.Kind]
-		segment := uniqueAccountSegment(safeAccountSegment(liability.Name), usedSegments, prefix)
-		accounts = append(accounts, starterLedgerAccount{Account: prefix + ":" + segment, Alias: liability.Name, Currency: liability.Currency, OpeningBalance: liability.OpeningBalance, IsLiability: true})
+		accounts = append(accounts, starterLedgerAccount{Account: liability.Account, Alias: liability.Name, Currency: liability.Currency, OpeningBalance: liability.OpeningBalance, IsLiability: true})
 	}
 	for _, category := range input.IncomeCategories {
-		account, alias, err := categoryAccount(category, onboardingIncomeTemplates, "Income", usedSegments)
+		account, alias, err := categoryAccount(category, onboardingIncomeTemplates)
 		if err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, starterLedgerAccount{Account: account, Alias: alias})
 	}
 	for _, category := range input.ExpenseCategories {
-		account, alias, err := categoryAccount(category, onboardingExpenseTemplates, "Expenses", usedSegments)
+		account, alias, err := categoryAccount(category, onboardingExpenseTemplates)
 		if err != nil {
 			return nil, err
 		}
@@ -361,18 +411,16 @@ func starterLedgerAccounts(input LedgerOnboardingRequest) ([]starterLedgerAccoun
 	return accounts, nil
 }
 
-func categoryAccount(category LedgerOnboardingCategory, templates []onboardingCategoryTemplate, root string, usedSegments map[string]map[string]bool) (string, string, error) {
+func categoryAccount(category LedgerOnboardingCategory, templates []onboardingCategoryTemplate) (string, string, error) {
 	if category.TemplateKey != "" {
 		for _, template := range templates {
 			if template.Key == category.TemplateKey {
-				return template.Account, template.Name, nil
+				return category.Account, template.Name, nil
 			}
 		}
 		return "", "", fmt.Errorf("未知的分类模板：%s", category.TemplateKey)
 	}
-	prefix := root + ":Custom"
-	segment := uniqueAccountSegment(safeAccountSegment(category.CustomName), usedSegments, prefix)
-	return prefix + ":" + segment, category.CustomName, nil
+	return category.Account, category.CustomName, nil
 }
 
 func accountCurrency(value, fallback string) string {
@@ -380,46 +428,6 @@ func accountCurrency(value, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func safeAccountSegment(value string) string {
-	var builder strings.Builder
-	lastSeparator := false
-	for _, character := range strings.TrimSpace(value) {
-		switch {
-		case character >= 'A' && character <= 'Z', character >= 'a' && character <= 'z', character >= '0' && character <= '9':
-			builder.WriteRune(unicode.ToLower(character))
-			lastSeparator = false
-		case character == '-' || character == '_' || unicode.IsSpace(character):
-			if builder.Len() > 0 && !lastSeparator {
-				builder.WriteByte('-')
-				lastSeparator = true
-			}
-		default:
-			builder.WriteString(fmt.Sprintf("u%x", character))
-			lastSeparator = false
-		}
-	}
-	segment := strings.Trim(builder.String(), "-")
-	if segment == "" || !((segment[0] >= 'a' && segment[0] <= 'z') || (segment[0] >= '0' && segment[0] <= '9')) {
-		segment = "item-" + segment
-	}
-	if segment[0] >= 'a' && segment[0] <= 'z' {
-		segment = strings.ToUpper(segment[:1]) + segment[1:]
-	}
-	return segment
-}
-
-func uniqueAccountSegment(base string, used map[string]map[string]bool, prefix string) string {
-	if used[prefix] == nil {
-		used[prefix] = map[string]bool{}
-	}
-	segment := base
-	for suffix := 2; used[prefix][segment]; suffix++ {
-		segment = fmt.Sprintf("%s-%d", base, suffix)
-	}
-	used[prefix][segment] = true
-	return segment
 }
 
 func isZeroDecimal(value string) bool {
