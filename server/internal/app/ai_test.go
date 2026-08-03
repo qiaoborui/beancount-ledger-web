@@ -535,6 +535,17 @@ func TestAgentTimelinePagesWithoutDiscardingHistory(t *testing.T) {
 	}
 }
 
+func TestAgentTimelineEmptyPageSerializesItemsAsAnArray(t *testing.T) {
+	server := testAgentServer(t)
+	page, err := server.agentTimelinePage(context.Background(), "empty-timeline", 0, agentTimelinePageLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items == nil {
+		t.Fatal("empty timeline page must use an empty items array, not null")
+	}
+}
+
 func TestLedgerAgentUpdatePreviewsOriginalBeancountAndRequiresApproval(t *testing.T) {
 	installFakeBeanCheck(t)
 	server := testAgentServer(t)

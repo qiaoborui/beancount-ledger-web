@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { normalizeBQLChartValue, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { normalizeAgentTimelinePage, normalizeBQLChartValue, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
@@ -73,6 +73,10 @@ describe("LedgerAgentWorkspace", () => {
     expect(timelineNeedsServerRefresh([{ kind: "message", id: "user", role: "user", content: "查看持仓" }])).toBe(true);
     expect(timelineNeedsServerRefresh([{ kind: "tool", id: "tool", tool: { id: "tool", name: "get_accounts", title: "读取账户表", status: "completed" } }])).toBe(true);
     expect(timelineNeedsServerRefresh([{ kind: "message", id: "assistant", role: "assistant", content: "已完成" }])).toBe(false);
+  });
+
+  it("normalizes a null timeline response instead of crashing the workspace", () => {
+    expect(normalizeAgentTimelinePage({ items: null, nextBefore: null })).toEqual({ items: [], nextBefore: null });
   });
 
   it("restores independently switchable Agent sessions", () => {

@@ -107,10 +107,11 @@ func (s *Server) withAgentTimelineLock(ctx context.Context, sessionID string, fn
 }
 
 func (s *Server) agentTimelinePage(ctx context.Context, sessionID string, before, limit int) (agentTimelinePage, error) {
+	emptyPage := agentTimelinePage{Items: []AgentTimelineItem{}}
 	var store agentTimelineStore
 	found, err := s.runtime().GetJSON(ctx, agentTimelineScope, s.agentSessionStoreKey(sessionID), &store)
 	if err != nil {
-		return agentTimelinePage{}, err
+		return emptyPage, err
 	}
 	if !found {
 		// Sessions created before timeline persistence still have their provider
@@ -118,7 +119,7 @@ func (s *Server) agentTimelinePage(ctx context.Context, sessionID string, before
 		// a deployment never makes an existing conversation look empty.
 		messages, sessionFound, readErr := s.readAgentSession(ctx, sessionID)
 		if readErr != nil || !sessionFound {
-			return agentTimelinePage{}, readErr
+			return emptyPage, readErr
 		}
 		store = agentTimelineStore{Version: 1, UpdatedAt: time.Now().UTC()}
 		for _, message := range messages {
@@ -127,12 +128,12 @@ func (s *Server) agentTimelinePage(ctx context.Context, sessionID string, before
 			}
 		}
 		if err := s.runtime().PutJSON(ctx, agentTimelineScope, s.agentSessionStoreKey(sessionID), store); err != nil {
-			return agentTimelinePage{}, err
+			return emptyPage, err
 		}
 	}
 	if store.UpdatedAt.IsZero() || time.Since(store.UpdatedAt) > agentSessionMaxAge {
 		_ = s.runtime().DeleteJSON(ctx, agentTimelineScope, s.agentSessionStoreKey(sessionID))
-		return agentTimelinePage{}, nil
+		return emptyPage, nil
 	}
 	if limit <= 0 || limit > agentTimelinePageLimit {
 		limit = agentTimelinePageLimit
@@ -145,7 +146,7 @@ func (s *Server) agentTimelinePage(ctx context.Context, sessionID string, before
 	if start < 0 {
 		start = 0
 	}
-	page := agentTimelinePage{Items: append([]AgentTimelineItem(nil), store.Items[start:end]...)}
+	page := agentTimelinePage{Items: append(make([]AgentTimelineItem, 0, end-start), store.Items[start:end]...)}
 	if start > 0 {
 		page.NextBefore = &start
 	}
