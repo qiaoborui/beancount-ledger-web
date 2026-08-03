@@ -10,6 +10,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('presentation = "dock"');
     expect(source).toContain('presentation === "page"');
     expect(source).toContain("账本 Agent 工作区");
+    expect(source).toContain("md:h-dvh");
+    expect(source).toContain("min-h-0 w-72");
     expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
     expect(source).toContain("createPortal(panel");

@@ -769,7 +769,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       >
       <div className="ledger-workspace-frame min-w-0 max-w-full">
       <div className="ledger-workspace-content min-w-0 max-w-full">
-      <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2.5 md:px-4 md:py-3 xl:px-6">
+      {page !== "agent" && <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2.5 md:px-4 md:py-3 xl:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3.5">
           <div className="w-full min-w-0 md:w-auto md:flex-1">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -804,10 +804,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           </div>
           <div className="workspace-controls flex w-full min-w-0 items-stretch gap-2 md:w-auto md:shrink-0">
             {canShowTimeControls && <div className="workspace-time-control min-w-0 flex-1 md:flex-none"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
-            {page !== "agent" && <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => openAgent()} aria-label="打开账本 Agent" title="打开账本 Agent"><Bot className="h-5 w-5" /></button>}
+            <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => openAgent()} aria-label="打开账本 Agent" title="打开账本 Agent"><Bot className="h-5 w-5" /></button>
           </div>
         </div>
-      </div>
+      </div>}
 
       {page === "agent" && <LedgerAgentWorkspace key={activeApiEndpointIdRef.current} presentation="page" request={agentRequest} open context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }} onApplyBQL={applyAgentBQL} onNavigate={(path) => { void pushPreloadedRoute(path); }} onChanged={() => load(true)} showToast={showToast} />}
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}

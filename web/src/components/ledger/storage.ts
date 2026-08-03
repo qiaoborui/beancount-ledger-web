@@ -13,9 +13,9 @@ export const defaultPrivacySettings: PrivacySettings = {
   valuationCurrency: "CNY",
 };
 
-export const defaultMobileTabHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts"];
+export const defaultMobileTabHrefs: LedgerNavHref[] = ["/home", "/transactions", "/accounts"];
 
-const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/agent", "/home", "/dashboard", "/transactions", "/accounts", "/imports", "/editor", "/net-worth", "/investments", "/income-statement", "/currencies", "/reconcile", "/settings"];
+const allLedgerNavHrefs: LedgerNavHref[] = ["/agent", "/home", "/dashboard", "/transactions", "/accounts", "/imports", "/editor", "/net-worth", "/investments", "/income-statement", "/currencies", "/reconcile", "/settings"];
 const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
 const mobileTabsKey = "ledger_mobile_tabs";
@@ -168,7 +168,9 @@ export function readMobileTabHrefs(): LedgerNavHref[] {
     if (!raw) return defaultMobileTabHrefs;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return defaultMobileTabHrefs;
-    const valid = parsed.filter((href): href is LedgerNavHref => allLedgerNavHrefs.includes(href));
+    const valid = parsed
+      .map((href) => href === "/" ? "/home" : href)
+      .filter((href): href is LedgerNavHref => allLedgerNavHrefs.includes(href));
     return valid.length ? Array.from(new Set(valid)).slice(0, 5) : defaultMobileTabHrefs;
   } catch {
     return defaultMobileTabHrefs;
