@@ -34,6 +34,8 @@ type Config struct {
 	LedgerGitSyncEnabled        bool
 	LedgerGitRemoteURL          string
 	LedgerGitReadToken          string
+	LedgerIndexNotifyEnabled    bool
+	LedgerIndexBeanCheckEnabled bool
 	DatabaseURL                 string
 	LedgerReadModel             string
 	ReadModelStrict             bool
@@ -97,6 +99,8 @@ func LoadConfig() Config {
 		LedgerGitSyncEnabled:        envBool("LEDGER_GIT_SYNC_ENABLED", false),
 		LedgerGitRemoteURL:          strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE_URL")),
 		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
+		LedgerIndexNotifyEnabled:    envBool("LEDGER_INDEX_NOTIFY_ENABLED", false),
+		LedgerIndexBeanCheckEnabled: envBool("LEDGER_INDEX_BEAN_CHECK_ENABLED", false),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LedgerReadModel:             ledgerReadModel,
 		ReadModelStrict:             envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
@@ -172,6 +176,8 @@ func loadBaseConfig() Config {
 		LedgerGitSyncEnabled:        envBool("LEDGER_GIT_SYNC_ENABLED", false),
 		LedgerGitRemoteURL:          strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE_URL")),
 		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
+		LedgerIndexNotifyEnabled:    envBool("LEDGER_INDEX_NOTIFY_ENABLED", false),
+		LedgerIndexBeanCheckEnabled: envBool("LEDGER_INDEX_BEAN_CHECK_ENABLED", false),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		EnabledModules:              parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 		NotificationRefreshInterval: env("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "off"),

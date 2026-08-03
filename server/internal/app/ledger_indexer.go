@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,11 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	}
 	if err := ensureLedgerReady(cfg); err != nil {
 		return LedgerIndexResult{}, err
+	}
+	if cfg.LedgerIndexBeanCheckEnabled {
+		if err := runBeanCheck(cfg); err != nil {
+			return LedgerIndexResult{}, fmt.Errorf("bean-check ledger revision: %w", err)
+		}
 	}
 	if hasActive {
 		version, err := ledgerVersion(cfg)

@@ -300,7 +300,7 @@ func (tx *githubLedgerTransaction) uniquePath(file string) (string, error) {
 
 func (tx *githubLedgerTransaction) commit(message string) (string, error) {
 	if len(tx.writes) == 0 {
-		return "No ledger changes to commit.", nil
+		return "", nil
 	}
 	paths := make([]string, 0, len(tx.writes))
 	for path := range tx.writes {
@@ -347,7 +347,7 @@ func (tx *githubLedgerTransaction) commit(message string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Committed %s to %s/%s@%s\n", created.GetSHA(), tx.ledger.owner, tx.ledger.repo, tx.ledger.branch), nil
+	return created.GetSHA(), nil
 }
 
 func (tx *githubLedgerTransaction) relPath(file string) (string, error) {

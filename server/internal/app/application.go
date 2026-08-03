@@ -144,6 +144,9 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		}
 		return snapshot.Commodities, nil
 	})
+	if indexStore, ok := dependencies.indexStore.(*LedgerIndexStore); ok {
+		dependencies.writer.SetIndexRequestStore(indexStore)
+	}
 	snapshot := func() (*LedgerSnapshot, error) {
 		return readService.SnapshotLite(context.Background())
 	}

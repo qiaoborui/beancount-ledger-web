@@ -69,10 +69,15 @@ dirty worktree rather than overwriting local edits.
 | `caddy` | Same-origin browser entrypoint | Caddy volumes |
 
 The indexer runs inside Compose. It must complete one successful pass before
-the API is considered healthy. A GitHub commit becomes visible after the next
-indexing interval. Application writes and imports keep the existing GitHub API
-transaction, preview, `bean-check` validation, and commit-conflict protection;
-the API never edits a local checkout.
+the API is considered healthy. Application writes and imports write a durable
+Postgres index request and wake the local indexer through PostgreSQL
+`LISTEN`/`NOTIFY`, so their GitHub commits are usually indexed immediately.
+The configured interval remains a fallback for missed notifications and GitHub
+commits made outside the application. The indexer runs `bean-check` before it
+publishes a revision; a failed GitHub commit stays out of the active Postgres
+read model. Application writes and imports keep their existing GitHub API
+transaction, preview, and commit-conflict protection; the API never edits a
+local checkout.
 
 ## LAN and HTTPS
 
