@@ -1,0 +1,22 @@
+import { useState } from "react";
+import { ArrowRight, Check, Landmark, PiggyBank, ReceiptText, WalletCards } from "lucide-react";
+
+const steps = ["命名账本", "搭建账户", "确认开始"];
+
+export function OnboardingPrototype() {
+  const [step, setStep] = useState(0);
+  const [selected, setSelected] = useState(["现金", "银行卡"]);
+  const [title, setTitle] = useState("我的生活账本");
+  const toggle = (name: string) => setSelected((items) => items.includes(name) ? items.filter((item) => item !== name) : [...items, name]);
+  return <main className="min-h-screen bg-paper px-4 py-6 text-ink sm:px-8 lg:px-12 lg:py-10">
+    <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[250px_minmax(0,1fr)]">
+      <aside className="lg:pt-6"><p className="text-xs font-semibold tracking-[0.16em] text-brand">FIRST LEDGER</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em]">从一张财务地图开始</h1><p className="mt-3 text-sm leading-6 text-stone">先放下你现在会用到的钱和账户，细节以后随时补齐。</p><ol className="mt-10 space-y-5">{steps.map((label, i) => <li key={label} className={`flex items-center gap-3 text-sm ${i === step ? "font-semibold text-ink" : i < step ? "text-olive" : "text-stone"}`}><span className={`grid h-7 w-7 place-items-center rounded-full text-xs ${i < step ? "bg-olive text-paper" : i === step ? "bg-brand text-paper" : "bg-sand"}`}>{i < step ? <Check className="h-4 w-4" /> : i + 1}</span>{label}</li>)}</ol></aside>
+      <section className="min-h-[620px] rounded-[1.5rem] bg-panel p-6 shadow-[0_18px_48px_oklch(0.20_0.012_255/0.10)] sm:p-10">
+        {step === 0 && <div className="max-w-xl"><p className="text-sm text-stone">第一步</p><h2 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">这本账，叫什么？</h2><p className="mt-3 text-sm leading-6 text-stone">名字只会写进你自己的 Beancount 账本。默认货币可以稍后在设置里扩充。</p><label className="mt-10 block text-sm font-medium">账本名称<input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-2 h-12 w-full rounded-xl border border-line bg-paper px-4 text-base outline-none focus-visible:ring-4 focus-visible:ring-brand/20" /></label><label className="mt-5 block text-sm font-medium">日常记账货币<select className="mt-2 h-12 w-full rounded-xl border border-line bg-paper px-4"><option>CNY, 人民币</option><option>USD, 美元</option><option>HKD, 港币</option></select></label></div>}
+        {step === 1 && <div><p className="text-sm text-stone">第二步</p><h2 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">把钱放进地图里</h2><p className="mt-3 text-sm text-stone">这不是完整科目表，只是你今天就能开始记账的起点。</p><div className="mt-10 grid gap-3 sm:grid-cols-2">{[["现金",WalletCards,"随身现金和零钱"],["银行卡",Landmark,"储蓄卡与支付账户"],["信用卡",ReceiptText,"账单与待还款"],["储蓄目标",PiggyBank,"旅行、应急和长期计划"]].map(([name, Icon, detail]) => <button key={String(name)} type="button" onClick={() => toggle(String(name))} className={`flex min-h-32 items-start gap-4 rounded-2xl p-5 text-left transition-[transform,box-shadow] active:scale-[0.98] ${selected.includes(String(name)) ? "bg-tag shadow-[inset_0_0_0_1px_oklch(var(--color-brand)/0.25)]" : "bg-paper shadow-[inset_0_0_0_1px_oklch(var(--color-line))]"}`}><Icon className="mt-0.5 h-5 w-5 text-brand" /><span><b className="block text-sm">{String(name)}</b><small className="mt-1 block text-sm text-stone">{String(detail)}</small></span>{selected.includes(String(name)) && <Check className="ml-auto h-4 w-4 text-olive" />}</button>)}</div></div>}
+        {step === 2 && <div className="max-w-xl"><p className="text-sm text-stone">第三步</p><h2 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">准备写入你的第一本账</h2><div className="mt-10 rounded-2xl bg-paper p-5 text-sm leading-7"><p className="font-medium">{title || "未命名账本"}</p><p className="mt-2 text-stone">将创建 main.bean、基础账户、价格与今年的交易文件。</p><div className="mt-4 flex flex-wrap gap-2">{selected.map((item) => <span key={item} className="rounded-full bg-tag px-3 py-1 text-xs text-warm">{item}</span>)}</div></div><p className="mt-6 text-sm text-stone">提交后，indexer 会校验账本并建立第一份可阅读的数据。通过前不会进入主界面。</p></div>}
+        <div className="mt-14 flex items-center justify-between border-t border-line pt-6"><button type="button" onClick={() => setStep(Math.max(0, step - 1))} className="h-11 px-3 text-sm text-stone disabled:opacity-0" disabled={step === 0}>上一步</button><button type="button" onClick={() => setStep(Math.min(2, step + 1))} className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-5 text-sm font-medium text-paper transition-transform active:scale-[0.97]">{step === 2 ? "创建并等待校验" : "继续"}<ArrowRight className="h-4 w-4" /></button></div>
+      </section>
+    </div>
+  </main>;
+}
