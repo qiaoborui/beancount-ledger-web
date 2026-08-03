@@ -62,7 +62,10 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
+      # `/api/health` intentionally remains unavailable until the indexer has
+      # published a revision. The API must still be reachable for a brand-new
+      # private repository to complete onboarding and create its first one.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/auth/me', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 12
