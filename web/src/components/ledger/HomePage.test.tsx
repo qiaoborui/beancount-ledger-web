@@ -16,6 +16,7 @@ const summary: Summary = {
 };
 
 const privacySettings: PrivacySettings = {
+  homePage: "agent",
   showHomeSummaryAmounts: true,
   showAccountBalancesByDefault: false,
   showNetWorthByDefault: false,

@@ -5,6 +5,7 @@ import { timeRangeCacheKey } from "@/lib/timeRange";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointStorageKeyForLedgerScope } from "@/lib/apiEndpoints";
 
 export const defaultPrivacySettings: PrivacySettings = {
+  homePage: "agent",
   showHomeSummaryAmounts: true,
   showAccountBalancesByDefault: false,
   showNetWorthByDefault: false,
@@ -14,7 +15,7 @@ export const defaultPrivacySettings: PrivacySettings = {
 
 export const defaultMobileTabHrefs: LedgerNavHref[] = ["/", "/transactions", "/accounts"];
 
-const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/dashboard", "/transactions", "/accounts", "/imports", "/editor", "/net-worth", "/investments", "/income-statement", "/currencies", "/reconcile", "/settings"];
+const allLedgerNavHrefs: LedgerNavHref[] = ["/", "/agent", "/home", "/dashboard", "/transactions", "/accounts", "/imports", "/editor", "/net-worth", "/investments", "/income-statement", "/currencies", "/reconcile", "/settings"];
 const privacySettingsKey = "ledger_privacy_settings";
 const themeModeKey = "ledger_theme_mode";
 const mobileTabsKey = "ledger_mobile_tabs";
