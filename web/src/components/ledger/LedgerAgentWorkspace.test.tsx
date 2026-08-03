@@ -15,6 +15,8 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
     expect(source).toContain("createPortal(panel");
+    expect(source).toContain('presentation === "page" ? "px-3 py-3"');
+    expect(source).toContain("h-9 w-9");
   });
 
   it("uses approval and typed artifact events", () => {
