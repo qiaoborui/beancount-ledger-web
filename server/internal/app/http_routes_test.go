@@ -451,6 +451,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/integrations/gmail/drain":     true,
 	}
 	covered["GET /api/ai/agent/sessions/:sessionID/timeline"] = true
+	covered["DELETE /api/ai/agent/sessions/:sessionID"] = true
 	missing := []string{}
 	for route := range actual {
 		if !covered[route] {

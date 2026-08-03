@@ -153,6 +153,47 @@ func (s *Server) agentTimelinePage(ctx context.Context, sessionID string, before
 	return page, nil
 }
 
+func (s *Server) deleteAgentSession(ctx context.Context, sessionID string) error {
+	// Commit this guard before the cleanup transaction. If a later delete step
+	// fails across runtime and relational storage, a stale approval still cannot
+	// resurrect the session while the caller retries the idempotent deletion.
+	if err := s.runtime().PutJSON(ctx, agentSessionDeletionScope, s.agentSessionStoreKey(sessionID), agentSessionDeletion{DeletedAt: time.Now().UTC()}); err != nil {
+		return err
+	}
+	return s.withAgentSessionRunLock(ctx, sessionID, func(lockCtx context.Context) error {
+		var timeline agentTimelineStore
+		_, err := s.runtime().GetJSON(lockCtx, agentTimelineScope, s.agentSessionStoreKey(sessionID), &timeline)
+		if err != nil {
+			return err
+		}
+		for _, item := range timeline.Items {
+			if item.Kind != "approval" || item.Approval == nil {
+				continue
+			}
+			if err := s.runtime().DeleteJSON(lockCtx, agentApprovalScope, item.Approval.ID); err != nil {
+				return err
+			}
+			if err := s.runtime().DeleteJSON(lockCtx, agentApprovalResolutionScope, item.Approval.ID); err != nil {
+				return err
+			}
+		}
+		if s.agentApprovals != nil {
+			if err := s.agentApprovals.DeleteSession(lockCtx, ledgerClusterID(s.cfg), sessionID); err != nil {
+				return err
+			}
+		}
+		if s.agentSessions != nil {
+			if err := s.agentSessions.Delete(lockCtx, ledgerClusterID(s.cfg), sessionID); err != nil {
+				return err
+			}
+		}
+		if err := s.runtime().DeleteJSON(lockCtx, agentTimelineScope, s.agentSessionStoreKey(sessionID)); err != nil {
+			return err
+		}
+		return s.runtime().DeleteJSON(lockCtx, agentSessionScope, s.agentSessionStoreKey(sessionID))
+	})
+}
+
 func agentTimelineMessage(role, content string) AgentTimelineItem {
 	return AgentTimelineItem{ID: newAgentID("timeline"), Kind: "message", Role: role, Content: content}
 }

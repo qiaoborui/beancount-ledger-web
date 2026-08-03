@@ -2,7 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, Database, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, Play, Plus, Send, ShieldCheck, SlidersHorizontal, Sparkles, Wrench, X } from "lucide-react";
+import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, Database, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
@@ -33,7 +33,7 @@ type ToolItem = { kind: "tool"; id: string; tool: AgentToolEvent };
 type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
 type ApprovalItem = { kind: "approval"; id: string; approval: AgentApproval; resolved?: boolean };
 type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
-type AgentSession = { id: string; serverSessionId: string; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
+type AgentSession = { id: string; serverSessionId: string; title: string; archived: boolean; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
 const MAX_STORED_SESSIONS = 30;
 const AGENT_TIMELINE_PAGE_SIZE = 80;
 const AGENT_TIMELINE_REFRESH_MS = 1500;
@@ -67,12 +67,16 @@ function containsSensitiveAgentInput(value: string) {
 
 function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = `session-${nextID()}`): AgentSession {
   const now = Date.now();
-  return { id: nextID(), serverSessionId, createdAt: now, updatedAt: now, timeline };
+  return { id: nextID(), serverSessionId, title: timelineTitle(timeline), archived: false, createdAt: now, updatedAt: now, timeline };
 }
 
 function sessionLabel(session: AgentSession) {
-  const firstPrompt = session.timeline.find((item): item is MessageItem => item.kind === "message" && item.role === "user");
-  return firstPrompt?.content.trim() || "新对话";
+  return session.title || timelineTitle(session.timeline) || "新对话";
+}
+
+function timelineTitle(timeline: TimelineItem[]) {
+  const firstPrompt = timeline.find((item): item is MessageItem => item.kind === "message" && item.role === "user");
+  return firstPrompt?.content.trim() || "";
 }
 
 function sessionTime(session: AgentSession) {
@@ -105,6 +109,8 @@ export function LedgerAgentWorkspace({
   const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
   const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
   const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
+  const [showArchivedSessions, setShowArchivedSessions] = useState(false);
+  const [sessionMutationID, setSessionMutationID] = useState("");
   const [timelinePagination, setTimelinePagination] = useState<Record<string, TimelinePagination>>({});
   const [desktopFullscreen, setDesktopFullscreen] = useState(false);
   const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
@@ -115,6 +121,7 @@ export function LedgerAgentWorkspace({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const requestRef = useRef(0);
   const timelineVersionRef = useRef(0);
+  const sessionTitleHydrationRef = useRef(new Set<string>());
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const desktopScrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -124,6 +131,8 @@ export function LedgerAgentWorkspace({
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const sessionId = activeSession.serverSessionId || `session-${activeSession.id}`;
   const timeline = activeSession.timeline;
+  const archivedSessionCount = sessions.filter((session) => session.archived).length;
+  const sidebarSessions = sessions.filter((session) => !session.archived || showArchivedSessions);
   const lastAssistantMessage = [...timeline].reverse().find((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
   const pendingApproval = timeline.find((item): item is ApprovalItem => item.kind === "approval" && !item.resolved);
   const canContinue = !pendingApproval && (lastAssistantMessage?.content.includes("本次请求已完成 8 轮工具处理") ?? false);
@@ -139,7 +148,10 @@ export function LedgerAgentWorkspace({
 
   function updateTimeline(update: (timeline: TimelineItem[]) => TimelineItem[]) {
     timelineVersionRef.current += 1;
-    updateActiveSession((session) => ({ ...session, timeline: update(session.timeline), updatedAt: Date.now() }));
+    updateActiveSession((session) => {
+      const timeline = update(session.timeline);
+      return { ...session, title: session.title || timelineTitle(timeline), timeline, updatedAt: Date.now() };
+    });
   }
 
   function createSession() {
@@ -152,6 +164,36 @@ export function LedgerAgentWorkspace({
     setStreamingText("");
     setStatus("就绪");
     requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function archiveSession(session: AgentSession, archived: boolean) {
+    if (busy || sessionMutationID) return;
+    setSessions((current) => current.map((item) => item.id === session.id ? { ...item, archived } : item));
+    if (archived && session.id === activeSession.id) {
+      const next = sessions.find((item) => item.id !== session.id && !item.archived);
+      if (next) setActiveSessionId(next.id);
+      else createSession();
+    }
+  }
+
+  async function deleteSession(session: AgentSession) {
+    if (busy || sessionMutationID || (session.id === activeSession.id && pendingApproval)) return;
+    if (!window.confirm(`删除“${sessionLabel(session)}”及其 Agent 会话记录？此操作无法恢复。`)) return;
+    setSessionMutationID(session.id);
+    try {
+      await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(session.serverSessionId || `session-${session.id}`)}`, { method: "DELETE" }, { kind: "write" });
+      const next = sessions.find((item) => item.id !== session.id && !item.archived) ?? sessions.find((item) => item.id !== session.id);
+      setSessions((current) => current.filter((item) => item.id !== session.id));
+      if (session.id === activeSession.id) {
+        if (next) setActiveSessionId(next.id);
+        else createSession();
+      }
+      showToast("success", "会话已删除");
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "删除会话失败");
+    } finally {
+      setSessionMutationID("");
+    }
   }
 
   function selectSession(sessionId: string) {
@@ -173,6 +215,15 @@ export function LedgerAgentWorkspace({
   // sessionId changes after a legacy session receives its durable server id.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, sessionId]);
+
+  useEffect(() => {
+    for (const session of sessions) {
+      const serverSessionId = session.serverSessionId || `session-${session.id}`;
+      if (session.title || timelineTitle(session.timeline) || sessionTitleHydrationRef.current.has(serverSessionId)) continue;
+      sessionTitleHydrationRef.current.add(serverSessionId);
+      void loadTimelinePage(serverSessionId);
+    }
+  }, [sessions]);
 
   useEffect(() => {
     if (!timelineNeedsServerRefresh(timeline)) return;
@@ -235,10 +286,11 @@ export function LedgerAgentWorkspace({
       setSessions((current) => current.map((session) => {
         if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
         if (!before) {
-          if (!page.items.length) return session;
-          if (timelineVersion === timelineVersionRef.current) return { ...session, timeline: page.items };
+          const title = timelineTitle(page.items) || session.title;
+          if (!page.items.length) return title === session.title ? session : { ...session, title };
+          if (timelineVersion === timelineVersionRef.current) return { ...session, title, timeline: page.items };
           const known = new Set(page.items.map((item) => item.id));
-          return { ...session, timeline: [...page.items, ...session.timeline.filter((item) => !known.has(item.id))] };
+          return { ...session, title, timeline: [...page.items, ...session.timeline.filter((item) => !known.has(item.id))] };
         }
         const known = new Set(session.timeline.map((item) => item.id));
         return { ...session, timeline: [...page.items.filter((item) => !known.has(item.id)), ...session.timeline] };
@@ -375,6 +427,15 @@ export function LedgerAgentWorkspace({
         <div className="flex items-center gap-1">
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:hidden" title="查看会话历史" aria-label="查看会话历史" onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
           {presentation === "dock" && <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(pendingApproval) || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-line bg-paper text-ink">
+              <DropdownMenuItem onSelect={() => archiveSession(activeSession, !activeSession.archived)}>{activeSession.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{activeSession.archived ? "取消归档" : "归档会话"}</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={() => void deleteSession(activeSession)}><Trash2 className="h-4 w-4" />删除会话</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
           {presentation === "dock" && <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>}
         </div>
@@ -468,8 +529,8 @@ export function LedgerAgentWorkspace({
 
   if (presentation === "page") return <section className="ledger-agent-page flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] min-h-0 min-w-0 max-w-full overflow-hidden bg-paper md:h-dvh" aria-label="账本 Agent 工作区">
     <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-line bg-panel md:flex" aria-label="Agent 会话历史">
-      <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div><button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span></button>)}</div>
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div><div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div></div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span></button>)}</div>
     </aside>
     {panel("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-paper", desktopScrollRef)}
   </section>;
@@ -482,12 +543,12 @@ export function LedgerAgentWorkspace({
       <section className="fixed inset-0 z-[100] hidden overflow-hidden bg-paper md:flex" aria-label="账本 Agent 全屏工作区">
         <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel" aria-label="Agent 会话历史">
           <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4">
-            <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div>
-            <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+            <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div>
+            <div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
-              <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
+            {[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
+              <span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span>
               <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
             </button>)}
           </div>
@@ -500,15 +561,16 @@ export function LedgerAgentWorkspace({
     {open && mobileSessionListOpen && createPortal(
       <section className="fixed inset-0 z-[110] flex flex-col overflow-hidden bg-paper md:hidden" aria-label="移动端会话历史">
         <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
-          <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div>
+          <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div>
           <div className="flex items-center gap-1">
+            {archivedSessionCount > 0 && <button type="button" className="h-9 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}
             <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
             <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="返回聊天" aria-label="返回聊天" onClick={() => setMobileSessionListOpen(false)}><X className="h-4 w-4" /></button>
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-          {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-2 w-full rounded-md border px-3 py-3 text-left transition ${session.id === activeSession.id ? "border-brand bg-brand text-paper" : "border-line bg-panel text-ink active:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
-            <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
+          {[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-2 w-full rounded-md border px-3 py-3 text-left transition ${session.id === activeSession.id ? "border-brand bg-brand text-paper" : "border-line bg-panel text-ink active:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
+            <span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span>
             <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
           </button>)}
         </div>
@@ -696,6 +758,8 @@ export function restoreSessions(value: unknown): AgentSession[] {
     return [{
       id: session.id,
       serverSessionId: typeof session.serverSessionId === "string" ? session.serverSessionId : "",
+      title: typeof session.title === "string" ? session.title.trim() : timelineTitle(restoreTimeline(session.timeline)),
+      archived: session.archived === true,
       createdAt,
       updatedAt,
       timeline: restoreTimeline(session.timeline),
@@ -745,7 +809,7 @@ function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSe
       ...value,
       // History is loaded from the server in pages. Keep only session metadata
       // locally, so browser quota can never silently trim a conversation.
-      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map(({ id, serverSessionId, createdAt, updatedAt }) => ({ id, serverSessionId, createdAt, updatedAt, timeline: [] })),
+      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map((session) => ({ id: session.id, serverSessionId: session.serverSessionId, title: session.title || timelineTitle(session.timeline), archived: session.archived, createdAt: session.createdAt, updatedAt: session.updatedAt, timeline: [] })),
     }));
   } catch {
     // Conversation persistence is optional.
