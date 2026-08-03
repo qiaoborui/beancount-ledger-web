@@ -18,6 +18,7 @@ type Config struct {
 	LedgerRoot                  string
 	LedgerLockFile              string
 	LedgerFilesystemLockEnabled bool
+	AuthTransport               string
 	RuntimeDir                  string
 	StaticDir                   string
 	ServeStatic                 bool
@@ -77,6 +78,7 @@ func LoadConfig() Config {
 		LedgerRoot:                  filepath.Clean(ledgerRoot),
 		LedgerLockFile:              filepath.Clean(ledgerLockFile),
 		LedgerFilesystemLockEnabled: envBool("LEDGER_FILESYSTEM_LOCK_ENABLED", false),
+		AuthTransport:               authTransportMode(),
 		RuntimeDir:                  filepath.Clean(runtimeDir),
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
@@ -325,6 +327,9 @@ func ValidateIndexerConfig(cfg Config) error {
 }
 
 func ValidateConfig(cfg Config) error {
+	if err := validateAuthTransportConfig(cfg); err != nil {
+		return err
+	}
 	if _, err := enabledBuiltinModules(cfg.EnabledModules); err != nil {
 		return err
 	}
@@ -359,6 +364,27 @@ func ValidateConfig(cfg Config) error {
 		return errors.New("LEDGER_READ_MODEL_STRICT=true requires LEDGER_READ_MODEL=postgres")
 	}
 	return nil
+}
+
+func validateAuthTransportConfig(cfg Config) error {
+	switch cfg.AuthTransport {
+	case "", "https":
+		return nil
+	case "http":
+		for _, key := range []string{"LEDGER_CORS_ORIGINS", "CORS_ALLOWED_ORIGINS", "PUBLIC_ORIGINS"} {
+			if strings.TrimSpace(os.Getenv(key)) != "" {
+				return errors.New("" + key + " cannot be set when LEDGER_AUTH_TRANSPORT=http")
+			}
+		}
+		for _, key := range []string{"WEBAUTHN_PUBLIC_ORIGIN", "WEBAUTHN_RP_ORIGINS", "WEBAUTHN_RP_ID"} {
+			if strings.TrimSpace(os.Getenv(key)) != "" {
+				return errors.New("" + key + " requires LEDGER_AUTH_TRANSPORT=https")
+			}
+		}
+		return nil
+	default:
+		return errors.New("LEDGER_AUTH_TRANSPORT must be https or http")
+	}
 }
 
 func gmailAutomationConfigured(cfg Config) bool {

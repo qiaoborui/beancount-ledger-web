@@ -186,6 +186,46 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 }
 
+func TestHTTPAuthTransportSetsNonSecureCookies(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_TRANSPORT", "http")
+	t.Setenv("APP_PASSWORD", "secret")
+	router := testRouter(t, testLedger(t))
+	login := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(login, req)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
+	}
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Secure {
+			t.Fatalf("HTTP transport set Secure cookie: %s", cookie.Name)
+		}
+	}
+	summary := requestWithCookies(router, http.MethodGet, "/api/ledger/summary?start=2026-05-01&end=2026-06-01", "", login.Result().Cookies())
+	if summary.Code != http.StatusOK {
+		t.Fatalf("summary status=%d body=%s", summary.Code, summary.Body.String())
+	}
+}
+
+func TestHTTPSAuthTransportSetsSecureCookies(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_TRANSPORT", "https")
+	t.Setenv("APP_PASSWORD", "secret")
+	router := testRouter(t, testLedger(t))
+	login := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(login, req)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
+	}
+	for _, cookie := range login.Result().Cookies() {
+		if !cookie.Secure {
+			t.Fatalf("HTTPS transport omitted Secure cookie: %s", cookie.Name)
+		}
+	}
+}
+
 func TestUnsafeAPIRoutesRejectCrossSiteOrigin(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")

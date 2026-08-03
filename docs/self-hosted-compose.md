@@ -89,6 +89,19 @@ WEBAUTHN_RP_ID=ledger.home.example
 Use a DNS name and Caddy's normal public-certificate flow instead when that is
 appropriate. Do not bind port 80 to a LAN interface.
 
+### HTTP-only LAN compatibility mode
+
+If HTTPS is genuinely unavailable, the app can run as a password-only,
+same-origin HTTP service. This is an explicit deployment choice, not a
+fallback: set `LEDGER_AUTH_TRANSPORT=http` and bind the HTTP port to the LAN.
+The server then uses non-`Secure` session cookies so standard browsers can log
+in over HTTP.
+
+Do not use this mode on an untrusted network. It disables the secure-cookie
+guarantee, cannot use passkeys/WebAuthn, and rejects configured cross-origin
+cookie access. One hostname must use either HTTP mode or HTTPS mode, never
+both, because an HTTP cookie can overwrite a Secure cookie with the same name.
+
 ## Backup and update
 
 Stop the stack before a consistent backup. Back up the ledger directory and a

@@ -115,6 +115,27 @@ func TestValidateConfigRejectsInvalidNotificationRefreshInterval(t *testing.T) {
 	}
 }
 
+func TestValidateConfigAuthTransportModes(t *testing.T) {
+	if err := ValidateConfig(Config{LedgerStorage: "filesystem", AuthTransport: "https"}); err != nil {
+		t.Fatalf("https transport should be valid: %v", err)
+	}
+	if err := ValidateConfig(Config{LedgerStorage: "filesystem", AuthTransport: "smtp"}); err == nil || !strings.Contains(err.Error(), "LEDGER_AUTH_TRANSPORT") {
+		t.Fatalf("invalid transport error=%v", err)
+	}
+	t.Setenv("WEBAUTHN_RP_ID", "ledger.example.com")
+	if err := ValidateConfig(Config{LedgerStorage: "filesystem", AuthTransport: "http"}); err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Fatalf("http WebAuthn config error=%v", err)
+	}
+}
+
+func TestLoadConfigPreservesInvalidAuthTransportForValidation(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_TRANSPORT", "smtp")
+	cfg := LoadConfig()
+	if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "LEDGER_AUTH_TRANSPORT") {
+		t.Fatalf("invalid transport error=%v", err)
+	}
+}
+
 func TestLoadConfigGitHubAlias(t *testing.T) {
 	t.Setenv("LEDGER_STORAGE", "github")
 	t.Setenv("LEDGER_GITHUB_OWNER", "example")
