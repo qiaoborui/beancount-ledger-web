@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
+import { pageFromPathname } from "./ledger/routes";
 import { queryDateRange } from "@/lib/queryDateRange";
 import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel, timeRangeToParams } from "@/lib/timeRange";
 import type { TimeRange } from "@/lib/timeRange";
@@ -124,22 +125,6 @@ function RouteFallback({ label }: { label: string }) {
   return <section className="card p-6 text-sm text-stone">{label}</section>;
 }
 
-function pageFromPathname(pathname: string): LedgerPage {
-  if (pathname.startsWith("/dashboard")) return "dashboard";
-  if (pathname.startsWith("/query")) return "query";
-  if (pathname.startsWith("/net-worth")) return "net-worth";
-  if (pathname.startsWith("/investments")) return "investments";
-  if (pathname.startsWith("/transactions")) return "transactions";
-  if (pathname.startsWith("/imports")) return "imports";
-  if (pathname.startsWith("/editor")) return "editor";
-  if (pathname.startsWith("/reconcile")) return "reconcile";
-  if (pathname.startsWith("/settings")) return "settings";
-  if (pathname.startsWith("/income-statement")) return "income-statement";
-  if (pathname.startsWith("/currencies")) return "currencies";
-  if (pathname.startsWith("/accounts")) return "accounts";
-  return "home";
-}
-
 /** 从路径提取账户详情参数，如 /accounts/Assets:Bank:Checking → Assets:Bank:Checking */
 function accountFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/accounts\/(.+)/);
@@ -168,11 +153,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const { pathname, search } = useBrowserLocation();
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
-  const page = pageProp ?? pageFromPathname(pathname);
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
   const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
-  const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange(page === "home" ? "year" : "month"));
   const { toast, showToast, clearToast } = useToast();
   const online = useNetworkStatus();
   const { getScrollTop, scrollToTop } = useRouteScrollMemory(pathname);
@@ -190,6 +173,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     visibleAccountMap,
     setVisibleAccountMap,
   } = usePrivacySettings();
+  const page = pageProp ?? pageFromPathname(pathname, privacySettings.homePage);
+  const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange(page === "home" ? "year" : "month"));
   const valuationCurrency = privacySettings.valuationCurrency || "CNY";
   const initialCategoryQuery = searchParams.get("category") ?? "";
   const initialMetadataQuery = searchParams.get("metadata") ?? "";
@@ -677,8 +662,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
   function openAgent(prompt?: string, autoSubmit = false) {
     void loadLedgerAgentWorkspace();
-    setAgentOpen(true);
     setAgentRequest({ id: Date.now(), prompt, autoSubmit });
+    void pushPreloadedRoute("/agent");
   }
 
   function applyAgentBQL(query: string) {
@@ -819,11 +804,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
           </div>
           <div className="workspace-controls flex w-full min-w-0 items-stretch gap-2 md:w-auto md:shrink-0">
             {canShowTimeControls && <div className="workspace-time-control min-w-0 flex-1 md:flex-none"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
-            <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => { void loadLedgerAgentWorkspace(); setAgentOpen((current) => !current); }} aria-label={agentOpen ? "收起账本 Agent" : "打开账本 Agent"} aria-pressed={agentOpen} title={agentOpen ? "收起账本 Agent" : "打开账本 Agent"}><Bot className="h-5 w-5" /></button>
+            {page !== "agent" && <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => openAgent()} aria-label="打开账本 Agent" title="打开账本 Agent"><Bot className="h-5 w-5" /></button>}
           </div>
         </div>
       </div>
 
+      {page === "agent" && <LedgerAgentWorkspace key={activeApiEndpointIdRef.current} presentation="page" request={agentRequest} open context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }} onApplyBQL={applyAgentBQL} onNavigate={(path) => { void pushPreloadedRoute(path); }} onChanged={() => load(true)} showToast={showToast} />}
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}
 
       {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
@@ -870,7 +856,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       )}
       </div>
 
-      <LedgerAgentWorkspace
+      {page !== "agent" && <LedgerAgentWorkspace
         key={activeApiEndpointIdRef.current}
         request={agentRequest}
         open={agentOpen}
@@ -880,7 +866,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         onNavigate={(path) => { void pushPreloadedRoute(path); }}
         onChanged={() => load(true)}
         showToast={showToast}
-      />
+      />}
       </div>
       </div>
 
@@ -938,8 +924,9 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query";
+  const isMonthScoped = page !== "agent" && page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
+    agent: { eyebrow: "ledger agent", title: "账本 Agent" },
     home: { eyebrow: "financial overview", title: "财务概览" },
     dashboard: { eyebrow: "income and spending analysis", title: `${label} 收支分析` },
     query: { eyebrow: "ledger query", title: "BQL 查询" },

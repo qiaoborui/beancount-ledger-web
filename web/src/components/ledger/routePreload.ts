@@ -1,4 +1,6 @@
 import type { LedgerPage } from "./types";
+import { readPrivacySettings } from "./storage";
+import { pageFromPathname } from "./routes";
 
 export const loadDashboardPage = () => import("./DashboardPage");
 export const loadBQLQueryPage = () => import("./BQLQueryPage");
@@ -19,6 +21,7 @@ export const loadSettingsPage = () => import("./SettingsPage");
 export const loadTransactionList = () => import("./TransactionList");
 
 const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
+  agent: loadLedgerAgentWorkspace,
   dashboard: loadDashboardPage,
   query: loadBQLQueryPage,
   "net-worth": loadNetWorthPage,
@@ -64,20 +67,7 @@ function pageFromHref(href: string): LedgerPage {
       return href.split("?")[0] || "/";
     }
   })();
-  if (pathname.startsWith("/dashboard")) return "dashboard";
-  if (pathname.startsWith("/query")) return "query";
-  if (pathname.startsWith("/net-worth")) return "net-worth";
-  if (pathname.startsWith("/investments")) return "investments";
-  if (pathname.startsWith("/transactions")) return "transactions";
-  if (pathname.startsWith("/imports")) return "imports";
-  if (pathname.startsWith("/editor")) return "editor";
-  if (pathname.startsWith("/reconcile")) return "reconcile";
-  if (pathname.startsWith("/settings")) return "settings";
-  if (pathname.startsWith("/income-statement")) return "income-statement";
-  if (pathname.startsWith("/currencies")) return "currencies";
-  if (pathname.startsWith("/accounts/")) return "accounts";
-  if (pathname.startsWith("/accounts")) return "accounts";
-  return "home";
+  return pageFromPathname(pathname, readPrivacySettings().homePage);
 }
 
 export function preloadLedgerRoute(href: string) {
@@ -104,7 +94,7 @@ function preloadRoutesIncrementally(hrefs: string[], index = 0) {
 
 export function preloadOfflineCoreRoutes() {
   if (typeof window === "undefined") return;
-  const coreRoutes = ["/transactions", "/accounts", "/dashboard", "/query", "/net-worth", "/income-statement", "/settings"];
+  const coreRoutes = ["/agent", "/transactions", "/accounts", "/dashboard", "/query", "/net-worth", "/income-statement", "/settings"];
   const secondaryRoutes = ["/imports", "/reconcile", "/currencies", "/investments", "/editor"];
   preloadRoutesIncrementally(coreRoutes);
   window.setTimeout(() => preloadRoutesIncrementally(secondaryRoutes), 1500);

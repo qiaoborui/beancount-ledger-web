@@ -162,6 +162,14 @@ export function SettingsPage({
     </section>
 
     <section className="card p-5 md:p-6">
+      <div className="border-b border-line pb-4"><div className="text-xs uppercase tracking-[0.24em] text-stone">home page</div><h1 className="mt-2 font-serif text-3xl font-medium">主页</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-olive">决定打开根路径 <code className="rounded bg-tag px-1.5 py-0.5 text-xs text-ink">/</code> 时首先进入的工作区。这个设置只保存在当前浏览器。</p></div>
+      <div className="mt-6 grid gap-2 md:grid-cols-2">
+        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "agent" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "agent")} aria-pressed={settings.homePage === "agent"}><span className="block font-medium text-ink">账本 Agent</span><span className="mt-1 block text-sm leading-6 text-olive">从对话、分析和待确认操作开始。</span></button>
+        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "overview" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "overview")} aria-pressed={settings.homePage === "overview"}><span className="block font-medium text-ink">财务概览</span><span className="mt-1 block text-sm leading-6 text-olive">先查看收入、支出和资产的摘要。</span></button>
+      </div>
+    </section>
+
+    <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">
         <div className="text-xs uppercase tracking-[0.24em] text-stone">privacy defaults</div>
         <h1 className="mt-2 font-serif text-3xl font-medium">默认显示设置</h1>
