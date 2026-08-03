@@ -62,8 +62,8 @@ func (r AgentTurnRequest) Validate() error {
 	if containsSensitiveAgentContent(r.Message) {
 		return errors.New("请勿在 Agent 对话中输入密码、验证码、令牌或完整卡号")
 	}
-	if len(r.Messages) > 60 {
-		return errors.New("too many messages")
+	if agentSessionMessagesTokenEstimate(agentMessagesFromRequest(r.Messages)) > agentSessionMaxHistoryTokenBudget {
+		return fmt.Errorf("message history exceeds the maximum token budget of %d", agentSessionMaxHistoryTokenBudget)
 	}
 	if r.ApprovalPolicy != "" && r.ApprovalPolicy != "on-write" && r.ApprovalPolicy != "always" {
 		return errors.New("approvalPolicy must be on-write or always")
@@ -286,7 +286,12 @@ func (s *Server) modelClient() AgentModelClient {
 func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
 	sessionID := normalizeAgentSessionID(request.SessionID)
 	return s.withAgentSessionRunLock(ctx, sessionID, func(lockCtx context.Context) error {
-		return s.runAgentTurnLocked(lockCtx, request, emit)
+		return s.runAgentTurnLocked(lockCtx, request, func(event string, payload any) error {
+			if err := s.recordAgentTimelineEvent(lockCtx, sessionID, event, payload); err != nil {
+				return err
+			}
+			return emit(event, payload)
+		})
 	})
 }
 
@@ -502,11 +507,7 @@ func (s *Server) appendAgentToolError(ctx context.Context, sessionID string, mes
 
 func agentMessagesFromRequest(history []AgentMessage) []agentModelMessage {
 	messages := make([]agentModelMessage, 0, len(history))
-	start := 0
-	if len(history) > 40 {
-		start = len(history) - 40
-	}
-	for _, message := range history[start:] {
+	for _, message := range history {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
 		if role != "assistant" && role != "user" {
 			continue
@@ -650,7 +651,12 @@ func sameAgentTransactionSource(entry BeanEntry, source TransactionSource) bool 
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
 	return s.withAgentSessionRunLock(ctx, request.SessionID, func(lockCtx context.Context) error {
-		return s.resolveAgentApprovalLocked(lockCtx, request, pageContext, emit)
+		return s.resolveAgentApprovalLocked(lockCtx, request, pageContext, func(event string, payload any) error {
+			if err := s.recordAgentTimelineEvent(lockCtx, request.SessionID, event, payload); err != nil {
+				return err
+			}
+			return emit(event, payload)
+		})
 	})
 }
 

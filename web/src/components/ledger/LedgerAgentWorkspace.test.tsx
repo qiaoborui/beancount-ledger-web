@@ -62,6 +62,13 @@ describe("LedgerAgentWorkspace", () => {
     expect(timeline[3]).toMatchObject({ kind: "approval", resolved: true });
   });
 
+  it("does not discard persisted timeline items by count", () => {
+    const timeline = restoreTimeline(Array.from({ length: 81 }, (_, index) => ({ kind: "message", id: `message-${index}`, role: "user", content: `第 ${index} 条` })));
+    expect(timeline).toHaveLength(81);
+    expect(source).not.toContain("MAX_STORED_TIMELINE_ITEMS");
+    expect(source).toContain("AGENT_TIMELINE_PAGE_SIZE");
+  });
+
   it("restores independently switchable Agent sessions", () => {
     const sessions = restoreSessions([
       { id: "session-1", serverSessionId: "server-1", createdAt: 1, updatedAt: 2, timeline: [{ kind: "message", id: "message-1", role: "user", content: "第一段对话" }] },

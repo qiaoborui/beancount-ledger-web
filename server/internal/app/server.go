@@ -138,6 +138,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/agent/turn", s.aiAgentTurn)
 	api.POST("/ai/agent/approval", s.aiAgentApproval)
+	api.GET("/ai/agent/sessions/:sessionID/timeline", noStore(), s.aiAgentTimeline)
 
 	readOnly60s.GET("/push/subscription", s.pushStatus)
 	api.POST("/push/subscription", s.pushSave)

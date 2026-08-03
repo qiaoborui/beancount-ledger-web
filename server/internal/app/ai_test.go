@@ -415,8 +415,9 @@ func TestLedgerSummaryUsesMajorUnitsForModelOutput(t *testing.T) {
 }
 
 func TestAgentSessionCompactionKeepsToolCallAndResultTogether(t *testing.T) {
+	t.Setenv("LEDGER_AI_HISTORY_TOKEN_BUDGET", "4096")
 	messages := []agentModelMessage{{Role: "user", Content: "long task"}}
-	for index := 0; index < 60; index++ {
+	for index := 0; index < 400; index++ {
 		id := fmt.Sprintf("compact-%d", index)
 		messages = append(messages,
 			agentModelMessage{Role: "assistant", ToolCalls: []agentModelToolCall{{ID: id, Type: "function", Function: agentModelFunctionCall{Name: "get_bql_capabilities", Arguments: `{}`}}}},
@@ -426,6 +427,48 @@ func TestAgentSessionCompactionKeepsToolCallAndResultTogether(t *testing.T) {
 	trimmed := trimAgentSessionMessages(messages)
 	if len(trimmed) >= len(messages) || trimmed[0].Role != "system" || hasUnresolvedAgentToolCalls(trimmed) {
 		t.Fatalf("compaction must retain a valid tool transcript: %#v", trimmed)
+	}
+}
+
+func TestAgentSessionKeepsSmallMessagesRegardlessOfMessageCount(t *testing.T) {
+	messages := make([]agentModelMessage, 0, 200)
+	for index := 0; index < 200; index++ {
+		messages = append(messages, agentModelMessage{Role: "user", Content: "ok"})
+	}
+	trimmed := trimAgentSessionMessages(messages)
+	if len(trimmed) != len(messages) {
+		t.Fatalf("small messages must not be truncated by count: got %d want %d", len(trimmed), len(messages))
+	}
+}
+
+func TestAgentRequestHistoryUsesTokenBudgetRatherThanMessageCount(t *testing.T) {
+	history := make([]AgentMessage, 0, 200)
+	for index := 0; index < 200; index++ {
+		history = append(history, AgentMessage{Role: "user", Content: "ok"})
+	}
+	request := AgentTurnRequest{Message: "continue", Messages: history}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("small history must not be rejected by message count: %v", err)
+	}
+	if got := agentMessagesFromRequest(history); len(got) != len(history) {
+		t.Fatalf("request history must not be truncated by count: got %d want %d", len(got), len(history))
+	}
+}
+
+func TestAgentTimelinePagesWithoutDiscardingHistory(t *testing.T) {
+	server := testAgentServer(t)
+	for index := 0; index < agentTimelinePageLimit+1; index++ {
+		if err := server.appendAgentTimelineItem(context.Background(), "timeline-pages", agentTimelineMessage("user", fmt.Sprintf("message-%d", index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := server.agentTimelinePage(context.Background(), "timeline-pages", 0, agentTimelinePageLimit)
+	if err != nil || len(latest.Items) != agentTimelinePageLimit || latest.NextBefore == nil {
+		t.Fatalf("latest timeline page = %#v, err=%v", latest, err)
+	}
+	earlier, err := server.agentTimelinePage(context.Background(), "timeline-pages", *latest.NextBefore, agentTimelinePageLimit)
+	if err != nil || len(earlier.Items) != 1 || earlier.NextBefore != nil {
+		t.Fatalf("earlier timeline page = %#v, err=%v", earlier, err)
 	}
 }
 

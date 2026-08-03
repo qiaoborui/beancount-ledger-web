@@ -4,16 +4,23 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
-	agentSessionScope        = "ledger-agent-sessions"
-	agentSessionMaxAge       = 24 * time.Hour
-	agentSessionMessageLimit = 96
-	agentSessionRecentTail   = 72
+	agentSessionScope  = "ledger-agent-sessions"
+	agentSessionMaxAge = 24 * time.Hour
+	// Keep a small reserve for the system prompt, tool definitions, and the
+	// provider's completion. The history itself is bounded by estimated tokens,
+	// never by a message count.
+	agentSessionDefaultHistoryTokenBudget = 48_000
+	agentSessionMinHistoryTokenBudget     = 4_096
+	agentSessionMaxHistoryTokenBudget     = 1_000_000
 )
 
 type agentSessionStore struct {
@@ -122,10 +129,16 @@ func (s *Server) appendAgentSessionMessage(ctx context.Context, sessionID string
 }
 
 func trimAgentSessionMessages(messages []agentModelMessage) []agentModelMessage {
-	if len(messages) <= agentSessionMessageLimit {
+	if agentSessionMessagesTokenEstimate(messages) <= agentSessionHistoryTokenBudget() {
 		return append([]agentModelMessage(nil), messages...)
 	}
-	start := len(messages) - agentSessionRecentTail
+	target := agentSessionHistoryTokenBudget() * 3 / 4
+	start := len(messages)
+	retainedTokens := 0
+	for start > 0 && retainedTokens < target {
+		start--
+		retainedTokens += agentModelMessageTokenEstimate(messages[start])
+	}
 	// A tool result must never be retained without the assistant call that
 	// requested it. Move the tail boundary back to that call; this preserves a
 	// valid provider transcript after compaction.
@@ -140,6 +153,47 @@ func trimAgentSessionMessages(messages []agentModelMessage) []agentModelMessage 
 	trimmed = append(trimmed, compacted)
 	trimmed = append(trimmed, messages[start:]...)
 	return trimmed
+}
+
+func agentSessionHistoryTokenBudget() int {
+	value, err := strconv.Atoi(os.Getenv("LEDGER_AI_HISTORY_TOKEN_BUDGET"))
+	if err != nil || value == 0 {
+		return agentSessionDefaultHistoryTokenBudget
+	}
+	if value < agentSessionMinHistoryTokenBudget {
+		return agentSessionMinHistoryTokenBudget
+	}
+	if value > agentSessionMaxHistoryTokenBudget {
+		return agentSessionMaxHistoryTokenBudget
+	}
+	return value
+}
+
+func agentSessionMessagesTokenEstimate(messages []agentModelMessage) int {
+	total := 0
+	for _, message := range messages {
+		total += agentModelMessageTokenEstimate(message)
+	}
+	return total
+}
+
+// agentModelMessageTokenEstimate deliberately overestimates CJK and JSON
+// payloads. Providers use different tokenizers, so this is a portable guard
+// around the configured context budget rather than a model-specific tokenizer.
+func agentModelMessageTokenEstimate(message agentModelMessage) int {
+	raw, err := json.Marshal(message)
+	if err != nil {
+		return 4 + utf8.RuneCountInString(message.Content)
+	}
+	ascii, nonASCII := 0, 0
+	for _, byteValue := range raw {
+		if byteValue < utf8.RuneSelf {
+			ascii++
+		} else {
+			nonASCII++
+		}
+	}
+	return 4 + (ascii+3)/4 + (nonASCII+2)/3
 }
 
 func agentSessionCompactionNotice(discarded []agentModelMessage) string {
