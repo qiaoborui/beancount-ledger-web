@@ -47,7 +47,10 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := strings.TrimSpace(cfg.LedgerGitSHA)
+	gitSHA, err := ledgerIndexGitSHA(ctx, cfg)
+	if err != nil {
+		return LedgerIndexResult{}, err
+	}
 	if hasActive && canSkipLedgerIndexByGitSHA(cfg, active, gitSHA, cfg.LedgerIndexForceRebuild) {
 		return LedgerIndexResult{
 			RevisionID:    active.ID,
@@ -91,6 +94,27 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 		return LedgerIndexResult{}, err
 	}
 	return LedgerIndexResult{RevisionID: revisionID, GitSHA: gitSHA, LedgerVersion: snapshot.LedgerVersion}, nil
+}
+
+// ledgerIndexGitSHA records the exact checkout revision whenever the indexer
+// owns a synchronized Git worktree. This keeps Postgres revisions traceable to
+// GitHub writes and lets onboarding wait for the commit it just created.
+func ledgerIndexGitSHA(ctx context.Context, cfg Config) (string, error) {
+	if gitSHA := strings.TrimSpace(cfg.LedgerGitSHA); gitSHA != "" {
+		return gitSHA, nil
+	}
+	if !cfg.LedgerGitSyncEnabled {
+		return "", nil
+	}
+	root := strings.TrimSpace(cfg.LedgerRoot)
+	if root == "" || root == "." {
+		return "", errors.New("LEDGER_ROOT is required to resolve the synchronized Git revision")
+	}
+	gitSHA, err := ledgerGitOutput(ctx, cfg, "-C", root, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve synchronized ledger revision: %w", err)
+	}
+	return strings.TrimSpace(gitSHA), nil
 }
 
 func shouldSkipLedgerIndexByGitSHA(active LedgerIndexRevision, gitSHA string, force bool) bool {

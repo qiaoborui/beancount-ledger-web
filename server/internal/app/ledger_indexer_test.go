@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,25 @@ func TestCanSkipLedgerIndexByGitSHARequiresCleanMatchingCheckout(t *testing.T) {
 	writeLedgerVersionFile(t, root, "transactions/2026/05.bean", "2026-05-02 * \"Dinner\"\n  Expenses:Food  20 USD\n  Assets:Cash\n")
 	if canSkipLedgerIndexByGitSHA(cfg, active, sha, false) {
 		t.Fatal("dirty included file should fall back to manifest hashing")
+	}
+}
+
+func TestLedgerIndexGitSHAUsesSynchronizedCheckoutHead(t *testing.T) {
+	root := t.TempDir()
+	runLedgerIndexerGit(t, root, "init")
+	runLedgerIndexerGit(t, root, "config", "user.name", "Ledger Test")
+	runLedgerIndexerGit(t, root, "config", "user.email", "ledger-test@example.com")
+	writeLedgerVersionFile(t, root, "README.md", "ledger\n")
+	runLedgerIndexerGit(t, root, "add", ".")
+	runLedgerIndexerGit(t, root, "commit", "-m", "ledger fixture")
+	want := strings.TrimSpace(runLedgerIndexerGit(t, root, "rev-parse", "HEAD"))
+
+	got, err := ledgerIndexGitSHA(context.Background(), Config{LedgerRoot: root, LedgerGitSyncEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("git SHA=%q, want %q", got, want)
 	}
 }
 
