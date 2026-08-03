@@ -450,6 +450,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/integrations/gmail/drain":      true,
 		"POST /api/integrations/gmail/drain":     true,
 	}
+	covered["GET /api/ai/agent/sessions/:sessionID/timeline"] = true
 	missing := []string{}
 	for route := range actual {
 		if !covered[route] {
@@ -466,6 +467,24 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	sort.Strings(extra)
 	if len(missing) > 0 || len(extra) > 0 {
 		t.Fatalf("API coverage inventory mismatch\nmissing coverage: %v\nstale coverage: %v", missing, extra)
+	}
+}
+
+func TestAgentTimelineRequiresSensitiveUnlock(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	router := testRouter(t, cfg)
+	cookies := loginCookies(t, router)
+	lockedCookies := make([]*http.Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name != sensitiveCookieName {
+			lockedCookies = append(lockedCookies, cookie)
+		}
+	}
+
+	res := requestWithCookies(router, http.MethodGet, "/api/ai/agent/sessions/session-history/timeline", "", lockedCookies)
+	if res.Code != http.StatusLocked {
+		t.Fatalf("agent timeline status=%d body=%s", res.Code, res.Body.String())
 	}
 }
 

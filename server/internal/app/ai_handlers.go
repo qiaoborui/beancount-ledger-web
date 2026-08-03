@@ -2,8 +2,10 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,7 +52,12 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
+	input.SessionID = normalizeAgentSessionID(input.SessionID)
 	input.Context.SensitiveUnlocked = isSensitiveUnlocked(c)
+	if err := s.appendAgentTimelineItem(c.Request.Context(), input.SessionID, agentTimelineMessage("user", input.Message)); err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return
+	}
 	prepareSSE(c)
 	start := time.Now()
 	err := s.runAgentTurn(c.Request.Context(), input, func(event string, payload any) error {
@@ -83,6 +90,28 @@ func (s *Server) aiAgentApproval(c *gin.Context) {
 	if err != nil {
 		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
 	}
+}
+
+func (s *Server) aiAgentTimeline(c *gin.Context) {
+	if !requireSensitive(c) {
+		return
+	}
+	sessionID := normalizeAgentSessionID(c.Param("sessionID"))
+	before := 0
+	if raw := c.Query("before"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 {
+			errorJSON(c, http.StatusBadRequest, errors.New("before must be a positive integer"))
+			return
+		}
+		before = value
+	}
+	page, err := s.agentTimelinePage(c.Request.Context(), sessionID, before, agentTimelinePageLimit)
+	if err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
 }
 
 func prepareSSE(c *gin.Context) {

@@ -34,8 +34,10 @@ type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
 type ApprovalItem = { kind: "approval"; id: string; approval: AgentApproval; resolved?: boolean };
 type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
 type AgentSession = { id: string; serverSessionId: string; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
-const MAX_STORED_TIMELINE_ITEMS = 80;
 const MAX_STORED_SESSIONS = 30;
+const AGENT_TIMELINE_PAGE_SIZE = 80;
+type AgentTimelinePage = { items: TimelineItem[]; nextBefore: number | null };
+type TimelinePagination = { loading: boolean; nextBefore: number | null };
 
 type BQLColumn = { name: string; type: string };
 type BQLResult = { columns: BQLColumn[]; rows: unknown[][]; query: string; warnings?: string[]; valuationCurrency: string; rowCount: number };
@@ -62,7 +64,7 @@ function containsSensitiveAgentInput(value: string) {
   return /密码|口令|验证码|密钥|身份证|\b(password|passcode|pin|otp|token|secret|cvv)\b/i.test(value) || /(?:\d[ -]?){12,}/.test(value);
 }
 
-function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = ""): AgentSession {
+function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = `session-${nextID()}`): AgentSession {
   const now = Date.now();
   return { id: nextID(), serverSessionId, createdAt: now, updatedAt: now, timeline };
 }
@@ -102,6 +104,7 @@ export function LedgerAgentWorkspace({
   const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
   const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
   const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
+  const [timelinePagination, setTimelinePagination] = useState<Record<string, TimelinePagination>>({});
   const [desktopFullscreen, setDesktopFullscreen] = useState(false);
   const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -110,6 +113,7 @@ export function LedgerAgentWorkspace({
   const [streamingText, setStreamingText] = useState("");
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const requestRef = useRef(0);
+  const timelineVersionRef = useRef(0);
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const desktopScrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -117,7 +121,7 @@ export function LedgerAgentWorkspace({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
-  const sessionId = activeSession.serverSessionId;
+  const sessionId = activeSession.serverSessionId || `session-${activeSession.id}`;
   const timeline = activeSession.timeline;
   const lastAssistantMessage = [...timeline].reverse().find((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
   const pendingApproval = timeline.find((item): item is ApprovalItem => item.kind === "approval" && !item.resolved);
@@ -133,7 +137,8 @@ export function LedgerAgentWorkspace({
   }
 
   function updateTimeline(update: (timeline: TimelineItem[]) => TimelineItem[]) {
-    updateActiveSession((session) => ({ ...session, timeline: update(session.timeline).slice(-MAX_STORED_TIMELINE_ITEMS), updatedAt: Date.now() }));
+    timelineVersionRef.current += 1;
+    updateActiveSession((session) => ({ ...session, timeline: update(session.timeline), updatedAt: Date.now() }));
   }
 
   function createSession() {
@@ -161,6 +166,12 @@ export function LedgerAgentWorkspace({
   useEffect(() => {
     writeStoredAgent({ approvalPolicy, activeSessionId, sessions });
   }, [activeSessionId, approvalPolicy, sessions]);
+
+  useEffect(() => {
+    void loadTimelinePage(sessionId);
+  // sessionId changes after a legacy session receives its durable server id.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, sessionId]);
 
   useEffect(() => {
     if (!request || request.id === requestRef.current) return;
@@ -206,6 +217,31 @@ export function LedgerAgentWorkspace({
   const conversation = timeline.filter((item): item is MessageItem => item.kind === "message");
   const hasConversation = conversation.some((message) => message.role === "user");
 
+  async function loadTimelinePage(serverSessionId: string, before?: number) {
+    if (!serverSessionId) return;
+    const timelineVersion = timelineVersionRef.current;
+    setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: true, nextBefore: current[serverSessionId]?.nextBefore ?? null } }));
+    try {
+      const query = before ? `?before=${before}` : "";
+      const response = await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(serverSessionId)}/timeline${query}`, undefined, { kind: "read" });
+      const page = await response.json() as AgentTimelinePage;
+      setSessions((current) => current.map((session) => {
+        if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
+        if (!before) {
+          if (!page.items.length) return session;
+          if (timelineVersion === timelineVersionRef.current) return { ...session, timeline: page.items };
+          const known = new Set(page.items.map((item) => item.id));
+          return { ...session, timeline: [...page.items, ...session.timeline.filter((item) => !known.has(item.id))] };
+        }
+        const known = new Set(session.timeline.map((item) => item.id));
+        return { ...session, timeline: [...page.items.filter((item) => !known.has(item.id)), ...session.timeline] };
+      }));
+      setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: false, nextBefore: page.nextBefore } }));
+    } catch {
+      setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: false, nextBefore: current[serverSessionId]?.nextBefore ?? null } }));
+    }
+  }
+
   async function sendMessage(text: string) {
     const prompt = text.trim();
     if (!prompt || busy) return;
@@ -217,7 +253,6 @@ export function LedgerAgentWorkspace({
       showToast("info", "请先确认或取消待处理操作");
       return;
     }
-    const history = timeline.filter((item): item is MessageItem => item.kind === "message").map((message) => ({ role: message.role, content: message.content }));
     setOpen(true);
     setBusy(true);
     setInput("");
@@ -228,7 +263,7 @@ export function LedgerAgentWorkspace({
       const response = await apiFetch("/api/ai/agent/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: prompt, messages: history, context, approvalPolicy }),
+        body: JSON.stringify({ sessionId, message: prompt, context, approvalPolicy }),
       }, { kind: "write" });
       const final = await consumeStream(response);
       finishTurn(final);
@@ -269,6 +304,7 @@ export function LedgerAgentWorkspace({
     if (final.message.trim()) {
       updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: final.message.trim() }]);
     }
+    void loadTimelinePage(final.sessionId);
     if (final.refreshLedger) {
       showToast("success", "账本已更新");
       void onChanged();
@@ -342,6 +378,8 @@ export function LedgerAgentWorkspace({
           {suggestions.map((suggestion) => <button key={suggestion} type="button" className="min-h-11 rounded-md border border-line bg-panel px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => void sendMessage(suggestion)} disabled={busy}>{suggestion}</button>)}
         </div>}
         <div className="min-w-0 max-w-full space-y-3">
+          {timelinePagination[sessionId]?.nextBefore != null && <button type="button" className="w-full rounded-md border border-line bg-panel px-3 py-2 text-xs text-olive hover:bg-tag disabled:opacity-50" onClick={() => void loadTimelinePage(sessionId, timelinePagination[sessionId].nextBefore ?? undefined)} disabled={busy || timelinePagination[sessionId]?.loading}>{timelinePagination[sessionId]?.loading ? "正在加载更早记录" : `加载更早记录（每页 ${AGENT_TIMELINE_PAGE_SIZE} 条）`}</button>}
+          {timelinePagination[sessionId]?.loading && timeline.length === 0 && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />正在加载会话记录</div>}
           {timeline.map((item) => {
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
             if (item.kind === "tool") return <ToolCard key={item.id} tool={item.tool} expanded={Boolean(expandedTools[item.id])} onToggle={() => setExpandedTools((current) => ({ ...current, [item.id]: !current[item.id] }))} />;
@@ -424,7 +462,7 @@ export function LedgerAgentWorkspace({
   if (presentation === "page") return <section className="ledger-agent-page flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] min-h-0 min-w-0 max-w-full overflow-hidden bg-paper md:h-dvh" aria-label="账本 Agent 工作区">
     <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-line bg-panel md:flex" aria-label="Agent 会话历史">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length} 个会话</p></div><button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {session.timeline.length} 条记录</span></button>)}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span></button>)}</div>
     </aside>
     {panel("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-paper", desktopScrollRef)}
   </section>;
@@ -443,7 +481,7 @@ export function LedgerAgentWorkspace({
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
               <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
-              <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {session.timeline.length} 条记录</span>
+              <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
             </button>)}
           </div>
         </aside>
@@ -464,7 +502,7 @@ export function LedgerAgentWorkspace({
         <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
           {[...sessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-2 w-full rounded-md border px-3 py-3 text-left transition ${session.id === activeSession.id ? "border-brand bg-brand text-paper" : "border-line bg-panel text-ink active:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
             <span className="block truncate text-sm font-medium">{sessionLabel(session)}</span>
-            <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {session.timeline.length} 条记录</span>
+            <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
           </button>)}
         </div>
       </section>,
@@ -678,14 +716,16 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
       return Boolean(approval && typeof approval === "object" && typeof (approval as Record<string, unknown>).id === "string" && typeof (approval as Record<string, unknown>).sessionId === "string" && typeof (approval as Record<string, unknown>).toolName === "string");
     }
     return false;
-  }).slice(-MAX_STORED_TIMELINE_ITEMS);
+  });
 }
 
 function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] }) {
   try {
     window.localStorage.setItem(storageKey(), JSON.stringify({
       ...value,
-      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map((session) => ({ ...session, timeline: session.timeline.slice(-MAX_STORED_TIMELINE_ITEMS) })),
+      // History is loaded from the server in pages. Keep only session metadata
+      // locally, so browser quota can never silently trim a conversation.
+      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map(({ id, serverSessionId, createdAt, updatedAt }) => ({ id, serverSessionId, createdAt, updatedAt, timeline: [] })),
     }));
   } catch {
     // Conversation persistence is optional.
