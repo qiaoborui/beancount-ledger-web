@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { OnboardingPrototype } from "./OnboardingPrototype";
 
 describe("OnboardingPrototype", () => {
-  it("starts with a personal ledger and funding-account workflow", () => {
+  it("starts with a plain-language personal finance workflow", () => {
     const html = renderToStaticMarkup(<OnboardingPrototype onCreate={vi.fn()} />);
 
-    expect(html).toContain("建立你的财务地图");
+    expect(html).toContain("从一张财务地图开始");
     expect(html).toContain("日常记账货币");
-    expect(html).toContain("建立资金账户");
+    expect(html).toContain("钱在哪里");
+    expect(html).not.toContain("Assets:");
+    expect(html).not.toContain("Expenses:");
   });
 
   it("keeps the user in the validation wait state and surfaces an indexer error", () => {
