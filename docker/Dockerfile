@@ -84,6 +84,8 @@ CMD ["/app/ledger-selfhost"]
 
 # ── Frontend build ──
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS web-builder
+ARG VITE_ENABLE_SPEED_INSIGHTS=true
+ENV VITE_ENABLE_SPEED_INSIGHTS=$VITE_ENABLE_SPEED_INSIGHTS
 WORKDIR /app/web
 RUN npm install -g pnpm@11.5.0
 COPY web/pnpm-lock.yaml web/package.json ./

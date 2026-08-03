@@ -126,6 +126,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: frontend
+      args:
+        VITE_ENABLE_SPEED_INSIGHTS: "false"
     restart: unless-stopped
     expose:
       - "80"

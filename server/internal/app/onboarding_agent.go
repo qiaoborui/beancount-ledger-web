@@ -48,9 +48,13 @@ type LedgerOnboardingAgentResponse struct {
 
 func defaultOnboardingDraft() LedgerOnboardingRequest {
 	return LedgerOnboardingRequest{
-		Title:     "我的生活账本",
-		Currency:  "CNY",
-		StartDate: time.Now().Format("2006-01-02"),
+		Title:             "我的生活账本",
+		Currency:          "CNY",
+		StartDate:         time.Now().Format("2006-01-02"),
+		FundingSpaces:     []LedgerOnboardingFundingSpace{},
+		Liabilities:       []LedgerOnboardingLiability{},
+		IncomeCategories:  []LedgerOnboardingCategory{},
+		ExpenseCategories: []LedgerOnboardingCategory{},
 	}
 }
 

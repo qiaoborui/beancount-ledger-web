@@ -80,6 +80,13 @@ func TestOnboardingAccountPathsAreAgentSuppliedAndRootBound(t *testing.T) {
 	}
 }
 
+func TestDefaultOnboardingDraftUsesEmptyCollections(t *testing.T) {
+	draft := defaultOnboardingDraft()
+	if draft.FundingSpaces == nil || draft.Liabilities == nil || draft.IncomeCategories == nil || draft.ExpenseCategories == nil {
+		t.Fatalf("first Agent response must encode collections as [] rather than null: %#v", draft)
+	}
+}
+
 func TestOnboardingAgentUsesToolsAndOnlyPresentsAValidDraft(t *testing.T) {
 	server := &Server{agentModel: &queuedAgentModel{results: []agentModelResult{
 		{ToolCalls: []agentModelToolCall{{ID: "wallet", Type: "function", Function: agentModelFunctionCall{Name: "upsert_funding_space", Arguments: `{"kind":"digital_wallet","name":"微信","account":"Assets:Wallet:WeChat"}`}}}},

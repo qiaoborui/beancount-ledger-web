@@ -21,6 +21,16 @@ export type OnboardingPayload = {
 
 type OnboardingAgentResponse = { reply: string; draft: OnboardingPayload; ready: boolean };
 
+function normalizeOnboardingDraft(draft: OnboardingPayload): OnboardingPayload {
+  return {
+    ...draft,
+    fundingSpaces: draft.fundingSpaces ?? [],
+    liabilities: draft.liabilities ?? [],
+    incomeCategories: draft.incomeCategories ?? [],
+    expenseCategories: draft.expenseCategories ?? [],
+  };
+}
+
 const fundingLabels: Record<FundingKind, string> = {
   cash: "现金",
   digital_wallet: "电子钱包",
@@ -86,7 +96,7 @@ export function OnboardingPrototype({ onCreate, creating = false, error = "", wa
         }),
       }, { kind: "write" });
       const result = await response.json() as OnboardingAgentResponse;
-      setDraft(result.draft);
+      setDraft(normalizeOnboardingDraft(result.draft));
       setReady(result.ready);
       setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
     } catch (cause) {
