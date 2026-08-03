@@ -1,14 +1,10 @@
 name: beancount-ledger-selfhost
 
-x-ledger-env: &ledger-env
+x-runtime-env: &runtime-env
   DATABASE_URL: postgresql://ledger@database:5432/ledger?sslmode=disable
   PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}
-  LEDGER_ROOT: /data/ledger
-  LEDGER_STORAGE: filesystem
   LEDGER_READ_MODEL: postgres
   LEDGER_READ_MODEL_STRICT: "true"
-  LEDGER_FILESYSTEM_LOCK_ENABLED: "true"
-  BEAN_CHECK_BIN: bean-check
   POSTGRES_MAX_OPEN_CONNS: "${POSTGRES_MAX_OPEN_CONNS:-4}"
   POSTGRES_MAX_IDLE_CONNS: "${POSTGRES_MAX_IDLE_CONNS:-2}"
   POSTGRES_CONN_MAX_IDLE_SECONDS: "${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}"
@@ -54,12 +50,14 @@ services:
       database:
         condition: service_healthy
     environment:
-      <<: *ledger-env
+      <<: *runtime-env
       PORT: "3000"
-    volumes:
-      - type: bind
-        source: ${LEDGER_HOST_PATH:?set an absolute LEDGER_HOST_PATH in .env.selfhost}
-        target: /data/ledger
+      LEDGER_STORAGE: github_api
+      LEDGER_GITHUB_OWNER: ${LEDGER_GITHUB_OWNER:?set LEDGER_GITHUB_OWNER in .env.selfhost}
+      LEDGER_GITHUB_REPO: ${LEDGER_GITHUB_REPO:?set LEDGER_GITHUB_REPO in .env.selfhost}
+      LEDGER_GIT_BRANCH: "${LEDGER_GIT_BRANCH:-main}"
+      LEDGER_GITHUB_TOKEN: ${LEDGER_GITHUB_TOKEN:?set LEDGER_GITHUB_TOKEN in .env.selfhost}
+      LEDGER_GITHUB_API_URL: "${LEDGER_GITHUB_API_URL:-}"
     expose:
       - "3000"
     healthcheck:
@@ -84,15 +82,19 @@ services:
       server:
         condition: service_started
     environment:
-      <<: *ledger-env
+      <<: *runtime-env
+      LEDGER_ROOT: /data/ledger
+      BEAN_CHECK_BIN: bean-check
+      LEDGER_GIT_SYNC_ENABLED: "true"
+      LEDGER_GIT_REMOTE_URL: ${LEDGER_GIT_REMOTE_URL:?set LEDGER_GIT_REMOTE_URL in .env.selfhost}
+      LEDGER_GITHUB_INDEX_TOKEN: ${LEDGER_GITHUB_INDEX_TOKEN:?set LEDGER_GITHUB_INDEX_TOKEN in .env.selfhost}
       LEDGER_INDEX_INTERVAL_SECONDS: "${LEDGER_INDEX_INTERVAL_SECONDS:-60}"
       LEDGER_INDEX_RETRY_INITIAL_SECONDS: "${LEDGER_INDEX_RETRY_INITIAL_SECONDS:-5}"
       LEDGER_INDEX_RETRY_MAX_SECONDS: "${LEDGER_INDEX_RETRY_MAX_SECONDS:-60}"
     volumes:
       - type: bind
-        source: ${LEDGER_HOST_PATH:?set an absolute LEDGER_HOST_PATH in .env.selfhost}
+        source: ${LEDGER_CHECKOUT_HOST_PATH:?set an absolute LEDGER_CHECKOUT_HOST_PATH in .env.selfhost}
         target: /data/ledger
-        read_only: true
     command: ["/app/ledger-indexer-daemon"]
     expose:
       - "3001"

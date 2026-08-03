@@ -1,13 +1,17 @@
 # Complete self-hosted Compose deployment
 
-This deployment keeps the ledger files, Postgres data, credentials, indexing,
-and browser-facing service inside your own Docker host. It uses no public
-endpoint and no GitHub Action.
+This deployment keeps the browser service, Postgres data, credentials, and
+indexer on your Docker host. The ledger remains a private GitHub repository:
+the API uses GitHub's Contents API for every read and write, and only the
+indexer receives a local checkout to publish the Postgres read model. It uses
+no public endpoint and no GitHub Action.
 
 ## Requirements
 
 - Docker Compose v2
-- An existing Beancount ledger directory with `main.bean`
+- A private GitHub Beancount repository with `main.bean`
+- Two fine-grained GitHub tokens: API `Contents` read/write, indexer `Contents`
+  read-only
 - A host directory with persistent storage for Docker volumes
 
 ## Start
@@ -21,12 +25,17 @@ cp .env.selfhost.example .env.selfhost
 Set these values in `.env.selfhost`:
 
 ```text
-LEDGER_HOST_PATH=/absolute/path/to/your/ledger
+LEDGER_CHECKOUT_HOST_PATH=/absolute/path/to/ledger-checkout
 POSTGRES_PASSWORD=<long random value>
 AUTH_SECRET=<openssl rand -base64 32>
 APP_PASSWORD=<your login password>
 LEDGER_UID=<$(id -u)>
 LEDGER_GID=<$(id -g)>
+LEDGER_GITHUB_OWNER=<owner>
+LEDGER_GITHUB_REPO=<private-ledger-repo>
+LEDGER_GITHUB_TOKEN=<contents-read-write-token>
+LEDGER_GITHUB_INDEX_TOKEN=<contents-read-only-token>
+LEDGER_GIT_REMOTE_URL=https://github.com/<owner>/<private-ledger-repo>.git
 ```
 
 Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
@@ -40,31 +49,30 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up
 ```
 
 Open `http://localhost:8080`. Docker keeps Postgres, runtime state, and Caddy
-state in named volumes. The ledger stays in `LEDGER_HOST_PATH` and remains the
-source of truth.
+state in named volumes. GitHub is the ledger source of truth. On its first
+pass, the indexer clones `LEDGER_GIT_REMOTE_URL` into
+`LEDGER_CHECKOUT_HOST_PATH`; subsequent passes fetch and fast-forward it.
 
-The server and indexer are non-root processes. `LEDGER_UID` and `LEDGER_GID`
-must match the owner of the host ledger directory; this allows application
-writes without making the bind mount world-writable. The API creates an empty
-`.ledger-web.lock` advisory lock alongside `main.bean`. It serializes API
-writes (including `bean-check` and rollback) with indexer reads; do not delete
-it while the stack is running.
+The indexer is a non-root process. `LEDGER_UID` and `LEDGER_GID` must match the
+owner of its checkout directory. The API has no ledger bind mount and cannot
+write host files. Keep the checkout dedicated to the indexer: it refuses a
+dirty worktree rather than overwriting local edits.
 
 ## Services
 
 | Service | Role | Data location |
 | --- | --- | --- |
 | `database` | Postgres read model and runtime state | `postgres_data` volume |
-| `server` | API, local ledger writes, `bean-check` rollback | mounted ledger + Postgres runtime state |
-| `indexer` | Parses and atomically publishes the read model every 60 seconds | read-only ledger mount |
+| `server` | API; GitHub API reads/writes, preview validation, commits | Postgres runtime state only |
+| `indexer` | Clones/fetches the ledger, validates and atomically publishes the read model every 60 seconds | dedicated local Git checkout + Postgres |
 | `frontend` | Static React application | container image |
 | `caddy` | Same-origin browser entrypoint | Caddy volumes |
 
 The indexer runs inside Compose. It must complete one successful pass before
-the API is considered healthy. A local ledger edit becomes visible after the
-next indexing interval. Ledger writes from the application validate through
-`bean-check` before they persist, and restore their exact file snapshots on a
-validation failure.
+the API is considered healthy. A GitHub commit becomes visible after the next
+indexing interval. Application writes and imports keep the existing GitHub API
+transaction, preview, `bean-check` validation, and commit-conflict protection;
+the API never edits a local checkout.
 
 ## LAN and HTTPS
 
@@ -104,22 +112,23 @@ both, because an HTTP cookie can overwrite a Secure cookie with the same name.
 
 ## Backup and update
 
-Stop the stack before a consistent backup. Back up the ledger directory and a
-logical Postgres dump (not a raw copy of a live volume):
+Stop the stack before a consistent backup. GitHub is the ledger backup/source
+of truth; back up the indexer's disposable checkout only if you need a local
+cache, and take a logical Postgres dump (not a raw copy of a live volume):
 
 ```bash
 set -a; . ./.env.selfhost; set +a
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml down
-tar -C "$(dirname "$LEDGER_HOST_PATH")" -czf ledger-backup.tgz "$(basename "$LEDGER_HOST_PATH")"
+tar -C "$(dirname "$LEDGER_CHECKOUT_HOST_PATH")" -czf ledger-checkout-backup.tgz "$(basename "$LEDGER_CHECKOUT_HOST_PATH")"
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d database
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database \
   pg_dump -Fc -U ledger -d ledger > postgres-backup.dump
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml down
 ```
 
-To restore, keep a copy of the failed ledger and database dump, restore the
-ledger archive to `LEDGER_HOST_PATH`, bring up only `database`, then replace
-the database before restoring its archive:
+To restore, keep a copy of the failed database dump, restore the optional
+checkout archive to `LEDGER_CHECKOUT_HOST_PATH`, bring up only `database`, then
+replace the database before restoring its archive:
 
 ```bash
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database dropdb -U ledger --if-exists ledger
@@ -127,9 +136,8 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml ex
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database pg_restore -U ledger -d ledger --clean --if-exists < postgres-backup.dump
 ```
 
-Finally start the full stack.
-The indexer will replace the active read-model snapshot from the restored
-ledger. A ledger Git remote remains a useful independent copy.
+Finally start the full stack. The indexer will fetch GitHub and replace the
+active read-model snapshot from its checkout.
 
 Check service health with:
 

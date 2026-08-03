@@ -12,6 +12,9 @@ func main() {
 	if err := app.ValidateIndexerConfig(cfg); err != nil {
 		log.Fatal(err)
 	}
+	if err := app.SyncLedgerGitCheckout(context.Background(), cfg); err != nil {
+		log.Fatal(err)
+	}
 	result, err := app.RunLedgerIndexOnce(context.Background(), cfg)
 	if err != nil {
 		log.Fatal(err)
