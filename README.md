@@ -1,368 +1,53 @@
 # Beancount Ledger Web
 
-A self-hosted Web UI for a personal [Beancount](https://beancount.github.io/) ledger, with transaction browsing, summaries, budget views, AI-assisted bookkeeping drafts, passkey unlock, web push notifications, and GitHub API writes for your private ledger repository.
+A private web app for a personal [Beancount](https://beancount.github.io/) ledger.
 
-## Demo
+It keeps your real ledger outside this repository and gives you a browser UI
+for browsing, reviewing, and safely updating it.
 
-<p align="center">
-  <img src="docs/assets/demo/demo-01.png" alt="Demo screenshot 1" width="260" />
-  <img src="docs/assets/demo/demo-02.png" alt="Demo screenshot 2" width="260" />
-  <img src="docs/assets/demo/demo-03.png" alt="Demo screenshot 3" width="260" />
-</p>
-<p align="center">
-  <img src="docs/assets/demo/demo-04.png" alt="Demo screenshot 4" width="260" />
-  <img src="docs/assets/demo/demo-05.png" alt="Demo screenshot 5" width="260" />
-  <img src="docs/assets/demo/demo-06.png" alt="Demo screenshot 6" width="260" />
-</p>
-<p align="center">
-  <img src="docs/assets/demo/demo-07.png" alt="Demo screenshot 7" width="260" />
-  <img src="docs/assets/demo/demo-08.png" alt="Demo screenshot 8" width="260" />
-  <img src="docs/assets/demo/demo-09.png" alt="Demo screenshot 9" width="260" />
-</p>
+## What it does
 
-## Repository model
+- Browse accounts, transactions, balances, budgets, and reports
+- Draft transactions from natural language, then preview before writing
+- Validate every local ledger write with `bean-check` and roll back failures
+- Review imports from supported payment statements before committing them
+- Use password login, passkeys on secure origins, and optional web push
+- Run entirely on your own Docker host, or use the hosted GitHub-backed setup
 
-This project is designed for a **two-repository setup**:
+## Self-hosted Compose
 
-1. **Application repository** — this public repo. It contains the Web app, generic scripts, examples, Docker/deployment files, and documentation.
-2. **Ledger repository** — your private repo. It contains `main.bean`, `accounts.bean`, `transactions/`, budgets, prices, imports, and your real financial data.
-
-```mermaid
-graph LR
-    A[Public app repo] --> B[Go API + Vite Web App]
-    B -->|self-hosted: LEDGER_ROOT| C[Private Beancount ledger repo]
-    B -->|hosted API: GitHub API| C
-    B -->|Postgres| D[Runtime state and read model]
-    D --> E[passkeys]
-    D --> F[notifications]
-    D --> G[web push subscriptions]
-```
-
-The app never needs your ledger data to be committed to this repository.
-
-## Features
-
-- Beancount transaction list and account views
-- Monthly income/expense summaries
-- Budget reports from `custom "budget"` directives
-- AI natural-language transaction parsing with preview-before-write
-- Safe writes with `bean-check` validation and rollback
-- Optional ledger Git status, pull, commit, and push
-- Password login plus optional passkey / Face ID / Touch ID unlock
-- Optional Web Push notifications
-- Statement import previews for Alipay, WeChat Pay, CMB credit cards, CMB checking accounts, and CCB credit cards
-
-## Quick start
-
-Run the Go server close to your private ledger and install the web client as a
-PWA from that local origin. The browser caches the app shell, cached ledger
-snapshots, and pending write queue, while every final ledger write still goes
-through the Go API, validation, rollback handling, and either GitHub API writes
-or local filesystem writes.
-
-See [docs/local-first-pwa.md](docs/local-first-pwa.md) for the recommended
-local-first topology and offline behavior.
-
-See [web/.env.example](web/.env.example) for the full environment configuration.
-
-## Deployment
-
-### Complete self-hosted Compose deployment
-
-The recommended privacy-preserving deployment runs the complete stack on the
-user's own Docker host: local ledger files, Postgres, API, frontend, Caddy, and
-the scheduled indexer. It uses no public endpoint and no GitHub Action.
-
-Copy `.env.selfhost.example`, set the ledger path and three secrets, then run:
+The complete self-hosted stack includes your ledger bind mount, Postgres, API,
+indexer, frontend, and Caddy.
 
 ```bash
+cp .env.selfhost.example .env.selfhost
+# Edit .env.selfhost with your ledger path, UID/GID, and secrets.
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
 
-See [docs/self-hosted-compose.md](docs/self-hosted-compose.md) for the required
-values, backup boundary, LAN access, and update procedure.
-
-### Advanced hosted deployment
-
-The recommended deployment runs a stateless `ledger-web` service plus a
-separately scheduled `ledger-indexer` job. The private ledger GitHub repository
-remains the source of truth; Postgres stores the ledger read model and all
-application runtime state.
-
-Google Cloud is the recommended hosted deployment. One Cloud Run service runs
-the standalone image, serving the Vite frontend and Go API on the same origin.
-Artifact Registry stores the image, Secret Manager supplies sensitive
-environment variables, and Cloud Scheduler runs Gmail event drain and Watch
-renewal jobs. The GitHub Actions workflow uses Workload Identity Federation and
-activates after the required repository variables are configured.
-
-See [docs/google-cloud-run.md](docs/google-cloud-run.md) for one-time project
-setup, IAM roles, Secret Manager mappings, deployment variables, validation,
-domain cutover, and rollback.
-
-Vercel remains available as a pull-request preview and migration rollback
-target. Connect
-the GitHub repository with the root `vercel.json`; the project defines two
-Vercel Services in one deployment: the Vite frontend under `web/` and the Go
-backend container from `Dockerfile.vercel`. Requests to `/api/*` route to the
-backend service; every other path routes to the frontend service. Configure
-environment variables in the Vercel dashboard:
-
-- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` — private ledger repository owner and name.
-- `LEDGER_GITHUB_TOKEN` — fine-grained GitHub token with Contents read/write access to the private ledger repository.
-- `LEDGER_GIT_BRANCH=main` — branch to read and update through the GitHub API.
-- `LEDGER_CLUSTER_ID` — optional stable ledger identity for multi-backend deployments. GitHub-backed deployments derive it from owner/repository/branch automatically.
-- `DATABASE_URL` — Postgres connection string for the read model, runtime state, locks, and import preview files.
-
-Do not set `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`,
-`LEDGER_ROOT`, `RUNTIME_DIR`, or `BEAN_CHECK_BIN` on the API service.
-`ledger-web` fixes these internally: reads are strict Postgres reads, writes go
-through the GitHub API, and runtime data lives in Postgres.
-
-The private ledger repository owns the `Index Ledger Web` workflow. It indexes
-every main-branch push and runs a 30-minute recovery schedule. Run it with
-`force_rebuild=true` after an index format migration to rebuild the active
-Postgres revision from the checked-out private ledger.
-
-See [web/.env.example](web/.env.example) for the complete list.
-
-If you previously used a separate `web/` Vercel project for frontend-only
-previews, disable it or remove its pull-request comments after switching to the
-root services project. The standalone frontend config no longer proxies `/api/*`
-to production.
-
-### Docker Compose with Supabase Postgres
-
-Compose separates the API server, static frontend, Caddy HTTPS proxy, and
-one-shot indexer.
-Copy `.env.example` to `.env`, set the GitHub and Postgres values, and keep that
-file uncommitted. The server, frontend, and indexer profiles use published GHCR
-images by default and still keep local build fallbacks. Each service has a
-profile, so it can be pulled, built, started, and updated independently.
-
-```bash
-# API only from the published image, available at http://localhost:3000
-docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
-docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d server
-
-# API only from a local source build.
-SERVER_IMAGE=ledger-web-server:local \
-  docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d --build server
-
-# Frontend only from the published image, available at http://localhost:8080
-docker compose --env-file .env -f docker/docker-compose.yml --profile frontend pull frontend
-docker compose --env-file .env -f docker/docker-compose.yml --profile frontend up -d frontend
-
-# Frontend only from a local source build.
-FRONTEND_IMAGE=ledger-web-frontend:local \
-  docker compose --env-file .env -f docker/docker-compose.yml --profile frontend up -d --build frontend
-
-# HTTPS edge proxy only. It proxies /api/* to server and every other path to frontend.
-docker compose --env-file .env -f docker/docker-compose.yml --profile caddy up -d --build
-
-# Full web application through Caddy, using published server/frontend images.
-docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
-docker compose --env-file .env -f docker/docker-compose.yml --profile frontend pull frontend
-docker compose --env-file .env -f docker/docker-compose.yml --profile caddy up -d --build caddy
-docker compose --env-file .env -f docker/docker-compose.yml --profile server --profile frontend --profile caddy up -d server frontend caddy
-
-# Refresh the read model from the published indexer image, then exit.
-LEDGER_HOST_PATH=/path/to/private-ledger \
-  docker compose --env-file .env -f docker/docker-compose.yml --profile indexer run --rm --pull always indexer
-```
-
-Pull and recreate `server` or `frontend` for routine app updates. Use
-`docker compose --env-file .env -f docker/docker-compose.yml up -d --build caddy`
-when the local Caddy wrapper changes. Set `CADDY_SITE_ADDRESS` to a domain for
-Caddy-managed HTTPS. The `caddy_data` volume retains certificates and Caddy
-state across Caddy image updates.
-`server` binds its published port to localhost by default; Caddy reaches it on
-the internal Compose network. Set `SERVER_BIND_ADDRESS=0.0.0.0` only when the
-API itself needs a remote listener.
-
-For routine image updates, pull the latest published image and recreate only the
-changed long-running container:
-
-```bash
-docker compose --env-file .env -f docker/docker-compose.yml --profile server pull server
-docker compose --env-file .env -f docker/docker-compose.yml --profile server up -d server
-
-docker compose --env-file .env -f docker/docker-compose.yml --profile frontend pull frontend
-docker compose --env-file .env -f docker/docker-compose.yml --profile frontend up -d frontend
-```
-
-To serve the SPA from the `server` container without starting `frontend`, set
-`SERVER_BUILD_TARGET=standalone` and `CADDY_FRONTEND_UPSTREAM=server:3000`.
-Set `CADDY_FRONTEND_UPSTREAM=frontend:80` when the separate frontend service is
-running.
-
-For a pre-existing Caddy internal CA, set `CADDY_TLS_DIRECTIVE=tls internal`,
-select the existing `CADDY_DATA_VOLUME` and `CADDY_CONFIG_VOLUME`, then set
-`CADDY_VOLUMES_EXTERNAL=true`. The `caddy_data` volume contains the local CA
-and issued certificates, so this retains trust for already configured clients.
-
-The indexer mounts `LEDGER_HOST_PATH` at `/data/ledger`, indexes it into
-Postgres, and exits. Clone, sync, and schedule that checkout outside the
-container; use cron, systemd, GitHub Actions, or your container platform to
-invoke the Compose indexer on a schedule.
-
-## Environment variables
-
-See [web/.env.example](web/.env.example) for the complete list.
-
-Important variables:
-
-- `LEDGER_GITHUB_OWNER` / `LEDGER_GITHUB_REPO` / `LEDGER_GITHUB_TOKEN` — GitHub API write configuration for `ledger-web`.
-- `DATABASE_URL` — required for the ledger read model, runtime state, locks, rate limits, web push subscriptions, notifications, and import preview files.
-- `LEDGER_ROOT` — indexer-only path to a local private ledger checkout or mounted copy.
-- `LEDGER_CLUSTER_ID` — optional shared identity for several backends serving the same ledger. Filesystem mode otherwise derives an identity from the absolute `LEDGER_ROOT`; set this explicitly when replicas use different mount paths.
-- `APP_PASSWORD` — single-user login password.
-- `AUTH_SECRET` — random secret for auth cookies.
-- `PUBLIC_ORIGIN` / `WEBAUTHN_PUBLIC_ORIGIN` / `WEBAUTHN_RP_ID` — public browser origin, allowed passkey origins, and passkey RP ID. Keep `WEBAUTHN_RP_ID` on the original registration domain to preserve existing passkeys after a domain move.
-- `BEAN_CHECK_BIN` — optional path to `bean-check` for index worker validation. It is not needed on API hosts.
-- `LEDGER_GIT_AUTHOR_NAME` / `LEDGER_GIT_AUTHOR_EMAIL` — Git commit identity for app-created ledger commits.
-- `LEDGER_ENABLED_MODULES` — optional comma-separated allowlist for statically linked modules. Leave it empty to enable all built-in modules: `importers`, `web-push`, and `notifications`.
-- `LEDGER_NOTIFICATION_REFRESH_INTERVAL` — optional periodic notification refresh interval such as `15m`; use `off` (the default) to keep notification refresh request-driven.
-- `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_OAUTH_REDIRECT_URL` — personal Google OAuth web-client configuration for Gmail read-only access.
-- `GMAIL_PUBSUB_TOPIC` / `GMAIL_PUBSUB_AUDIENCE` / `GMAIL_PUBSUB_SERVICE_ACCOUNT` — authenticated Gmail Watch delivery to the Go API.
-- `GMAIL_LABEL` / `GMAIL_ALLOWED_SENDERS` — Label-scoped mailbox watch plus an exact sender allowlist enforced again by the backend.
-- `GMAIL_TOKEN_ENCRYPTION_KEY` — base64-encoded 32-byte key used to encrypt the stored Gmail refresh token.
-- `CRON_OIDC_AUDIENCE` / `CRON_OIDC_SERVICE_ACCOUNT` — authenticate Cloud Scheduler Gmail event drain and Watch renewal requests.
-- `CRON_SECRET` — transition fallback for Vercel Cron and existing secret-header Scheduler jobs.
-- `LEDGER_STORAGE`, `LEDGER_READ_MODEL`, `LEDGER_READ_MODEL_STRICT`, `RUNTIME_DIR`, `LEDGER_INDEX_INTERVAL_SECONDS`, and `LEDGER_GIT_SCHEDULER` — removed from production runtime configuration.
-
-See [docs/gmail-import-automation.md](docs/gmail-import-automation.md) for the Gmail filter, OAuth, Pub/Sub, Cloud Scheduler, and hosted deployment setup. The same import endpoint also accepts plain or six-digit ZipCrypto ZIP uploads and archives the original ZIP beside the committed import.
-
-### Postgres ledger read model
-
-For hosted deployments where cold Git checkout and full Beancount parsing are too
-slow, run the API and the index worker separately:
-
-```text
-private Beancount Git repo -> ledger-indexer -> Postgres read model -> ledger-web API
-```
-
-The Beancount files remain the only source of truth. `ledger-indexer` validates
-an existing local checkout or mounted ledger directory, parses it, writes a
-revision-scoped normalized projection to Postgres, then atomically marks the
-revision active. `ledger-web` can then serve `/api/ledger/*` reads from Postgres
-without requiring a local checkout in the API service.
-
-The API host needs `DATABASE_URL` and the explicit GitHub repository/token
-variables. Ledger read endpoints use Postgres only. Import commit and editor
-save create GitHub commits directly, mark the read model as pending, and the
-private-ledger indexer updates Postgres from that commit. Import
-preview in GitHub API mode does not parse the full ledger or run the ledger-file
-dedup script; instead it dedups against the Postgres read model by statement
-metadata, order IDs, exact transaction signatures, and funding-account postings.
-Review any remaining preview rows before committing.
-
-The index worker needs `LEDGER_ROOT` and `DATABASE_URL`. It runs one indexing
-pass and exits, so schedule it externally with cron, systemd timers, GitHub
-Actions, or your container platform. The API and worker both use the default
-`ledger#<branch>` index namespace, so no separate source-key variable is needed
-for the normal single-ledger deployment. Keep the mounted ledger checkout and
-Beancount tooling on the worker side; keep them off the hosted API service.
-The indexer holds a Postgres advisory lock while publishing, so set
-`POSTGRES_MAX_OPEN_CONNS` to at least `2` when configuring a finite pool.
-
-The indexer fingerprints `main.bean` and its recursively included `.bean` files.
-Unreferenced files therefore stay outside the read-model refresh boundary.
-
-#### GitHub Actions indexer
-
-Install `Index Ledger Web` in the private ledger repository. It checks out the
-private ledger at the triggering commit, checks out this application repository,
-sets `LEDGER_ROOT`, and runs:
-
-```bash
-cd server
-go run ./cmd/ledger-indexer
-```
-
-Configure `DATABASE_URL` as a private-ledger Actions secret. `LEDGER_WEB_APP_REF`
-selects the application revision. The workflow indexes `main` into the
-`ledger#main` Postgres source key.
-
-To migrate an older filesystem runtime directory into Postgres:
-
-```bash
-go run ./cmd/ledger-state-migrate -runtime-dir /path/to/runtime
-go run ./cmd/ledger-state-migrate -runtime-dir /path/to/runtime -write
-```
-
-The first command is a dry run. The second writes idempotent runtime JSON and
-import preview blobs to Postgres.
-
-## Ledger layout
-
-A compatible ledger should include at least:
-
-```text
-main.bean
-accounts.bean
-commodities.bean
-budgets.bean
-prices.bean
-transactions/
-```
-
-`main.bean` should include the other files, for example:
-
-```beancount
-option "title" "My Beancount Ledger"
-option "operating_currency" "CNY"
-
-include "commodities.bean"
-include "accounts.bean"
-include "budgets.bean"
-include "prices.bean"
-include "transactions/2026.bean"
-```
-
-## Statement imports
-
-The import flow keeps provider logic behind a small engine abstraction:
-
-- DEG providers use `deg-module`: Alipay, WeChat Pay, and CMB credit card statements load the same YAML config files used by double-entry-generator.
-- CMB checking-account CSV/PDF statements use the Web PDF adapter plus DEG's `cmb` provider through the `cmb-checking` import source.
-- Native providers use the same Web preview, dedup, and commit flow with DEG-style YAML config: `ccb-credit` for CCB credit card email/HTML/CSV statements.
-
-Ledger-side import files live under `$LEDGER_ROOT/imports/`. CMB checking import expects `imports/cmb-checking-config.yaml`; see [examples/preview-ledger/imports/cmb-checking-config.yaml](examples/preview-ledger/imports/cmb-checking-config.yaml) for the DEG `cmb` config shape. CCB credit card import expects `imports/ccb-credit-card-config.yaml` and accepts `.eml`, `.html`, `.htm`, or normalized `.csv` files. The `ccbCredit.paymentSourceHandledExternally` config controls prefixes such as `支付宝-`, `财付通-`, and `微信支付-` that should be filtered before generation to avoid duplicate platform-payment imports.
-
-## Examples
-
-- [examples/minimal-ledger](examples/minimal-ledger) — small English example for quick start and CI.
-- [examples/chinese-personal-ledger](examples/chinese-personal-ledger) — anonymized Chinese personal finance template.
-
-## Privacy and security
-
-- Keep your real ledger in a private repository.
-- Do not commit `.env`, runtime files, API keys, or passkey stores.
-- Deploy behind HTTPS if using passkeys or exposing the app outside localhost.
-- AI providers receive the text you ask them to parse plus account names needed for validation. Successful BQL queries also go to the configured provider to generate a query title; result rows stay in the app. Do not send sensitive text to an AI provider you do not trust.
-- Writes are previewed first and validated with `bean-check` before being kept.
-
-## Scripts
-
-Generic helper scripts live in [scripts](scripts). They read the ledger path from `LEDGER_ROOT` or `BUB_LEDGER_ROOT`.
-
-Examples:
-
-```bash
-LEDGER_ROOT=/path/to/private-ledger python3 scripts/bub_query.py summary 2026-01
-LEDGER_ROOT=/path/to/private-ledger python3 scripts/budget_report.py 2026-01 --ledger /path/to/private-ledger/main.bean
-```
+The default browser endpoint is `http://127.0.0.1:8080`. See the
+[self-hosted guide](docs/self-hosted-compose.md) for LAN TLS, backups,
+restores, image updates, and the full configuration reference.
 
 ## Development
 
 ```bash
-cd web
-pnpm install
-pnpm run typecheck
-pnpm run build
+cd server && go test ./... && go build ./cmd/...
+cd web && pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
 ```
+
+Use the ledgers in `examples/` for local development and tests. Keep your real
+ledger, secrets, imports, and runtime data outside this repository.
+
+## Documentation
+
+- [Self-hosted Compose](docs/self-hosted-compose.md)
+- [Hosted Google Cloud deployment](docs/google-cloud-run.md)
+- [Local-first PWA](docs/local-first-pwa.md)
+- [Ledger layout](docs/ledger-layout.md)
+- [Privacy](docs/privacy.md)
+- [Backend architecture](docs/backend-architecture.md)
 
 ## License
 
-Add your chosen open-source license in [LICENSE](LICENSE) before publishing.
+[MIT](LICENSE)
