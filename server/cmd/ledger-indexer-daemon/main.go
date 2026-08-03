@@ -60,7 +60,11 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 		status.attempts++
 		status.lastAttempt = time.Now().UTC()
 		status.mu.Unlock()
-		result, err := app.RunLedgerIndexOnce(ctx, cfg)
+		err := app.SyncLedgerGitCheckout(ctx, cfg)
+		var result app.LedgerIndexResult
+		if err == nil {
+			result, err = app.RunLedgerIndexOnce(ctx, cfg)
+		}
 		if err != nil {
 			failures++
 			status.mu.Lock()

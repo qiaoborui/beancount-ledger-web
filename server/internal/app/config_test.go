@@ -188,50 +188,66 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	}
 }
 
-func TestLoadSelfHostedConfigForcesFilesystemPostgresTopology(t *testing.T) {
+func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
 	t.Setenv("LEDGER_STORAGE", "github_api")
 	t.Setenv("LEDGER_READ_MODEL", "files")
 	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
-	t.Setenv("LEDGER_ROOT", t.TempDir())
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("AUTH_SECRET", "self-hosted-auth-secret")
 	t.Setenv("APP_PASSWORD", "self-hosted-password")
+	t.Setenv("LEDGER_GITHUB_OWNER", "example")
+	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
+	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
 
 	cfg := LoadSelfHostedConfig()
-	if !cfg.LedgerFilesystemLockEnabled {
-		t.Fatal("self-hosted config must enable the filesystem lock")
-	}
-
-	if cfg.LedgerStorage != "filesystem" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict {
+	if cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict || cfg.LedgerFilesystemLockEnabled {
 		t.Fatalf("self-hosted topology = %#v", cfg)
 	}
-	if cfg.RuntimeDir != "" {
-		t.Fatalf("RuntimeDir=%q, want empty Postgres-backed runtime", cfg.RuntimeDir)
+	if cfg.RuntimeDir != "" || cfg.LedgerRoot != "" {
+		t.Fatalf("self-hosted API must not receive filesystem paths: %#v", cfg)
 	}
 	if err := ValidateSelfHostedConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestValidateSelfHostedConfigRequiresLedgerAndCredentials(t *testing.T) {
+func TestValidateSelfHostedConfigRequiresGitHubCredentials(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
 	t.Setenv("AUTH_SECRET", "")
 	t.Setenv("APP_PASSWORD", "")
 	cfg := Config{
-		LedgerStorage:   "filesystem",
+		LedgerStorage:   "github_api",
 		DatabaseURL:     "postgres://example",
 		LedgerReadModel: "postgres",
 		ReadModelStrict: true,
 	}
 
-	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "LEDGER_ROOT") {
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "LEDGER_GITHUB_OWNER") {
 		t.Fatalf("error=%v", err)
 	}
 
-	cfg.LedgerRoot = t.TempDir()
+	cfg.LedgerGitHubOwner = "example"
+	cfg.LedgerGitHubRepo = "ledger"
+	cfg.LedgerGitHubToken = "secret"
 	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLoadIndexerConfigReadsGitSyncSettings(t *testing.T) {
+	t.Setenv("LEDGER_ROOT", t.TempDir())
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("LEDGER_GIT_SYNC_ENABLED", "true")
+	t.Setenv("LEDGER_GIT_REMOTE_URL", "https://github.com/example/ledger.git")
+	t.Setenv("LEDGER_GITHUB_INDEX_TOKEN", "read-only-token")
+
+	cfg := LoadIndexerConfig()
+	if !cfg.LedgerGitSyncEnabled || cfg.LedgerGitRemoteURL == "" || cfg.LedgerGitReadToken != "read-only-token" {
+		t.Fatalf("indexer Git sync settings were not loaded: %#v", cfg)
+	}
+	if err := ValidateIndexerConfig(cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 

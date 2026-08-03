@@ -31,6 +31,9 @@ type Config struct {
 	LedgerGitHubRepo            string
 	LedgerGitHubToken           string
 	LedgerGitHubAPIURL          string
+	LedgerGitSyncEnabled        bool
+	LedgerGitRemoteURL          string
+	LedgerGitReadToken          string
 	DatabaseURL                 string
 	LedgerReadModel             string
 	ReadModelStrict             bool
@@ -91,6 +94,9 @@ func LoadConfig() Config {
 		LedgerGitHubRepo:            strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
 		LedgerGitHubToken:           strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
 		LedgerGitHubAPIURL:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		LedgerGitSyncEnabled:        envBool("LEDGER_GIT_SYNC_ENABLED", false),
+		LedgerGitRemoteURL:          strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE_URL")),
+		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LedgerReadModel:             ledgerReadModel,
 		ReadModelStrict:             envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
@@ -126,17 +132,11 @@ func LoadWebConfig() Config {
 	return cfg
 }
 
-// LoadSelfHostedConfig selects the complete self-hosted topology. The API and
-// indexer share a user-owned Postgres database, while ledger files stay on the
-// mounted local filesystem.
+// LoadSelfHostedConfig selects the self-hosted API topology. It deliberately
+// remains stateless: ledger reads and writes go through the GitHub API, while
+// the separate indexer owns the local Git checkout used to build Postgres.
 func LoadSelfHostedConfig() Config {
-	cfg := LoadConfig()
-	cfg.LedgerStorage = "filesystem"
-	cfg.LedgerReadModel = "postgres"
-	cfg.ReadModelStrict = true
-	cfg.LedgerFilesystemLockEnabled = true
-	cfg.RuntimeDir = ""
-	return cfg
+	return LoadWebConfig()
 }
 
 func LoadIndexerConfig() Config {
@@ -169,6 +169,9 @@ func loadBaseConfig() Config {
 		LedgerGitHubRepo:            strings.TrimSpace(os.Getenv("LEDGER_GITHUB_REPO")),
 		LedgerGitHubToken:           strings.TrimSpace(os.Getenv("LEDGER_GITHUB_TOKEN")),
 		LedgerGitHubAPIURL:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_API_URL")),
+		LedgerGitSyncEnabled:        envBool("LEDGER_GIT_SYNC_ENABLED", false),
+		LedgerGitRemoteURL:          strings.TrimSpace(os.Getenv("LEDGER_GIT_REMOTE_URL")),
+		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		EnabledModules:              parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 		NotificationRefreshInterval: env("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "off"),
@@ -277,22 +280,8 @@ func ValidateWebConfig(cfg Config) error {
 // ValidateSelfHostedConfig checks the mandatory boundaries for the Compose
 // deployment before the HTTP server opens a listener.
 func ValidateSelfHostedConfig(cfg Config) error {
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateWebConfig(cfg); err != nil {
 		return err
-	}
-	if cfg.LedgerStorage != "filesystem" {
-		return errors.New("self-hosted ledger-web requires filesystem ledger storage")
-	}
-	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
-		return errors.New("LEDGER_ROOT is required for self-hosted ledger-web")
-	}
-	if cfg.LedgerFilesystemLockEnabled {
-		if _, err := ledgerFilesystemLockPath(cfg); err != nil {
-			return errors.New("LEDGER_LOCK_FILE is required for self-hosted ledger-web")
-		}
-	}
-	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
-		return errors.New("self-hosted ledger-web requires the Postgres read model in strict mode")
 	}
 	if !envBool("LEDGER_AUTH_DISABLED", false) {
 		if strings.TrimSpace(os.Getenv("AUTH_SECRET")) == "" {
@@ -319,6 +308,9 @@ func ValidateIndexerConfig(cfg Config) error {
 	}
 	if !ledgerReadModelEnabled(cfg) {
 		return errors.New("ledger-indexer requires the Postgres read model")
+	}
+	if cfg.LedgerGitSyncEnabled && strings.TrimSpace(cfg.LedgerGitRemoteURL) == "" {
+		return errors.New("LEDGER_GIT_REMOTE_URL is required when LEDGER_GIT_SYNC_ENABLED=true")
 	}
 	if maxOpenConns := postgresPoolSettingsFromEnv().maxOpenConns; maxOpenConns > 0 && maxOpenConns < 2 {
 		return errors.New("ledger-indexer requires POSTGRES_MAX_OPEN_CONNS to be at least 2 when it is set")
