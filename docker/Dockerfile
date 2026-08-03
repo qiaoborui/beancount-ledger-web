@@ -47,8 +47,6 @@ CMD ["/app/zip-worker"]
 FROM debian:bookworm-slim AS indexer
 WORKDIR /app
 ENV GIN_MODE=release
-ARG LEDGER_UID=1000
-ARG LEDGER_GID=1000
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -60,18 +58,26 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && pip3 install --break-system-packages beancount==3.2.3
 
+COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
+CMD ["/app/ledger-indexer"]
+
+# ── Complete self-hosted runtime base ──
+FROM indexer AS selfhost-base
+ARG LEDGER_UID=1000
+ARG LEDGER_GID=1000
 RUN groupadd --gid "$LEDGER_GID" ledger \
   && useradd --uid "$LEDGER_UID" --gid ledger --create-home --shell /usr/sbin/nologin ledger
-
-COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
 COPY --from=go-builder /app/ledger-indexer-daemon /app/ledger-indexer-daemon
 USER ledger
-CMD ["/app/ledger-indexer"]
+
+# ── Recurring self-hosted indexer ──
+FROM selfhost-base AS selfhost-indexer
+CMD ["/app/ledger-indexer-daemon"]
 
 # ── Complete self-hosted API ──
 # This image includes bean-check because local ledger writes validate and roll
 # back within the user's own mounted ledger directory.
-FROM indexer AS selfhost-server
+FROM selfhost-base AS selfhost-server
 COPY --from=go-builder /app/ledger-selfhost /app/ledger-selfhost
 EXPOSE 3000
 CMD ["/app/ledger-selfhost"]

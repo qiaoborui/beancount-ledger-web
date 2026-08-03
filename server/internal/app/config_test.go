@@ -153,7 +153,7 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 
 	cfg := LoadWebConfig()
 
-	if cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict {
+	if cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict || cfg.LedgerFilesystemLockEnabled {
 		t.Fatalf("web config did not force stateless modes: %#v", cfg)
 	}
 	if cfg.LedgerRoot != "" || cfg.RuntimeDir != "" {
@@ -178,6 +178,9 @@ func TestLoadSelfHostedConfigForcesFilesystemPostgresTopology(t *testing.T) {
 	t.Setenv("APP_PASSWORD", "self-hosted-password")
 
 	cfg := LoadSelfHostedConfig()
+	if !cfg.LedgerFilesystemLockEnabled {
+		t.Fatal("self-hosted config must enable the filesystem lock")
+	}
 
 	if cfg.LedgerStorage != "filesystem" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict {
 		t.Fatalf("self-hosted topology = %#v", cfg)

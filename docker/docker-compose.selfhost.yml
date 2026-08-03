@@ -1,11 +1,13 @@
 name: beancount-ledger-selfhost
 
 x-ledger-env: &ledger-env
-  DATABASE_URL: postgresql://ledger:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}@database:5432/ledger?sslmode=disable
+  DATABASE_URL: postgresql://ledger@database:5432/ledger?sslmode=disable
+  PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}
   LEDGER_ROOT: /data/ledger
   LEDGER_STORAGE: filesystem
   LEDGER_READ_MODEL: postgres
   LEDGER_READ_MODEL_STRICT: "true"
+  LEDGER_FILESYSTEM_LOCK_ENABLED: "true"
   BEAN_CHECK_BIN: bean-check
   POSTGRES_MAX_OPEN_CONNS: "${POSTGRES_MAX_OPEN_CONNS:-4}"
   POSTGRES_MAX_IDLE_CONNS: "${POSTGRES_MAX_IDLE_CONNS:-2}"
@@ -35,6 +37,7 @@ services:
       retries: 20
 
   server:
+    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-server:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -62,10 +65,11 @@ services:
       retries: 12
 
   indexer:
+    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-indexer:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: indexer
+      target: selfhost-indexer
       args:
         LEDGER_UID: "${LEDGER_UID:-1000}"
         LEDGER_GID: "${LEDGER_GID:-1000}"
@@ -95,6 +99,7 @@ services:
       retries: 20
 
   frontend:
+    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-frontend:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -104,6 +109,7 @@ services:
       - "80"
 
   caddy:
+    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-caddy:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile

@@ -17,6 +17,7 @@ type Config struct {
 	LedgerClusterID             string
 	LedgerRoot                  string
 	LedgerLockFile              string
+	LedgerFilesystemLockEnabled bool
 	RuntimeDir                  string
 	StaticDir                   string
 	ServeStatic                 bool
@@ -75,6 +76,7 @@ func LoadConfig() Config {
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		LedgerRoot:                  filepath.Clean(ledgerRoot),
 		LedgerLockFile:              filepath.Clean(ledgerLockFile),
+		LedgerFilesystemLockEnabled: envBool("LEDGER_FILESYSTEM_LOCK_ENABLED", false),
 		RuntimeDir:                  filepath.Clean(runtimeDir),
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
@@ -130,6 +132,7 @@ func LoadSelfHostedConfig() Config {
 	cfg.LedgerStorage = "filesystem"
 	cfg.LedgerReadModel = "postgres"
 	cfg.ReadModelStrict = true
+	cfg.LedgerFilesystemLockEnabled = true
 	cfg.RuntimeDir = ""
 	return cfg
 }
@@ -281,8 +284,10 @@ func ValidateSelfHostedConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
 		return errors.New("LEDGER_ROOT is required for self-hosted ledger-web")
 	}
-	if _, err := ledgerFilesystemLockPath(cfg); err != nil {
-		return errors.New("LEDGER_LOCK_FILE is required for self-hosted ledger-web")
+	if cfg.LedgerFilesystemLockEnabled {
+		if _, err := ledgerFilesystemLockPath(cfg); err != nil {
+			return errors.New("LEDGER_LOCK_FILE is required for self-hosted ledger-web")
+		}
 	}
 	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
 		return errors.New("self-hosted ledger-web requires the Postgres read model in strict mode")
@@ -305,8 +310,10 @@ func ValidateIndexerConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
 		return errors.New("LEDGER_ROOT is required for ledger-indexer")
 	}
-	if _, err := ledgerFilesystemLockPath(cfg); err != nil {
-		return errors.New("LEDGER_LOCK_FILE is required for ledger-indexer")
+	if cfg.LedgerFilesystemLockEnabled {
+		if _, err := ledgerFilesystemLockPath(cfg); err != nil {
+			return errors.New("LEDGER_LOCK_FILE is required for ledger-indexer")
+		}
 	}
 	if !ledgerReadModelEnabled(cfg) {
 		return errors.New("ledger-indexer requires the Postgres read model")

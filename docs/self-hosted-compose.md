@@ -29,6 +29,10 @@ LEDGER_UID=<$(id -u)>
 LEDGER_GID=<$(id -g)>
 ```
 
+Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
+safe in Compose and PostgreSQL environment variables. `SELFHOST_IMAGE_TAG`
+defaults to `latest`; pin it to a published commit tag for a repeatable update.
+
 Start every required service with one command:
 
 ```bash
@@ -64,8 +68,10 @@ validation failure.
 
 ## LAN and HTTPS
 
-The default binds both mapped ports to `127.0.0.1`: HTTP on `8080` and HTTPS on
-`8443`. It never exposes a plaintext login endpoint to the LAN.
+The default binds HTTP on `127.0.0.1:8080`. The 443 container port is also
+mapped to loopback (`127.0.0.1:8443`) for an explicit TLS setup, but Caddy does
+not serve TLS until `CADDY_SITE_ADDRESS` and its TLS policy are configured. It
+never exposes a plaintext login endpoint to the LAN.
 
 For LAN use, keep `SELFHOST_HTTP_BIND_ADDRESS=127.0.0.1`, set only
 `SELFHOST_HTTPS_BIND_ADDRESS=0.0.0.0` and `SELFHOST_HTTPS_PORT=443`, then give
@@ -94,13 +100,21 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml do
 tar -C "$(dirname "$LEDGER_HOST_PATH")" -czf ledger-backup.tgz "$(basename "$LEDGER_HOST_PATH")"
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d database
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database \
-  pg_dump -U ledger -d ledger > postgres-backup.sql
+  pg_dump -Fc -U ledger -d ledger > postgres-backup.dump
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml down
 ```
 
-To restore, keep a copy of the failed ledger and SQL dump, restore the ledger
-archive to `LEDGER_HOST_PATH`, bring up only `database`, then restore with
-`psql -U ledger -d ledger < postgres-backup.sql`; finally start the full stack.
+To restore, keep a copy of the failed ledger and database dump, restore the
+ledger archive to `LEDGER_HOST_PATH`, bring up only `database`, then replace
+the database before restoring its archive:
+
+```bash
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database dropdb -U ledger --if-exists ledger
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database createdb -U ledger ledger
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database pg_restore -U ledger -d ledger --clean --if-exists < postgres-backup.dump
+```
+
+Finally start the full stack.
 The indexer will replace the active read-model snapshot from the restored
 ledger. A ledger Git remote remains a useful independent copy.
 

@@ -22,7 +22,7 @@ const ledgerFilesystemLockRetryInterval = 50 * time.Millisecond
 // EnsureLedgerFilesystemLock creates the advisory lock before the indexer is
 // allowed to mount the ledger read-only. The lock itself has no ledger data.
 func EnsureLedgerFilesystemLock(cfg Config) error {
-	if githubAPIEnabled(cfg) {
+	if githubAPIEnabled(cfg) || !cfg.LedgerFilesystemLockEnabled {
 		return nil
 	}
 	path, err := ledgerFilesystemLockPath(cfg)
@@ -40,7 +40,7 @@ func EnsureLedgerFilesystemLock(cfg Config) error {
 }
 
 func withLedgerFilesystemLock(ctx context.Context, cfg Config, mode ledgerFilesystemLockMode, fn func() error) error {
-	if githubAPIEnabled(cfg) {
+	if githubAPIEnabled(cfg) || !cfg.LedgerFilesystemLockEnabled {
 		return fn()
 	}
 	path, err := ledgerFilesystemLockPath(cfg)
