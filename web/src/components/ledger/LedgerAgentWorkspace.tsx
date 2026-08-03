@@ -231,7 +231,7 @@ export function LedgerAgentWorkspace({
     try {
       const query = before ? `?before=${before}` : "";
       const response = await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(serverSessionId)}/timeline${query}`, undefined, { kind: "read" });
-      const page = await response.json() as AgentTimelinePage;
+      const page = normalizeAgentTimelinePage(await response.json());
       setSessions((current) => current.map((session) => {
         if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
         if (!before) {
@@ -729,6 +729,14 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
 export function timelineNeedsServerRefresh(timeline: TimelineItem[]) {
   const last = timeline.at(-1);
   return Boolean(last && !(last.kind === "message" && last.role === "assistant"));
+}
+
+export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {
+  const page = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    items: restoreTimeline(page.items),
+    nextBefore: typeof page.nextBefore === "number" && Number.isInteger(page.nextBefore) && page.nextBefore > 0 ? page.nextBefore : null,
+  };
 }
 
 function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] }) {
