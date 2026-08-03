@@ -160,7 +160,10 @@ func (s *Server) onboardingAgent(c *gin.Context) {
 	if !s.limiter.Check(c, "onboarding.agent", 30, 5*time.Minute) {
 		return
 	}
-	if !requireSensitive(c) {
+	// A first-run repository has no ledger data to protect. The Agent receives
+	// only the browser-provided draft and its tools cannot read or write storage,
+	// so the ordinary authenticated session is sufficient here.
+	if !requireAuth(c) {
 		return
 	}
 	var input LedgerOnboardingAgentRequest

@@ -114,6 +114,27 @@ func TestOnboardingAgentNeverMarksAnIncompleteDraftReady(t *testing.T) {
 	}
 }
 
+func TestOnboardingAgentAllowsAnAuthenticatedButLockedSession(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	t.Setenv("LEDGER_AI_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "")
+	router := testRouter(t, cfg)
+	lockedCookies := []*http.Cookie{}
+	for _, cookie := range loginCookies(t, router) {
+		if cookie.Name == sessionCookieName {
+			lockedCookies = append(lockedCookies, cookie)
+		}
+	}
+	response := requestWithCookies(router, http.MethodPost, "/api/onboarding/agent", `{"start":true}`, lockedCookies)
+	if response.Code == http.StatusLocked {
+		t.Fatalf("onboarding Agent must not require sensitive unlock: %s", response.Body.String())
+	}
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected the deliberately unconfigured AI provider to fail after auth, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestOnboardingCustomNamesUseStableSafeSegmentsAndResolveCollisions(t *testing.T) {
 	input := LedgerOnboardingRequest{
 		Title:     "账本",
