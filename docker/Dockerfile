@@ -7,6 +7,7 @@ COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-selfhost ./cmd/ledger-selfhost
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-indexer ./cmd/ledger-indexer
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/zip-worker ./cmd/zip-worker
 
@@ -58,6 +59,14 @@ RUN apt-get update \
 
 COPY --from=go-builder /app/ledger-indexer /app/ledger-indexer
 CMD ["/app/ledger-indexer"]
+
+# ── Complete self-hosted API ──
+# This image includes bean-check because local ledger writes validate and roll
+# back within the user's own mounted ledger directory.
+FROM indexer AS selfhost-server
+COPY --from=go-builder /app/ledger-selfhost /app/ledger-selfhost
+EXPOSE 3000
+CMD ["/app/ledger-selfhost"]
 
 # ── Frontend build ──
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS web-builder

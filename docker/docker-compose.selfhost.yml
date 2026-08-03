@@ -1,0 +1,113 @@
+name: beancount-ledger-selfhost
+
+x-ledger-env: &ledger-env
+  DATABASE_URL: postgresql://ledger:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}@database:5432/ledger?sslmode=disable
+  LEDGER_ROOT: /data/ledger
+  LEDGER_STORAGE: filesystem
+  LEDGER_READ_MODEL: postgres
+  LEDGER_READ_MODEL_STRICT: "true"
+  BEAN_CHECK_BIN: bean-check
+  POSTGRES_MAX_OPEN_CONNS: "${POSTGRES_MAX_OPEN_CONNS:-4}"
+  POSTGRES_MAX_IDLE_CONNS: "${POSTGRES_MAX_IDLE_CONNS:-2}"
+  POSTGRES_CONN_MAX_IDLE_SECONDS: "${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}"
+  AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env.selfhost}
+  APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env.selfhost}
+  LEDGER_AUTH_DISABLED: "${LEDGER_AUTH_DISABLED:-false}"
+  PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
+  WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
+  WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
+  LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
+
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: selfhost-server
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      <<: *ledger-env
+      PORT: "3000"
+    volumes:
+      - type: bind
+        source: ${LEDGER_HOST_PATH:?set an absolute LEDGER_HOST_PATH in .env.selfhost}
+        target: /data/ledger
+    expose:
+      - "3000"
+
+  indexer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: indexer
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      <<: *ledger-env
+      LEDGER_INDEX_INTERVAL_SECONDS: "${LEDGER_INDEX_INTERVAL_SECONDS:-60}"
+    volumes:
+      - type: bind
+        source: ${LEDGER_HOST_PATH:?set an absolute LEDGER_HOST_PATH in .env.selfhost}
+        target: /data/ledger
+        read_only: true
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        while true; do
+          /app/ledger-indexer || true
+          sleep "$${LEDGER_INDEX_INTERVAL_SECONDS}"
+        done
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: caddy
+    restart: unless-stopped
+    depends_on:
+      - server
+      - frontend
+    environment:
+      CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:-:80}"
+      CADDY_TLS_DIRECTIVE: "${CADDY_TLS_DIRECTIVE:-}"
+      CADDY_FRONTEND_UPSTREAM: frontend:80
+    ports:
+      - "${SELFHOST_HTTP_PORT:-8080}:80"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

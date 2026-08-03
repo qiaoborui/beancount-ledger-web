@@ -167,6 +167,50 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	}
 }
 
+func TestLoadSelfHostedConfigForcesFilesystemPostgresTopology(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "false")
+	t.Setenv("LEDGER_STORAGE", "github_api")
+	t.Setenv("LEDGER_READ_MODEL", "files")
+	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
+	t.Setenv("LEDGER_ROOT", t.TempDir())
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("AUTH_SECRET", "self-hosted-auth-secret")
+	t.Setenv("APP_PASSWORD", "self-hosted-password")
+
+	cfg := LoadSelfHostedConfig()
+
+	if cfg.LedgerStorage != "filesystem" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict {
+		t.Fatalf("self-hosted topology = %#v", cfg)
+	}
+	if cfg.RuntimeDir != "" {
+		t.Fatalf("RuntimeDir=%q, want empty Postgres-backed runtime", cfg.RuntimeDir)
+	}
+	if err := ValidateSelfHostedConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateSelfHostedConfigRequiresLedgerAndCredentials(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "false")
+	t.Setenv("AUTH_SECRET", "")
+	t.Setenv("APP_PASSWORD", "")
+	cfg := Config{
+		LedgerStorage:   "filesystem",
+		DatabaseURL:     "postgres://example",
+		LedgerReadModel: "postgres",
+		ReadModelStrict: true,
+	}
+
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "LEDGER_ROOT") {
+		t.Fatalf("error=%v", err)
+	}
+
+	cfg.LedgerRoot = t.TempDir()
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestValidateWebConfigRequiresPostgresAndGitHub(t *testing.T) {
 	cfg := LoadWebConfig()
 

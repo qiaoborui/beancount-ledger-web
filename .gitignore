@@ -15,6 +15,7 @@ server/ledger-web
 .env
 .env.*
 !.env.example
+!.env.selfhost.example
 web/.env
 web/.env.*
 !web/.env.example

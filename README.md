@@ -67,6 +67,23 @@ See [web/.env.example](web/.env.example) for the full environment configuration.
 
 ## Deployment
 
+### Complete self-hosted Compose deployment
+
+The recommended privacy-preserving deployment runs the complete stack on the
+user's own Docker host: local ledger files, Postgres, API, frontend, Caddy, and
+the scheduled indexer. It uses no public endpoint and no GitHub Action.
+
+Copy `.env.selfhost.example`, set the ledger path and three secrets, then run:
+
+```bash
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
+```
+
+See [docs/self-hosted-compose.md](docs/self-hosted-compose.md) for the required
+values, backup boundary, LAN access, and update procedure.
+
+### Advanced hosted deployment
+
 The recommended deployment runs a stateless `ledger-web` service plus a
 separately scheduled `ledger-indexer` job. The private ledger GitHub repository
 remains the source of truth; Postgres stores the ledger read model and all

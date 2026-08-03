@@ -119,6 +119,12 @@ jobs:
       - name: Build
         working-directory: server
         run: go build ./cmd/...
+      - name: Validate complete self-hosted Compose
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          AUTH_SECRET: ci-auth-secret
+          APP_PASSWORD: ci-app-password
+        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
 
   server-image:
     name: Server image

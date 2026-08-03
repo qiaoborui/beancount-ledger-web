@@ -116,6 +116,18 @@ func LoadWebConfig() Config {
 	return cfg
 }
 
+// LoadSelfHostedConfig selects the complete self-hosted topology. The API and
+// indexer share a user-owned Postgres database, while ledger files stay on the
+// mounted local filesystem.
+func LoadSelfHostedConfig() Config {
+	cfg := LoadConfig()
+	cfg.LedgerStorage = "filesystem"
+	cfg.LedgerReadModel = "postgres"
+	cfg.ReadModelStrict = true
+	cfg.RuntimeDir = ""
+	return cfg
+}
+
 func LoadIndexerConfig() Config {
 	cfg := loadBaseConfig()
 	cfg.LedgerStorage = "filesystem"
@@ -242,6 +254,32 @@ func ValidateWebConfig(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.LedgerGitHubToken) == "" {
 		return errors.New("LEDGER_GITHUB_TOKEN is required")
+	}
+	return nil
+}
+
+// ValidateSelfHostedConfig checks the mandatory boundaries for the Compose
+// deployment before the HTTP server opens a listener.
+func ValidateSelfHostedConfig(cfg Config) error {
+	if err := ValidateConfig(cfg); err != nil {
+		return err
+	}
+	if cfg.LedgerStorage != "filesystem" {
+		return errors.New("self-hosted ledger-web requires filesystem ledger storage")
+	}
+	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
+		return errors.New("LEDGER_ROOT is required for self-hosted ledger-web")
+	}
+	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
+		return errors.New("self-hosted ledger-web requires the Postgres read model in strict mode")
+	}
+	if !envBool("LEDGER_AUTH_DISABLED", false) {
+		if strings.TrimSpace(os.Getenv("AUTH_SECRET")) == "" {
+			return errors.New("AUTH_SECRET is required unless LEDGER_AUTH_DISABLED=true")
+		}
+		if strings.TrimSpace(os.Getenv("APP_PASSWORD")) == "" {
+			return errors.New("APP_PASSWORD is required unless LEDGER_AUTH_DISABLED=true")
+		}
 	}
 	return nil
 }
