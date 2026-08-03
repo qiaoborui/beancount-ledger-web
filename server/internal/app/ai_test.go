@@ -546,6 +546,45 @@ func TestAgentTimelineEmptyPageSerializesItemsAsAnArray(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentSessionRemovesDurableTimelineAndTranscript(t *testing.T) {
+	server := testAgentServer(t)
+	ctx := context.Background()
+	const sessionID = "delete-session"
+	if err := server.writeAgentSession(ctx, sessionID, []agentModelMessage{{Role: "user", Content: "请删除这个会话"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.appendAgentTimelineItem(ctx, sessionID, agentTimelineMessage("user", "请删除这个会话")); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.deleteAgentSession(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := server.readAgentSession(ctx, sessionID); err != nil || found {
+		t.Fatalf("deleted session found=%t err=%v", found, err)
+	}
+	page, err := server.agentTimelinePage(ctx, sessionID, 0, agentTimelinePageLimit)
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("deleted timeline page=%#v err=%v", page, err)
+	}
+}
+
+func TestDeleteAgentSessionPreventsRecoveryOfUnrecordedApproval(t *testing.T) {
+	server := testAgentServer(t)
+	ctx := context.Background()
+	const sessionID = "deleted-approval-session"
+	approval := AgentApproval{ID: "approval-before-timeline", SessionID: sessionID, ToolCallID: "write-1", ToolName: "append_transactions", ToolTitle: "写入账本", ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	if err := server.writeAgentApprovalResolution(ctx, agentApprovalResolution{ApprovalID: approval.ID, SessionID: sessionID, Status: "pending", ToolCallID: approval.ToolCallID, ToolName: approval.ToolName, ToolTitle: approval.ToolTitle, ExpiresAt: approval.ExpiresAt, Approval: &approval}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.deleteAgentSession(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	err := server.resolveAgentApproval(ctx, AgentApprovalRequest{SessionID: sessionID, ApprovalID: approval.ID, Approved: true}, AgentPageContext{SensitiveUnlocked: true}, func(string, any) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "has been deleted") {
+		t.Fatalf("deleted session must not recover approval: %v", err)
+	}
+}
+
 func TestLedgerAgentUpdatePreviewsOriginalBeancountAndRequiresApproval(t *testing.T) {
 	installFakeBeanCheck(t)
 	server := testAgentServer(t)

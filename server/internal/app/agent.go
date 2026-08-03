@@ -286,6 +286,16 @@ func (s *Server) modelClient() AgentModelClient {
 func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
 	sessionID := normalizeAgentSessionID(request.SessionID)
 	return s.withAgentSessionRunLock(ctx, sessionID, func(lockCtx context.Context) error {
+		deleted, err := s.agentSessionWasDeleted(lockCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return errors.New("agent session has been deleted")
+		}
+		if err := s.appendAgentTimelineItem(lockCtx, sessionID, agentTimelineMessage("user", request.Message)); err != nil {
+			return err
+		}
 		return s.runAgentTurnLocked(lockCtx, request, func(event string, payload any) error {
 			if err := s.recordAgentTimelineEvent(lockCtx, sessionID, event, payload); err != nil {
 				return err
@@ -651,6 +661,13 @@ func sameAgentTransactionSource(entry BeanEntry, source TransactionSource) bool 
 
 func (s *Server) resolveAgentApproval(ctx context.Context, request AgentApprovalRequest, pageContext AgentPageContext, emit agentEventWriter) error {
 	return s.withAgentSessionRunLock(ctx, request.SessionID, func(lockCtx context.Context) error {
+		deleted, err := s.agentSessionWasDeleted(lockCtx, request.SessionID)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return errors.New("agent session has been deleted")
+		}
 		return s.resolveAgentApprovalLocked(lockCtx, request, pageContext, func(event string, payload any) error {
 			if err := s.recordAgentTimelineEvent(lockCtx, request.SessionID, event, payload); err != nil {
 				return err

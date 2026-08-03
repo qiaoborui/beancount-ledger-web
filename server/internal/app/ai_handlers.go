@@ -59,10 +59,6 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 	defer cancel()
 	input.SessionID = normalizeAgentSessionID(input.SessionID)
 	input.Context.SensitiveUnlocked = isSensitiveUnlocked(c)
-	if err := s.appendAgentTimelineItem(turnCtx, input.SessionID, agentTimelineMessage("user", input.Message)); err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return
-	}
 	prepareSSE(c)
 	start := time.Now()
 	err := s.runAgentTurn(turnCtx, input, durableSSEEventWriter(c))
@@ -115,6 +111,23 @@ func (s *Server) aiAgentTimeline(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, page)
+}
+
+func (s *Server) aiAgentSessionDelete(c *gin.Context) {
+	if !requireSensitive(c) {
+		return
+	}
+	rawSessionID := c.Param("sessionID")
+	sessionID := normalizeAgentSessionID(rawSessionID)
+	if rawSessionID != sessionID {
+		errorJSON(c, http.StatusBadRequest, errors.New("invalid session ID"))
+		return
+	}
+	if err := s.deleteAgentSession(c.Request.Context(), sessionID); err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func prepareSSE(c *gin.Context) {

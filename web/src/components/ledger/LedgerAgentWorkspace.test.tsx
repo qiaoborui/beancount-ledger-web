@@ -89,4 +89,19 @@ describe("LedgerAgentWorkspace", () => {
     expect(sessions[0]).toMatchObject({ id: "session-1", serverSessionId: "server-1", timeline: [{ kind: "message" }] });
     expect(sessions[1]).toMatchObject({ id: "session-2", serverSessionId: "server-2", timeline: [{ kind: "tool" }] });
   });
+
+  it("retains each session title when the timeline is intentionally omitted from local storage", () => {
+    const sessions = restoreSessions([{ id: "session-title", serverSessionId: "server-title", title: "分析本月支出", createdAt: 1, updatedAt: 2, timeline: [] }]);
+    expect(sessions[0]).toMatchObject({ title: "分析本月支出", timeline: [] });
+  });
+
+  it("retains archived state while session timelines stay out of local storage", () => {
+    const sessions = restoreSessions([{ id: "session-archived", serverSessionId: "server-archived", title: "归档会话", archived: true, createdAt: 1, updatedAt: 2, timeline: [] }]);
+    expect(sessions[0]).toMatchObject({ title: "归档会话", archived: true, timeline: [] });
+  });
+
+  it("never persists the new-session placeholder as a title", () => {
+    expect(source).toContain("title: session.title || timelineTitle(session.timeline)");
+    expect(source).not.toContain("title: sessionLabel(session), archived");
+  });
 });

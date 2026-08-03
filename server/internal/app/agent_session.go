@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	agentSessionScope  = "ledger-agent-sessions"
-	agentSessionMaxAge = 24 * time.Hour
+	agentSessionScope         = "ledger-agent-sessions"
+	agentSessionDeletionScope = "ledger-agent-session-deletions"
+	agentSessionMaxAge        = 24 * time.Hour
 	// Keep a small reserve for the system prompt, tool definitions, and the
 	// provider's completion. The history itself is bounded by estimated tokens,
 	// never by a message count.
@@ -27,6 +28,14 @@ type agentSessionStore struct {
 	Version   int                 `json:"version"`
 	UpdatedAt time.Time           `json:"updatedAt"`
 	Messages  []agentModelMessage `json:"messages"`
+}
+
+// agentSessionDeletion prevents a stale request from reviving a deleted
+// session, including a pending approval receipt that predates its timeline.
+// Session IDs are random and never intentionally reused, so the tombstone may
+// safely outlive the short-lived transcript and approval records.
+type agentSessionDeletion struct {
+	DeletedAt time.Time `json:"deletedAt"`
 }
 
 type agentSessionRunLockContextKey struct{}
@@ -52,6 +61,12 @@ func (s *Server) withAgentSessionRunLock(ctx context.Context, sessionID string, 
 	return s.runtime().WithLock(ctx, lockName, func(lockCtx context.Context) error {
 		return fn(context.WithValue(lockCtx, agentSessionRunLockContextKey{}, lockName))
 	})
+}
+
+func (s *Server) agentSessionWasDeleted(ctx context.Context, sessionID string) (bool, error) {
+	var deletion agentSessionDeletion
+	found, err := s.runtime().GetJSON(ctx, agentSessionDeletionScope, s.agentSessionStoreKey(sessionID), &deletion)
+	return found, err
 }
 
 func (s *Server) readAgentSession(ctx context.Context, sessionID string) ([]agentModelMessage, bool, error) {

@@ -19,11 +19,13 @@ type agentSessionRepository interface {
 	Read(context.Context, string, string) ([]agentModelMessage, bool, error)
 	Write(context.Context, string, string, []agentModelMessage) error
 	Append(context.Context, string, string, agentModelMessage) (bool, error)
+	Delete(context.Context, string, string) error
 }
 
 type agentApprovalRepository interface {
 	Save(context.Context, string, AgentApproval) error
 	Take(context.Context, string, string, string) (AgentApproval, bool, bool, error)
+	DeleteSession(context.Context, string, string) error
 }
 
 type entAgentSessionRepository struct{ client *ent.Client }
@@ -121,6 +123,22 @@ func (r *entAgentSessionRepository) Append(ctx context.Context, clusterID, sessi
 	return true, tx.Commit()
 }
 
+func (r *entAgentSessionRepository) Delete(ctx context.Context, clusterID, sessionID string) error {
+	key := relationalAgentSessionKey(clusterID, sessionID)
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.AgentSessionMessage.Delete().Where(agentsessionmessage.SessionKeyEQ(key)).Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := tx.AgentSession.Delete().Where(agentsession.IDEQ(key), agentsession.ClusterIDEQ(clusterID)).Exec(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func replaceAgentSessionMessages(ctx context.Context, tx *ent.Tx, clusterID, sessionID string, messages []agentModelMessage, locked bool) error {
 	key := relationalAgentSessionKey(clusterID, sessionID)
 	if !locked {
@@ -187,6 +205,11 @@ func (r *entAgentApprovalRepository) Take(ctx context.Context, clusterID, sessio
 		return AgentApproval{}, false, true, nil
 	}
 	return agentApprovalFromEnt(row), true, false, nil
+}
+
+func (r *entAgentApprovalRepository) DeleteSession(ctx context.Context, clusterID, sessionID string) error {
+	_, err := r.client.AgentApproval.Delete().Where(agentapproval.ClusterIDEQ(clusterID), agentapproval.SessionIDEQ(sessionID)).Exec(ctx)
+	return err
 }
 
 func agentMessageFromEnt(row *ent.AgentSessionMessage) (agentModelMessage, error) {
