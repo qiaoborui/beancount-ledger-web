@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ type LedgerWriter struct {
 	cfg                 Config
 	cache               *LedgerCache
 	runtimeStore        RuntimeStore
+	indexStore          *LedgerIndexStore
 	commoditiesProvider func() ([]string, error)
 	mu                  sync.Mutex
 }
@@ -111,6 +113,12 @@ func NewLedgerWriterWithRuntimeStoreAndCommodities(cfg Config, cache *LedgerCach
 	return &LedgerWriter{cfg: cfg, cache: cache, runtimeStore: runtimeStore, commoditiesProvider: commoditiesProvider}
 }
 
+func (w *LedgerWriter) SetIndexRequestStore(store *LedgerIndexStore) {
+	if w != nil {
+		w.indexStore = store
+	}
+}
+
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceDefault, apply)
 }
@@ -180,7 +188,8 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			}
 			return err
 		}
-		if _, err := remoteTx.commit(ledgerCommitMessage(source)); err != nil {
+		gitSHA, err := remoteTx.commit(ledgerCommitMessage(source))
+		if err != nil {
 			cancel()
 			if isContextTimeout(err) {
 				return ledgerWriteTimeoutError(timeout, err)
@@ -189,6 +198,14 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			continue
 		}
 		cancel()
+		if w.cfg.LedgerIndexNotifyEnabled && gitSHA != "" {
+			if err := w.enqueueLedgerIndexRequest(context.Background(), gitSHA); err != nil {
+				// The Git commit has already succeeded. Polling remains a safe
+				// fallback, so do not turn a committed financial write into an
+				// apparent client-side failure.
+				log.Printf("queue ledger index request sha=%s: %v", gitSHA, err)
+			}
+		}
 		if w.cache != nil {
 			w.cache.MarkDirty()
 		}
@@ -198,6 +215,13 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		lastErr = errors.New("github api ledger write failed")
 	}
 	return lastErr
+}
+
+func (w *LedgerWriter) enqueueLedgerIndexRequest(ctx context.Context, gitSHA string) error {
+	if w.indexStore == nil {
+		return errors.New("ledger index request store is unavailable")
+	}
+	return w.indexStore.EnqueueRequest(ctx, gitSHA)
 }
 
 func githubLedgerWriteTimeout() time.Duration {

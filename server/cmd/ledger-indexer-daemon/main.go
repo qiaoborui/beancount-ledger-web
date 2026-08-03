@@ -60,6 +60,10 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 		status.attempts++
 		status.lastAttempt = time.Now().UTC()
 		status.mu.Unlock()
+		requestBoundary, boundaryErr := app.PendingLedgerIndexRequestBoundary(ctx, cfg)
+		if boundaryErr != nil {
+			log.Printf("read ledger index request boundary: %v", boundaryErr)
+		}
 		err := app.SyncLedgerGitCheckout(ctx, cfg)
 		var result app.LedgerIndexResult
 		if err == nil {
@@ -86,8 +90,11 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 		status.lastError = ""
 		status.lastRevision = result.RevisionID
 		status.mu.Unlock()
+		if err := app.CompleteLedgerIndexRequests(ctx, cfg, requestBoundary); err != nil {
+			log.Printf("complete ledger index requests: %v", err)
+		}
 		log.Printf("ledger indexer complete revision=%d skipped=%t", result.RevisionID, result.Skipped)
-		if !wait(ctx, interval) {
+		if !app.WaitForLedgerIndexTrigger(ctx, cfg, interval) {
 			return
 		}
 	}
@@ -107,6 +114,12 @@ func (s *indexerStatus) respond(writer http.ResponseWriter, allowLastError bool)
 	}
 	_ = json.NewEncoder(writer).Encode(body)
 }
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 func wait(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -116,12 +129,6 @@ func wait(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
-}
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 func durationEnv(name string, fallback time.Duration) time.Duration {
 	value, err := strconv.Atoi(os.Getenv(name))

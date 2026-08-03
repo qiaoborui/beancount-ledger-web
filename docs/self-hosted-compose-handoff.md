@@ -26,6 +26,9 @@ This branch contains an implementation draft for that runtime:
   `LEDGER_INDEX_INTERVAL_SECONDS`.
 - The indexer is the only service with the local Git checkout. It clones or
   fast-forwards it using a separate read-only GitHub token before indexing.
+- GitHub API writes enqueue a durable Postgres index request and use
+  `LISTEN`/`NOTIFY` to wake the local indexer immediately; interval polling is
+  retained for missed notifications and external pushes.
 - `.env.selfhost.example` and `docs/self-hosted-compose.md` document the
   operator path.
 - CI parses the Compose file with representative required environment values.

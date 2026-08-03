@@ -397,7 +397,66 @@ CREATE TABLE IF NOT EXISTS ledger_index_commodities (
   revision_id BIGINT NOT NULL REFERENCES ledger_index_revisions(id) ON DELETE CASCADE,
   commodity TEXT NOT NULL,
   PRIMARY KEY (revision_id, commodity)
-);`)
+);
+
+CREATE TABLE IF NOT EXISTS ledger_index_requests (
+  id BIGSERIAL PRIMARY KEY,
+  source_key TEXT NOT NULL,
+  git_sha TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT NOT NULL DEFAULT '',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  UNIQUE (source_key, git_sha)
+);
+
+CREATE INDEX IF NOT EXISTS ledger_index_requests_pending
+  ON ledger_index_requests (source_key, requested_at)
+  WHERE status = 'pending';`)
+	return err
+}
+
+// EnqueueRequest durably records a Git revision that should be indexed and
+// wakes local indexers listening on the shared database. The table is the
+// source of truth; NOTIFY is only a low-latency hint and may be missed.
+func (s *LedgerIndexStore) EnqueueRequest(ctx context.Context, gitSHA string) error {
+	gitSHA = strings.TrimSpace(gitSHA)
+	if gitSHA == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO ledger_index_requests (source_key, git_sha, status, error, requested_at, completed_at)
+VALUES ($1, $2, 'pending', '', now(), NULL)
+ON CONFLICT (source_key, git_sha)
+DO UPDATE SET status = 'pending', error = '', requested_at = now(), completed_at = NULL`, s.sourceKey, gitSHA); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `SELECT pg_notify('ledger_index_request', $1)`, s.sourceKey)
+	return err
+}
+
+func (s *LedgerIndexStore) HasPendingRequest(ctx context.Context) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM ledger_index_requests WHERE source_key = $1 AND status = 'pending')`, s.sourceKey).Scan(&exists)
+	return exists, err
+}
+
+func (s *LedgerIndexStore) PendingRequestBoundary(ctx context.Context) (int64, error) {
+	var boundary int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(id), 0) FROM ledger_index_requests WHERE source_key = $1 AND status = 'pending'`, s.sourceKey).Scan(&boundary)
+	return boundary, err
+}
+
+func (s *LedgerIndexStore) CompletePendingRequestsThrough(ctx context.Context, boundary int64) error {
+	if boundary <= 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE ledger_index_requests
+SET status = 'completed', error = '', completed_at = now()
+WHERE source_key = $1 AND status = 'pending' AND id <= $2`, s.sourceKey, boundary)
 	return err
 }
 
