@@ -154,6 +154,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
   }
 
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
+  const isAgentRoute = isActivePath(pathname, "/agent");
   const showingRouteProgress = routePending || Boolean(navPendingHref);
   return (
     <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(3.5rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none] md:pt-0">
@@ -244,15 +245,15 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
           </div>
         </aside>
 
-        <main id="main-content" data-ledger-main-scroll className="app-shell-main min-w-0 max-w-full flex-1 [overflow-x:clip] px-3 py-4 md:px-0 md:py-0">
+        <main id="main-content" data-ledger-main-scroll className={`app-shell-main min-w-0 max-w-full flex-1 [overflow-x:clip] ${isAgentRoute ? "p-0" : "px-3 py-4"} md:px-0 md:py-0`}>
           <div className="min-w-0">{children}</div>
         </main>
       </div>
 
-      <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.15rem+env(safe-area-inset-bottom))] right-4 z-30 inline-flex h-12 w-12 items-center justify-center gap-2 rounded-lg bg-brand text-primary-foreground active:scale-95 md:bottom-4 md:right-4 md:h-9 md:w-auto md:px-3" aria-label="打开快捷操作">
+      <button onClick={() => { haptic(10); onAdd?.(); }} className={`kami-float app-fab fixed bottom-[calc(6.15rem+env(safe-area-inset-bottom))] right-4 z-30 h-12 w-12 items-center justify-center gap-2 rounded-lg bg-brand text-primary-foreground active:scale-95 md:bottom-4 md:right-4 md:h-9 md:w-auto md:px-3 ${isAgentRoute ? "hidden md:inline-flex" : "inline-flex"}`} aria-label="打开快捷操作">
         <Plus className="h-5 w-5 md:h-4 md:w-4" /><span className="hidden text-xs font-semibold md:inline">新建</span>
       </button>
-      <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1.5 md:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
+      {!isAgentRoute && <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1.5 md:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>
         {mobilePrimaryNav.map((item) => {
           const Icon = item.icon;
           const active = isActivePath(pathname, item.href);
@@ -262,7 +263,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
             </ClientNavLink>
           );
         })}
-      </nav>
+      </nav>}
     </div>
   );
 }

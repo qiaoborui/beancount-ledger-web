@@ -416,7 +416,7 @@ export function LedgerAgentWorkspace({
     <section className={className}
       aria-label="全局账本 Agent"
     >
-      <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
+      <header className={`flex shrink-0 items-center justify-between border-b border-line bg-panel ${presentation === "page" ? "px-3 py-3" : "px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]"} md:py-3`}>
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand text-paper"><Bot className="h-4 w-4" /></span>
           <div className="min-w-0">
@@ -425,18 +425,18 @@ export function LedgerAgentWorkspace({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:hidden" title="查看会话历史" aria-label="查看会话历史" onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8 md:hidden" title="查看会话历史" aria-label="查看会话历史" onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
           {presentation === "dock" && <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(pendingApproval) || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45 md:h-8 md:w-8" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(pendingApproval) || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-line bg-paper text-ink">
               <DropdownMenuItem onSelect={() => archiveSession(activeSession, !activeSession.archived)}>{activeSession.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{activeSession.archived ? "取消归档" : "归档会话"}</DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onSelect={() => void deleteSession(activeSession)}><Trash2 className="h-4 w-4" />删除会话</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
           {presentation === "dock" && <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>}
         </div>
       </header>
