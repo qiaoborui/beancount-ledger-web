@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,6 +89,74 @@ func TestAgentGatewayProxiesTurnAndMintsCapability(t *testing.T) {
 	}
 	if received["sessionId"] != "session-test" || received["capabilityToken"] == "" || received["systemPrompt"] == "" {
 		t.Fatalf("unexpected forwarded turn: %#v", received)
+	}
+}
+
+func TestAgentGatewayDoesNotDeadlockWhenRuntimeConfigRefreshIsDueDuringCallback(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	server.cfg.AgentServiceToken = "agent-secret"
+	server.runtimeConfig = &RuntimeConfigStore{}
+	server.cfgRefreshedAt = time.Now()
+
+	var ledgerURL string
+	callbackResult := make(chan error, 1)
+	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/turn" {
+			http.Error(w, "unexpected Agent path", http.StatusNotFound)
+			return
+		}
+		time.Sleep(2100 * time.Millisecond)
+		callbackRequest, err := http.NewRequest(http.MethodGet, ledgerURL+"/api/internal/agent/tools", nil)
+		if err != nil {
+			callbackResult <- err
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		callbackRequest.Header.Set("X-Agent-Service-Token", "agent-secret")
+		callbackResponse, err := (&http.Client{Timeout: 750 * time.Millisecond}).Do(callbackRequest)
+		if err != nil {
+			callbackResult <- err
+			http.Error(w, err.Error(), http.StatusGatewayTimeout)
+			return
+		}
+		defer callbackResponse.Body.Close()
+		if callbackResponse.StatusCode != http.StatusOK {
+			err := fmt.Errorf("tools callback status=%d", callbackResponse.StatusCode)
+			callbackResult <- err
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		callbackResult <- nil
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: final\ndata: {\"status\":\"completed\"}\n\n"))
+	}))
+	defer fakeAgent.Close()
+	server.cfg.AgentServiceURL = fakeAgent.URL
+
+	ledgerServer := httptest.NewServer(newRouter(server.cfg, server))
+	defer ledgerServer.Close()
+	ledgerURL = ledgerServer.URL
+
+	request, err := http.NewRequest(http.MethodPost, ledgerURL+"/api/ai/agent/turn", strings.NewReader(`{"sessionId":"session-test","message":"看看本月支出"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "event: final") {
+		t.Fatalf("Agent proxy status=%d body=%s", response.StatusCode, body)
+	}
+	if err := <-callbackResult; err != nil {
+		t.Fatalf("Agent tools callback failed: %v", err)
 	}
 }
 
