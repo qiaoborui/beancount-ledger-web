@@ -97,7 +97,12 @@ func (s *Server) refreshConfigIfNeeded(ctx context.Context) {
 	if recent {
 		return
 	}
-	s.cfgMu.Lock()
+	// A request may call an external service that calls back into this server.
+	// Do not wait for active requests to release their configuration read locks,
+	// otherwise the outer request and callback can deadlock each other.
+	if !s.cfgMu.TryLock() {
+		return
+	}
 	defer s.cfgMu.Unlock()
 	if time.Since(s.cfgRefreshedAt) < 2*time.Second {
 		return
