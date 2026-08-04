@@ -7,6 +7,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { MessageResponse } from "@/components/ai-elements/message";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import type { AccountOperation } from "./types";
@@ -79,6 +80,12 @@ function timelineTitle(timeline: TimelineItem[]) {
   return firstPrompt?.content.trim() || "";
 }
 
+export function activeTurnTools(timeline: TimelineItem[]) {
+  const lastUserIndex = timeline.findLastIndex((item) => item.kind === "message" && item.role === "user");
+  if (lastUserIndex < 0) return [];
+  return timeline.slice(lastUserIndex + 1).filter((item): item is ToolItem => item.kind === "tool");
+}
+
 function sessionTime(session: AgentSession) {
   return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(session.updatedAt);
 }
@@ -138,6 +145,8 @@ export function LedgerAgentWorkspace({
   const lastAssistantMessage = [...timeline].reverse().find((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
   const pendingApproval = timeline.find((item): item is ApprovalItem => item.kind === "approval" && !item.resolved);
   const canContinue = !pendingApproval && (lastAssistantMessage?.content.includes("本次请求已完成 8 轮工具处理") ?? false);
+  const liveTools = busy ? activeTurnTools(timeline) : [];
+  const liveToolIDs = new Set(liveTools.map((item) => item.id));
 
   function setOpen(next: boolean) {
     setUncontrolledOpen(next);
@@ -458,12 +467,18 @@ export function LedgerAgentWorkspace({
           {timelinePagination[sessionId]?.loading && timeline.length === 0 && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />正在加载会话记录</div>}
           {timeline.map((item) => {
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
+            if (item.kind === "tool" && liveToolIDs.has(item.id)) return null;
             if (item.kind === "tool") return <ToolCard key={item.id} tool={item.tool} expanded={Boolean(expandedTools[item.id])} onToggle={() => setExpandedTools((current) => ({ ...current, [item.id]: !current[item.id] }))} />;
             if (item.kind === "artifact") return <ArtifactCard key={item.id} artifact={item.artifact} onApplyBQL={onApplyBQL} onNavigate={onNavigate} />;
             return <ApprovalCard key={item.id} approval={item.approval} resolved={item.resolved} busy={resolvingInteractionID === item.approval.id} onResolve={resolveApproval} />;
           })}
-          {busy && streamingText && <MessageBubble key={streamingMessageIDRef.current || "streaming"} item={{ kind: "message", id: streamingMessageIDRef.current || "streaming", role: "assistant", content: streamingText }} />}
-          {busy && !streamingText && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />{status}</div>}
+          {busy && <AgentWorkStatus
+            status={status}
+            tools={liveTools}
+            streamingText={streamingText}
+            expandedTools={expandedTools}
+            onToggleTool={(id) => setExpandedTools((current) => ({ ...current, [id]: !current[id] }))}
+          />}
         </div>
       </div>
 
@@ -592,11 +607,46 @@ function MessageBubble({ item }: { item: MessageItem }) {
   return <AgentMessageBubble role={item.role} content={item.content} />;
 }
 
+function AgentWorkStatus({ status, tools, streamingText, expandedTools, onToggleTool }: { status: string; tools: ToolItem[]; streamingText: string; expandedTools: Record<string, boolean>; onToggleTool: (id: string) => void }) {
+  const completedTools = tools.filter((item) => item.tool.status === "completed").length;
+  return <section className="min-w-0 overflow-hidden rounded-md border border-line bg-panel" aria-live="polite" aria-label="Agent 当前工作状态">
+    <div className="flex items-center gap-3 px-3 py-2.5">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand/10 text-brand"><LoaderCircle className="h-4 w-4 animate-spin" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-ink">Agent 正在工作</div>
+        <div className="truncate text-xs text-stone">{status}</div>
+      </div>
+      <span className="shrink-0 text-[11px] tabular-nums text-stone">{tools.length ? `${completedTools}/${tools.length} 个工具` : "准备中"}</span>
+    </div>
+    {tools.length > 0 && <div className="divide-y divide-line border-t border-line">
+      {tools.map((item) => <AgentWorkTool key={item.id} item={item} expanded={Boolean(expandedTools[item.id])} onToggle={() => onToggleTool(item.id)} />)}
+    </div>}
+    {streamingText && <div className="border-t border-line bg-paper px-3 py-3">
+      <div className="mb-1.5 text-[11px] font-semibold text-stone">实时回复</div>
+      <div className="min-w-0 break-words text-sm leading-relaxed text-ink [overflow-wrap:anywhere] [&_a]:break-all [&_code]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm [&_pre]:bg-panel [&_pre]:p-2"><MessageResponse>{streamingText}</MessageResponse></div>
+    </div>}
+  </section>;
+}
+
+function AgentWorkTool({ item, expanded, onToggle }: { item: ToolItem; expanded: boolean; onToggle: () => void }) {
+  const tool = item.tool;
+  return <div className="min-w-0 bg-paper/35">
+    <button type="button" className="flex min-h-10 w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-tag" onClick={onToggle}>
+      <span className="flex min-w-0 items-center gap-2">{toolStateIcon(tool.status)}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="hidden truncate font-mono text-[10px] text-stone sm:inline">{tool.name}</span></span>
+      {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
+    </button>
+    {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line px-3 py-2.5 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
+  </div>;
+}
+
+function toolStateIcon(status: AgentToolEvent["status"]) {
+  return status === "running" ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-brand" /> : status === "completed" ? <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" /> : <Ban className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />;
+}
+
 function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded: boolean; onToggle: () => void }) {
-  const state = tool.status === "running" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-brand" /> : tool.status === "completed" ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : <Ban className="h-3.5 w-3.5 text-[var(--danger)]" />;
   return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
     <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left" onClick={onToggle}>
-      <span className="flex min-w-0 items-center gap-2">{state}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="truncate font-mono text-[10px] text-stone">{tool.name}</span></span>
+      <span className="flex min-w-0 items-center gap-2">{toolStateIcon(tool.status)}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="truncate font-mono text-[10px] text-stone">{tool.name}</span></span>
       {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
     </button>
     {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line p-3 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
