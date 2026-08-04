@@ -116,6 +116,7 @@ export function LedgerAgentWorkspace({
   const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resolvingInteractionID, setResolvingInteractionID] = useState("");
   const [status, setStatus] = useState("就绪");
   const [streamingText, setStreamingText] = useState("");
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
@@ -379,26 +380,23 @@ export function LedgerAgentWorkspace({
   }
 
   async function resolveApproval(approval: AgentApproval, approved: boolean) {
-    if (busy) return;
-    setBusy(true);
+    if (resolvingInteractionID) return;
+    setResolvingInteractionID(approval.id);
     setStatus(approved ? "正在执行已确认操作" : "正在取消操作");
     updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: true } : item));
     try {
-      const response = await apiFetch("/api/ai/agent/approval", {
+      await apiFetch(`/api/ai/agent/interactions/${encodeURIComponent(approval.id)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: approval.sessionId, approvalId: approval.id, approved }),
+        body: JSON.stringify({ approved }),
       }, { kind: "write" });
-      const final = await consumeStream(response);
-      finishTurn(final);
     } catch (error) {
       const message = error instanceof Error ? error.message : "审批处理失败";
       updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: false } : item));
       setStatus("审批失败");
       showToast("error", message);
     } finally {
-      setBusy(false);
-      setStreamingText("");
+      setResolvingInteractionID("");
     }
   }
 
@@ -452,7 +450,7 @@ export function LedgerAgentWorkspace({
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
             if (item.kind === "tool") return <ToolCard key={item.id} tool={item.tool} expanded={Boolean(expandedTools[item.id])} onToggle={() => setExpandedTools((current) => ({ ...current, [item.id]: !current[item.id] }))} />;
             if (item.kind === "artifact") return <ArtifactCard key={item.id} artifact={item.artifact} onApplyBQL={onApplyBQL} onNavigate={onNavigate} />;
-            return <ApprovalCard key={item.id} approval={item.approval} resolved={item.resolved} busy={busy} onResolve={resolveApproval} />;
+            return <ApprovalCard key={item.id} approval={item.approval} resolved={item.resolved} busy={resolvingInteractionID === item.approval.id} onResolve={resolveApproval} />;
           })}
           {busy && streamingText && <MessageBubble item={{ kind: "message", id: "streaming", role: "assistant", content: streamingText }} />}
           {busy && !streamingText && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />{status}</div>}
@@ -719,7 +717,7 @@ function objectArray<T>(value: unknown, key: string): T[] {
 }
 
 function storageKey() {
-  return `ledger.agent.workspace.v1:${apiEndpointLedgerScope()}`;
+  return `ledger.agent.workspace.v2:${apiEndpointLedgerScope()}`;
 }
 
 function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] } {

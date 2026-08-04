@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -55,40 +57,42 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	turnCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agentTurnDetachedTimeout)
-	defer cancel()
-	input.SessionID = normalizeAgentSessionID(input.SessionID)
-	input.Context.SensitiveUnlocked = isSensitiveUnlocked(c)
-	prepareSSE(c)
 	start := time.Now()
-	err := s.runAgentTurn(turnCtx, input, durableSSEEventWriter(c))
+	err := s.proxyLedgerAgentTurn(c, input)
 	logDuration("ai.agent.turn", start, nil)
 	if err != nil {
-		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
+		if !c.Writer.Written() {
+			errorJSON(c, http.StatusBadGateway, err)
+		}
 	}
 }
 
-func (s *Server) aiAgentApproval(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.agent_approval", 30, 5*time.Minute) {
+func (s *Server) aiAgentInteraction(c *gin.Context) {
+	if !s.limiter.Check(c, "ai.agent_interaction", 30, 5*time.Minute) {
 		return
 	}
 	if !requireAuth(c) {
 		return
 	}
-	var input AgentApprovalRequest
+	var input struct {
+		Approved bool `json:"approved"`
+	}
 	if !bindJSON(c, &input) {
 		return
 	}
-	turnCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agentTurnDetachedTimeout)
+	turnCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	prepareSSE(c)
-	pageContext := AgentPageContext{SensitiveUnlocked: isSensitiveUnlocked(c)}
-	start := time.Now()
-	err := s.resolveAgentApproval(turnCtx, input, pageContext, durableSSEEventWriter(c))
-	logDuration("ai.agent.approval", start, nil)
+	response, err := s.agentServiceRequest(turnCtx, http.MethodPost, "/v1/interactions/"+url.PathEscape(c.Param("interactionID")), input)
 	if err != nil {
-		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
+		errorJSON(c, http.StatusBadGateway, err)
+		return
 	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errorJSON(c, response.StatusCode, agentServiceResponseError(response))
+		return
+	}
+	c.Status(http.StatusAccepted)
 }
 
 func (s *Server) aiAgentTimeline(c *gin.Context) {
@@ -105,12 +109,22 @@ func (s *Server) aiAgentTimeline(c *gin.Context) {
 		}
 		before = value
 	}
-	page, err := s.agentTimelinePage(c.Request.Context(), sessionID, before, agentTimelinePageLimit)
+	path := fmt.Sprintf("/v1/sessions/%s/timeline", url.PathEscape(sessionID))
+	if before > 0 {
+		path += "?before=" + strconv.Itoa(before)
+	}
+	response, err := s.agentServiceRequest(c.Request.Context(), http.MethodGet, path, nil)
 	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
+		errorJSON(c, http.StatusBadGateway, err)
 		return
 	}
-	c.JSON(http.StatusOK, page)
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errorJSON(c, response.StatusCode, agentServiceResponseError(response))
+		return
+	}
+	c.Status(response.StatusCode)
+	_, _ = io.Copy(c.Writer, response.Body)
 }
 
 func (s *Server) aiAgentSessionDelete(c *gin.Context) {
@@ -123,8 +137,14 @@ func (s *Server) aiAgentSessionDelete(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, errors.New("invalid session ID"))
 		return
 	}
-	if err := s.deleteAgentSession(c.Request.Context(), sessionID); err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
+	response, err := s.agentServiceRequest(c.Request.Context(), http.MethodDelete, "/v1/sessions/"+url.PathEscape(sessionID), nil)
+	if err != nil {
+		errorJSON(c, http.StatusBadGateway, err)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errorJSON(c, response.StatusCode, agentServiceResponseError(response))
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -148,20 +168,4 @@ func writeSSEEvent(c *gin.Context, event string, payload any) error {
 	}
 	c.Writer.Flush()
 	return nil
-}
-
-// durableSSEEventWriter treats the stream as an optional live view. A browser
-// reload may close it at any time, but the Agent run must keep writing its
-// durable session and timeline through its own bounded context.
-func durableSSEEventWriter(c *gin.Context) agentEventWriter {
-	connected := true
-	return func(event string, payload any) error {
-		if !connected {
-			return nil
-		}
-		if err := writeSSEEvent(c, event, payload); err != nil {
-			connected = false
-		}
-		return nil
-	}
 }

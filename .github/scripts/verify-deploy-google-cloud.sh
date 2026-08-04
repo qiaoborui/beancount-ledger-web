@@ -25,7 +25,7 @@ fi
 
 worker_step="$(awk '
   /^      - name: Deploy private ZIP worker$/ { capture = 1 }
-  /^      - name: Deploy Cloud Run service$/ { capture = 0 }
+  /^      - name: Deploy private Bub Agent$/ { capture = 0 }
   capture { print }
 ' "${workflow}")"
 

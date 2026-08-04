@@ -6,17 +6,8 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
-// AgentApproval is the predicate function for agentapproval builders.
-type AgentApproval func(*sql.Selector)
-
 // AgentMemory is the predicate function for agentmemory builders.
 type AgentMemory func(*sql.Selector)
-
-// AgentSession is the predicate function for agentsession builders.
-type AgentSession func(*sql.Selector)
-
-// AgentSessionMessage is the predicate function for agentsessionmessage builders.
-type AgentSessionMessage func(*sql.Selector)
 
 // BQLHistoryRecord is the predicate function for bqlhistoryrecord builders.
 type BQLHistoryRecord func(*sql.Selector)

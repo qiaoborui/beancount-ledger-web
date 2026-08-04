@@ -43,6 +43,8 @@ services:
       PORT: "3000"
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env.selfhost}
       INDEXER_IDENTITY_TOKEN: ${INDEXER_IDENTITY_TOKEN:?set INDEXER_IDENTITY_TOKEN in .env.selfhost}
+      AGENT_SERVICE_URL: http://agent:8080
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?set AGENT_SERVICE_TOKEN in .env.selfhost}
       LEDGER_AUTH_DISABLED: "${LEDGER_AUTH_DISABLED:-false}"
       LEDGER_AUTH_TRANSPORT: "${LEDGER_AUTH_TRANSPORT:-http}"
       PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
@@ -53,6 +55,33 @@ services:
       - "3000"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  agent:
+    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-agent:${SELFHOST_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: agent
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+      server:
+        condition: service_started
+    environment:
+      <<: *database-env
+      LEDGER_API_URL: http://server:3000
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?set AGENT_SERVICE_TOKEN in .env.selfhost}
+      BUB_MODEL: "${BUB_MODEL:-openai:ledger-agent}"
+      BUB_API_BASE: http://server:3000/api/internal/agent/model
+      BUB_API_KEY: ${AGENT_SERVICE_TOKEN:?set AGENT_SERVICE_TOKEN in .env.selfhost}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -114,6 +143,7 @@ services:
     restart: unless-stopped
     depends_on:
       - server
+      - agent
       - frontend
     environment:
       CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:-:80}"

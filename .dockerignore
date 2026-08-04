@@ -10,6 +10,10 @@ gha-creds-*.json
 **/node_modules
 **/dist
 **/.runtime
+**/.venv
+**/.pytest_cache
+**/__pycache__
+**/*.pyc
 ledger-web
 ledger-indexer
 main.bean

@@ -55,6 +55,9 @@ type Config struct {
 	GmailZipTimeoutSeconds      int
 	ZIPWorkerURL                string
 	ZIPWorkerAudience           string
+	AgentServiceURL             string
+	AgentServiceAudience        string
+	AgentServiceToken           string
 	CronSecret                  string
 	CronOIDCAudience            string
 	CronOIDCServiceAccount      string
@@ -120,6 +123,9 @@ func LoadConfig() Config {
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
 		ZIPWorkerURL:                zipWorkerURL,
 		ZIPWorkerAudience:           zipWorkerAudience,
+		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
+		AgentServiceAudience:        strings.TrimSpace(os.Getenv("AGENT_SERVICE_AUDIENCE")),
+		AgentServiceToken:           strings.TrimSpace(os.Getenv("AGENT_SERVICE_TOKEN")),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
@@ -195,6 +201,9 @@ func loadBaseConfig() Config {
 		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
 		ZIPWorkerURL:                zipWorkerURL,
 		ZIPWorkerAudience:           zipWorkerAudience,
+		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
+		AgentServiceAudience:        strings.TrimSpace(os.Getenv("AGENT_SERVICE_AUDIENCE")),
+		AgentServiceToken:           strings.TrimSpace(os.Getenv("AGENT_SERVICE_TOKEN")),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
@@ -277,6 +286,9 @@ func ValidateWebConfig(cfg Config) error {
 	if strings.TrimSpace(os.Getenv("AUTH_SECRET")) == "" {
 		return errors.New("AUTH_SECRET is required")
 	}
+	if err := validateAgentServiceConfig(cfg, true); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -349,6 +361,31 @@ func ValidateConfig(cfg Config) error {
 	}
 	if cfg.ReadModelStrict && !ledgerReadModelEnabled(cfg) {
 		return errors.New("LEDGER_READ_MODEL_STRICT=true requires LEDGER_READ_MODEL=postgres")
+	}
+	if err := validateAgentServiceConfig(cfg, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateAgentServiceConfig(cfg Config, required bool) error {
+	serviceURL := strings.TrimSpace(cfg.AgentServiceURL)
+	token := strings.TrimSpace(cfg.AgentServiceToken)
+	if serviceURL == "" && token == "" && !required {
+		return nil
+	}
+	if serviceURL == "" || token == "" {
+		return errors.New("AGENT_SERVICE_URL and AGENT_SERVICE_TOKEN must be configured together")
+	}
+	parsed, err := url.ParseRequestURI(serviceURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errors.New("AGENT_SERVICE_URL must be an HTTP or HTTPS URL")
+	}
+	if audience := strings.TrimSpace(cfg.AgentServiceAudience); audience != "" {
+		parsedAudience, err := url.ParseRequestURI(audience)
+		if err != nil || parsedAudience.Scheme != "https" || parsedAudience.Host == "" {
+			return errors.New("AGENT_SERVICE_AUDIENCE must be an HTTPS URL")
+		}
 	}
 	return nil
 }

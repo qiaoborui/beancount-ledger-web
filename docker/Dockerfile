@@ -1,3 +1,33 @@
+# Defaults keep direct legacy Docker builds usable; BuildKit overrides these
+# automatic platform arguments for multi-architecture CI builds.
+ARG BUILDPLATFORM=linux/amd64
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+# ── Bub Agent runtime ──
+FROM python:3.12-slim-bookworm AS agent-builder
+WORKDIR /app/agent
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip install --no-cache-dir uv==0.8.14
+COPY agent/pyproject.toml agent/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY agent/src ./src
+RUN uv sync --frozen --no-dev
+
+FROM python:3.12-slim-bookworm AS agent
+WORKDIR /app/agent
+ENV PATH=/app/agent/.venv/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+RUN groupadd --system ledger \
+  && useradd --system --gid ledger --home-dir /app/agent ledger
+COPY --from=agent-builder --chown=ledger:ledger /app/agent/.venv /app/agent/.venv
+COPY --from=agent-builder --chown=ledger:ledger /app/agent/src /app/agent/src
+USER ledger
+EXPOSE 8080
+CMD ["ledger-agent"]
+
 # ── Backend build ──
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
 ARG TARGETOS

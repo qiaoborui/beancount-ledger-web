@@ -14,10 +14,7 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
-	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentapproval"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentmemory"
-	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsession"
-	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/agentsessionmessage"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/bqlhistoryrecord"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailconnection"
 	"github.com/borui/beancount-ledger-web/server/internal/persistence/ent/gmailoauthstate"
@@ -42,14 +39,8 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
-	// AgentApproval is the client for interacting with the AgentApproval builders.
-	AgentApproval *AgentApprovalClient
 	// AgentMemory is the client for interacting with the AgentMemory builders.
 	AgentMemory *AgentMemoryClient
-	// AgentSession is the client for interacting with the AgentSession builders.
-	AgentSession *AgentSessionClient
-	// AgentSessionMessage is the client for interacting with the AgentSessionMessage builders.
-	AgentSessionMessage *AgentSessionMessageClient
 	// BQLHistoryRecord is the client for interacting with the BQLHistoryRecord builders.
 	BQLHistoryRecord *BQLHistoryRecordClient
 	// GmailConnection is the client for interacting with the GmailConnection builders.
@@ -91,10 +82,7 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
-	c.AgentApproval = NewAgentApprovalClient(c.config)
 	c.AgentMemory = NewAgentMemoryClient(c.config)
-	c.AgentSession = NewAgentSessionClient(c.config)
-	c.AgentSessionMessage = NewAgentSessionMessageClient(c.config)
 	c.BQLHistoryRecord = NewBQLHistoryRecordClient(c.config)
 	c.GmailConnection = NewGmailConnectionClient(c.config)
 	c.GmailOAuthState = NewGmailOAuthStateClient(c.config)
@@ -202,10 +190,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	return &Tx{
 		ctx:                  ctx,
 		config:               cfg,
-		AgentApproval:        NewAgentApprovalClient(cfg),
 		AgentMemory:          NewAgentMemoryClient(cfg),
-		AgentSession:         NewAgentSessionClient(cfg),
-		AgentSessionMessage:  NewAgentSessionMessageClient(cfg),
 		BQLHistoryRecord:     NewBQLHistoryRecordClient(cfg),
 		GmailConnection:      NewGmailConnectionClient(cfg),
 		GmailOAuthState:      NewGmailOAuthStateClient(cfg),
@@ -240,10 +225,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	return &Tx{
 		ctx:                  ctx,
 		config:               cfg,
-		AgentApproval:        NewAgentApprovalClient(cfg),
 		AgentMemory:          NewAgentMemoryClient(cfg),
-		AgentSession:         NewAgentSessionClient(cfg),
-		AgentSessionMessage:  NewAgentSessionMessageClient(cfg),
 		BQLHistoryRecord:     NewBQLHistoryRecordClient(cfg),
 		GmailConnection:      NewGmailConnectionClient(cfg),
 		GmailOAuthState:      NewGmailOAuthStateClient(cfg),
@@ -265,7 +247,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		AgentApproval.
+//		AgentMemory.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -288,11 +270,11 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.AgentApproval, c.AgentMemory, c.AgentSession, c.AgentSessionMessage,
-		c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState, c.GmailPendingImport,
-		c.GmailPushEvent, c.GmailSyncLease, c.ImportJob, c.ImportPreviewState,
-		c.ImportPreviewWarning, c.Notification, c.PasskeyCredential, c.PasskeySession,
-		c.PasskeyTransport, c.QuickUnlockDevice, c.WebPushSubscription,
+		c.AgentMemory, c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState,
+		c.GmailPendingImport, c.GmailPushEvent, c.GmailSyncLease, c.ImportJob,
+		c.ImportPreviewState, c.ImportPreviewWarning, c.Notification,
+		c.PasskeyCredential, c.PasskeySession, c.PasskeyTransport, c.QuickUnlockDevice,
+		c.WebPushSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -302,11 +284,11 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.AgentApproval, c.AgentMemory, c.AgentSession, c.AgentSessionMessage,
-		c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState, c.GmailPendingImport,
-		c.GmailPushEvent, c.GmailSyncLease, c.ImportJob, c.ImportPreviewState,
-		c.ImportPreviewWarning, c.Notification, c.PasskeyCredential, c.PasskeySession,
-		c.PasskeyTransport, c.QuickUnlockDevice, c.WebPushSubscription,
+		c.AgentMemory, c.BQLHistoryRecord, c.GmailConnection, c.GmailOAuthState,
+		c.GmailPendingImport, c.GmailPushEvent, c.GmailSyncLease, c.ImportJob,
+		c.ImportPreviewState, c.ImportPreviewWarning, c.Notification,
+		c.PasskeyCredential, c.PasskeySession, c.PasskeyTransport, c.QuickUnlockDevice,
+		c.WebPushSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -315,14 +297,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
-	case *AgentApprovalMutation:
-		return c.AgentApproval.mutate(ctx, m)
 	case *AgentMemoryMutation:
 		return c.AgentMemory.mutate(ctx, m)
-	case *AgentSessionMutation:
-		return c.AgentSession.mutate(ctx, m)
-	case *AgentSessionMessageMutation:
-		return c.AgentSessionMessage.mutate(ctx, m)
 	case *BQLHistoryRecordMutation:
 		return c.BQLHistoryRecord.mutate(ctx, m)
 	case *GmailConnectionMutation:
@@ -355,139 +331,6 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.WebPushSubscription.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
-	}
-}
-
-// AgentApprovalClient is a client for the AgentApproval schema.
-type AgentApprovalClient struct {
-	config
-}
-
-// NewAgentApprovalClient returns a client for the AgentApproval from the given config.
-func NewAgentApprovalClient(c config) *AgentApprovalClient {
-	return &AgentApprovalClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `agentapproval.Hooks(f(g(h())))`.
-func (c *AgentApprovalClient) Use(hooks ...Hook) {
-	c.hooks.AgentApproval = append(c.hooks.AgentApproval, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `agentapproval.Intercept(f(g(h())))`.
-func (c *AgentApprovalClient) Intercept(interceptors ...Interceptor) {
-	c.inters.AgentApproval = append(c.inters.AgentApproval, interceptors...)
-}
-
-// Create returns a builder for creating a AgentApproval entity.
-func (c *AgentApprovalClient) Create() *AgentApprovalCreate {
-	mutation := newAgentApprovalMutation(c.config, OpCreate)
-	return &AgentApprovalCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of AgentApproval entities.
-func (c *AgentApprovalClient) CreateBulk(builders ...*AgentApprovalCreate) *AgentApprovalCreateBulk {
-	return &AgentApprovalCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *AgentApprovalClient) MapCreateBulk(slice any, setFunc func(*AgentApprovalCreate, int)) *AgentApprovalCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &AgentApprovalCreateBulk{err: fmt.Errorf("calling to AgentApprovalClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*AgentApprovalCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &AgentApprovalCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for AgentApproval.
-func (c *AgentApprovalClient) Update() *AgentApprovalUpdate {
-	mutation := newAgentApprovalMutation(c.config, OpUpdate)
-	return &AgentApprovalUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *AgentApprovalClient) UpdateOne(_m *AgentApproval) *AgentApprovalUpdateOne {
-	mutation := newAgentApprovalMutation(c.config, OpUpdateOne, withAgentApproval(_m))
-	return &AgentApprovalUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *AgentApprovalClient) UpdateOneID(id string) *AgentApprovalUpdateOne {
-	mutation := newAgentApprovalMutation(c.config, OpUpdateOne, withAgentApprovalID(id))
-	return &AgentApprovalUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for AgentApproval.
-func (c *AgentApprovalClient) Delete() *AgentApprovalDelete {
-	mutation := newAgentApprovalMutation(c.config, OpDelete)
-	return &AgentApprovalDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *AgentApprovalClient) DeleteOne(_m *AgentApproval) *AgentApprovalDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *AgentApprovalClient) DeleteOneID(id string) *AgentApprovalDeleteOne {
-	builder := c.Delete().Where(agentapproval.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &AgentApprovalDeleteOne{builder}
-}
-
-// Query returns a query builder for AgentApproval.
-func (c *AgentApprovalClient) Query() *AgentApprovalQuery {
-	return &AgentApprovalQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeAgentApproval},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a AgentApproval entity by its id.
-func (c *AgentApprovalClient) Get(ctx context.Context, id string) (*AgentApproval, error) {
-	return c.Query().Where(agentapproval.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *AgentApprovalClient) GetX(ctx context.Context, id string) *AgentApproval {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *AgentApprovalClient) Hooks() []Hook {
-	return c.hooks.AgentApproval
-}
-
-// Interceptors returns the client interceptors.
-func (c *AgentApprovalClient) Interceptors() []Interceptor {
-	return c.inters.AgentApproval
-}
-
-func (c *AgentApprovalClient) mutate(ctx context.Context, m *AgentApprovalMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&AgentApprovalCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&AgentApprovalUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&AgentApprovalUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&AgentApprovalDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("ent: unknown AgentApproval mutation op: %q", m.Op())
 	}
 }
 
@@ -621,272 +464,6 @@ func (c *AgentMemoryClient) mutate(ctx context.Context, m *AgentMemoryMutation) 
 		return (&AgentMemoryDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown AgentMemory mutation op: %q", m.Op())
-	}
-}
-
-// AgentSessionClient is a client for the AgentSession schema.
-type AgentSessionClient struct {
-	config
-}
-
-// NewAgentSessionClient returns a client for the AgentSession from the given config.
-func NewAgentSessionClient(c config) *AgentSessionClient {
-	return &AgentSessionClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `agentsession.Hooks(f(g(h())))`.
-func (c *AgentSessionClient) Use(hooks ...Hook) {
-	c.hooks.AgentSession = append(c.hooks.AgentSession, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `agentsession.Intercept(f(g(h())))`.
-func (c *AgentSessionClient) Intercept(interceptors ...Interceptor) {
-	c.inters.AgentSession = append(c.inters.AgentSession, interceptors...)
-}
-
-// Create returns a builder for creating a AgentSession entity.
-func (c *AgentSessionClient) Create() *AgentSessionCreate {
-	mutation := newAgentSessionMutation(c.config, OpCreate)
-	return &AgentSessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of AgentSession entities.
-func (c *AgentSessionClient) CreateBulk(builders ...*AgentSessionCreate) *AgentSessionCreateBulk {
-	return &AgentSessionCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *AgentSessionClient) MapCreateBulk(slice any, setFunc func(*AgentSessionCreate, int)) *AgentSessionCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &AgentSessionCreateBulk{err: fmt.Errorf("calling to AgentSessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*AgentSessionCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &AgentSessionCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for AgentSession.
-func (c *AgentSessionClient) Update() *AgentSessionUpdate {
-	mutation := newAgentSessionMutation(c.config, OpUpdate)
-	return &AgentSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *AgentSessionClient) UpdateOne(_m *AgentSession) *AgentSessionUpdateOne {
-	mutation := newAgentSessionMutation(c.config, OpUpdateOne, withAgentSession(_m))
-	return &AgentSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *AgentSessionClient) UpdateOneID(id string) *AgentSessionUpdateOne {
-	mutation := newAgentSessionMutation(c.config, OpUpdateOne, withAgentSessionID(id))
-	return &AgentSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for AgentSession.
-func (c *AgentSessionClient) Delete() *AgentSessionDelete {
-	mutation := newAgentSessionMutation(c.config, OpDelete)
-	return &AgentSessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *AgentSessionClient) DeleteOne(_m *AgentSession) *AgentSessionDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *AgentSessionClient) DeleteOneID(id string) *AgentSessionDeleteOne {
-	builder := c.Delete().Where(agentsession.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &AgentSessionDeleteOne{builder}
-}
-
-// Query returns a query builder for AgentSession.
-func (c *AgentSessionClient) Query() *AgentSessionQuery {
-	return &AgentSessionQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeAgentSession},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a AgentSession entity by its id.
-func (c *AgentSessionClient) Get(ctx context.Context, id string) (*AgentSession, error) {
-	return c.Query().Where(agentsession.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *AgentSessionClient) GetX(ctx context.Context, id string) *AgentSession {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *AgentSessionClient) Hooks() []Hook {
-	return c.hooks.AgentSession
-}
-
-// Interceptors returns the client interceptors.
-func (c *AgentSessionClient) Interceptors() []Interceptor {
-	return c.inters.AgentSession
-}
-
-func (c *AgentSessionClient) mutate(ctx context.Context, m *AgentSessionMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&AgentSessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&AgentSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&AgentSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&AgentSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("ent: unknown AgentSession mutation op: %q", m.Op())
-	}
-}
-
-// AgentSessionMessageClient is a client for the AgentSessionMessage schema.
-type AgentSessionMessageClient struct {
-	config
-}
-
-// NewAgentSessionMessageClient returns a client for the AgentSessionMessage from the given config.
-func NewAgentSessionMessageClient(c config) *AgentSessionMessageClient {
-	return &AgentSessionMessageClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `agentsessionmessage.Hooks(f(g(h())))`.
-func (c *AgentSessionMessageClient) Use(hooks ...Hook) {
-	c.hooks.AgentSessionMessage = append(c.hooks.AgentSessionMessage, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `agentsessionmessage.Intercept(f(g(h())))`.
-func (c *AgentSessionMessageClient) Intercept(interceptors ...Interceptor) {
-	c.inters.AgentSessionMessage = append(c.inters.AgentSessionMessage, interceptors...)
-}
-
-// Create returns a builder for creating a AgentSessionMessage entity.
-func (c *AgentSessionMessageClient) Create() *AgentSessionMessageCreate {
-	mutation := newAgentSessionMessageMutation(c.config, OpCreate)
-	return &AgentSessionMessageCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of AgentSessionMessage entities.
-func (c *AgentSessionMessageClient) CreateBulk(builders ...*AgentSessionMessageCreate) *AgentSessionMessageCreateBulk {
-	return &AgentSessionMessageCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *AgentSessionMessageClient) MapCreateBulk(slice any, setFunc func(*AgentSessionMessageCreate, int)) *AgentSessionMessageCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &AgentSessionMessageCreateBulk{err: fmt.Errorf("calling to AgentSessionMessageClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*AgentSessionMessageCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &AgentSessionMessageCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for AgentSessionMessage.
-func (c *AgentSessionMessageClient) Update() *AgentSessionMessageUpdate {
-	mutation := newAgentSessionMessageMutation(c.config, OpUpdate)
-	return &AgentSessionMessageUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *AgentSessionMessageClient) UpdateOne(_m *AgentSessionMessage) *AgentSessionMessageUpdateOne {
-	mutation := newAgentSessionMessageMutation(c.config, OpUpdateOne, withAgentSessionMessage(_m))
-	return &AgentSessionMessageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *AgentSessionMessageClient) UpdateOneID(id string) *AgentSessionMessageUpdateOne {
-	mutation := newAgentSessionMessageMutation(c.config, OpUpdateOne, withAgentSessionMessageID(id))
-	return &AgentSessionMessageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for AgentSessionMessage.
-func (c *AgentSessionMessageClient) Delete() *AgentSessionMessageDelete {
-	mutation := newAgentSessionMessageMutation(c.config, OpDelete)
-	return &AgentSessionMessageDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *AgentSessionMessageClient) DeleteOne(_m *AgentSessionMessage) *AgentSessionMessageDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *AgentSessionMessageClient) DeleteOneID(id string) *AgentSessionMessageDeleteOne {
-	builder := c.Delete().Where(agentsessionmessage.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &AgentSessionMessageDeleteOne{builder}
-}
-
-// Query returns a query builder for AgentSessionMessage.
-func (c *AgentSessionMessageClient) Query() *AgentSessionMessageQuery {
-	return &AgentSessionMessageQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeAgentSessionMessage},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a AgentSessionMessage entity by its id.
-func (c *AgentSessionMessageClient) Get(ctx context.Context, id string) (*AgentSessionMessage, error) {
-	return c.Query().Where(agentsessionmessage.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *AgentSessionMessageClient) GetX(ctx context.Context, id string) *AgentSessionMessage {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *AgentSessionMessageClient) Hooks() []Hook {
-	return c.hooks.AgentSessionMessage
-}
-
-// Interceptors returns the client interceptors.
-func (c *AgentSessionMessageClient) Interceptors() []Interceptor {
-	return c.inters.AgentSessionMessage
-}
-
-func (c *AgentSessionMessageClient) mutate(ctx context.Context, m *AgentSessionMessageMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&AgentSessionMessageCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&AgentSessionMessageUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&AgentSessionMessageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&AgentSessionMessageDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("ent: unknown AgentSessionMessage mutation op: %q", m.Op())
 	}
 }
 
@@ -2888,18 +2465,18 @@ func (c *WebPushSubscriptionClient) mutate(ctx context.Context, m *WebPushSubscr
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		AgentApproval, AgentMemory, AgentSession, AgentSessionMessage, BQLHistoryRecord,
-		GmailConnection, GmailOAuthState, GmailPendingImport, GmailPushEvent,
-		GmailSyncLease, ImportJob, ImportPreviewState, ImportPreviewWarning,
-		Notification, PasskeyCredential, PasskeySession, PasskeyTransport,
-		QuickUnlockDevice, WebPushSubscription []ent.Hook
+		AgentMemory, BQLHistoryRecord, GmailConnection, GmailOAuthState,
+		GmailPendingImport, GmailPushEvent, GmailSyncLease, ImportJob,
+		ImportPreviewState, ImportPreviewWarning, Notification, PasskeyCredential,
+		PasskeySession, PasskeyTransport, QuickUnlockDevice,
+		WebPushSubscription []ent.Hook
 	}
 	inters struct {
-		AgentApproval, AgentMemory, AgentSession, AgentSessionMessage, BQLHistoryRecord,
-		GmailConnection, GmailOAuthState, GmailPendingImport, GmailPushEvent,
-		GmailSyncLease, ImportJob, ImportPreviewState, ImportPreviewWarning,
-		Notification, PasskeyCredential, PasskeySession, PasskeyTransport,
-		QuickUnlockDevice, WebPushSubscription []ent.Interceptor
+		AgentMemory, BQLHistoryRecord, GmailConnection, GmailOAuthState,
+		GmailPendingImport, GmailPushEvent, GmailSyncLease, ImportJob,
+		ImportPreviewState, ImportPreviewWarning, Notification, PasskeyCredential,
+		PasskeySession, PasskeyTransport, QuickUnlockDevice,
+		WebPushSubscription []ent.Interceptor
 	}
 )
 

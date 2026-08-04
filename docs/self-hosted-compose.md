@@ -30,6 +30,7 @@ LEDGER_CHECKOUT_HOST_PATH=/absolute/path/to/ledger-checkout
 POSTGRES_PASSWORD=<long random value>
 AUTH_SECRET=<openssl rand -base64 32>
 INDEXER_IDENTITY_TOKEN=<openssl rand -base64 32>
+AGENT_SERVICE_TOKEN=<openssl rand -base64 32>
 LEDGER_UID=<$(id -u)>
 LEDGER_GID=<$(id -g)>
 ```
@@ -73,9 +74,10 @@ dirty worktree rather than overwriting local edits.
 | --- | --- | --- |
 | `database` | Postgres read model and runtime state | `postgres_data` volume |
 | `server` | API; GitHub API reads/writes, preview validation, commits | Postgres runtime state only |
+| `agent` | Private Bub runtime and PostgreSQL conversation tapes; calls only Go capabilities | Postgres only; no ledger mount |
 | `indexer` | Clones/fetches the ledger, validates and atomically publishes the read model every 60 seconds | dedicated local Git checkout + Postgres |
 | `frontend` | Static React application | container image |
-| `caddy` | Same-origin browser entrypoint | Caddy volumes |
+| `caddy` | Same-origin browser entrypoint; does not expose the Agent service | Caddy volumes |
 
 The indexer runs inside Compose. `/api/health` stays healthy during installation
 and index catch-up, while `/api/ready` becomes ready only after configuration
@@ -161,7 +163,7 @@ Check service health with:
 
 ```bash
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml ps
-docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml logs --tail=100 server indexer
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml logs --tail=100 server agent indexer
 ```
 
 `docker compose ... ps` shows whether the indexer process is alive. Its

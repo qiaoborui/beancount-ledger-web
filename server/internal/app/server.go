@@ -28,8 +28,6 @@ type Server struct {
 	bqlHistoryRepository bqlHistoryRepository
 	quickUnlocks         quickUnlockRepository
 	passkeys             passkeyRepository
-	agentSessions        agentSessionRepository
-	agentApprovals       agentApprovalRepository
 	agentMemories        agentMemoryRepository
 	importState          importStateRepository
 	indexStore           LedgerIndexPort
@@ -204,9 +202,13 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/agent/turn", s.aiAgentTurn)
-	api.POST("/ai/agent/approval", s.aiAgentApproval)
+	api.POST("/ai/agent/interactions/:interactionID", s.aiAgentInteraction)
 	api.GET("/ai/agent/sessions/:sessionID/timeline", noStore(), s.aiAgentTimeline)
 	api.DELETE("/ai/agent/sessions/:sessionID", s.aiAgentSessionDelete)
+	api.GET("/internal/agent/tools", s.internalAgentTools)
+	api.POST("/internal/agent/tools/:toolName/preview", s.internalAgentToolPreview)
+	api.POST("/internal/agent/tools/:toolName/execute", s.internalAgentToolExecute)
+	api.POST("/internal/agent/model/chat/completions", s.internalAgentModelProxy)
 
 	readOnly60s.GET("/push/subscription", s.pushStatus)
 	api.POST("/push/subscription", s.pushSave)

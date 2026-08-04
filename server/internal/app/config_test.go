@@ -161,6 +161,8 @@ func TestLoadConfigGitHubAlias(t *testing.T) {
 }
 
 func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
+	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
+	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_STORAGE", "filesystem")
 	t.Setenv("LEDGER_READ_MODEL", "files")
 	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
@@ -190,6 +192,8 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 }
 
 func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
+	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
+	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
 	t.Setenv("LEDGER_STORAGE", "github_api")
 	t.Setenv("LEDGER_READ_MODEL", "files")
@@ -214,14 +218,18 @@ func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
 }
 
 func TestValidateSelfHostedConfigRequiresPlatformSecretsNotRuntimeGitHubConfig(t *testing.T) {
+	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
+	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
 	t.Setenv("AUTH_SECRET", "")
 	t.Setenv("APP_PASSWORD", "")
 	cfg := Config{
-		LedgerStorage:   "github_api",
-		DatabaseURL:     "postgres://example",
-		LedgerReadModel: "postgres",
-		ReadModelStrict: true,
+		LedgerStorage:     "github_api",
+		DatabaseURL:       "postgres://example",
+		LedgerReadModel:   "postgres",
+		ReadModelStrict:   true,
+		AgentServiceURL:   "http://agent:8080",
+		AgentServiceToken: "test-agent-token",
 	}
 
 	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {

@@ -14,14 +14,8 @@ import (
 // Tx is a transactional client that is created by calling Client.Tx().
 type Tx struct {
 	config
-	// AgentApproval is the client for interacting with the AgentApproval builders.
-	AgentApproval *AgentApprovalClient
 	// AgentMemory is the client for interacting with the AgentMemory builders.
 	AgentMemory *AgentMemoryClient
-	// AgentSession is the client for interacting with the AgentSession builders.
-	AgentSession *AgentSessionClient
-	// AgentSessionMessage is the client for interacting with the AgentSessionMessage builders.
-	AgentSessionMessage *AgentSessionMessageClient
 	// BQLHistoryRecord is the client for interacting with the BQLHistoryRecord builders.
 	BQLHistoryRecord *BQLHistoryRecordClient
 	// GmailConnection is the client for interacting with the GmailConnection builders.
@@ -183,10 +177,7 @@ func (tx *Tx) Client() *Client {
 }
 
 func (tx *Tx) init() {
-	tx.AgentApproval = NewAgentApprovalClient(tx.config)
 	tx.AgentMemory = NewAgentMemoryClient(tx.config)
-	tx.AgentSession = NewAgentSessionClient(tx.config)
-	tx.AgentSessionMessage = NewAgentSessionMessageClient(tx.config)
 	tx.BQLHistoryRecord = NewBQLHistoryRecordClient(tx.config)
 	tx.GmailConnection = NewGmailConnectionClient(tx.config)
 	tx.GmailOAuthState = NewGmailOAuthStateClient(tx.config)
@@ -211,7 +202,7 @@ func (tx *Tx) init() {
 // of them in order to commit or rollback the transaction.
 //
 // If a closed transaction is embedded in one of the generated entities, and the entity
-// applies a query, for example: AgentApproval.QueryXXX(), the query will be executed
+// applies a query, for example: AgentMemory.QueryXXX(), the query will be executed
 // through the driver which created this transaction.
 //
 // Note that txDriver is not goroutine safe.

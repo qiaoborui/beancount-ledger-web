@@ -29,8 +29,6 @@ type applicationDependencies struct {
 	pushSubscriptions    pushSubscriptionRepository
 	notifications        notificationRepository
 	passkeys             passkeyRepository
-	agentSessions        agentSessionRepository
-	agentApprovals       agentApprovalRepository
 	agentMemories        agentMemoryRepository
 	indexStore           LedgerIndexPort
 	indexStoreErr        error
@@ -62,8 +60,6 @@ func NewApplication(cfg Config) (*Application, error) {
 		gmailRepository:      dependencies.gmailRepository,
 		importState:          dependencies.importState,
 		passkeys:             dependencies.passkeys,
-		agentSessions:        dependencies.agentSessions,
-		agentApprovals:       dependencies.agentApprovals,
 		agentMemories:        dependencies.agentMemories,
 		indexStore:           dependencies.indexStore,
 		indexStoreErr:        dependencies.indexStoreErr,
@@ -115,8 +111,6 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		dependencies.pushSubscriptions = newEntPushSubscriptionRepository(storageAdapters.persistence.Client)
 		dependencies.notifications = newEntNotificationRepository(storageAdapters.persistence.Client)
 		dependencies.passkeys = newEntPasskeyRepository(storageAdapters.persistence.Client)
-		dependencies.agentSessions = newEntAgentSessionRepository(storageAdapters.persistence.Client)
-		dependencies.agentApprovals = newEntAgentApprovalRepository(storageAdapters.persistence.Client)
 		dependencies.agentMemories = newEntAgentMemoryRepository(storageAdapters.persistence.Client)
 		if err := backfillRelationalRuntime(context.Background(), storageAdapters.persistence, dependencies.runtimeStore, cfg, dependencies.bqlHistoryRepository, dependencies.pushSubscriptions, dependencies.notifications); err != nil {
 			return fail(err)
