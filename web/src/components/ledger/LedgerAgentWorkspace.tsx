@@ -122,6 +122,7 @@ export function LedgerAgentWorkspace({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const requestRef = useRef(0);
   const timelineVersionRef = useRef(0);
+  const streamingMessageIDRef = useRef("");
   const sessionTitleHydrationRef = useRef(new Set<string>());
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const desktopScrollRef = useRef<HTMLDivElement | null>(null);
@@ -163,6 +164,7 @@ export function LedgerAgentWorkspace({
     setMobileSessionListOpen(false);
     setInput("");
     setStreamingText("");
+    streamingMessageIDRef.current = "";
     setStatus("就绪");
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
@@ -204,6 +206,7 @@ export function LedgerAgentWorkspace({
     setActiveSessionId(sessionId);
     setInput("");
     setStreamingText("");
+    streamingMessageIDRef.current = "";
     setStatus("就绪");
   }
 
@@ -289,7 +292,7 @@ export function LedgerAgentWorkspace({
         if (!before) {
           const title = timelineTitle(page.items) || session.title;
           if (!page.items.length) return title === session.title ? session : { ...session, title };
-          if (timelineVersion === timelineVersionRef.current) return { ...session, title, timeline: page.items };
+          if (timelineVersion === timelineVersionRef.current) return { ...session, title, timeline: reconcileAgentTimeline(page.items, session.timeline) };
           const known = new Set(page.items.map((item) => item.id));
           return { ...session, title, timeline: [...page.items, ...session.timeline.filter((item) => !known.has(item.id))] };
         }
@@ -317,6 +320,7 @@ export function LedgerAgentWorkspace({
     setBusy(true);
     setInput("");
     setStreamingText("");
+    streamingMessageIDRef.current = nextID();
     setStatus("正在连接 Agent");
     updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "user", content: prompt }]);
     try {
@@ -329,12 +333,15 @@ export function LedgerAgentWorkspace({
       finishTurn(final);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Agent 请求失败";
-      updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: `处理失败：${message}` }]);
+      const messageID = streamingMessageIDRef.current || nextID();
+      setStreamingText("");
+      updateTimeline((current) => [...current, { kind: "message", id: messageID, role: "assistant", content: `处理失败：${message}` }]);
       setStatus("处理失败");
       showToast("error", message);
     } finally {
       setBusy(false);
       setStreamingText("");
+      streamingMessageIDRef.current = "";
     }
   }
 
@@ -361,8 +368,11 @@ export function LedgerAgentWorkspace({
             ? "已取消"
             : "就绪"
     );
-    if (final.message.trim()) {
-      updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "assistant", content: final.message.trim() }]);
+    const message = final.message.trim();
+    if (message) {
+      const messageID = streamingMessageIDRef.current || nextID();
+      setStreamingText("");
+      updateTimeline((current) => [...current, { kind: "message", id: messageID, role: "assistant", content: message }]);
     }
     void loadTimelinePage(final.sessionId);
     if (final.refreshLedger) {
@@ -452,7 +462,7 @@ export function LedgerAgentWorkspace({
             if (item.kind === "artifact") return <ArtifactCard key={item.id} artifact={item.artifact} onApplyBQL={onApplyBQL} onNavigate={onNavigate} />;
             return <ApprovalCard key={item.id} approval={item.approval} resolved={item.resolved} busy={resolvingInteractionID === item.approval.id} onResolve={resolveApproval} />;
           })}
-          {busy && streamingText && <MessageBubble item={{ kind: "message", id: "streaming", role: "assistant", content: streamingText }} />}
+          {busy && streamingText && <MessageBubble key={streamingMessageIDRef.current || "streaming"} item={{ kind: "message", id: streamingMessageIDRef.current || "streaming", role: "assistant", content: streamingText }} />}
           {busy && !streamingText && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />{status}</div>}
         </div>
       </div>
@@ -788,6 +798,20 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
 export function timelineNeedsServerRefresh(timeline: TimelineItem[]) {
   const last = timeline.at(-1);
   return Boolean(last && !(last.kind === "message" && last.role === "assistant"));
+}
+
+export function reconcileAgentTimeline(serverItems: TimelineItem[], currentItems: TimelineItem[]) {
+  const currentMessages = currentItems.filter((item): item is MessageItem => item.kind === "message");
+  const usedMessageIDs = new Set<string>();
+  return serverItems.map((item) => {
+    if (item.kind !== "message") return item;
+    const rendered = currentMessages.find((candidate) =>
+      !usedMessageIDs.has(candidate.id) && candidate.role === item.role && candidate.content === item.content
+    );
+    if (!rendered) return item;
+    usedMessageIDs.add(rendered.id);
+    return { ...item, id: rendered.id };
+  });
 }
 
 export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {

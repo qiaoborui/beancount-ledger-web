@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { normalizeAgentTimelinePage, normalizeBQLChartValue, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
@@ -80,6 +80,24 @@ describe("LedgerAgentWorkspace", () => {
 
   it("normalizes a null timeline response instead of crashing the workspace", () => {
     expect(normalizeAgentTimelinePage({ items: null, nextBefore: null })).toEqual({ items: [], nextBefore: null });
+  });
+
+  it("keeps rendered message identities stable when the durable timeline arrives", () => {
+    const current = restoreTimeline([
+      { kind: "message", id: "local-user", role: "user", content: "分析上周支出" },
+      { kind: "tool", id: "tool-1", tool: { id: "tool-1", name: "run_bql", title: "运行 BQL", status: "running" } },
+      { kind: "message", id: "local-assistant", role: "assistant", content: "已完成分析" },
+    ]);
+    const server = restoreTimeline([
+      { kind: "message", id: "server-user", role: "user", content: "分析上周支出" },
+      { kind: "tool", id: "tool-1", tool: { id: "tool-1", name: "run_bql", title: "运行 BQL", status: "completed", output: { rowCount: 7 } } },
+      { kind: "message", id: "server-assistant", role: "assistant", content: "已完成分析" },
+    ]);
+
+    const reconciled = reconcileAgentTimeline(server, current);
+
+    expect(reconciled.map((item) => item.id)).toEqual(["local-user", "tool-1", "local-assistant"]);
+    expect(reconciled[1]).toMatchObject({ kind: "tool", tool: { status: "completed", output: { rowCount: 7 } } });
   });
 
   it("restores independently switchable Agent sessions", () => {
