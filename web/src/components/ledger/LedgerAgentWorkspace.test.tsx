@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { activeTurnTools, normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
 
@@ -44,6 +44,21 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("对账检查");
     expect(source).toContain("账户维护");
     expect(source).toContain("导入整理");
+  });
+
+  it("keeps live status, tool progress, and streaming text in one main-flow work region", () => {
+    const timeline = restoreTimeline([
+      { kind: "tool", id: "old-tool", tool: { id: "old-tool", name: "old", title: "旧工具", status: "completed" } },
+      { kind: "message", id: "user", role: "user", content: "分析本月支出" },
+      { kind: "tool", id: "current-1", tool: { id: "current-1", name: "get_accounts", title: "读取账户", status: "completed" } },
+      { kind: "tool", id: "current-2", tool: { id: "current-2", name: "run_bql", title: "运行 BQL", status: "running" } },
+    ]);
+
+    expect(activeTurnTools(timeline).map((item) => item.id)).toEqual(["current-1", "current-2"]);
+    expect(source).toContain("AgentWorkStatus");
+    expect(source).toContain('aria-live="polite"');
+    expect(source).toContain("Agent 正在工作");
+    expect(source).not.toContain("{busy && streamingText && <MessageBubble");
   });
 
   it("converts BQL money values from minor units before charting", () => {
