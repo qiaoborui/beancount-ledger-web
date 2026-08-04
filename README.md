@@ -16,15 +16,15 @@ for browsing, reviewing, and safely updating it.
 
 ## Self-hosted Compose
 
-The complete self-hosted stack includes Postgres, API, indexer, frontend, and
-Caddy. Your private GitHub ledger remains the source of truth: the API writes
+The complete self-hosted stack includes Postgres, API, a private Bub Agent,
+indexer, frontend, and Caddy. Your private GitHub ledger remains the source of truth: the API writes
 through the GitHub API, while only the indexer has a local checkout for
 publishing the Postgres read model.
 
 ```bash
 cp .env.selfhost.example .env.selfhost
 # Set the checkout path, UID/GID, Postgres password, AUTH_SECRET,
-# and the internal indexer identity token.
+# the internal indexer identity token, and AGENT_SERVICE_TOKEN.
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
 
@@ -39,6 +39,7 @@ restores, image updates, and the full configuration reference.
 
 ```bash
 cd server && go test ./... && go build ./cmd/...
+cd agent && uv sync --frozen --python 3.12 && uv run pytest
 cd web && pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
 ```
 
@@ -49,6 +50,7 @@ ledger, secrets, imports, and runtime data outside this repository.
 
 - [Self-hosted Compose](docs/self-hosted-compose.md)
 - [Hosted Google Cloud deployment](docs/google-cloud-run.md)
+- [Bub Agent runtime](docs/agent-runtime.md)
 - [Local-first PWA](docs/local-first-pwa.md)
 - [Ledger layout](docs/ledger-layout.md)
 - [Privacy](docs/privacy.md)

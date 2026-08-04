@@ -21,7 +21,9 @@ env:
   GCP_REGION: ${{ vars.GCP_REGION || 'asia-southeast1' }}
   ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'beancount-ledger-web' }}
   CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE || 'beancount-ledger-web' }}
+  AGENT_SERVICE: ${{ vars.GCP_AGENT_SERVICE || 'beancount-ledger-agent' }}
   ZIP_WORKER_SERVICE: ${{ vars.GCP_ZIP_WORKER_SERVICE || 'beancount-ledger-zip-worker' }}
+  BUB_MODEL: ${{ vars.BUB_MODEL || 'openai:ledger-agent' }}
   DEEPSEEK_SECRET_NAME: ${{ vars.GCP_DEEPSEEK_SECRET }}
 
 jobs:
@@ -119,6 +121,7 @@ jobs:
         run: |
           base="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
           echo "name=${base}/${CLOUD_RUN_SERVICE}" >> "$GITHUB_OUTPUT"
+          echo "agent_name=${base}/${AGENT_SERVICE}" >> "$GITHUB_OUTPUT"
           echo "zip_worker_name=${base}/${ZIP_WORKER_SERVICE}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push standalone image
@@ -151,6 +154,21 @@ jobs:
             ${{ steps.image.outputs.zip_worker_name }}:latest
           cache-from: type=gha,scope=cloud-run-zip-worker
           cache-to: type=gha,scope=cloud-run-zip-worker,mode=max
+
+      - name: Build and push Bub Agent image
+        id: build-agent-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: agent
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.agent_name }}:${{ github.sha }}
+            ${{ steps.image.outputs.agent_name }}:latest
+          cache-from: type=gha,scope=cloud-run-agent
+          cache-to: type=gha,scope=cloud-run-agent,mode=max
 
       - name: Deploy private ZIP worker
         id: deploy-zip-worker
@@ -209,6 +227,76 @@ jobs:
           echo "url=${worker_url}" >> "$GITHUB_OUTPUT"
           echo "ZIP Worker: ${worker_url}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Deploy private Bub Agent
+        id: deploy-agent
+        env:
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+        run: |
+          for name in DATABASE_URL AGENT_SERVICE_TOKEN; do
+            if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
+              echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
+              exit 1
+            fi
+          done
+          if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
+            echo "::error::PUBLIC_ORIGIN must use HTTPS"
+            exit 1
+          fi
+
+          agent_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
+            | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN"' \
+            | paste -sd, -)"
+          agent_image="${{ steps.image.outputs.agent_name }}@${{ steps.build-agent-image.outputs.digest }}"
+          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model"
+          gcloud run deploy "${AGENT_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${agent_image}" \
+            --service-account="${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --execution-environment=gen2 \
+            --no-allow-unauthenticated \
+            --ingress=all \
+            --port=8080 \
+            --cpu=1 \
+            --memory=1Gi \
+            --cpu-throttling \
+            --concurrency=8 \
+            --min-instances=0 \
+            --max-instances=1 \
+            --timeout=900s \
+            --set-env-vars="${agent_env}" \
+            --set-secrets="${agent_secret_mappings}" \
+            --quiet
+
+          policy_file="$(mktemp)"
+          jq -n \
+            --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            '{bindings: [{role: "roles/run.invoker", members: [$member]}]}' \
+            > "${policy_file}"
+          gcloud run services set-iam-policy "${AGENT_SERVICE}" "${policy_file}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --quiet
+          rm -f "${policy_file}"
+
+          agent_url="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          if [[ "${agent_url}" != https://* ]]; then
+            echo "::error::Bub Agent URL was not published"
+            exit 1
+          fi
+          ready="$(gcloud run services describe "${AGENT_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.conditions[0].status)')"
+          if [[ "${ready}" != "True" ]]; then
+            echo "::error::Bub Agent service is not ready"
+            exit 1
+          fi
+          echo "url=${agent_url}" >> "$GITHUB_OUTPUT"
+          echo "Bub Agent: ${agent_url}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy Cloud Run service
         id: deploy-candidate
         env:
@@ -222,13 +310,19 @@ jobs:
           CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
           DEPLOYED_WORKER_URL: ${{ steps.deploy-zip-worker.outputs.url }}
+          DEPLOYED_AGENT_URL: ${{ steps.deploy-agent.outputs.url }}
         run: |
           ZIP_WORKER_URL="${DEPLOYED_WORKER_URL}"
+          AGENT_SERVICE_URL="${DEPLOYED_AGENT_URL}"
           if [[ -z "${ZIP_WORKER_URL}" ]]; then
             ZIP_WORKER_URL="$(gcloud run services describe "${ZIP_WORKER_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
           fi
           if [[ "${ZIP_WORKER_URL}" != https://* ]]; then
             echo "::error::ZIP worker URL was not published; run a manual deployment to create it"
+            exit 1
+          fi
+          if [[ "${AGENT_SERVICE_URL}" != https://* ]]; then
+            echo "::error::Bub Agent URL was not published"
             exit 1
           fi
 
@@ -241,6 +335,7 @@ jobs:
             WEBAUTHN_RP_ID
             CLOUD_RUN_SECRET_MAPPINGS
             ZIP_WORKER_URL
+            AGENT_SERVICE_URL
           )
           for name in "${required_values[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -249,7 +344,7 @@ jobs:
             fi
           done
 
-          for name in AUTH_SECRET DATABASE_URL; do
+          for name in AUTH_SECRET DATABASE_URL AGENT_SERVICE_TOKEN; do
             if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
               echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
               exit 1
@@ -261,7 +356,7 @@ jobs:
             exit 1
           fi
 
-          for name in ZIP_WORKER_URL ZIP_WORKER_AUDIENCE; do
+          for name in ZIP_WORKER_URL ZIP_WORKER_AUDIENCE AGENT_SERVICE_URL AGENT_SERVICE_AUDIENCE; do
             if [[ "|${CLOUD_RUN_EXTRA_ENV_VARS}|" == *"|${name}="* ]]; then
               echo "::error::${name} is managed by the deployment workflow"
               exit 1
@@ -294,7 +389,7 @@ jobs:
             | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY"' \
             | paste -sd, -)"
           candidate_secret_mappings="${platform_secret_mappings}"
-          env_vars="^|^PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}"
+          env_vars="^|^PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}|AGENT_SERVICE_URL=${AGENT_SERVICE_URL}|AGENT_SERVICE_AUDIENCE=${AGENT_SERVICE_URL}"
           if [[ "${legacy_migration_required}" == "true" ]]; then
             for name in LEDGER_GITHUB_OWNER LEDGER_GITHUB_REPO; do
               if [[ -z "${!name}" ]]; then

@@ -1,12 +1,14 @@
 # Google Cloud Run deployment
 
-The hosted topology runs one standalone container on Cloud Run. The Go process
+The hosted topology runs the standalone web/API container plus a private,
+single-instance Bub Agent service on Cloud Run. The Go process
 serves the Vite build and `/api/*` from the same origin, preserving the existing
 session cookies, sensitive-unlock cookie, passkeys, PWA behavior, and long AI
 SSE requests.
 
 ```text
 Browser -> Cloud Run standalone image -> Postgres / GitHub API / Gmail / AI
+                                   \-> private Bub Agent -> Postgres tapes
                                    \-> private ZIP Worker (8 vCPU, scale to zero)
 Cloud Scheduler -> Cloud Run Gmail drain and Watch renewal endpoints
 Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
@@ -39,6 +41,7 @@ export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(
 export REGION=asia-southeast1
 export ARTIFACT_REPOSITORY=beancount-ledger-web
 export CLOUD_RUN_SERVICE=beancount-ledger-web
+export AGENT_SERVICE=beancount-ledger-agent
 export ZIP_WORKER_SERVICE=beancount-ledger-zip-worker
 export RUNTIME_SERVICE_ACCOUNT=ledger-web-runtime
 export ZIP_WORKER_SERVICE_ACCOUNT=ledger-zip-worker
@@ -160,6 +163,7 @@ Permanent platform secrets:
 
 - `AUTH_SECRET`
 - `DATABASE_URL`
+- `AGENT_SERVICE_TOKEN`
 
 `AUTH_SECRET` must remain stable because it encrypts database-held runtime
 credentials. New deployments configure the administrator password, GitHub
@@ -201,7 +205,7 @@ The GitHub Actions secret `CLOUD_RUN_SECRET_MAPPINGS` maps environment variables
 to Secret Manager versions:
 
 ```text
-AUTH_SECRET=ledger-auth-secret:latest,DATABASE_URL=ledger-database-url:latest
+AUTH_SECRET=ledger-auth-secret:latest,DATABASE_URL=ledger-database-url:latest,AGENT_SERVICE_TOKEN=ledger-agent-service-token:latest
 ```
 
 During the existing-production migration, temporarily keep the old
@@ -223,7 +227,9 @@ level so the workflow can evaluate its configuration gate:
 | `GCP_REGION` | Region such as `asia-southeast1` |
 | `GCP_ARTIFACT_REPOSITORY` | Artifact Registry repository |
 | `GCP_CLOUD_RUN_SERVICE` | Cloud Run service name |
+| `GCP_AGENT_SERVICE` | Private Bub Agent service name, normally `beancount-ledger-agent` |
 | `GCP_ZIP_WORKER_SERVICE` | Private ZIP worker service name, normally `beancount-ledger-zip-worker` |
+| `BUB_MODEL` | Bub model identifier; defaults to `openai:ledger-agent` and uses the Go model proxy |
 | `GCP_DEEPSEEK_SECRET` | Optional Secret Manager secret containing the DeepSeek API key |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
@@ -252,13 +258,19 @@ LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com
 ## First deployment
 
 Merge the deployment change, configure the repository values, then run `Deploy
-Google Cloud` from `main`. The workflow first deploys an IAM-protected ZIP
+Google Cloud` from `main`. The workflow deploys an IAM-protected ZIP
 Worker with 8 vCPU, 4 GiB memory, concurrency one, zero minimum instances, one
 maximum instance, and a 15-minute request timeout. It sets the main runtime
 service account as the Worker's only explicit `roles/run.invoker` member and
 injects the worker URL and audience into the main service. The worker keeps
 archives in memory, accepts at most 10 MB, and returns only the discovered
 password.
+
+The workflow also deploys the private Bub Agent with one maximum instance and
+the same runtime service account as its only invoker. The Agent receives only
+Postgres, the public Go API origin, the internal service token, and model-proxy
+configuration. It has no ledger or GitHub credential. Its URL and OIDC audience
+are injected into the main service.
 
 The main service keeps request-based 1 vCPU, zero minimum instances, two maximum
 instances, concurrency eight, a 15-minute request timeout, and 512 MiB memory.

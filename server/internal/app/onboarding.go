@@ -95,6 +95,36 @@ var onboardingTemplateResponse = gin.H{
 	"expenses": onboardingExpenseTemplates,
 }
 
+// LedgerOnboardingAgentRequest is forwarded to the isolated Bub service. The
+// browser owns the draft while Bub owns the conversational tape.
+type LedgerOnboardingAgentRequest struct {
+	Start    bool                     `json:"start,omitempty"`
+	Message  string                   `json:"message,omitempty"`
+	Messages []AgentMessage           `json:"messages,omitempty"`
+	Draft    *LedgerOnboardingRequest `json:"draft,omitempty"`
+	Ready    bool                     `json:"ready,omitempty"`
+}
+
+func (r LedgerOnboardingAgentRequest) Validate() error {
+	message := strings.TrimSpace(r.Message)
+	if !r.Start && message == "" {
+		return errors.New("message is required unless start is true")
+	}
+	if len(message) > 4000 || len(r.Messages) > 32 {
+		return errors.New("onboarding conversation is too long")
+	}
+	for _, message := range r.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role != "user" && role != "assistant" {
+			return errors.New("onboarding messages must be user or assistant")
+		}
+		if len(message.Content) > 4000 {
+			return errors.New("onboarding message is too long")
+		}
+	}
+	return nil
+}
+
 func (s *Server) onboardingStatus(c *gin.Context) {
 	if !requireAuth(c) {
 		return
@@ -190,13 +220,11 @@ func (s *Server) onboardingAgent(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	prepareSSE(c)
-	_, err := s.runOnboardingAgentWithEvents(c.Request.Context(), input, func(event string, payload any) error {
-		return writeSSEEvent(c, event, payload)
-	})
+	err := s.proxyAgentSSE(c, "/v1/onboarding/turn", input)
 	if err != nil {
-		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
-		return
+		if !c.Writer.Written() {
+			errorJSON(c, http.StatusBadGateway, err)
+		}
 	}
 }
 
