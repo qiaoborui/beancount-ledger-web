@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { pageFromPathname } from "./ledger/routes";
+
+const source = readFileSync(new URL("./LedgerApp.tsx", import.meta.url), "utf8");
 
 describe("LedgerApp routes", () => {
   it("uses Agent for the root path and its dedicated route", () => {
@@ -13,5 +16,10 @@ describe("LedgerApp routes", () => {
 
   it("keeps the financial overview available at /home", () => {
     expect(pageFromPathname("/home")).toBe("home");
+  });
+
+  it("keeps Agent route loading visible and does not replay route requests in the dock", () => {
+    expect(source).toContain('fallback={props.presentation === "page" ? <AgentPageLoading /> : null}');
+    expect(source).toContain('request={null}');
   });
 });
