@@ -257,26 +257,15 @@ func TestStarterLedgerFilesPassBeanCheckWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Skip("bean-check is not installed in this Go test environment")
 	}
+	t.Setenv("BEAN_CHECK_BIN", binary)
 	input := starterOnboardingRequest()
 	input.Normalize()
 	files, err := starterLedgerFiles(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
-	for path, content := range files {
-		fullPath := filepath.Join(root, path)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	command := exec.Command(binary, "main.bean")
-	command.Dir = root
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("bean-check failed: %v\n%s", err, output)
+	if err := validateStarterLedgerFiles(context.Background(), files); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -334,14 +323,25 @@ func TestOnboardingRoutesInitializeAnEmptyGitHubLedger(t *testing.T) {
 	defer fake.server.Close()
 	cfg := githubAPITestConfig(t, fake)
 	router := newRouter(cfg, &Server{cfg: cfg, writer: NewLedgerWriter(cfg, nil), limiter: NewRateLimiter()})
-	cookies := loginCookies(t, router)
+	cookies := []*http.Cookie{}
+	for _, cookie := range loginCookies(t, router) {
+		if cookie.Name == sessionCookieName {
+			cookies = append(cookies, cookie)
+		}
+	}
 
 	status := requestWithCookies(router, http.MethodGet, "/api/onboarding", "", cookies)
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"uninitialized"`) || !strings.Contains(status.Body.String(), `"salary"`) {
 		t.Fatalf("onboarding status=%d body=%s", status.Code, status.Body.String())
 	}
 
-	created := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","account":"Assets:Cash:Wallet","currency":"CNY","openingBalance":"500"}],"liabilities":[],"incomeCategories":[{"templateKey":"salary","account":"Income:Work:Salary"}],"expenseCategories":[{"templateKey":"coffee","account":"Expenses:Food:Coffee"}]}`, cookies)
+	initializeBody := `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","account":"Assets:Cash:Wallet","currency":"CNY","openingBalance":"500"}],"liabilities":[],"incomeCategories":[{"templateKey":"salary","account":"Income:Work:Salary"}],"expenseCategories":[{"templateKey":"coffee","account":"Expenses:Food:Coffee"}]}`
+	unauthenticated := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", initializeBody, nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated onboarding initialize=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+
+	created := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", initializeBody, cookies)
 	if created.Code != http.StatusAccepted || !strings.Contains(created.Body.String(), `"gitSHA":"new-commit-1"`) {
 		t.Fatalf("onboarding initialize=%d body=%s", created.Code, created.Body.String())
 	}
@@ -362,9 +362,56 @@ func TestOnboardingValidationRejectsUnsafeSemanticInput(t *testing.T) {
 		{Title: "ledger", Currency: "CNY", StartDate: "2026-08-03", FundingSpaces: []LedgerOnboardingFundingSpace{{Kind: "cash", Name: "钱包", OpeningBalance: "-1"}}},
 		{Title: "ledger", Currency: "CNY", StartDate: "2026-08-03", FundingSpaces: []LedgerOnboardingFundingSpace{{Kind: "cash", Name: "钱包"}}, ExpenseCategories: []LedgerOnboardingCategory{{TemplateKey: "unknown"}}},
 		{Title: "ledger", Currency: "CNY", StartDate: "2026-08-03", FundingSpaces: []LedgerOnboardingFundingSpace{{Kind: "cash", Name: "钱包"}}, IncomeCategories: []LedgerOnboardingCategory{{TemplateKey: "salary", CustomName: "工资"}}},
+		{Title: "ledger", Currency: "CNY", StartDate: "2026-08-03", FundingSpaces: []LedgerOnboardingFundingSpace{{Kind: "cash", Name: "钱包", Account: "Assets:Cash:Wallet"}, {Kind: "cash", Name: "备用金", Account: "Assets:Cash:Wallet"}}},
 	} {
 		if err := input.Validate(); err == nil {
 			t.Fatalf("expected invalid onboarding input to fail: %#v", input)
 		}
+	}
+	oversized := starterOnboardingRequest()
+	oversized.FundingSpaces = make([]LedgerOnboardingFundingSpace, maxOnboardingFundingSpaces+1)
+	if err := oversized.Validate(); err == nil || !strings.Contains(err.Error(), "最多") {
+		t.Fatalf("expected oversized onboarding input to fail with a limit error: %v", err)
+	}
+}
+
+func TestOnboardingInitializationDoesNotOverwritePartialLedger(t *testing.T) {
+	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
+	t.Setenv("APP_PASSWORD", "secret")
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"README.md": "private ledger\n", "accounts.bean": "sentinel\n"})
+	defer fake.server.Close()
+	cfg := githubAPITestConfig(t, fake)
+	router := newRouter(cfg, &Server{cfg: cfg, writer: NewLedgerWriter(cfg, nil), limiter: NewRateLimiter()})
+	cookies := loginCookies(t, router)
+
+	response := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","account":"Assets:Cash:Wallet"}],"liabilities":[],"incomeCategories":[],"expenseCategories":[]}`, cookies)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "不会覆盖") {
+		t.Fatalf("partial ledger initialize=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := fake.files["accounts.bean"]; got != "sentinel\n" {
+		t.Fatalf("partial ledger file was overwritten: %q", got)
+	}
+}
+
+func TestOnboardingInitializationRunsBeanCheckBeforeCommit(t *testing.T) {
+	t.Setenv("AUTH_SECRET", "test-auth-secret-with-enough-entropy")
+	t.Setenv("APP_PASSWORD", "secret")
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	if err := os.WriteFile(beanCheck, []byte("#!/bin/sh\necho invalid generated ledger >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"README.md": "private ledger\n"})
+	defer fake.server.Close()
+	cfg := githubAPITestConfig(t, fake)
+	router := newRouter(cfg, &Server{cfg: cfg, writer: NewLedgerWriter(cfg, nil), limiter: NewRateLimiter()})
+	cookies := loginCookies(t, router)
+
+	response := requestWithCookies(router, http.MethodPost, "/api/onboarding/initialize", `{"title":"我的生活账本","currency":"CNY","startDate":"2026-08-03","fundingSpaces":[{"kind":"cash","name":"钱包","account":"Assets:Cash:Wallet"}],"liabilities":[],"incomeCategories":[],"expenseCategories":[]}`, cookies)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "bean-check") {
+		t.Fatalf("bean-check rejection=%d body=%s", response.Code, response.Body.String())
+	}
+	if fake.updatedRef != "" || fake.files["main.bean"] != "" {
+		t.Fatalf("invalid ledger was committed: ref=%q main=%q", fake.updatedRef, fake.files["main.bean"])
 	}
 }

@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +14,15 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	onboardingBeanCheckTimeout     = 15 * time.Second
+	maxOnboardingFundingSpaces     = 100
+	maxOnboardingLiabilities       = 100
+	maxOnboardingIncomeCategories  = 200
+	maxOnboardingExpenseCategories = 200
+	maxOnboardingCollectionItems   = 500
 )
 
 type LedgerOnboardingFundingSpace struct {
@@ -111,7 +122,11 @@ func (s *Server) onboardingStatus(c *gin.Context) {
 }
 
 func (s *Server) initializeLedger(c *gin.Context) {
-	if !requireSensitive(c) {
+	// A repository without main.bean has no indexed financial data to expose.
+	// Initialization writes only the validated draft supplied by this
+	// authenticated onboarding session, so requiring the separate sensitive
+	// unlock token would make first-run completion impossible after login.
+	if !requireAuth(c) {
 		return
 	}
 	if !githubAPIEnabled(s.cfg) {
@@ -133,10 +148,15 @@ func (s *Server) initializeLedger(c *gin.Context) {
 		return
 	}
 	gitSHA, err := s.writer.RunTransactionWithSourceResult("onboarding-initialize", func(tx *LedgerWriteTransaction) error {
-		if exists, err := tx.Exists("main.bean"); err != nil {
+		for _, path := range sortedStringKeys(files) {
+			if exists, err := tx.Exists(path); err != nil {
+				return err
+			} else if exists {
+				return fmt.Errorf("账本仓库已包含 %s，不会覆盖已有文件", path)
+			}
+		}
+		if err := validateStarterLedgerFiles(c.Request.Context(), files); err != nil {
 			return err
-		} else if exists {
-			return errors.New("账本已初始化，不会覆盖现有 main.bean")
 		}
 		for _, path := range sortedStringKeys(files) {
 			if err := tx.WriteFile(filepath.ToSlash(path), []byte(files[path]), 0o644); err != nil {
@@ -212,6 +232,21 @@ func (r *LedgerOnboardingRequest) Normalize() {
 
 func (r LedgerOnboardingRequest) Validate() error {
 	r.Normalize()
+	if len(r.FundingSpaces) > maxOnboardingFundingSpaces {
+		return fmt.Errorf("资金账户最多 %d 个", maxOnboardingFundingSpaces)
+	}
+	if len(r.Liabilities) > maxOnboardingLiabilities {
+		return fmt.Errorf("负债账户最多 %d 个", maxOnboardingLiabilities)
+	}
+	if len(r.IncomeCategories) > maxOnboardingIncomeCategories {
+		return fmt.Errorf("收入分类最多 %d 个", maxOnboardingIncomeCategories)
+	}
+	if len(r.ExpenseCategories) > maxOnboardingExpenseCategories {
+		return fmt.Errorf("支出分类最多 %d 个", maxOnboardingExpenseCategories)
+	}
+	if len(r.FundingSpaces)+len(r.Liabilities)+len(r.IncomeCategories)+len(r.ExpenseCategories) > maxOnboardingCollectionItems {
+		return fmt.Errorf("账本结构最多包含 %d 项", maxOnboardingCollectionItems)
+	}
 	if r.Title == "" || len(r.Title) > 120 {
 		return errors.New("账本名称需为 1–120 个字符")
 	}
@@ -266,6 +301,17 @@ func (r LedgerOnboardingRequest) Validate() error {
 	}
 	if err := validateOnboardingCategories("expenseCategories", r.ExpenseCategories, onboardingExpenseTemplates, "Expenses"); err != nil {
 		return err
+	}
+	accounts, err := starterLedgerAccounts(r)
+	if err != nil {
+		return err
+	}
+	seenAccounts := map[string]bool{}
+	for _, account := range accounts {
+		if seenAccounts[account.Account] {
+			return fmt.Errorf("账户路径重复：%s", account.Account)
+		}
+		seenAccounts[account.Account] = true
 	}
 	return nil
 }
@@ -381,6 +427,51 @@ func starterLedgerFiles(input LedgerOnboardingRequest) (map[string]string, error
 		transactions = fmt.Sprintf("%s * \"期初余额\"\n%s\n", input.StartDate, strings.Join(opening, "\n"))
 	}
 	return map[string]string{"main.bean": fmt.Sprintf("option \"title\" %q\noption \"operating_currency\" %q\noption \"booking_method\" \"FIFO\"\n\ninclude \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"prices.bean\"\ninclude \"transactions/%s.bean\"\n", input.Title, currency, year), "commodities.bean": fmt.Sprintf("%s commodity %s\n", input.StartDate, currency), "accounts.bean": strings.Join(accountLines, "\n") + "\n", "prices.bean": "", "transactions/" + year + ".bean": transactions}, nil
+}
+
+func validateStarterLedgerFiles(ctx context.Context, files map[string]string) error {
+	// The complete self-hosted server image opts into pre-publish bean-check by
+	// setting BEAN_CHECK_BIN. Hosted API images that do not bundle Beancount keep
+	// relying on the strict semantic validator and the separate indexer.
+	binary := strings.TrimSpace(os.Getenv("BEAN_CHECK_BIN"))
+	if binary == "" {
+		return nil
+	}
+	// Keep the stateless server free of ledger files: remove include directives,
+	// combine the generated files in memory, and stream the result to bean-check.
+	var source strings.Builder
+	for _, line := range strings.Split(files["main.bean"], "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "include ") {
+			continue
+		}
+		source.WriteString(line)
+		source.WriteByte('\n')
+	}
+	for _, path := range sortedStringKeys(files) {
+		if path == "main.bean" {
+			continue
+		}
+		source.WriteString(files[path])
+		if !strings.HasSuffix(files[path], "\n") {
+			source.WriteByte('\n')
+		}
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, onboardingBeanCheckTimeout)
+	defer cancel()
+	command := exec.CommandContext(commandCtx, binary, "/dev/stdin")
+	command.Stdin = strings.NewReader(source.String())
+	output, err := command.CombinedOutput()
+	if err != nil {
+		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("bean-check 初始化账本超时（%s）", onboardingBeanCheckTimeout)
+		}
+		message := strings.TrimSpace(string(output))
+		if message != "" {
+			return fmt.Errorf("bean-check 初始化账本失败：%w: %s", err, message)
+		}
+		return fmt.Errorf("bean-check 初始化账本失败：%w", err)
+	}
+	return nil
 }
 
 type starterLedgerAccount struct {

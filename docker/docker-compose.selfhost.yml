@@ -69,6 +69,7 @@ services:
       LEDGER_GITHUB_TOKEN: ${LEDGER_GITHUB_TOKEN:?set LEDGER_GITHUB_TOKEN in .env.selfhost}
       LEDGER_GITHUB_API_URL: "${LEDGER_GITHUB_API_URL:-}"
       LEDGER_INDEX_NOTIFY_ENABLED: "true"
+      BEAN_CHECK_BIN: bean-check
     expose:
       - "3000"
     healthcheck:
