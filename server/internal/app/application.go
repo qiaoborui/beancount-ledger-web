@@ -19,7 +19,9 @@ type Application struct {
 }
 
 type applicationDependencies struct {
+	cfg                  Config
 	runtimeStore         RuntimeStore
+	runtimeConfig        *RuntimeConfigStore
 	bqlHistoryRepository bqlHistoryRepository
 	quickUnlocks         quickUnlockRepository
 	gmailRepository      gmailStateRepository
@@ -52,8 +54,9 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, err
 	}
 	server := &Server{
-		cfg:                  cfg,
+		cfg:                  dependencies.cfg,
 		runtimeStore:         dependencies.runtimeStore,
+		runtimeConfig:        dependencies.runtimeConfig,
 		bqlHistoryRepository: dependencies.bqlHistoryRepository,
 		quickUnlocks:         dependencies.quickUnlocks,
 		gmailRepository:      dependencies.gmailRepository,
@@ -76,7 +79,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		txService:            dependencies.txService,
 		limiter:              dependencies.limiter,
 	}
-	return newApplication(newRouter(cfg, server), dependencies.closers), nil
+	return newApplication(newRouter(dependencies.cfg, server), dependencies.closers), nil
 }
 
 func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) {
@@ -84,21 +87,23 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 	fail := func(err error) (*applicationDependencies, error) {
 		return nil, errors.Join(err, closeResources(dependencies.closers))
 	}
-	selectedModules, err := enabledBuiltinModules(cfg.EnabledModules)
-	if err != nil {
-		return nil, err
-	}
-	modules, err := NewModuleRegistry(selectedModules...)
-	if err != nil {
-		return nil, err
-	}
-
 	storageAdapters, err := openApplicationStorageAdapters(cfg)
 	if err != nil {
 		return nil, err
 	}
+	cfg = storageAdapters.config
+	dependencies.cfg = cfg
 	dependencies.closers = append(dependencies.closers, storageAdapters.closers...)
 	dependencies.runtimeStore = storageAdapters.runtimeStore
+	dependencies.runtimeConfig = storageAdapters.runtimeConfig
+	selectedModules, err := enabledBuiltinModules(cfg.EnabledModules)
+	if err != nil {
+		return fail(err)
+	}
+	modules, err := NewModuleRegistry(selectedModules...)
+	if err != nil {
+		return fail(err)
+	}
 	if storageAdapters.persistence != nil {
 		dependencies.bqlHistoryRepository = newEntBQLHistoryRepository(storageAdapters.persistence.Client)
 		dependencies.quickUnlocks = newEntQuickUnlockRepository(storageAdapters.persistence.Client)

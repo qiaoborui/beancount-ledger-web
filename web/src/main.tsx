@@ -9,9 +9,11 @@ import "@/app/globals.css";
 
 installApiEndpointFetchInterceptor();
 
+const speedInsightsEnabled = import.meta.env.VITE_ENABLE_SPEED_INSIGHTS !== "false";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <SpeedInsights />
+    {speedInsightsEnabled && <SpeedInsights />}
     <PwaRegister />
     <Suspense fallback={null}>
       <TooltipProvider>

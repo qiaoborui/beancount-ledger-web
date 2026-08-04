@@ -1,0 +1,39 @@
+name: Publish ledger index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.bean"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ledger-index-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    container:
+      # Pin this tag to the application release you have verified.
+      image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-indexer:latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate and publish Postgres read model
+        env:
+          DATABASE_URL: ${{ secrets.INDEXER_DATABASE_URL }}
+          # Copy the instanceId shown on the application's settings page.
+          LEDGER_CLUSTER_ID: ${{ secrets.LEDGER_INSTANCE_ID }}
+          LEDGER_ROOT: ${{ github.workspace }}
+          LEDGER_GIT_SHA: ${{ github.sha }}
+          LEDGER_INDEX_BEAN_CHECK_ENABLED: "true"
+          LEDGER_READ_MODEL: postgres
+          LEDGER_READ_MODEL_STRICT: "true"
+          POSTGRES_MAX_OPEN_CONNS: "2"
+        run: /app/ledger-indexer

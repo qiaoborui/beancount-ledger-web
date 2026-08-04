@@ -119,17 +119,35 @@ func (w *LedgerWriter) SetIndexRequestStore(store *LedgerIndexStore) {
 	}
 }
 
+func (w *LedgerWriter) SetConfig(cfg Config) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	w.cfg = cfg
+	w.mu.Unlock()
+}
+
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceDefault, apply)
 }
 
 func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*LedgerWriteTransaction) error) error {
+	_, err := w.RunTransactionWithSourceResult(source, apply)
+	return err
+}
+
+// RunTransactionWithSourceResult applies one all-or-nothing ledger write and
+// returns the immutable Git commit created for it. Filesystem writers return
+// an empty commit SHA. Callers that need to wait for the indexer should only
+// use the SHA with GitHub API storage.
+func (w *LedgerWriter) RunTransactionWithSourceResult(source string, apply func(*LedgerWriteTransaction) error) (string, error) {
 	if githubAPIEnabled(w.cfg) {
 		return w.runGitHubAPITransaction(source, apply)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return withLedgerFilesystemLock(context.Background(), w.cfg, ledgerFilesystemExclusiveLock, func() error {
+	err := withLedgerFilesystemLock(context.Background(), w.cfg, ledgerFilesystemExclusiveLock, func() error {
 		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}}
 		if err := apply(tx); err != nil {
 			tx.Restore()
@@ -147,23 +165,28 @@ func (w *LedgerWriter) RunTransactionWithSource(source string, apply func(*Ledge
 		}
 		return nil
 	})
+	return "", err
 }
 
-func (w *LedgerWriter) runGitHubAPITransaction(source string, apply func(*LedgerWriteTransaction) error) error {
+func (w *LedgerWriter) runGitHubAPITransaction(source string, apply func(*LedgerWriteTransaction) error) (string, error) {
 	if w.runtimeStore != nil {
-		return w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func(context.Context) error {
-			return w.runGitHubAPITransactionLocked(source, apply)
+		var gitSHA string
+		err := w.runtimeStore.WithLock(context.Background(), "ledger:"+w.cfg.LedgerGitBranch, func(context.Context) error {
+			var err error
+			gitSHA, err = w.runGitHubAPITransactionLocked(source, apply)
+			return err
 		})
+		return gitSHA, err
 	}
 	return w.runGitHubAPITransactionLocked(source, apply)
 }
 
-func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*LedgerWriteTransaction) error) error {
+func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*LedgerWriteTransaction) error) (string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	client, err := newGitHubLedgerClient(w.cfg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if strings.TrimSpace(source) == "" {
 		source = ledgerWriteSourceDefault
@@ -176,23 +199,23 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		if err != nil {
 			cancel()
 			if isContextTimeout(err) {
-				return ledgerWriteTimeoutError(timeout, err)
+				return "", ledgerWriteTimeoutError(timeout, err)
 			}
-			return err
+			return "", err
 		}
 		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}, github: remoteTx}
 		if err := apply(tx); err != nil {
 			cancel()
 			if isContextTimeout(err) {
-				return ledgerWriteTimeoutError(timeout, err)
+				return "", ledgerWriteTimeoutError(timeout, err)
 			}
-			return err
+			return "", err
 		}
 		gitSHA, err := remoteTx.commit(ledgerCommitMessage(source))
 		if err != nil {
 			cancel()
 			if isContextTimeout(err) {
-				return ledgerWriteTimeoutError(timeout, err)
+				return "", ledgerWriteTimeoutError(timeout, err)
 			}
 			lastErr = err
 			continue
@@ -209,12 +232,12 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		if w.cache != nil {
 			w.cache.MarkDirty()
 		}
-		return nil
+		return gitSHA, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("github api ledger write failed")
 	}
-	return lastErr
+	return "", lastErr
 }
 
 func (w *LedgerWriter) enqueueLedgerIndexRequest(ctx context.Context, gitSHA string) error {

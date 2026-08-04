@@ -31,6 +31,9 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if store == nil {
 		return LedgerIndexResult{}, errors.New("ledger index store is required")
 	}
+	if err := verifyLedgerIndexerInstance(ctx, cfg, store); err != nil {
+		return LedgerIndexResult{}, err
+	}
 	var result LedgerIndexResult
 	err := withLedgerFilesystemLock(ctx, cfg, ledgerFilesystemSharedLock, func() error {
 		var err error
@@ -42,12 +45,33 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	return result, err
 }
 
+func verifyLedgerIndexerInstance(ctx context.Context, cfg Config, store *LedgerIndexStore) error {
+	expected := strings.TrimSpace(cfg.LedgerClusterID)
+	if expected == "" || store == nil || store.db == nil {
+		return nil
+	}
+	settings, found, err := readRuntimeConfigSettings(ctx, store.db)
+	if err != nil {
+		return fmt.Errorf("read runtime instance identity: %w", err)
+	}
+	if !found || !settings.SetupComplete {
+		return errors.New("runtime instance identity is not initialized")
+	}
+	if settings.InstanceID != expected {
+		return fmt.Errorf("indexer instance identity mismatch: configured %q, database requires %q", expected, settings.InstanceID)
+	}
+	return nil
+}
+
 func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerIndexStore) (LedgerIndexResult, error) {
 	active, hasActive, err := store.ActiveRevision(ctx)
 	if err != nil {
 		return LedgerIndexResult{}, err
 	}
-	gitSHA := strings.TrimSpace(cfg.LedgerGitSHA)
+	gitSHA, err := ledgerIndexGitSHA(ctx, cfg)
+	if err != nil {
+		return LedgerIndexResult{}, err
+	}
 	if hasActive && canSkipLedgerIndexByGitSHA(cfg, active, gitSHA, cfg.LedgerIndexForceRebuild) {
 		return LedgerIndexResult{
 			RevisionID:    active.ID,
@@ -91,6 +115,27 @@ func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 		return LedgerIndexResult{}, err
 	}
 	return LedgerIndexResult{RevisionID: revisionID, GitSHA: gitSHA, LedgerVersion: snapshot.LedgerVersion}, nil
+}
+
+// ledgerIndexGitSHA records the exact checkout revision whenever the indexer
+// owns a synchronized Git worktree. This keeps Postgres revisions traceable to
+// GitHub writes and lets onboarding wait for the commit it just created.
+func ledgerIndexGitSHA(ctx context.Context, cfg Config) (string, error) {
+	if gitSHA := strings.TrimSpace(cfg.LedgerGitSHA); gitSHA != "" {
+		return gitSHA, nil
+	}
+	if !cfg.LedgerGitSyncEnabled {
+		return "", nil
+	}
+	root := strings.TrimSpace(cfg.LedgerRoot)
+	if root == "" || root == "." {
+		return "", errors.New("LEDGER_ROOT is required to resolve the synchronized Git revision")
+	}
+	gitSHA, err := ledgerGitOutput(ctx, cfg, "-C", root, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve synchronized ledger revision: %w", err)
+	}
+	return strings.TrimSpace(gitSHA), nil
 }
 
 func shouldSkipLedgerIndexByGitSHA(active LedgerIndexRevision, gitSHA string, force bool) bool {

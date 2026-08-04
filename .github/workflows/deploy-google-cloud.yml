@@ -237,8 +237,6 @@ jobs:
             GCP_REGION
             CLOUD_RUN_SERVICE
             GCP_RUNTIME_SERVICE_ACCOUNT
-            LEDGER_GITHUB_OWNER
-            LEDGER_GITHUB_REPO
             PUBLIC_ORIGIN
             WEBAUTHN_RP_ID
             CLOUD_RUN_SECRET_MAPPINGS
@@ -251,16 +249,12 @@ jobs:
             fi
           done
 
-          for name in AUTH_SECRET APP_PASSWORD DATABASE_URL LEDGER_GITHUB_TOKEN; do
+          for name in AUTH_SECRET DATABASE_URL; do
             if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
               echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
               exit 1
             fi
           done
-
-          if [[ -n "${DEEPSEEK_SECRET_NAME}" && ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",DEEPSEEK_API_KEY="* ]]; then
-            CLOUD_RUN_SECRET_MAPPINGS="${CLOUD_RUN_SECRET_MAPPINGS},DEEPSEEK_API_KEY=${DEEPSEEK_SECRET_NAME}:latest"
-          fi
 
           if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
             echo "::error::PUBLIC_ORIGIN must use HTTPS"
@@ -274,21 +268,54 @@ jobs:
             fi
           done
 
-          env_vars="^|^LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER}|LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO}|LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH}|PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}"
-          if [[ -n "${CLOUD_RUN_EXTRA_ENV_VARS}" ]]; then
-            env_vars="${env_vars}|${CLOUD_RUN_EXTRA_ENV_VARS}"
-          fi
-
           previous_traffic=""
           service_existed=false
+          legacy_migration_required=false
           existing_service="$(gcloud run services list --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --filter="metadata.name=${CLOUD_RUN_SERVICE}" --format='value(metadata.name)')"
           if [[ "${existing_service}" == "${CLOUD_RUN_SERVICE}" ]]; then
             service_existed=true
             service_json="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
             previous_traffic="$(jq -r '[.status.traffic[]? | select((.percent // 0) > 0 and .revisionName != null) | "\(.revisionName)=\(.percent)"] | sort | join(",")' <<<"${service_json}")"
+            service_url="$(jq -r '.status.url // empty' <<<"${service_json}")"
+            current_health=""
+            if [[ "${service_url}" == https://* ]]; then
+              current_health="$(curl --silent --show-error --connect-timeout 10 --max-time 30 "${service_url}/api/health" || true)"
+            fi
+            legacy_environment_present="$(jq -r '[.spec.template.spec.containers[0].env[]?.name] | any(. == "APP_PASSWORD" or . == "LEDGER_GITHUB_TOKEN" or . == "LEDGER_GITHUB_OWNER" or . == "LEDGER_GITHUB_REPO")' <<<"${service_json}")"
+            if [[ "$(jq -r '.configSource // empty' <<<"${current_health}" 2>/dev/null || true)" != "database" && "${legacy_environment_present}" == "true" ]]; then
+              legacy_migration_required=true
+            fi
           elif [[ -n "${existing_service}" ]]; then
             echo "::error::Cloud Run service lookup returned an unexpected result"
             exit 1
+          fi
+
+          platform_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
+            | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY"' \
+            | paste -sd, -)"
+          candidate_secret_mappings="${platform_secret_mappings}"
+          env_vars="^|^PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}"
+          if [[ "${legacy_migration_required}" == "true" ]]; then
+            for name in LEDGER_GITHUB_OWNER LEDGER_GITHUB_REPO; do
+              if [[ -z "${!name}" ]]; then
+                echo "::error::${name} is required for the one-time legacy runtime configuration migration"
+                exit 1
+              fi
+            done
+            for name in APP_PASSWORD LEDGER_GITHUB_TOKEN; do
+              if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
+                echo "::error::existing services require legacy ${name} for the one-time migration"
+                exit 1
+              fi
+            done
+            candidate_secret_mappings="${CLOUD_RUN_SECRET_MAPPINGS}"
+            if [[ -n "${DEEPSEEK_SECRET_NAME}" && ",${candidate_secret_mappings}," != *",DEEPSEEK_API_KEY="* ]]; then
+              candidate_secret_mappings="${candidate_secret_mappings},DEEPSEEK_API_KEY=${DEEPSEEK_SECRET_NAME}:latest"
+            fi
+            env_vars="${env_vars}|LEDGER_GITHUB_OWNER=${LEDGER_GITHUB_OWNER}|LEDGER_GITHUB_REPO=${LEDGER_GITHUB_REPO}|LEDGER_GIT_BRANCH=${LEDGER_GIT_BRANCH}"
+          fi
+          if [[ -n "${CLOUD_RUN_EXTRA_ENV_VARS}" ]]; then
+            env_vars="${env_vars}|${CLOUD_RUN_EXTRA_ENV_VARS}"
           fi
 
           revision_tag="candidate-${GITHUB_SHA::12}"
@@ -296,6 +323,7 @@ jobs:
           echo "previous_traffic=${previous_traffic}" >> "$GITHUB_OUTPUT"
           echo "revision_tag=${revision_tag}" >> "$GITHUB_OUTPUT"
           echo "service_existed=${service_existed}" >> "$GITHUB_OUTPUT"
+          echo "legacy_migration_required=${legacy_migration_required}" >> "$GITHUB_OUTPUT"
           echo "candidate_image=${candidate_image}" >> "$GITHUB_OUTPUT"
 
           traffic_args=(--tag="${revision_tag}")
@@ -321,13 +349,14 @@ jobs:
             --timeout=900s \
             "${traffic_args[@]}" \
             --set-env-vars="${env_vars}" \
-            --set-secrets="${CLOUD_RUN_SECRET_MAPPINGS}" \
+            --set-secrets="${candidate_secret_mappings}" \
             --quiet
 
       - name: Verify candidate and promote traffic
         id: verify-promote
         env:
           REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
         run: |
           candidate_url=""
           candidate_revision=""
@@ -371,6 +400,13 @@ jobs:
               --format='yaml(status.conditions)' || true
             exit 1
           fi
+          if [[ "${{ steps.deploy-candidate.outputs.legacy_migration_required }}" == "true" ]]; then
+            if [[ "$(jq -r '.configSource // empty' "${health_body}")" != "database" ]] || [[ "$(jq -r '.state // empty' "${health_body}")" == "setup_required" ]]; then
+              echo "::error::existing service did not complete the one-time database runtime configuration migration"
+              cat "${health_body}"
+              exit 1
+            fi
+          fi
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/" >/dev/null
 
           gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
@@ -379,8 +415,24 @@ jobs:
             --to-revisions="${candidate_revision}=100" \
             --quiet
 
+          if [[ "${{ steps.deploy-candidate.outputs.legacy_migration_required }}" == "true" ]]; then
+            platform_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
+              | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY"' \
+              | paste -sd, -)"
+            gcloud run services update "${CLOUD_RUN_SERVICE}" \
+              --project="${GCP_PROJECT_ID}" \
+              --region="${GCP_REGION}" \
+              --remove-env-vars=LEDGER_GITHUB_OWNER,LEDGER_GITHUB_REPO,LEDGER_GIT_BRANCH \
+              --set-secrets="${platform_secret_mappings}" \
+              --quiet
+          fi
+
           service_url="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
-          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/api/health"
+          final_health="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${service_url}/api/health")"
+          if [[ "$(jq -r '.configSource // empty' <<<"${final_health}")" != "database" ]]; then
+            echo "::error::Cloud Run service is not using database runtime configuration"
+            exit 1
+          fi
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/" >/dev/null
           echo "Cloud Run: ${service_url}" >> "$GITHUB_STEP_SUMMARY"
 

@@ -156,12 +156,23 @@ after repository tests pass.
 Create one Secret Manager secret per sensitive environment variable. Reuse the
 current production values.
 
-Required secrets:
+Permanent platform secrets:
 
 - `AUTH_SECRET`
-- `APP_PASSWORD`
 - `DATABASE_URL`
-- `LEDGER_GITHUB_TOKEN`
+
+`AUTH_SECRET` must remain stable because it encrypts database-held runtime
+credentials. New deployments configure the administrator password, GitHub
+Tokens, and AI key in the public installation page using the one-time code
+printed in that user's Cloud Run revision log. Running instances refresh the
+database-backed configuration on a short cache interval, so a settings change
+converges across multiple Cloud Run instances without redeployment.
+
+Existing instances keep `APP_PASSWORD`, `LEDGER_GITHUB_TOKEN`, and the current
+AI key in Secret Manager for one migration deployment. The deployment workflow
+mounts them only on the zero-traffic candidate, verifies
+`configSource=database`, promotes it, then creates a clean revision without the
+legacy mappings.
 
 Feature-specific secrets include `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
 `WEB_PUSH_VAPID_PRIVATE_KEY`, `GMAIL_CLIENT_SECRET`,
@@ -190,10 +201,13 @@ The GitHub Actions secret `CLOUD_RUN_SECRET_MAPPINGS` maps environment variables
 to Secret Manager versions:
 
 ```text
-AUTH_SECRET=ledger-auth-secret:latest,APP_PASSWORD=ledger-app-password:latest,DATABASE_URL=ledger-database-url:latest,LEDGER_GITHUB_TOKEN=ledger-github-token:latest
+AUTH_SECRET=ledger-auth-secret:latest,DATABASE_URL=ledger-database-url:latest
 ```
 
-Add feature-specific mappings for enabled integrations. Include `CRON_SECRET`
+During the existing-production migration, temporarily keep the old
+`APP_PASSWORD`, `LEDGER_GITHUB_TOKEN`, and AI key mappings in the same secret.
+They are filtered from the final revision automatically. Add feature-specific
+mappings for enabled integrations. Include `CRON_SECRET`
 during the Vercel rollback window because the existing Vercel Cron uses it.
 
 ## GitHub repository configuration
@@ -215,9 +229,9 @@ level so the workflow can evaluate its configuration gate:
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
 | `GCP_RUNTIME_SERVICE_ACCOUNT` | Runtime service-account email |
 | `GCP_ZIP_WORKER_SERVICE_ACCOUNT` | Dedicated ZIP worker service-account email with no ledger or secret access |
-| `LEDGER_GITHUB_OWNER` | Private ledger repository owner |
-| `LEDGER_GITHUB_REPO` | Private ledger repository name |
-| `LEDGER_GIT_BRANCH` | Ledger branch, normally `main` |
+| `LEDGER_GITHUB_OWNER` | Existing production only: legacy repository owner used by the one-time migration |
+| `LEDGER_GITHUB_REPO` | Existing production only: legacy repository name used by the one-time migration |
+| `LEDGER_GIT_BRANCH` | Existing production only: legacy branch, normally `main` |
 | `PUBLIC_ORIGIN` | Final HTTPS browser origin |
 | `WEBAUTHN_RP_ID` | Existing passkey relying-party domain |
 | `WEBAUTHN_PUBLIC_ORIGIN` | Allowed passkey origins |
@@ -227,9 +241,9 @@ Store `CLOUD_RUN_SECRET_MAPPINGS` as a secret in the
 optional public configuration as
 `KEY=VALUE|KEY=VALUE`. The pipe character is reserved as the separator. Example:
 
-When `GCP_DEEPSEEK_SECRET` is configured, the workflow automatically mounts its
-`latest` version as `DEEPSEEK_API_KEY`; do not duplicate that entry in
-`CLOUD_RUN_SECRET_MAPPINGS`.
+`GCP_DEEPSEEK_SECRET` is migration-only. New instances enter their AI key in
+the installer instead of mounting it as a permanent Cloud Run environment
+variable.
 
 ```text
 LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com|GMAIL_OAUTH_REDIRECT_URL=https://beancount.borry.org/api/integrations/gmail/callback|GMAIL_PUBSUB_TOPIC=projects/beancount-502511/topics/ledger-gmail|GMAIL_PUBSUB_AUDIENCE=https://beancount.borry.org/api/integrations/gmail/pubsub|GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@beancount-502511.iam.gserviceaccount.com|GMAIL_LABEL=Ledger/Bills|GMAIL_ALLOWED_SENDERS=bill@example.com|CRON_OIDC_AUDIENCE=https://beancount.borry.org|CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@beancount-502511.iam.gserviceaccount.com
@@ -253,6 +267,22 @@ tag. The workflow verifies the tagged URL, promotes the revision, verifies the
 service URL, and restores the previous traffic split when post-promotion health
 checks fail.
 
+For a brand-new service, `/api/health` reports `state=setup_required` with HTTP
+200. Open the public service URL, enter the one-time code from the revision log,
+and complete the installation form. `/api/ready` remains unavailable until the
+configuration is complete and the ledger index has an active revision. The
+installation code is hashed in Postgres and deleted after use.
+
+For an existing service, the workflow imports legacy environment values
+transactionally. A failed import, a `setup_required` regression, or a candidate
+that does not report `configSource=database` cannot receive production traffic.
+After promotion, the workflow removes the old password, GitHub Token, AI key,
+and repository environment variables, then verifies that database-only startup
+still succeeds. After that successful run, remove the legacy mappings from the
+`CLOUD_RUN_SECRET_MAPPINGS` Actions secret and delete the migration-only
+repository variables when no rollback needs them; later deployments detect the
+database-backed instance and no longer require those values.
+
 Verify the generated `run.app` URL:
 
 1. `/` serves the Vite application.
@@ -266,6 +296,23 @@ Verify the generated `run.app` URL:
 
 Passkey verification follows after the production domain is mapped because the
 RP ID remains the existing domain.
+
+## Private ledger indexer workflow
+
+The hosted indexer belongs in the private ledger repository, not in this public
+application repository. Start from
+[`docs/examples/private-ledger-indexer.yml`](examples/private-ledger-indexer.yml).
+Its checkout uses that repository's scoped `GITHUB_TOKEN`; the process receives
+only `INDEXER_DATABASE_URL` and the stable instance ID shown in the application
+settings. It does not receive `AUTH_SECRET`, the API's GitHub write Token, the
+AI key, or the administrator password.
+
+Grant `INDEXER_DATABASE_URL` only enough Postgres privileges to publish the
+ledger index tables and read the runtime instance identity. Network access to
+Postgres must be restricted to the chosen GitHub-hosted or self-hosted runner.
+The indexer refuses to write when `LEDGER_INSTANCE_ID` does not match the
+database instance ID, which prevents a copied workflow secret from publishing
+one ledger into another instance.
 
 ## Production domain
 

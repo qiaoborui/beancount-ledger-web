@@ -80,6 +80,12 @@ func (s *LedgerIndexStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *LedgerIndexStore) SetConfig(cfg Config) {
+	if s != nil {
+		s.sourceKey = ledgerIndexSourceKey(cfg)
+	}
+}
+
 func (s *LedgerIndexStore) withIndexLock(ctx context.Context, fn func() (LedgerIndexResult, error)) (LedgerIndexResult, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {

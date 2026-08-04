@@ -23,11 +23,14 @@ publishing the Postgres read model.
 
 ```bash
 cp .env.selfhost.example .env.selfhost
-# Set GitHub repository credentials, a separate read-only indexer token,
-# checkout path, UID/GID, and application secrets.
+# Set the checkout path, UID/GID, Postgres password, AUTH_SECRET,
+# and the internal indexer identity token.
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
 
+Read the one-time installation code from `docker compose ... logs server`,
+then open the browser installer to configure the private GitHub repository,
+separate write/read tokens, administrator password, AI, and indexer timing.
 The default browser endpoint is `http://127.0.0.1:8080`. See the
 [self-hosted guide](docs/self-hosted-compose.md) for LAN TLS, backups,
 restores, image updates, and the full configuration reference.

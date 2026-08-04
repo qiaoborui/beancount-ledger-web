@@ -167,6 +167,7 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	t.Setenv("LEDGER_ROOT", "/tmp/ledger")
 	t.Setenv("RUNTIME_DIR", "/tmp/runtime")
 	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("AUTH_SECRET", "test-auth-secret")
 	t.Setenv("LEDGER_GITHUB_OWNER", "example")
 	t.Setenv("LEDGER_GITHUB_REPO", "ledger")
 	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
@@ -212,7 +213,7 @@ func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
 	}
 }
 
-func TestValidateSelfHostedConfigRequiresGitHubCredentials(t *testing.T) {
+func TestValidateSelfHostedConfigRequiresPlatformSecretsNotRuntimeGitHubConfig(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
 	t.Setenv("AUTH_SECRET", "")
 	t.Setenv("APP_PASSWORD", "")
@@ -223,15 +224,13 @@ func TestValidateSelfHostedConfigRequiresGitHubCredentials(t *testing.T) {
 		ReadModelStrict: true,
 	}
 
-	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "LEDGER_GITHUB_OWNER") {
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {
 		t.Fatalf("error=%v", err)
 	}
 
-	cfg.LedgerGitHubOwner = "example"
-	cfg.LedgerGitHubRepo = "ledger"
-	cfg.LedgerGitHubToken = "secret"
-	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {
-		t.Fatalf("error=%v", err)
+	t.Setenv("AUTH_SECRET", "runtime-encryption-key")
+	if err := ValidateSelfHostedConfig(cfg); err != nil {
+		t.Fatalf("database-backed runtime configuration should allow missing GitHub env vars: %v", err)
 	}
 }
 
@@ -251,7 +250,8 @@ func TestLoadIndexerConfigReadsGitSyncSettings(t *testing.T) {
 	}
 }
 
-func TestValidateWebConfigRequiresPostgresAndGitHub(t *testing.T) {
+func TestValidateWebConfigRequiresPostgres(t *testing.T) {
+	t.Setenv("AUTH_SECRET", "test-auth-secret")
 	cfg := LoadWebConfig()
 
 	if err := ValidateWebConfig(cfg); err == nil {

@@ -6,9 +6,9 @@ import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, Clipb
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
-import { MessageResponse } from "@/components/ai-elements/message";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { ParsedTransaction } from "@/lib/schemas";
+import { AgentMessageBubble } from "./AgentMessageBubble";
 import type { AccountOperation } from "./types";
 
 type AgentApprovalPolicy = "on-write" | "always";
@@ -581,10 +581,7 @@ export function LedgerAgentWorkspace({
 }
 
 function MessageBubble({ item }: { item: MessageItem }) {
-  const user = item.role === "user";
-  return <div className={`flex min-w-0 max-w-full ${user ? "justify-end" : "justify-start"}`}>
-    <div className={`min-w-0 max-w-[92%] break-words rounded-md px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${user ? "bg-brand text-paper whitespace-pre-wrap" : "border border-line bg-panel text-ink [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm [&_pre]:bg-paper [&_pre]:p-2 [&_code]:break-words [&_a]:break-all"}`}>{user ? item.content : <MessageResponse>{item.content}</MessageResponse>}</div>
-  </div>;
+  return <AgentMessageBubble role={item.role} content={item.content} />;
 }
 
 function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded: boolean; onToggle: () => void }) {

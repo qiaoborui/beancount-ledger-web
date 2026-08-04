@@ -1062,6 +1062,10 @@ html[data-theme="dark"] .home-daily-chart-line {
 
 @media (max-width: 720px) {
   body { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  body.instance-setup-active {
+    overflow: hidden;
+    padding-bottom: 0;
+  }
 }
 
 @media (min-width: 768px) {

@@ -40,6 +40,11 @@ export type AgentFinal = {
   refreshLedger?: boolean;
 };
 
+export type AgentOnboardingDraftEvent<TDraft = unknown> = {
+  draft: TDraft;
+  ready: boolean;
+};
+
 type AgentStreamError = { error?: string };
 
 export async function readLedgerAgentStream(
@@ -50,6 +55,7 @@ export async function readLedgerAgentStream(
     onTool?: (tool: AgentToolEvent) => void;
     onArtifact?: (artifact: AgentArtifact) => void;
     onApproval?: (approval: AgentApproval) => void;
+    onOnboardingDraft?: (event: AgentOnboardingDraftEvent) => void;
   }
 ): Promise<AgentFinal> {
   if (!response.ok || !response.body) {
@@ -88,6 +94,9 @@ export async function readLedgerAgentStream(
           } else if (event.type === "approval_required") {
             const approval = payload as AgentApproval;
             if (approval.id && approval.sessionId && approval.toolName) options.onApproval?.(approval);
+          } else if (event.type === "onboarding_draft") {
+            const draft = payload as Partial<AgentOnboardingDraftEvent>;
+            if (draft.draft && typeof draft.ready === "boolean") options.onOnboardingDraft?.(draft as AgentOnboardingDraftEvent);
           } else if (event.type === "final") {
             final = payload as AgentFinal;
           } else if (event.type === "error") {

@@ -1,24 +1,11 @@
 name: beancount-ledger-selfhost
 
-x-runtime-env: &runtime-env
+x-database-env: &database-env
   DATABASE_URL: postgresql://ledger@database:5432/ledger?sslmode=disable
   PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.selfhost}
-  LEDGER_READ_MODEL: postgres
-  LEDGER_READ_MODEL_STRICT: "true"
   POSTGRES_MAX_OPEN_CONNS: "${POSTGRES_MAX_OPEN_CONNS:-4}"
   POSTGRES_MAX_IDLE_CONNS: "${POSTGRES_MAX_IDLE_CONNS:-2}"
   POSTGRES_CONN_MAX_IDLE_SECONDS: "${POSTGRES_CONN_MAX_IDLE_SECONDS:-60}"
-  AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env.selfhost}
-  APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env.selfhost}
-  LEDGER_AUTH_DISABLED: "${LEDGER_AUTH_DISABLED:-false}"
-
-  # Select one deployment transport. HTTP is an explicit same-origin
-  # password-only compatibility mode; HTTPS is the default.
-  LEDGER_AUTH_TRANSPORT: "${LEDGER_AUTH_TRANSPORT:-https}"
-  PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
-  WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
-  WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
-  LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
 
 services:
   database:
@@ -46,19 +33,22 @@ services:
         LEDGER_UID: "${LEDGER_UID:-1000}"
         LEDGER_GID: "${LEDGER_GID:-1000}"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       database:
         condition: service_healthy
     environment:
-      <<: *runtime-env
+      <<: *database-env
       PORT: "3000"
-      LEDGER_STORAGE: github_api
-      LEDGER_GITHUB_OWNER: ${LEDGER_GITHUB_OWNER:?set LEDGER_GITHUB_OWNER in .env.selfhost}
-      LEDGER_GITHUB_REPO: ${LEDGER_GITHUB_REPO:?set LEDGER_GITHUB_REPO in .env.selfhost}
-      LEDGER_GIT_BRANCH: "${LEDGER_GIT_BRANCH:-main}"
-      LEDGER_GITHUB_TOKEN: ${LEDGER_GITHUB_TOKEN:?set LEDGER_GITHUB_TOKEN in .env.selfhost}
-      LEDGER_GITHUB_API_URL: "${LEDGER_GITHUB_API_URL:-}"
-      LEDGER_INDEX_NOTIFY_ENABLED: "true"
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env.selfhost}
+      INDEXER_IDENTITY_TOKEN: ${INDEXER_IDENTITY_TOKEN:?set INDEXER_IDENTITY_TOKEN in .env.selfhost}
+      LEDGER_AUTH_DISABLED: "${LEDGER_AUTH_DISABLED:-false}"
+      LEDGER_AUTH_TRANSPORT: "${LEDGER_AUTH_TRANSPORT:-http}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
+      WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
+      WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
+      LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
     expose:
       - "3000"
     healthcheck:
@@ -83,17 +73,13 @@ services:
       server:
         condition: service_started
     environment:
-      <<: *runtime-env
+      <<: *database-env
       LEDGER_ROOT: /data/ledger
-      BEAN_CHECK_BIN: bean-check
-      LEDGER_GIT_SYNC_ENABLED: "true"
-      LEDGER_GIT_REMOTE_URL: ${LEDGER_GIT_REMOTE_URL:?set LEDGER_GIT_REMOTE_URL in .env.selfhost}
-      LEDGER_GITHUB_INDEX_TOKEN: ${LEDGER_GITHUB_INDEX_TOKEN:?set LEDGER_GITHUB_INDEX_TOKEN in .env.selfhost}
+      INDEXER_CONFIG_URL: http://server:3000/api/indexer/config
+      INDEXER_IDENTITY_TOKEN: ${INDEXER_IDENTITY_TOKEN:?set INDEXER_IDENTITY_TOKEN in .env.selfhost}
       LEDGER_INDEX_NOTIFY_ENABLED: "true"
       LEDGER_INDEX_BEAN_CHECK_ENABLED: "true"
-      LEDGER_INDEX_INTERVAL_SECONDS: "${LEDGER_INDEX_INTERVAL_SECONDS:-60}"
-      LEDGER_INDEX_RETRY_INITIAL_SECONDS: "${LEDGER_INDEX_RETRY_INITIAL_SECONDS:-5}"
-      LEDGER_INDEX_RETRY_MAX_SECONDS: "${LEDGER_INDEX_RETRY_MAX_SECONDS:-60}"
+      BEAN_CHECK_BIN: bean-check
     volumes:
       - type: bind
         source: ${LEDGER_CHECKOUT_HOST_PATH:?set an absolute LEDGER_CHECKOUT_HOST_PATH in .env.selfhost}
@@ -113,6 +99,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: frontend
+      args:
+        VITE_ENABLE_SPEED_INSIGHTS: "false"
     restart: unless-stopped
     expose:
       - "80"
