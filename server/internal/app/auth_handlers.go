@@ -19,7 +19,7 @@ func (s *Server) login(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	ok, err := verifyPassword(input.Password)
+	ok, err := s.verifyPassword(c, input.Password)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

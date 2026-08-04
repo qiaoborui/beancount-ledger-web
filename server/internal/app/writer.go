@@ -119,6 +119,15 @@ func (w *LedgerWriter) SetIndexRequestStore(store *LedgerIndexStore) {
 	}
 }
 
+func (w *LedgerWriter) SetConfig(cfg Config) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	w.cfg = cfg
+	w.mu.Unlock()
+}
+
 func (w *LedgerWriter) RunTransaction(apply func(*LedgerWriteTransaction) error) error {
 	return w.RunTransactionWithSource(ledgerWriteSourceDefault, apply)
 }

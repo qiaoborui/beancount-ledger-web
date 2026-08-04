@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowDown, ArrowUp, BellRing, Check, Minus, Plus, RotateCcw, Send, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, Check, Database, Minus, Plus, RotateCcw, Save, Send, Zap } from "lucide-react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { fetchJson } from "@/lib/clientFetch";
 import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatus, applyApiEndpointProbe, createApiEndpointId, displayApiEndpointUrl, hasKnownApiEndpointAuthentication, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, withActiveApiEndpoint, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
 import { getWebPushPresentation, useWebPush } from "./hooks/useWebPush";
 import { PasskeySettingsPanel } from "./PasskeySettingsPanel";
@@ -91,6 +92,7 @@ export function SettingsPage({
 
   return <div className="space-y-6">
     <LocalAccessPanel />
+    <RuntimeConfigPanel sensitiveUnlocked={sensitiveUnlocked} showToast={showToast} />
     <PasskeySettingsPanel onRegister={onRegisterPasskey} onRegisteredChange={onPasskeyRegisteredChange} showToast={showToast} />
     <NotificationSettingsPanel showToast={showToast} />
     <ApiEndpointSettingsPanel showToast={showToast} />
@@ -183,6 +185,140 @@ export function SettingsPage({
       </div>
     </section>
   </div>;
+}
+
+type RuntimeConfigView = {
+  setupComplete: boolean;
+  configSource: string;
+  instanceId?: string;
+  githubOwner?: string;
+  githubRepo?: string;
+  githubBranch?: string;
+  githubApiUrl?: string;
+  githubWriteTokenConfigured: boolean;
+  githubIndexTokenConfigured: boolean;
+  aiProvider?: string;
+  aiBaseUrl?: string;
+  aiModel?: string;
+  aiApiKeyConfigured: boolean;
+  indexerIntervalSeconds?: number;
+  indexerRetryInitialSeconds?: number;
+  indexerRetryMaximumSeconds?: number;
+};
+
+function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocked: boolean; showToast: ToastFn }) {
+  const [status, setStatus] = useState<RuntimeConfigView | null | undefined>(undefined);
+  const [form, setForm] = useState({
+    githubOwner: "", githubRepo: "", githubBranch: "main", githubApiUrl: "",
+    githubWriteToken: "", githubIndexToken: "",
+    aiProvider: "openai-compatible", aiBaseUrl: "", aiModel: "", aiApiKey: "",
+    adminPassword: "", indexerIntervalSeconds: 60, indexerRetryInitialSeconds: 5, indexerRetryMaximumSeconds: 60,
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!sensitiveUnlocked) {
+      setStatus(undefined);
+      return;
+    }
+    let cancelled = false;
+    void fetchJson<RuntimeConfigView>("/api/runtime-config", { cache: "no-store" }, undefined, { kind: "read" })
+      .then((next) => {
+        if (cancelled) return;
+        setStatus(next);
+        setForm((current) => ({
+          ...current,
+          githubOwner: next.githubOwner ?? "",
+          githubRepo: next.githubRepo ?? "",
+          githubBranch: next.githubBranch ?? "main",
+          githubApiUrl: next.githubApiUrl ?? "",
+          aiProvider: next.aiProvider ?? "openai-compatible",
+          aiBaseUrl: next.aiBaseUrl ?? "",
+          aiModel: next.aiModel ?? "",
+          indexerIntervalSeconds: next.indexerIntervalSeconds ?? 60,
+          indexerRetryInitialSeconds: next.indexerRetryInitialSeconds ?? 5,
+          indexerRetryMaximumSeconds: next.indexerRetryMaximumSeconds ?? 60,
+        }));
+      })
+      .catch(() => { if (!cancelled) setStatus(null); });
+    return () => { cancelled = true; };
+  }, [sensitiveUnlocked]);
+
+  function update(key: keyof typeof form, value: string | number) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const next = await fetchJson<RuntimeConfigView>("/api/runtime-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      }, undefined, { kind: "write" });
+      setStatus(next);
+      setForm((current) => ({ ...current, githubWriteToken: "", githubIndexToken: "", aiApiKey: "", adminPassword: "" }));
+      showToast("success", "实例运行配置已更新");
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "保存实例配置失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (status === null) return null;
+  const inputClass = "h-11 min-w-0 rounded-xl border border-line bg-panel px-3 text-sm text-ink";
+  return <section className="card p-5 md:p-6">
+    <div className="flex items-start gap-3 border-b border-line pb-4">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand"><Database className="h-5 w-5" /></span>
+      <div>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">instance runtime</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">实例运行配置</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">仓库、Agent 和 indexer 设置保存在 Postgres。秘密字段留空表示保留现值，页面永远不会回显明文。</p>
+      </div>
+    </div>
+    {!sensitiveUnlocked ? <p className="mt-5 rounded-xl bg-tag px-4 py-3 text-sm text-stone">解锁敏感数据后才能查看或修改实例配置。</p> :
+      status === undefined ? <p className="mt-5 text-sm text-stone">正在读取实例配置…</p> :
+      <div className="mt-6 space-y-6">
+        <div className="flex flex-wrap gap-2 text-xs text-stone">
+          <span className="rounded-full bg-tag px-2.5 py-1">来源：{status.configSource}</span>
+          {status.instanceId && <span className="rounded-full bg-tag px-2.5 py-1 font-mono">{status.instanceId}</span>}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <RuntimeField label="GitHub 用户或组织"><input required className={inputClass} value={form.githubOwner} onChange={(event) => update("githubOwner", event.target.value)} /></RuntimeField>
+          <RuntimeField label="私有仓库"><input required className={inputClass} value={form.githubRepo} onChange={(event) => update("githubRepo", event.target.value)} /></RuntimeField>
+          <RuntimeField label="分支"><input required className={inputClass} value={form.githubBranch} onChange={(event) => update("githubBranch", event.target.value)} /></RuntimeField>
+        </div>
+        <RuntimeField label="GitHub API 地址"><input type="url" className={inputClass} value={form.githubApiUrl} onChange={(event) => update("githubApiUrl", event.target.value)} placeholder="github.com 用户留空" /></RuntimeField>
+        <div className="grid gap-3 md:grid-cols-2">
+          <RuntimeField label={`写入 Token${status.githubWriteTokenConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.githubWriteToken} onChange={(event) => update("githubWriteToken", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
+          <RuntimeField label={`Indexer Token${status.githubIndexTokenConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.githubIndexToken} onChange={(event) => update("githubIndexToken", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <RuntimeField label="AI Provider"><input required className={inputClass} value={form.aiProvider} onChange={(event) => update("aiProvider", event.target.value)} /></RuntimeField>
+          <RuntimeField label="AI Base URL"><input required type="url" className={inputClass} value={form.aiBaseUrl} onChange={(event) => update("aiBaseUrl", event.target.value)} /></RuntimeField>
+          <RuntimeField label="模型"><input required className={inputClass} value={form.aiModel} onChange={(event) => update("aiModel", event.target.value)} /></RuntimeField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <RuntimeField label={`AI API Key${status.aiApiKeyConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.aiApiKey} onChange={(event) => update("aiApiKey", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
+          <RuntimeField label="新管理员密码"><input type="password" minLength={12} className={inputClass} value={form.adminPassword} onChange={(event) => update("adminPassword", event.target.value)} placeholder="留空不修改" /></RuntimeField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {([
+            ["轮询秒数", "indexerIntervalSeconds"],
+            ["首次重试秒数", "indexerRetryInitialSeconds"],
+            ["最大重试秒数", "indexerRetryMaximumSeconds"],
+          ] as const).map(([label, key]) => <RuntimeField key={key} label={label}><input type="number" min={1} className={inputClass} value={form[key]} onChange={(event) => update(key, Number(event.target.value))} /></RuntimeField>)}
+        </div>
+        <button type="button" disabled={saving} onClick={() => void save()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-medium text-paper transition-transform active:scale-[0.98] disabled:opacity-50">
+          {saving ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? "保存中…" : "保存实例配置"}
+        </button>
+      </div>}
+  </section>;
+}
+
+function RuntimeField({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="grid gap-2 text-sm font-medium text-olive">{label}{children}</label>;
 }
 
 function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {

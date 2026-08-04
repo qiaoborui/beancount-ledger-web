@@ -274,11 +274,8 @@ func ValidateWebConfig(cfg Config) error {
 	if !ledgerReadModelEnabled(cfg) || !cfg.ReadModelStrict {
 		return errors.New("ledger-web requires the Postgres read model in strict mode")
 	}
-	if strings.TrimSpace(cfg.LedgerGitHubOwner) == "" || strings.TrimSpace(cfg.LedgerGitHubRepo) == "" {
-		return errors.New("LEDGER_GITHUB_OWNER and LEDGER_GITHUB_REPO are required")
-	}
-	if strings.TrimSpace(cfg.LedgerGitHubToken) == "" {
-		return errors.New("LEDGER_GITHUB_TOKEN is required")
+	if strings.TrimSpace(os.Getenv("AUTH_SECRET")) == "" {
+		return errors.New("AUTH_SECRET is required")
 	}
 	return nil
 }
@@ -288,14 +285,6 @@ func ValidateWebConfig(cfg Config) error {
 func ValidateSelfHostedConfig(cfg Config) error {
 	if err := ValidateWebConfig(cfg); err != nil {
 		return err
-	}
-	if !envBool("LEDGER_AUTH_DISABLED", false) {
-		if strings.TrimSpace(os.Getenv("AUTH_SECRET")) == "" {
-			return errors.New("AUTH_SECRET is required unless LEDGER_AUTH_DISABLED=true")
-		}
-		if strings.TrimSpace(os.Getenv("APP_PASSWORD")) == "" {
-			return errors.New("APP_PASSWORD is required unless LEDGER_AUTH_DISABLED=true")
-		}
 	}
 	return nil
 }

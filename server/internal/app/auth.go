@@ -30,7 +30,7 @@ func authSecret() ([]byte, error) {
 	return []byte(raw), nil
 }
 
-func verifyPassword(password string) (bool, error) {
+func verifyLegacyPassword(password string) (bool, error) {
 	configured := os.Getenv("APP_PASSWORD")
 	if configured == "" {
 		return false, errors.New("APP_PASSWORD is required")
@@ -39,6 +39,13 @@ func verifyPassword(password string) (bool, error) {
 		return bcrypt.CompareHashAndPassword([]byte(configured), []byte(password)) == nil, nil
 	}
 	return password == configured, nil
+}
+
+func (s *Server) verifyPassword(c *gin.Context, password string) (bool, error) {
+	if s != nil && s.runtimeConfig != nil {
+		return s.runtimeConfig.VerifyAdminPassword(c.Request.Context(), password)
+	}
+	return verifyLegacyPassword(password)
 }
 
 func createSessionToken() (string, error) {

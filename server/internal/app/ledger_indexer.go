@@ -31,6 +31,9 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 	if store == nil {
 		return LedgerIndexResult{}, errors.New("ledger index store is required")
 	}
+	if err := verifyLedgerIndexerInstance(ctx, cfg, store); err != nil {
+		return LedgerIndexResult{}, err
+	}
 	var result LedgerIndexResult
 	err := withLedgerFilesystemLock(ctx, cfg, ledgerFilesystemSharedLock, func() error {
 		var err error
@@ -40,6 +43,24 @@ func RunLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerI
 		return err
 	})
 	return result, err
+}
+
+func verifyLedgerIndexerInstance(ctx context.Context, cfg Config, store *LedgerIndexStore) error {
+	expected := strings.TrimSpace(cfg.LedgerClusterID)
+	if expected == "" || store == nil || store.db == nil {
+		return nil
+	}
+	settings, found, err := readRuntimeConfigSettings(ctx, store.db)
+	if err != nil {
+		return fmt.Errorf("read runtime instance identity: %w", err)
+	}
+	if !found || !settings.SetupComplete {
+		return errors.New("runtime instance identity is not initialized")
+	}
+	if settings.InstanceID != expected {
+		return fmt.Errorf("indexer instance identity mismatch: configured %q, database requires %q", expected, settings.InstanceID)
+	}
+	return nil
 }
 
 func runLedgerIndexOnceWithStore(ctx context.Context, cfg Config, store *LedgerIndexStore) (LedgerIndexResult, error) {

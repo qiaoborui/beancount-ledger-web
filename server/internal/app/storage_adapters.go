@@ -12,6 +12,8 @@ import (
 // The composition root owns selection; application services receive only their ports.
 type applicationStorageAdapters struct {
 	runtimeStore  RuntimeStore
+	runtimeConfig *RuntimeConfigStore
+	config        Config
 	persistence   *persistence.Store
 	indexStore    LedgerIndexPort
 	indexStoreErr error
@@ -20,7 +22,7 @@ type applicationStorageAdapters struct {
 }
 
 func openApplicationStorageAdapters(cfg Config) (*applicationStorageAdapters, error) {
-	adapters := &applicationStorageAdapters{}
+	adapters := &applicationStorageAdapters{config: cfg}
 	fail := func(err error) (*applicationStorageAdapters, error) {
 		return nil, errors.Join(err, closeResources(adapters.closers))
 	}
@@ -34,12 +36,20 @@ func openApplicationStorageAdapters(cfg Config) (*applicationStorageAdapters, er
 		if err != nil {
 			return fail(err)
 		}
+		adapters.runtimeConfig, err = NewRuntimeConfigStore(db)
+		if err != nil {
+			return fail(err)
+		}
+		adapters.config, err = adapters.runtimeConfig.Bootstrap(context.Background(), cfg)
+		if err != nil {
+			return fail(err)
+		}
 		adapters.runtimeStore, err = NewRuntimeStoreWithDB(db)
 		if err != nil {
 			return fail(err)
 		}
-		if ledgerReadModelEnabled(cfg) {
-			adapters.indexStore, adapters.indexStoreErr = NewLedgerIndexStoreWithDB(db, cfg)
+		if ledgerReadModelEnabled(adapters.config) {
+			adapters.indexStore, adapters.indexStoreErr = NewLedgerIndexStoreWithDB(db, adapters.config)
 		}
 		adapters.limiter, err = NewPostgresRateLimiter(db)
 		if err != nil {

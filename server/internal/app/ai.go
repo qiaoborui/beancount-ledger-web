@@ -21,7 +21,7 @@ func (s *Server) parseNaturalLanguage(input, today string) ([]LedgerEntry, error
 		return nil, err
 	}
 	accounts := activeAccounts(snapshot.Accounts)
-	content, err := runStructuredAI(parserPrompt(today, accounts), input)
+	content, err := s.runStructuredAI(context.Background(), parserPrompt(today, accounts), input)
 	if err != nil {
 		return nil, err
 	}
@@ -46,8 +46,8 @@ func parserPrompt(today string, accounts []string) string {
 每条交易每个 currency 下的 postings 金额合计必须为 0；不确定分类用 Expenses:Unknown 并 needsReview=true；没有日期用今天。`
 }
 
-func runStructuredAI(system, input string) (string, error) {
-	provider, err := resolveAIProviderConfig()
+func (s *Server) runStructuredAI(ctx context.Context, system, input string) (string, error) {
+	provider, err := s.resolveAIProviderConfig(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +64,7 @@ func runStructuredAI(system, input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(provider.baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(provider.baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return "", err
 	}
@@ -93,6 +93,13 @@ func runStructuredAI(system, input string) (string, error) {
 		return "", errors.New("AI returned empty content")
 	}
 	return parsed.Choices[0].Message.Content, nil
+}
+
+func (s *Server) resolveAIProviderConfig(ctx context.Context) (aiProviderConfig, error) {
+	if s != nil && s.runtimeConfig != nil {
+		return s.runtimeConfig.AIProviderConfig(ctx)
+	}
+	return resolveAIProviderConfig()
 }
 
 type aiProviderConfig struct {

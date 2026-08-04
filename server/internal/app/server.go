@@ -1,13 +1,17 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/gzip"
@@ -16,7 +20,10 @@ import (
 
 type Server struct {
 	cfg                  Config
+	cfgMu                sync.RWMutex
+	cfgRefreshedAt       time.Time
 	runtimeStore         RuntimeStore
+	runtimeConfig        *RuntimeConfigStore
 	gmailRepository      gmailStateRepository
 	bqlHistoryRepository bqlHistoryRepository
 	quickUnlocks         quickUnlockRepository
@@ -43,7 +50,7 @@ type Server struct {
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), gzip.Gzip(gzip.DefaultCompression))
+	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {
@@ -56,8 +63,65 @@ func newRouter(cfg Config, server *Server) *gin.Engine {
 	return router
 }
 
+func (s *Server) configReadLock() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if (c.Request.Method == http.MethodPost && path == "/api/setup/install") ||
+			(c.Request.Method == http.MethodPut && path == "/api/runtime-config") {
+			c.Next()
+			return
+		}
+		s.refreshConfigIfNeeded(c.Request.Context())
+		s.cfgMu.RLock()
+		defer s.cfgMu.RUnlock()
+		c.Next()
+	}
+}
+
+func (s *Server) applyConfigLocked(cfg Config) {
+	s.cfg = cfg
+	s.cfgRefreshedAt = time.Now()
+	if s.writer != nil {
+		s.writer.SetConfig(cfg)
+	}
+	if store, ok := s.indexStore.(*LedgerIndexStore); ok {
+		store.SetConfig(cfg)
+	}
+}
+
+func (s *Server) refreshConfigIfNeeded(ctx context.Context) {
+	if s.runtimeConfig == nil {
+		return
+	}
+	s.cfgMu.RLock()
+	recent := time.Since(s.cfgRefreshedAt) < 2*time.Second
+	s.cfgMu.RUnlock()
+	if recent {
+		return
+	}
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	if time.Since(s.cfgRefreshedAt) < 2*time.Second {
+		return
+	}
+	effective, err := s.runtimeConfig.EffectiveConfig(ctx, s.cfg)
+	if err != nil {
+		s.cfgRefreshedAt = time.Now()
+		log.Printf("refresh database runtime configuration: %v", err)
+		return
+	}
+	s.applyConfigLocked(effective)
+}
+
 func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.GET("/health", s.health)
+	api.GET("/ready", s.ready)
+	api.GET("/setup/status", s.setupStatus)
+	api.POST("/setup/test", s.setupTest)
+	api.POST("/setup/install", s.setupInstall)
+	api.GET("/indexer/config", s.indexerRuntimeConfig)
+	api.GET("/runtime-config", s.runtimeConfigStatus)
+	api.PUT("/runtime-config", s.runtimeConfigUpdate)
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/lock", s.lockSensitive)
 	api.POST("/auth/logout", s.logout)
@@ -183,6 +247,23 @@ func (s *Server) health(c *gin.Context) {
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)
 	}
+	if s.runtimeConfig != nil {
+		runtimeStatus, err := s.runtimeConfig.Status(c.Request.Context())
+		if err != nil {
+			body := gin.H{"ok": false, "state": "database_error", "error": err.Error(), "runtimeBackend": runtimeBackend(s.cfg)}
+			mergeHealthIdentity(body, identity)
+			c.JSON(http.StatusServiceUnavailable, body)
+			return
+		}
+		if runtimeStatus.SetupRequired {
+			body := gin.H{"ok": true, "state": "setup_required", "ready": false, "runtimeBackend": runtimeBackend(s.cfg), "configSource": "database"}
+			mergeHealthIdentity(body, identity)
+			c.JSON(http.StatusOK, body)
+			return
+		}
+		identity["configSource"] = runtimeStatus.ConfigSource
+		identity["instanceId"] = runtimeStatus.InstanceID
+	}
 	if s.indexStoreErr != nil {
 		body := gin.H{
 			"ok":               false,
@@ -199,7 +280,9 @@ func (s *Server) health(c *gin.Context) {
 	if s.indexStore != nil {
 		revision, indexed, err := s.indexStore.ActiveRevision(c.Request.Context())
 		body := gin.H{
-			"ok":                  err == nil && indexed,
+			"ok":                  err == nil,
+			"ready":               err == nil && indexed,
+			"state":               map[bool]string{true: "ready", false: "indexing"}[indexed],
 			"uptimeSeconds":       int(time.Since(startedAt).Seconds()),
 			"ledgerReadModel":     s.cfg.LedgerReadModel,
 			"readModelStrict":     s.cfg.ReadModelStrict,
@@ -214,9 +297,10 @@ func (s *Server) health(c *gin.Context) {
 		}
 		if err != nil {
 			body["error"] = err.Error()
+			body["state"] = "database_error"
 		}
 		mergeHealthIdentity(body, identity)
-		c.JSON(status(err == nil && indexed, http.StatusOK, http.StatusServiceUnavailable), body)
+		c.JSON(status(err == nil, http.StatusOK, http.StatusServiceUnavailable), body)
 		return
 	}
 	if err := ensureLedgerReady(s.cfg); err != nil {
@@ -245,6 +329,41 @@ func (s *Server) health(c *gin.Context) {
 	}
 	mergeHealthIdentity(body, identity)
 	c.JSON(status(ok, http.StatusOK, http.StatusServiceUnavailable), body)
+}
+
+func (s *Server) ready(c *gin.Context) {
+	if s.runtimeConfig != nil {
+		setupRequired, err := s.runtimeConfig.SetupRequired(c.Request.Context())
+		if err != nil {
+			errorJSON(c, http.StatusServiceUnavailable, err)
+			return
+		}
+		if setupRequired {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "state": "setup_required"})
+			return
+		}
+	}
+	if s.indexStoreErr != nil {
+		errorJSON(c, http.StatusServiceUnavailable, s.indexStoreErr)
+		return
+	}
+	if s.indexStore != nil {
+		revision, indexed, err := s.indexStore.ActiveRevision(c.Request.Context())
+		if err != nil || !indexed {
+			if err == nil {
+				err = errors.New("ledger index has no active revision")
+			}
+			errorJSON(c, http.StatusServiceUnavailable, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "state": "ready", "gitSHA": revision.GitSHA, "revision": revision.ID})
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "state": "ready"})
 }
 
 func ledgerClusterID(cfg Config) string {

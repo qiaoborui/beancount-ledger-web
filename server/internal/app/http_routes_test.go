@@ -372,6 +372,13 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	}
 	covered := map[string]bool{
 		"GET /api/health":                        true,
+		"GET /api/ready":                         true,
+		"GET /api/setup/status":                  true,
+		"POST /api/setup/test":                   true,
+		"POST /api/setup/install":                true,
+		"GET /api/indexer/config":                true,
+		"GET /api/runtime-config":                true,
+		"PUT /api/runtime-config":                true,
 		"POST /api/auth/login":                   true,
 		"POST /api/auth/lock":                    true,
 		"POST /api/auth/logout":                  true,

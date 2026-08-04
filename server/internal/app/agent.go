@@ -179,10 +179,16 @@ type AgentModelClient interface {
 	Complete(context.Context, string, []agentModelMessage, []agentToolSpec) (agentModelResult, error)
 }
 
-type openAICompatibleAgentClient struct{}
+type openAICompatibleAgentClient struct {
+	resolve func(context.Context) (aiProviderConfig, error)
+}
 
-func (openAICompatibleAgentClient) Complete(ctx context.Context, system string, messages []agentModelMessage, tools []agentToolSpec) (agentModelResult, error) {
-	provider, err := resolveAIProviderConfig()
+func (client openAICompatibleAgentClient) Complete(ctx context.Context, system string, messages []agentModelMessage, tools []agentToolSpec) (agentModelResult, error) {
+	resolve := client.resolve
+	if resolve == nil {
+		resolve = func(context.Context) (aiProviderConfig, error) { return resolveAIProviderConfig() }
+	}
+	provider, err := resolve(ctx)
 	if err != nil {
 		return agentModelResult{}, err
 	}
@@ -280,7 +286,7 @@ func (s *Server) modelClient() AgentModelClient {
 	if s.agentModel != nil {
 		return s.agentModel
 	}
-	return openAICompatibleAgentClient{}
+	return openAICompatibleAgentClient{resolve: s.resolveAIProviderConfig}
 }
 
 func (s *Server) runAgentTurn(ctx context.Context, request AgentTurnRequest, emit agentEventWriter) error {
