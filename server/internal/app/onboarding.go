@@ -170,12 +170,14 @@ func (s *Server) onboardingAgent(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	result, err := s.runOnboardingAgent(c.Request.Context(), input)
+	prepareSSE(c)
+	_, err := s.runOnboardingAgentWithEvents(c.Request.Context(), input, func(event string, payload any) error {
+		return writeSSEEvent(c, event, payload)
+	})
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		_ = writeSSEEvent(c, "error", gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, result)
 }
 
 func (r *LedgerOnboardingRequest) Normalize() {

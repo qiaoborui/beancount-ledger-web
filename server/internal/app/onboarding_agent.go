@@ -126,7 +126,30 @@ func validateOnboardingLiability(index int, liability LedgerOnboardingLiability)
 	return validateOnboardingAmount(fmt.Sprintf("liabilities[%d]", index), liability.Currency, liability.OpeningBalance)
 }
 
+func validateOnboardingAgentReady(draft LedgerOnboardingRequest) error {
+	if err := draft.Validate(); err != nil {
+		return err
+	}
+	if len(draft.IncomeCategories) == 0 {
+		return errors.New("请至少整理一个收入分类")
+	}
+	if len(draft.ExpenseCategories) == 0 {
+		return errors.New("请至少整理一个支出分类")
+	}
+	return nil
+}
+
 func (s *Server) runOnboardingAgent(ctx context.Context, request LedgerOnboardingAgentRequest) (LedgerOnboardingAgentResponse, error) {
+	return s.runOnboardingAgentWithEvents(ctx, request, nil)
+}
+
+// runOnboardingAgentWithEvents uses the same Agent event vocabulary as the
+// established ledger Agent (status, tool_call, tool_result, message_delta and
+// final).  The draft tools remain deliberately separate: before initialization
+// there is no ledger to read or write, and these tools may only mutate the
+// request-scoped draft.  Keeping the transport shared means the client has one
+// Markdown, tool-progress and streaming contract in both experiences.
+func (s *Server) runOnboardingAgentWithEvents(ctx context.Context, request LedgerOnboardingAgentRequest, emit agentEventWriter) (LedgerOnboardingAgentResponse, error) {
 	if err := request.Validate(); err != nil {
 		return LedgerOnboardingAgentResponse{}, err
 	}
@@ -137,7 +160,7 @@ func (s *Server) runOnboardingAgent(ctx context.Context, request LedgerOnboardin
 	if err := normalizeOnboardingDraft(&draft); err != nil {
 		return LedgerOnboardingAgentResponse{}, err
 	}
-	ready := request.Ready && draft.Validate() == nil
+	ready := request.Ready && validateOnboardingAgentReady(draft) == nil
 	messages := agentMessagesFromRequest(request.Messages)
 	if request.Start && strings.TrimSpace(request.Message) == "" {
 		messages = append(messages, agentModelMessage{Role: "user", Content: "请主动开始这次建账引导。"})
@@ -147,6 +170,9 @@ func (s *Server) runOnboardingAgent(ctx context.Context, request LedgerOnboardin
 
 	tools := onboardingAgentTools(&draft, &ready)
 	specs := sortedAgentToolSpecs(tools)
+	if err := emitOnboardingAgentEvent(emit, "status", map[string]any{"text": "正在分析建账信息"}); err != nil {
+		return LedgerOnboardingAgentResponse{}, err
+	}
 	for modelCalls := 0; modelCalls < 12; modelCalls++ {
 		result, err := s.modelClient().Complete(ctx, onboardingAgentPrompt(draft), messages, specs)
 		if err != nil {
@@ -158,18 +184,34 @@ func (s *Server) runOnboardingAgent(ctx context.Context, request LedgerOnboardin
 			if reply == "" {
 				reply = "我已经更新了这份财务地图。接下来想先确认哪一部分？"
 			}
-			return LedgerOnboardingAgentResponse{Reply: reply, Draft: draft, Ready: ready && draft.Validate() == nil}, nil
+			response := LedgerOnboardingAgentResponse{Reply: reply, Draft: draft, Ready: ready && validateOnboardingAgentReady(draft) == nil}
+			if err := emitOnboardingAgentEvent(emit, "message_delta", map[string]any{"text": reply}); err != nil {
+				return LedgerOnboardingAgentResponse{}, err
+			}
+			if err := emitOnboardingAgentEvent(emit, "final", map[string]any{"sessionId": "", "message": reply, "status": "completed", "draft": response.Draft, "ready": response.Ready}); err != nil {
+				return LedgerOnboardingAgentResponse{}, err
+			}
+			return response, nil
 		}
 		seenIDs := make(map[string]struct{}, len(result.ToolCalls))
 		for _, call := range result.ToolCalls {
-			tool, args, _, err := validateAgentToolCall(tools, call, seenIDs)
+			tool, args, input, err := validateAgentToolCall(tools, call, seenIDs)
 			if err != nil {
 				messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
+				if emitErr := emitOnboardingAgentEvent(emit, "tool_result", map[string]any{"id": call.ID, "name": call.Function.Name, "title": call.Function.Name, "status": "error", "error": err.Error()}); emitErr != nil {
+					return LedgerOnboardingAgentResponse{}, emitErr
+				}
 				continue
+			}
+			if err := emitOnboardingAgentEvent(emit, "tool_call", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "running", "input": input}); err != nil {
+				return LedgerOnboardingAgentResponse{}, err
 			}
 			execution, err := tool.Execute(ctx, args, AgentPageContext{})
 			if err != nil {
 				messages = append(messages, agentToolResultMessage(call.ID, map[string]any{"error": err.Error()}))
+				if emitErr := emitOnboardingAgentEvent(emit, "tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "error", "error": err.Error()}); emitErr != nil {
+					return LedgerOnboardingAgentResponse{}, emitErr
+				}
 				continue
 			}
 			output := execution.ModelOutput
@@ -177,9 +219,29 @@ func (s *Server) runOnboardingAgent(ctx context.Context, request LedgerOnboardin
 				output = execution.ClientOutput
 			}
 			messages = append(messages, agentToolResultMessage(call.ID, output))
+			clientOutput := execution.ClientOutput
+			if clientOutput == nil {
+				clientOutput = output
+			}
+			if err := emitOnboardingAgentEvent(emit, "tool_result", map[string]any{"id": call.ID, "name": tool.Name, "title": tool.Title, "status": "completed", "output": clientOutput}); err != nil {
+				return LedgerOnboardingAgentResponse{}, err
+			}
+			if err := emitOnboardingAgentEvent(emit, "onboarding_draft", map[string]any{"draft": draft, "ready": ready && validateOnboardingAgentReady(draft) == nil}); err != nil {
+				return LedgerOnboardingAgentResponse{}, err
+			}
+		}
+		if err := emitOnboardingAgentEvent(emit, "status", map[string]any{"text": "正在整理工具结果"}); err != nil {
+			return LedgerOnboardingAgentResponse{}, err
 		}
 	}
 	return LedgerOnboardingAgentResponse{}, errors.New("建账 Agent 的工具调用次数过多，请换一种说法再试")
+}
+
+func emitOnboardingAgentEvent(emit agentEventWriter, event string, payload any) error {
+	if emit == nil {
+		return nil
+	}
+	return emit(event, payload)
 }
 
 func onboardingAgentTools(draft *LedgerOnboardingRequest, ready *bool) map[string]agentTool {
@@ -214,19 +276,21 @@ func onboardingAgentTools(draft *LedgerOnboardingRequest, ready *bool) map[strin
 				return mutated(), nil
 			},
 		},
-		"upsert_funding_space":    onboardingFundingTool(draft, mutated),
-		"remove_funding_space":    onboardingRemoveFundingTool(draft, mutated),
-		"upsert_liability":        onboardingLiabilityTool(draft, mutated),
-		"remove_liability":        onboardingRemoveLiabilityTool(draft, mutated),
-		"upsert_income_category":  onboardingCategoryTool(draft, mutated, true),
-		"remove_income_category":  onboardingRemoveCategoryTool(draft, mutated, true),
-		"upsert_expense_category": onboardingCategoryTool(draft, mutated, false),
-		"remove_expense_category": onboardingRemoveCategoryTool(draft, mutated, false),
+		"upsert_funding_space":       onboardingFundingTool(draft, mutated),
+		"remove_funding_space":       onboardingRemoveFundingTool(draft, mutated),
+		"upsert_liability":           onboardingLiabilityTool(draft, mutated),
+		"remove_liability":           onboardingRemoveLiabilityTool(draft, mutated),
+		"upsert_income_category":     onboardingCategoryTool(draft, mutated, true),
+		"replace_income_categories":  onboardingReplaceCategoriesTool(draft, mutated, true),
+		"remove_income_category":     onboardingRemoveCategoryTool(draft, mutated, true),
+		"upsert_expense_category":    onboardingCategoryTool(draft, mutated, false),
+		"replace_expense_categories": onboardingReplaceCategoriesTool(draft, mutated, false),
+		"remove_expense_category":    onboardingRemoveCategoryTool(draft, mutated, false),
 		"present_onboarding_plan": {
-			agentToolSpec: agentToolSpec{Name: "present_onboarding_plan", Description: "仅当草案已包含至少一个钱在哪里的账户，且足以开始记账时调用。它不会写入账本，只会让用户看到确认创建按钮。", Parameters: objectSchema(nil, nil)},
+			agentToolSpec: agentToolSpec{Name: "present_onboarding_plan", Description: "仅当草案已包含至少一个资金账户、一个收入分类和一个支出分类，且足以开始记账时调用。它不会写入账本，只会让用户看到确认创建按钮。", Parameters: objectSchema(nil, nil)},
 			Title:         "展示建账方案",
 			Execute: func(_ context.Context, _ json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
-				if err := draft.Validate(); err != nil {
+				if err := validateOnboardingAgentReady(*draft); err != nil {
 					return agentToolExecution{}, fmt.Errorf("草案尚不能确认：%w", err)
 				}
 				*ready = true
@@ -237,7 +301,7 @@ func onboardingAgentTools(draft *LedgerOnboardingRequest, ready *bool) map[strin
 }
 
 func onboardingFundingTool(draft *LedgerOnboardingRequest, done func() agentToolExecution) agentTool {
-	return agentTool{agentToolSpec: agentToolSpec{Name: "upsert_funding_space", Description: "新增或更新一个“钱在哪里”的位置，如现金、微信、支付宝、银行卡、储蓄或投资。account 必须由你设计为分层英文 Beancount 路径。", Parameters: objectSchema(map[string]any{"kind": enumSchema("cash", "bank_card", "digital_wallet", "savings", "investment"), "name": stringSchema("用户看见的中文名称"), "account": stringSchema("英文 Beancount 路径"), "currency": stringSchema("可选货币"), "openingBalance": stringSchema("可选、非负的期初余额")}, []string{"kind", "name", "account"})}, Title: "整理资金位置", Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
+	return agentTool{agentToolSpec: agentToolSpec{Name: "upsert_funding_space", Description: "新增或更新一个资金账户，如现金、微信、支付宝、银行卡、储蓄或投资。account 必须由你设计为分层英文 Beancount 路径。", Parameters: objectSchema(map[string]any{"kind": enumSchema("cash", "bank_card", "digital_wallet", "savings", "investment"), "name": stringSchema("用户看见的中文名称"), "account": stringSchema("英文 Beancount 路径"), "currency": stringSchema("可选货币"), "openingBalance": stringSchema("可选、非负的期初余额")}, []string{"kind", "name", "account"})}, Title: "整理资金账户", Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 		var input LedgerOnboardingFundingSpace
 		if err := decodeAgentArgs(raw, &input); err != nil {
 			return agentToolExecution{}, err
@@ -323,12 +387,12 @@ func onboardingRemoveLiabilityTool(draft *LedgerOnboardingRequest, done func() a
 }
 
 func onboardingCategoryTool(draft *LedgerOnboardingRequest, done func() agentToolExecution, income bool) agentTool {
-	name, root, title := "upsert_expense_category", "Expenses", "整理消费分类"
+	name, root, title := "upsert_expense_category", "Expenses", "整理支出分类"
 	templates := onboardingExpenseTemplates
 	if income {
-		name, root, title, templates = "upsert_income_category", "Income", "整理收入来源", onboardingIncomeTemplates
+		name, root, title, templates = "upsert_income_category", "Income", "整理收入分类", onboardingIncomeTemplates
 	}
-	return agentTool{agentToolSpec: agentToolSpec{Name: name, Description: "新增或更新一个" + map[bool]string{true: "收入来源", false: "消费分类"}[income] + "。templateKey 仅在适合预设分类时填写；否则用 customName。account 必须由你设计为分层英文 Beancount 路径。", Parameters: objectSchema(map[string]any{"templateKey": stringSchema("可选预设分类 key"), "customName": stringSchema("可选自定义中文名称"), "account": stringSchema("英文 Beancount 路径")}, []string{"account"})}, Title: title, Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
+	return agentTool{agentToolSpec: agentToolSpec{Name: name, Description: "新增或更新一个" + map[bool]string{true: "收入分类", false: "支出分类"}[income] + "。templateKey 仅在适合预设分类时填写；否则用 customName。account 必须由你设计为分层英文 Beancount 路径。", Parameters: objectSchema(map[string]any{"templateKey": stringSchema("可选预设分类 key"), "customName": stringSchema("可选自定义中文名称"), "account": stringSchema("英文 Beancount 路径")}, []string{"account"})}, Title: title, Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 		var input LedgerOnboardingCategory
 		if err := decodeAgentArgs(raw, &input); err != nil {
 			return agentToolExecution{}, err
@@ -356,10 +420,59 @@ func onboardingCategoryTool(draft *LedgerOnboardingRequest, done func() agentToo
 	}}
 }
 
-func onboardingRemoveCategoryTool(draft *LedgerOnboardingRequest, done func() agentToolExecution, income bool) agentTool {
-	name, title := "remove_expense_category", "移除消费分类"
+func onboardingReplaceCategoriesTool(draft *LedgerOnboardingRequest, done func() agentToolExecution, income bool) agentTool {
+	name, root, title := "replace_expense_categories", "Expenses", "更新支出分类"
+	templates := onboardingExpenseTemplates
 	if income {
-		name, title = "remove_income_category", "移除收入来源"
+		name, root, title, templates = "replace_income_categories", "Income", "更新收入分类", onboardingIncomeTemplates
+	}
+	itemSchema := objectSchema(map[string]any{
+		"templateKey": stringSchema("可选预设分类 key"),
+		"customName":  stringSchema("可选自定义中文名称"),
+		"account":     stringSchema("英文 Beancount 路径"),
+	}, []string{"account"})
+	return agentTool{
+		agentToolSpec: agentToolSpec{
+			Name:        name,
+			Description: "一次性替换完整的" + map[bool]string{true: "收入分类", false: "支出分类"}[income] + "列表。用户一次提供多个分类时优先使用；每项必须包含由你设计的英文 Beancount account。",
+			Parameters:  objectSchema(map[string]any{"categories": arraySchema(itemSchema, "完整分类列表")}, []string{"categories"}),
+		},
+		Title: title,
+		Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
+			var input struct {
+				Categories []LedgerOnboardingCategory `json:"categories"`
+			}
+			if err := decodeAgentArgs(raw, &input); err != nil {
+				return agentToolExecution{}, err
+			}
+			if len(input.Categories) == 0 {
+				return agentToolExecution{}, errors.New("分类列表不能为空")
+			}
+			for index := range input.Categories {
+				input.Categories[index].TemplateKey = strings.TrimSpace(input.Categories[index].TemplateKey)
+				input.Categories[index].CustomName = strings.TrimSpace(input.Categories[index].CustomName)
+				input.Categories[index].Account = strings.TrimSpace(input.Categories[index].Account)
+			}
+			if err := validateOnboardingCategories("categories", input.Categories, templates, root); err != nil {
+				return agentToolExecution{}, err
+			}
+			if income {
+				draft.IncomeCategories = append([]LedgerOnboardingCategory(nil), input.Categories...)
+			} else {
+				draft.ExpenseCategories = append([]LedgerOnboardingCategory(nil), input.Categories...)
+			}
+			if err := normalizeOnboardingDraft(draft); err != nil {
+				return agentToolExecution{}, err
+			}
+			return done(), nil
+		},
+	}
+}
+
+func onboardingRemoveCategoryTool(draft *LedgerOnboardingRequest, done func() agentToolExecution, income bool) agentTool {
+	name, title := "remove_expense_category", "移除支出分类"
+	if income {
+		name, title = "remove_income_category", "移除收入分类"
 	}
 	return agentTool{agentToolSpec: agentToolSpec{Name: name, Description: "删除用户明确不要的分类。传 templateKey 或 customName，二者只能有一个。", Parameters: objectSchema(map[string]any{"templateKey": stringSchema("预设分类 key"), "customName": stringSchema("自定义中文名称")}, nil)}, Title: title, Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 		var input LedgerOnboardingCategory
@@ -402,10 +515,11 @@ func onboardingAgentPrompt(draft LedgerOnboardingRequest) string {
 
 行为准则：
 - 首轮先自然地自我介绍，并主动问一个最有价值的问题；通常从“你平时把钱放在哪里”开始。每轮只问一个问题。
-- 用“钱在哪里、钱从哪里来、钱去哪了、待还款项”的日常语言，绝不向用户展示 Assets、Expenses、Income、Liabilities、复式记账或 Beancount 路径。
+- 用户侧只使用“资金账户、收入分类、支出分类、待还款项”这些直接概念，绝不向用户展示 Assets、Expenses、Income、Liabilities、复式记账或 Beancount 路径。
 - 仅把用户明确说明或确认的信息写入草案；不要臆造银行、余额、债务或生活偏好。可以给 2–4 个自然语言选项帮助回答。
-- 收到信息后先用相应工具更新草案，再用简短中文说明你理解了什么并继续问一个最有价值的问题。
+- 收到信息后必须先用相应工具更新草案，再用简短中文说明你理解了什么并继续问一个最有价值的问题。绝不能只在回复中声称“已经记录”。
+- 用户一次提供多个收入或支出分类时，必须优先调用 replace_income_categories 或 replace_expense_categories，一次写入完整列表；之后单项修改再使用 upsert/remove。
 - account 是内部实现：每个账户都必须由你给出清晰、分层、英文的标准 Beancount 路径。不能把中文编码、拼音化，也不能让程序猜账户名。资金位置与待还款项严格使用工具规定的根路径；收入位于 Income:，消费位于 Expenses:。
-- 当“钱在哪里”至少有一个账户，且收入来源和常见消费已足够让用户开始使用时，主动调用 present_onboarding_plan，再告知用户可以检查财务地图并确认创建。用户即使在方案就绪后继续修改，也必须再次调用该工具才能恢复确认状态。
+- 只有当草案至少有一个资金账户、一个收入分类和一个支出分类时，才能调用 present_onboarding_plan，再告知用户可以检查账本结构并确认创建。用户即使在方案就绪后继续修改，也必须再次调用该工具才能恢复确认状态。
 - 只在确实要变更草案或展示方案时调用工具；正常对话直接回复。`
 }

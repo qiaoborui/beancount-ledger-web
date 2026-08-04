@@ -24,7 +24,7 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('artifact.type === "transaction_change"');
     expect(source).toContain("原始 Beancount");
     expect(source).toContain('artifact.type === "chart"');
-    expect(source).toContain("MessageResponse");
+    expect(source).toContain("AgentMessageBubble");
     expect(source).toContain('approvalPolicy === "always"');
     expect(source).toContain("全屏查看会话");
     expect(source).toContain("会话历史");

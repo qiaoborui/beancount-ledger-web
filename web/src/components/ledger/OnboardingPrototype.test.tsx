@@ -9,7 +9,12 @@ describe("OnboardingPrototype", () => {
     expect(html).toContain("从一段引导开始");
     expect(html).toContain("建账 Agent");
     expect(html).toContain("正在开始");
-    expect(html).toContain("钱在哪里");
+    expect(html).toContain("资金账户");
+    expect(html).toContain("收入分类");
+    expect(html).toContain("支出分类");
+    expect(html).toContain("h-dvh");
+    expect(html).toContain("overflow-hidden");
+    expect(html).toContain("overflow-y-auto");
     expect(html).not.toContain("Assets:");
     expect(html).not.toContain("Expenses:");
   });

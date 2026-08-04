@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -107,6 +108,33 @@ func TestOnboardingAgentUsesToolsAndOnlyPresentsAValidDraft(t *testing.T) {
 	}
 }
 
+func TestOnboardingAgentStreamsTheSharedToolAndDraftEvents(t *testing.T) {
+	server := &Server{agentModel: &queuedAgentModel{results: []agentModelResult{
+		{ToolCalls: []agentModelToolCall{{ID: "wallet", Type: "function", Function: agentModelFunctionCall{Name: "upsert_funding_space", Arguments: `{"kind":"digital_wallet","name":"微信","account":"Assets:Wallet:WeChat"}`}}}},
+		{Content: "**已记录微信**。接下来告诉我你的收入分类。"},
+	}}}
+	var events []string
+	_, err := server.runOnboardingAgentWithEvents(context.Background(), LedgerOnboardingAgentRequest{Start: true}, func(event string, _ any) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"status", "tool_call", "tool_result", "onboarding_draft", "message_delta", "final"} {
+		found := false
+		for _, event := range events {
+			if event == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("shared Agent stream missing %q: %#v", want, events)
+		}
+	}
+}
+
 func TestOnboardingAgentNeverMarksAnIncompleteDraftReady(t *testing.T) {
 	server := &Server{agentModel: &queuedAgentModel{results: []agentModelResult{
 		{ToolCalls: []agentModelToolCall{{ID: "present", Type: "function", Function: agentModelFunctionCall{Name: "present_onboarding_plan", Arguments: `{}`}}}},
@@ -118,6 +146,48 @@ func TestOnboardingAgentNeverMarksAnIncompleteDraftReady(t *testing.T) {
 	}
 	if result.Ready || len(result.Draft.FundingSpaces) != 0 {
 		t.Fatalf("incomplete draft must not be ready: %#v", result)
+	}
+}
+
+func TestOnboardingAgentCannotPresentWithoutIncomeAndExpenseCategories(t *testing.T) {
+	draft := defaultOnboardingDraft()
+	draft.FundingSpaces = append(draft.FundingSpaces, LedgerOnboardingFundingSpace{
+		Kind: "digital_wallet", Name: "微信", Account: "Assets:Wallet:WeChat",
+	})
+	ready := false
+	tool := onboardingAgentTools(&draft, &ready)["present_onboarding_plan"]
+	if _, err := tool.Execute(context.Background(), nil, AgentPageContext{}); err == nil {
+		t.Fatal("present_onboarding_plan must reject a draft whose category map is still empty")
+	}
+	if ready {
+		t.Fatal("incomplete category map must not become ready")
+	}
+}
+
+func TestOnboardingAgentBulkCategoryToolsKeepDraftAndReadyInSync(t *testing.T) {
+	draft := defaultOnboardingDraft()
+	draft.FundingSpaces = append(draft.FundingSpaces, LedgerOnboardingFundingSpace{
+		Kind: "digital_wallet", Name: "微信", Account: "Assets:Wallet:WeChat",
+	})
+	ready := true
+	tools := onboardingAgentTools(&draft, &ready)
+	if _, err := tools["replace_income_categories"].Execute(context.Background(), json.RawMessage(`{"categories":[{"templateKey":"salary","account":"Income:Work:Salary"},{"customName":"红包","account":"Income:Gift"}]}`), AgentPageContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if ready || len(draft.IncomeCategories) != 2 {
+		t.Fatalf("income replacement must update the draft and reset ready: ready=%v draft=%#v", ready, draft)
+	}
+	if _, err := tools["replace_expense_categories"].Execute(context.Background(), json.RawMessage(`{"categories":[{"templateKey":"dining","account":"Expenses:Food:Dining"},{"customName":"通讯","account":"Expenses:Communication"}]}`), AgentPageContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if ready || len(draft.ExpenseCategories) != 2 {
+		t.Fatalf("expense replacement must update the draft and keep ready false: ready=%v draft=%#v", ready, draft)
+	}
+	if _, err := tools["present_onboarding_plan"].Execute(context.Background(), nil, AgentPageContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatal("a complete category draft should become ready only after present_onboarding_plan")
 	}
 }
 
@@ -137,8 +207,8 @@ func TestOnboardingAgentAllowsAnAuthenticatedButLockedSession(t *testing.T) {
 	if response.Code == http.StatusLocked {
 		t.Fatalf("onboarding Agent must not require sensitive unlock: %s", response.Body.String())
 	}
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("expected the deliberately unconfigured AI provider to fail after auth, got %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: error") || !strings.Contains(response.Body.String(), "OPENAI_API_KEY is not configured") {
+		t.Fatalf("expected the shared Agent stream to report the deliberately unconfigured provider after auth, got %d: %s", response.Code, response.Body.String())
 	}
 }
 
