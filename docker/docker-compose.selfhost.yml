@@ -56,6 +56,8 @@ services:
         LEDGER_UID: "${LEDGER_UID:-1000}"
         LEDGER_GID: "${LEDGER_GID:-1000}"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       database:
         condition: service_healthy
