@@ -42,7 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True}
 
     @app.post("/v1/turn", dependencies=[Depends(authorize)])
-    async def turn(input: TurnRequest, agent: Annotated[AgentRuntime, Depends(runtime)]) -> StreamingResponse:
+    async def turn(input: TurnRequest, agent: AgentRuntime = Depends(runtime)) -> StreamingResponse:
         async def stream() -> AsyncIterator[bytes]:
             async for event, payload in agent.turn(input):
                 yield _sse(event, payload)
@@ -52,7 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/v1/onboarding/turn", dependencies=[Depends(authorize)])
     async def onboarding(
         input: OnboardingRequest,
-        agent: Annotated[AgentRuntime, Depends(runtime)],
+        agent: AgentRuntime = Depends(runtime),
     ) -> StreamingResponse:
         async def stream() -> AsyncIterator[bytes]:
             async for event, payload in agent.onboarding_turn(input):
@@ -64,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def resolve_interaction(
         interaction_id: str,
         input: InteractionResponse,
-        agent: Annotated[AgentRuntime, Depends(runtime)],
+        agent: AgentRuntime = Depends(runtime),
     ) -> dict[str, bool]:
         try:
             await agent.broker.resolve(interaction_id, input.approved)
@@ -75,13 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/sessions/{session_id}/timeline", dependencies=[Depends(authorize)])
     async def timeline(
         session_id: str,
-        agent: Annotated[AgentRuntime, Depends(runtime)],
+        agent: AgentRuntime = Depends(runtime),
         before: int = Query(0, ge=0),
     ) -> dict:
         return await agent.timeline(session_id, before)
 
     @app.delete("/v1/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(authorize)])
-    async def delete_session(session_id: str, agent: Annotated[AgentRuntime, Depends(runtime)]) -> Response:
+    async def delete_session(session_id: str, agent: AgentRuntime = Depends(runtime)) -> Response:
         await agent.delete_session(session_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
