@@ -78,3 +78,8 @@ class CapabilityResult(BaseModel):
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     refresh_ledger: bool = Field(False, alias="refreshLedger")
     confirmation_token: str = Field("", alias="confirmationToken")
+
+    @field_validator("artifacts", mode="before")
+    @classmethod
+    def normalize_artifacts(cls, value: Any) -> Any:
+        return [] if value is None else value

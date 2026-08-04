@@ -389,9 +389,13 @@ func agentCapabilityExecutionResponse(execution agentToolExecution) gin.H {
 	if modelOutput == nil {
 		modelOutput = execution.ClientOutput
 	}
+	artifacts := execution.Artifacts
+	if artifacts == nil {
+		artifacts = []AgentArtifact{}
+	}
 	return gin.H{
 		"modelOutput": modelOutput, "clientOutput": execution.ClientOutput,
-		"artifacts": execution.Artifacts, "refreshLedger": execution.RefreshLedger,
+		"artifacts": artifacts, "refreshLedger": execution.RefreshLedger,
 	}
 }
 

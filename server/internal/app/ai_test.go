@@ -195,6 +195,20 @@ func TestInternalAgentToolsRequireServiceToken(t *testing.T) {
 	}
 }
 
+func TestAgentCapabilityExecutionResponseUsesEmptyArtifactArray(t *testing.T) {
+	response := agentCapabilityExecutionResponse(agentToolExecution{
+		ModelOutput:  map[string]any{"ok": true},
+		ClientOutput: map[string]any{"ok": true},
+	})
+	payload, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"artifacts":[]`) {
+		t.Fatalf("empty artifacts must be encoded as an array: %s", payload)
+	}
+}
+
 func TestWriteCapabilityRequiresMatchingPreviewConfirmation(t *testing.T) {
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "agent-secret"
