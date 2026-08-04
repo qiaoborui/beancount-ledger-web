@@ -119,8 +119,17 @@ function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备 BQL 查询…</section>}><LazyBQLQueryPage {...props} /></Suspense>;
 }
 
+function AgentPageLoading() {
+  return <section className="ledger-agent-page fixed inset-0 z-40 flex min-h-0 min-w-0 max-w-full items-center justify-center bg-paper md:static md:z-auto md:h-dvh" aria-busy="true" aria-label="正在打开账本 Agent">
+    <div className="flex items-center gap-3 text-sm text-stone">
+      <Bot className="h-5 w-5 animate-pulse text-brand" />
+      <span>正在打开账本 Agent…</span>
+    </div>
+  </section>;
+}
+
 function LedgerAgentWorkspace(props: ComponentProps<typeof LazyLedgerAgentWorkspace>) {
-  return <Suspense fallback={null}><LazyLedgerAgentWorkspace {...props} /></Suspense>;
+  return <Suspense fallback={props.presentation === "page" ? <AgentPageLoading /> : null}><LazyLedgerAgentWorkspace {...props} /></Suspense>;
 }
 
 function RouteFallback({ label }: { label: string }) {
@@ -920,7 +929,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page !== "agent" && <LedgerAgentWorkspace
         key={activeApiEndpointIdRef.current}
-        request={agentRequest}
+        request={null}
         open={agentOpen}
         onOpenChange={setAgentOpen}
         context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }}
