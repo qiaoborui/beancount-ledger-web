@@ -174,13 +174,18 @@ class LedgerPlugin:
         if state.get("mode") == "onboarding":
             request = message.context.get("_ledger_onboarding_request")
             if isinstance(request, OnboardingRequest):
-                history = [{"role": item.role, "content": item.content} for item in request.messages]
                 prompt = request.message or "请主动开始这次建账引导。"
-                return [*history, {"role": "user", "content": prompt}]
+                if request.messages:
+                    history = "\n".join(
+                        f"{'用户' if item.role == 'user' else '助手'}：{item.content}"
+                        for item in request.messages
+                    )
+                    prompt = f"此前建账对话：\n{history}\n\n当前用户消息：\n{prompt}"
+                return [{"type": "text", "text": prompt}]
         if message.channel == "telegram":
             return "$telegram-ledger-agent $telegram\n" + content_of(message)
         if message.channel == "web":
-            return [{"role": "user", "content": content_of(message)}]
+            return content_of(message)
         return None
 
     @hookimpl
