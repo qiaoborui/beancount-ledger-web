@@ -120,12 +120,15 @@ function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
 }
 
 function AgentPageLoading() {
-  return <section className="ledger-agent-page flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] min-h-0 min-w-0 max-w-full items-center justify-center bg-paper md:h-dvh" aria-busy="true" aria-label="正在打开账本 Agent">
-    <div className="flex items-center gap-3 text-sm text-stone">
-      <Bot className="h-5 w-5 animate-pulse text-brand" />
-      <span>正在打开账本 Agent…</span>
-    </div>
-  </section>;
+  return createPortal(
+    <section className="ledger-agent-page fixed inset-0 z-40 flex min-h-0 min-w-0 max-w-full items-center justify-center overflow-hidden bg-paper" aria-busy="true" aria-label="正在打开账本 Agent">
+      <div className="flex items-center gap-3 text-sm text-stone">
+        <Bot className="h-5 w-5 animate-pulse text-brand" />
+        <span>正在打开账本 Agent…</span>
+      </div>
+    </section>,
+    document.body,
+  );
 }
 
 function LedgerAgentWorkspace(props: ComponentProps<typeof LazyLedgerAgentWorkspace>) {

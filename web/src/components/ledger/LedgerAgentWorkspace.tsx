@@ -550,13 +550,16 @@ export function LedgerAgentWorkspace({
     </section>
   );
 
-  if (presentation === "page") return <section className="ledger-agent-page flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] min-h-0 min-w-0 max-w-full overflow-hidden bg-paper md:h-dvh" aria-label="账本 Agent 工作区">
+  if (presentation === "page") return createPortal(
+    <section className="ledger-agent-page fixed inset-0 z-40 flex min-h-0 min-w-0 max-w-full overflow-hidden bg-paper" aria-label="账本 Agent 工作区">
     <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-line bg-panel md:flex" aria-label="Agent 会话历史">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div><div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div></div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span></button>)}</div>
     </aside>
     {panel("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-paper", desktopScrollRef)}
-  </section>;
+    </section>,
+    document.body,
+  );
 
   return <>
     <aside className={`ledger-agent-dock hidden min-w-0 ${desktopFullscreen ? "" : "md:block"}`} data-open={open && !desktopFullscreen ? "true" : "false"} aria-label="账本 Agent 侧栏">
