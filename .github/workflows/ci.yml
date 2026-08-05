@@ -5,6 +5,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_call:
     inputs:
+      reusable_call:
+        required: true
+        type: boolean
       backend:
         required: true
         type: boolean
@@ -36,17 +39,17 @@ jobs:
           fetch-depth: 0
 
       - name: Verify deployment workflow guards
-        if: ${{ github.event_name != 'workflow_call' }}
         run: bash .github/scripts/verify-deploy-google-cloud.sh
 
       - name: Detect changed components
         id: changes
         env:
+          INPUT_REUSABLE_CALL: ${{ inputs.reusable_call }}
           INPUT_BACKEND: ${{ inputs.backend }}
           INPUT_AGENT: ${{ inputs.agent }}
           INPUT_WEB: ${{ inputs.web }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+          if [[ "${INPUT_REUSABLE_CALL}" == "true" ]]; then
             backend="${INPUT_BACKEND}"
             agent="${INPUT_AGENT}"
             web="${INPUT_WEB}"

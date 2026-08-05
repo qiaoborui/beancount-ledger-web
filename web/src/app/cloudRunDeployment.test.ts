@@ -18,12 +18,18 @@ describe("Cloud Run deployment", () => {
 
   it("runs checks and production image builds in parallel before deployment", () => {
     expect(ciWorkflow).toContain("workflow_call:");
+    expect(ciWorkflow).toContain("reusable_call:");
+    expect(ciWorkflow).toContain('INPUT_REUSABLE_CALL: ${{ inputs.reusable_call }}');
+    expect(ciWorkflow).toContain('if [[ "${INPUT_REUSABLE_CALL}" == "true" ]]');
+    expect(ciWorkflow).not.toContain("github.event_name != 'workflow_call'");
+    expect(ciWorkflow).not.toContain('github.event_name }}" == "workflow_call"');
     expect(ciWorkflow).toContain("go test ./...");
     expect(ciWorkflow).toContain("pnpm run typecheck");
     expect(ciWorkflow).toContain("pnpm run test");
     expect(deploymentWorkflow).toContain("push:\n    branches: [main]");
     expect(deploymentWorkflow).not.toContain("workflow_run:");
     expect(deploymentWorkflow).toContain("uses: ./.github/workflows/ci.yml");
+    expect(deploymentWorkflow).toContain("reusable_call: true");
     expect(deploymentWorkflow).toContain("needs: [plan, checks, build-standalone, build-agent, build-zip-worker]");
     expect(deploymentWorkflow).toContain("needs.checks.result == 'success'");
     expect(deploymentWorkflow).toContain("name: Verify current main commit");
