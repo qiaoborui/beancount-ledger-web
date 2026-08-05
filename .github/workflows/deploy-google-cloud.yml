@@ -376,11 +376,23 @@ jobs:
           agent_image="${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
           agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}"
           agent_runtime_args=(--cpu-throttling --min-instances=0)
+          telegram_secret_mapped=false
+          telegram_allow_list_configured=false
           if [[ ",${agent_secret_mappings}," == *",BUB_TELEGRAM_TOKEN="* ]]; then
-            if [[ -z "${BUB_TELEGRAM_ALLOW_USERS}" && -z "${BUB_TELEGRAM_ALLOW_CHATS}" ]]; then
-              echo "::error::BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled"
-              exit 1
-            fi
+            telegram_secret_mapped=true
+          fi
+          if [[ -n "${BUB_TELEGRAM_ALLOW_USERS}" || -n "${BUB_TELEGRAM_ALLOW_CHATS}" ]]; then
+            telegram_allow_list_configured=true
+          fi
+          if [[ "${telegram_allow_list_configured}" == "true" && "${telegram_secret_mapped}" != "true" ]]; then
+            echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured"
+            exit 1
+          fi
+          if [[ "${telegram_secret_mapped}" == "true" && "${telegram_allow_list_configured}" != "true" ]]; then
+            echo "::error::BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled"
+            exit 1
+          fi
+          if [[ "${telegram_secret_mapped}" == "true" ]]; then
             agent_runtime_args=(--no-cpu-throttling --min-instances=1)
           fi
           gcloud run deploy "${AGENT_SERVICE}" \

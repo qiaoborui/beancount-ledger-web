@@ -86,6 +86,11 @@ describe("Cloud Run deployment", () => {
   it("keeps Telegram polling alive and its token out of the public service", () => {
     expect(deploymentWorkflow).toContain("agent_runtime_args=(--cpu-throttling --min-instances=0)");
     expect(deploymentWorkflow).toContain("agent_runtime_args=(--no-cpu-throttling --min-instances=1)");
+    expect(deploymentWorkflow).toContain("telegram_secret_mapped=false");
+    expect(deploymentWorkflow).toContain("telegram_allow_list_configured=false");
+    expect(deploymentWorkflow).toContain(
+      "CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured",
+    );
     expect(deploymentWorkflow).toContain("BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled");
     const telegramExclusions = deploymentWorkflow.match(/\$1 != "BUB_TELEGRAM_TOKEN"/g) ?? [];
     expect(telegramExclusions).toHaveLength(2);
