@@ -10,6 +10,8 @@ describe("Cloud Run deployment", () => {
     expect(dockerfile).toContain("FROM server AS standalone");
     expect(dockerfile).toContain("ENV SERVE_STATIC=true");
     expect(dockerfile).toContain("COPY --from=web-builder /app/web/dist /app/web-dist");
+    expect(dockerfile).toContain("mkdir -p /app/agent/.bub");
+    expect(dockerfile).toContain("chown ledger:ledger /app/agent/.bub");
   });
 
   it("runs required checks before Google Cloud authentication", () => {
@@ -37,6 +39,14 @@ describe("Cloud Run deployment", () => {
     expect(deploymentWorkflow).toContain("--remove-tags=\"${REVISION_TAG}\"");
     expect(deploymentWorkflow).toContain("traffic restoration did not match");
     expect(deploymentWorkflow).toContain("CLOUD_RUN_SECRET_MAPPINGS must define");
+  });
+
+  it("keeps Telegram polling alive and its token out of the public service", () => {
+    expect(deploymentWorkflow).toContain("agent_runtime_args=(--cpu-throttling --min-instances=0)");
+    expect(deploymentWorkflow).toContain("agent_runtime_args=(--no-cpu-throttling --min-instances=1)");
+    expect(deploymentWorkflow).toContain("BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled");
+    const telegramExclusions = deploymentWorkflow.match(/\$1 != "BUB_TELEGRAM_TOKEN"/g) ?? [];
+    expect(telegramExclusions).toHaveLength(2);
   });
 
   it("pins every third-party action to a full commit SHA", () => {

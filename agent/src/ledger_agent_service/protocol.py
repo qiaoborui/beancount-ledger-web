@@ -83,3 +83,12 @@ class CapabilityResult(BaseModel):
     @classmethod
     def normalize_artifacts(cls, value: Any) -> Any:
         return [] if value is None else value
+
+
+class AgentBootstrap(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    capability_token: str = Field(alias="capabilityToken")
+    system_prompt: str = Field(alias="systemPrompt")
+    tools: list[ToolSpec] = Field(default_factory=list)
+    expires_at: str = Field("", alias="expiresAt")

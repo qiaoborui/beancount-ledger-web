@@ -15,7 +15,8 @@ def _required(name: str) -> str:
 class Settings:
     database_url: str
     ledger_api_url: str
-    service_token: str
+    service_token: str = ""
+    access_token: str = ""
     approval_timeout_seconds: int = 600
 
     @classmethod
@@ -23,11 +24,31 @@ class Settings:
         timeout = int(os.environ.get("AGENT_APPROVAL_TIMEOUT_SECONDS", "600"))
         if timeout < 30 or timeout > 720:
             raise RuntimeError("AGENT_APPROVAL_TIMEOUT_SECONDS must be between 30 and 720")
-        service_token = _required("AGENT_SERVICE_TOKEN")
-        os.environ.setdefault("BUB_API_KEY", service_token)
+        service_token = os.environ.get("AGENT_SERVICE_TOKEN", "").strip()
+        access_token = os.environ.get("LEDGER_AGENT_TOKEN", "").strip()
+        if not service_token and not access_token:
+            raise RuntimeError("AGENT_SERVICE_TOKEN or LEDGER_AGENT_TOKEN is required")
+        telegram_token = os.environ.get("BUB_TELEGRAM_TOKEN", "").strip()
+        telegram_users = os.environ.get("BUB_TELEGRAM_ALLOW_USERS", "").strip()
+        telegram_chats = os.environ.get("BUB_TELEGRAM_ALLOW_CHATS", "").strip()
+        if telegram_token and not telegram_users and not telegram_chats:
+            raise RuntimeError("BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled")
+        credential = service_token or access_token
+        ledger_api_url = _required("LEDGER_API_URL").rstrip("/")
+        os.environ.setdefault("BUB_MODEL", "openai:ledger-agent")
+        os.environ.setdefault(
+            "BUB_API_BASE",
+            f"{ledger_api_url}/api/internal/agent/model" if service_token else f"{ledger_api_url}/api/agent/model",
+        )
+        os.environ.setdefault("BUB_API_KEY", credential)
         return cls(
-            database_url=_required("DATABASE_URL"),
-            ledger_api_url=_required("LEDGER_API_URL").rstrip("/"),
+            database_url=os.environ.get("DATABASE_URL", "").strip(),
+            ledger_api_url=ledger_api_url,
             service_token=service_token,
+            access_token=access_token,
             approval_timeout_seconds=timeout,
         )
+
+    @property
+    def hosted(self) -> bool:
+        return bool(self.service_token)

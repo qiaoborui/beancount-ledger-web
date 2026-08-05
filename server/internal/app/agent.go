@@ -215,7 +215,7 @@ func (s *Server) agentTools() map[string]agentTool {
 	tools := []agentTool{
 		{
 			agentToolSpec: agentToolSpec{Name: "get_bql_capabilities", Description: "获取当前 BQL 支持的表、字段、聚合、过滤和限制。生成 BQL 前优先调用。", Parameters: objectSchema(nil, nil)},
-			Title:         "读取 BQL 能力",
+			Title:         "读取 BQL 能力", ReadOnly: true,
 			Execute: func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error) {
 				result := bqlCapabilities()
 				return agentToolExecution{ModelOutput: result, ClientOutput: result}, nil
@@ -223,7 +223,7 @@ func (s *Server) agentTools() map[string]agentTool {
 		},
 		{
 			agentToolSpec: agentToolSpec{Name: "validate_bql", Description: "校验一条只读 BQL SELECT 查询。不会读取账本数据。", Parameters: objectSchema(map[string]any{"query": stringSchema("要校验的 BQL SQL")}, []string{"query"})},
-			Title:         "校验 BQL",
+			Title:         "校验 BQL", ReadOnly: true,
 			Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 				var input struct {
 					Query string `json:"query"`
@@ -246,7 +246,7 @@ func (s *Server) agentTools() map[string]agentTool {
 				"valuationCurrency": stringSchema("折算币种，例如 CNY"),
 				"visualization":     enumSchema("auto", "table", "bar", "pie", "line"),
 			}, []string{"query"})},
-			Title: "运行 BQL",
+			Title: "运行 BQL", ReadOnly: true,
 			Execute: func(ctx context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 				if err := requireAgentSensitive(page); err != nil {
 					return agentToolExecution{}, err
@@ -287,7 +287,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			agentToolSpec: agentToolSpec{Name: "search_transactions", Description: "使用看板/流水页 DSL 跨月份搜索交易，支持 AND、OR、NOT、字段和日期条件。返回的 postings.amount 是元单位字符串（amountUnit=major），可直接用于 update_transaction，不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"query": stringSchema("流水查询 DSL"), "start": stringSchema("默认起始日期 YYYY-MM-DD"), "end": stringSchema("默认结束日期 YYYY-MM-DD，开区间"), "limit": numberSchema("最多返回条数，1-100"),
 			}, []string{"query"})},
-			Title: "搜索流水",
+			Title: "搜索流水", ReadOnly: true,
 			Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 				if err := requireAgentSensitive(page); err != nil {
 					return agentToolExecution{}, err
@@ -323,7 +323,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。返回给你的所有金额均为元单位字符串（amountUnit=major），可直接阅读，绝不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"start": stringSchema("起始日期 YYYY-MM-DD"), "end": stringSchema("结束日期 YYYY-MM-DD，开区间"), "valuationCurrency": stringSchema("折算币种"),
 			}, nil)},
-			Title: "读取账本汇总",
+			Title: "读取账本汇总", ReadOnly: true,
 			Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 				if err := requireAgentSensitive(page); err != nil {
 					return agentToolExecution{}, err
@@ -347,7 +347,7 @@ func (s *Server) agentTools() map[string]agentTool {
 		},
 		{
 			agentToolSpec: agentToolSpec{Name: "get_accounts", Description: "读取账户名称、别名、币种、分组和启用状态，用于生成合法分录或账户操作。", Parameters: objectSchema(map[string]any{"activeOnly": booleanSchema("是否只返回启用账户")}, nil)},
-			Title:         "读取账户表",
+			Title:         "读取账户表", ReadOnly: true,
 			Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 				var input struct {
 					ActiveOnly bool `json:"activeOnly"`
@@ -373,7 +373,7 @@ func (s *Server) agentTools() map[string]agentTool {
 		},
 		{
 			agentToolSpec: agentToolSpec{Name: "search_memories", Description: "检索已确认的 Agent 偏好和习惯记忆。记忆仅可作为偏好指导，不是账本事实。", Parameters: objectSchema(map[string]any{"query": stringSchema("可选关键词")}, nil)},
-			Title:         "查询 Agent 记忆",
+			Title:         "查询 Agent 记忆", ReadOnly: true,
 			Execute: func(ctx context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 				if err := requireAgentSensitive(page); err != nil {
 					return agentToolExecution{}, err
@@ -423,7 +423,7 @@ func (s *Server) agentTools() map[string]agentTool {
 				"path":  enumSchema("/", "/dashboard", "/query", "/transactions", "/accounts", "/net-worth", "/income-statement", "/investments", "/imports", "/reconcile", "/editor", "/settings"),
 				"label": stringSchema("导航说明"),
 			}, []string{"path"})},
-			Title: "打开页面",
+			Title: "打开页面", ReadOnly: true,
 			Execute: func(_ context.Context, raw json.RawMessage, _ AgentPageContext) (agentToolExecution, error) {
 				var input struct {
 					Path  string `json:"path"`
@@ -439,9 +439,9 @@ func (s *Server) agentTools() map[string]agentTool {
 	}
 	out := make(map[string]agentTool, len(tools))
 	for _, tool := range tools {
-		// The registry is the single source of truth for capability safety. A
-		// tool that is not explicitly an approval-gated write is read-only.
-		tool.ReadOnly = !tool.RequiresApproval
+		if !tool.ReadOnly && !tool.RequiresApproval {
+			panic("Agent tool must be read-only or require approval: " + tool.Name)
+		}
 		out[tool.Name] = tool
 	}
 	return out
@@ -450,7 +450,7 @@ func (s *Server) agentTools() map[string]agentTool {
 func newTransactionDraftTool(s *Server, name, description, title string, write bool) agentTool {
 	return agentTool{
 		agentToolSpec: agentToolSpec{Name: name, Description: description, Parameters: objectSchema(map[string]any{"entries": arraySchema(ledgerEntrySchema(), "交易或余额断言列表")}, []string{"entries"})},
-		Title:         title, RequiresApproval: write,
+		Title:         title, RequiresApproval: write, ReadOnly: !write,
 		Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 			var input struct {
 				Entries []LedgerEntry `json:"entries"`
@@ -608,7 +608,7 @@ func (s *Server) validateAgentTransactionUpdateSource(source TransactionSource) 
 func newAccountOperationsTool(s *Server, name, description, title string, write bool) agentTool {
 	return agentTool{
 		agentToolSpec: agentToolSpec{Name: name, Description: description, Parameters: objectSchema(map[string]any{"operations": arraySchema(accountOperationSchema(), "账户操作列表")}, []string{"operations"})},
-		Title:         title, RequiresApproval: write,
+		Title:         title, RequiresApproval: write, ReadOnly: !write,
 		Execute: func(_ context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 			var input struct {
 				Operations []AccountOperation `json:"operations"`

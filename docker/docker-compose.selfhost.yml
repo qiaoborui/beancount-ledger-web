@@ -78,6 +78,9 @@ services:
       BUB_MODEL: "${BUB_MODEL:-openai:ledger-agent}"
       BUB_API_BASE: http://server:3000/api/internal/agent/model
       BUB_API_KEY: ${AGENT_SERVICE_TOKEN:?set AGENT_SERVICE_TOKEN in .env.selfhost}
+      BUB_TELEGRAM_TOKEN: "${BUB_TELEGRAM_TOKEN:-}"
+      BUB_TELEGRAM_ALLOW_USERS: "${BUB_TELEGRAM_ALLOW_USERS:-}"
+      BUB_TELEGRAM_ALLOW_CHATS: "${BUB_TELEGRAM_ALLOW_CHATS:-}"
     expose:
       - "8080"
     healthcheck:
