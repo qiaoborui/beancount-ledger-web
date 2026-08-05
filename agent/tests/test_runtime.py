@@ -8,12 +8,13 @@ from types import SimpleNamespace
 import pytest
 from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
+from bub.builtin.model_runner import ModelRunner
 from bub.hooks.interception import ToolCall
 from bub.streaming import AsyncStreamEvents, StreamEvent
 
 from ledger_agent_service.config import Settings
 from ledger_agent_service.interactions import InteractionBroker
-from ledger_agent_service.protocol import ToolSpec, TurnRequest
+from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
 from ledger_agent_service.runtime import AgentGateway, CONFIRM_PHRASES, LedgerPlugin, LedgerTelegramChannel
 
 
@@ -157,13 +158,61 @@ async def test_concurrent_telegram_writes_are_confirmed_one_at_a_time() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_prompt_cannot_enter_bub_comma_command_mode() -> None:
+async def test_web_prompt_exposes_bub_comma_command_mode() -> None:
     plugin = object.__new__(LedgerPlugin)
     message = ChannelMessage(session_id="session-1", channel="web", content=",env")
 
     prompt = await plugin.build_prompt(message, "session-1", {"mode": "ledger"})
 
-    assert prompt == [{"role": "user", "content": ",env"}]
+    assert prompt == ",env"
+
+
+@pytest.mark.asyncio
+async def test_web_prompt_reaches_the_model_as_plain_text() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    message = ChannelMessage(session_id="session-1", channel="web", content="查询本月支出")
+
+    prompt = await plugin.build_prompt(message, "session-1", {"mode": "ledger"})
+
+    class EmptyTape:
+        async def read_messages(self) -> list[dict]:
+            return []
+
+    runner = object.__new__(ModelRunner)
+    messages, _ = await runner.build_messages(
+        tape=EmptyTape(),
+        run_id="test-run",
+        system_prompt="system",
+        prompt=prompt,
+        model="openai:ledger-agent",
+    )
+    assert messages[1] == {"role": "user", "content": "查询本月支出"}
+
+
+@pytest.mark.asyncio
+async def test_onboarding_history_is_rendered_as_typed_text_content() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    request = OnboardingRequest.model_validate({
+        "message": "工资",
+        "messages": [
+            {"role": "assistant", "content": "你的收入来源是什么？"},
+            {"role": "user", "content": "每月有固定收入"},
+        ],
+    })
+    message = ChannelMessage(
+        session_id="onboarding-1",
+        channel="web",
+        content=request.message,
+        context={"_ledger_onboarding_request": request},
+    )
+
+    prompt = await plugin.build_prompt(message, "onboarding-1", {"mode": "onboarding"})
+
+    assert isinstance(prompt, list) and len(prompt) == 1
+    assert prompt[0]["type"] == "text"
+    assert "助手：你的收入来源是什么？" in prompt[0]["text"]
+    assert "用户：每月有固定收入" in prompt[0]["text"]
+    assert prompt[0]["text"].endswith("当前用户消息：\n工资")
 
 
 @pytest.mark.asyncio
