@@ -11,7 +11,7 @@ describe("AgentAccessTokenSettings", () => {
 
   it("distinguishes active, expired and revoked tokens", () => {
     const base = { id: "token-1", name: "Laptop", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-12-01T00:00:00Z" };
-    expect(agentTokenPresentation(base, new Date("2026-08-05T00:00:00Z").getTime())).toEqual({ label: "只读", active: true });
+    expect(agentTokenPresentation(base, new Date("2026-08-05T00:00:00Z").getTime())).toEqual({ label: "可用", active: true });
     expect(agentTokenPresentation({ ...base, expiresAt: "2026-01-02T00:00:00Z" }, new Date("2026-08-05T00:00:00Z").getTime())).toEqual({ label: "已过期", active: false });
     expect(agentTokenPresentation({ ...base, revokedAt: "2026-02-01T00:00:00Z" })).toEqual({ label: "已吊销", active: false });
     expect(agentTokenUsageLabel(base)).toBe("尚未使用");

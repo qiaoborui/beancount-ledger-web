@@ -49,7 +49,6 @@ type runtimeConfigSettings struct {
 	AIProvider              string `json:"aiProvider"`
 	AIBaseURL               string `json:"aiBaseUrl"`
 	AIModel                 string `json:"aiModel"`
-	AgentTokenWriteEnabled  bool   `json:"agentTokenWriteEnabled"`
 	IndexerIntervalSeconds  int    `json:"indexerIntervalSeconds"`
 	IndexerRetryInitial     int    `json:"indexerRetryInitialSeconds"`
 	IndexerRetryMaximum     int    `json:"indexerRetryMaximumSeconds"`
@@ -72,7 +71,6 @@ type RuntimeConfigStatus struct {
 	AIBaseURL              string `json:"aiBaseUrl,omitempty"`
 	AIModel                string `json:"aiModel,omitempty"`
 	AIAPIKeySet            bool   `json:"aiApiKeyConfigured"`
-	AgentTokenWriteEnabled bool   `json:"agentTokenWriteEnabled"`
 	IndexerIntervalSeconds int    `json:"indexerIntervalSeconds,omitempty"`
 	IndexerRetryInitial    int    `json:"indexerRetryInitialSeconds,omitempty"`
 	IndexerRetryMaximum    int    `json:"indexerRetryMaximumSeconds,omitempty"`
@@ -91,7 +89,6 @@ type RuntimeConfigInstallInput struct {
 	AIBaseURL              string `json:"aiBaseUrl"`
 	AIModel                string `json:"aiModel"`
 	AIAPIKey               string `json:"aiApiKey"`
-	AgentTokenWriteEnabled bool   `json:"agentTokenWriteEnabled"`
 	IndexerIntervalSeconds int    `json:"indexerIntervalSeconds"`
 	IndexerRetryInitial    int    `json:"indexerRetryInitialSeconds"`
 	IndexerRetryMaximum    int    `json:"indexerRetryMaximumSeconds"`
@@ -109,7 +106,6 @@ type RuntimeConfigUpdateInput struct {
 	AIBaseURL              string `json:"aiBaseUrl"`
 	AIModel                string `json:"aiModel"`
 	AIAPIKey               string `json:"aiApiKey"`
-	AgentTokenWriteEnabled bool   `json:"agentTokenWriteEnabled"`
 	IndexerIntervalSeconds int    `json:"indexerIntervalSeconds"`
 	IndexerRetryInitial    int    `json:"indexerRetryInitialSeconds"`
 	IndexerRetryMaximum    int    `json:"indexerRetryMaximumSeconds"`
@@ -372,7 +368,6 @@ func (s *RuntimeConfigStore) Status(ctx context.Context) (RuntimeConfigStatus, e
 		status.AIProvider = settings.AIProvider
 		status.AIBaseURL = settings.AIBaseURL
 		status.AIModel = settings.AIModel
-		status.AgentTokenWriteEnabled = settings.AgentTokenWriteEnabled
 		status.IndexerIntervalSeconds = settings.IndexerIntervalSeconds
 		status.IndexerRetryInitial = settings.IndexerRetryInitial
 		status.IndexerRetryMaximum = settings.IndexerRetryMaximum
@@ -428,7 +423,6 @@ func (s *RuntimeConfigStore) Install(ctx context.Context, input RuntimeConfigIns
 			AIProvider:              input.AIProvider,
 			AIBaseURL:               input.AIBaseURL,
 			AIModel:                 input.AIModel,
-			AgentTokenWriteEnabled:  input.AgentTokenWriteEnabled,
 			IndexerIntervalSeconds:  input.IndexerIntervalSeconds,
 			IndexerRetryInitial:     input.IndexerRetryInitial,
 			IndexerRetryMaximum:     input.IndexerRetryMaximum,
@@ -510,7 +504,6 @@ func (s *RuntimeConfigStore) Update(ctx context.Context, input RuntimeConfigUpda
 		settings.AIProvider = input.AIProvider
 		settings.AIBaseURL = input.AIBaseURL
 		settings.AIModel = input.AIModel
-		settings.AgentTokenWriteEnabled = input.AgentTokenWriteEnabled
 		settings.IndexerIntervalSeconds = input.IndexerIntervalSeconds
 		settings.IndexerRetryInitial = input.IndexerRetryInitial
 		settings.IndexerRetryMaximum = input.IndexerRetryMaximum
@@ -641,17 +634,6 @@ func (s *RuntimeConfigStore) VerifyAdminPassword(ctx context.Context, password s
 		return false, err
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil, nil
-}
-
-func (s *RuntimeConfigStore) AgentTokenWriteEnabled(ctx context.Context) (bool, error) {
-	settings, found, err := readRuntimeConfigSettings(ctx, s.db)
-	if err != nil {
-		return false, err
-	}
-	if !found || !settings.SetupComplete {
-		return false, nil
-	}
-	return settings.AgentTokenWriteEnabled, nil
 }
 
 func (s *RuntimeConfigStore) AIProviderConfig(ctx context.Context) (aiProviderConfig, error) {

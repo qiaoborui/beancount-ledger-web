@@ -111,7 +111,7 @@ export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sen
       setCreatedToken(result.token);
       setCopied(false);
       setName("");
-      showToast("success", "只读 Agent 访问令牌已创建");
+      showToast("success", "本地 Agent Token 已创建");
     } catch (error) {
       if (!operationGate.current.isCurrent(current)) return;
       showToast("error", error instanceof Error ? error.message : "创建 Agent 访问令牌失败");
@@ -158,7 +158,7 @@ export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sen
         <div>
           <div className="text-xs uppercase tracking-[0.24em] text-stone">local bub access</div>
           <h1 className="mt-2 font-serif text-3xl font-medium">本地 Agent 访问</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">签发给本地 <code className="rounded bg-tag px-1.5 py-0.5 text-xs text-ink">bub chat</code> 的可吊销 Token。首版只允许查询账本，不能写账、导入或执行 Git 操作。</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">签发给本地 <code className="rounded bg-tag px-1.5 py-0.5 text-xs text-ink">bub chat</code> 的可吊销 Token，默认提供完整账本工具。写入前 Agent 必须先在一轮对话中展示完整草稿，等你下一轮明确确认后才能调用写工具。</p>
         </div>
       </div>
       <div className="flex w-full gap-2 lg:w-auto lg:min-w-80">
@@ -186,17 +186,17 @@ export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sen
 
     <div className="mt-5 overflow-hidden rounded-xl border border-line bg-panel">
       {loading && <div className="flex min-h-28 items-center justify-center px-5 py-8 text-sm text-stone" role="status">正在读取 Agent 访问令牌…</div>}
-      {!loading && unsupported && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="status"><h2 className="text-sm font-semibold text-ink">当前后端暂不支持 Token 管理</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">升级后端后，即可为本地 Bub 签发只读访问令牌。</p></div>}
+      {!loading && unsupported && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="status"><h2 className="text-sm font-semibold text-ink">当前后端暂不支持 Token 管理</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">升级后端后，即可为本地 Bub 签发 Agent Token。</p></div>}
       {!loading && loadError && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="alert"><h2 className="text-sm font-semibold text-ink">暂时无法读取 Token</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{loadError}</p><Button type="button" variant="outline" className="mt-4" onClick={() => void load()}>重试</Button></div>}
-      {!loading && sensitiveUnlocked && !unsupported && !loadError && tokens.length === 0 && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-9 text-center"><span className="grid size-11 place-items-center rounded-lg border border-line bg-paper text-brand"><KeyRound className="h-5 w-5" /></span><h2 className="mt-4 text-sm font-semibold text-ink">还没有本地 Agent Token</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">创建后可在自己的电脑上运行 Bub，并通过远程 API 只读查询这个账本。</p></div>}
+      {!loading && sensitiveUnlocked && !unsupported && !loadError && tokens.length === 0 && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-9 text-center"><span className="grid size-11 place-items-center rounded-lg border border-line bg-paper text-brand"><KeyRound className="h-5 w-5" /></span><h2 className="mt-4 text-sm font-semibold text-ink">还没有本地 Agent Token</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">创建后可在自己的电脑上运行 Bub，通过远程 API 使用查询和写入工具。</p></div>}
       {!loading && tokens.length > 0 && <div className="divide-y divide-line">{tokens.map((token) => <AgentTokenRow key={token.id} token={token} onRevoke={() => setRevoking(token)} />)}</div>}
     </div>
 
-    <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-stone"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />服务端只保存 Token 密钥的哈希。吊销立即生效，已签发的短期查询 capability 最长还会保留 15 分钟。</p>
+    <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-stone"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />服务端只保存 Token 密钥的哈希。capability 本身有效期为 15 分钟，但 Token 吊销后会立即失效；账本写入仍会执行参数校验、来源版本校验、bean-check 和失败回滚。</p>
 
     <AlertDialog open={revoking != null} onOpenChange={(open) => !open && !saving && setRevoking(null)}>
       <AlertDialogContent className="border-line bg-panel text-ink">
-        <AlertDialogHeader><AlertDialogTitle>吊销这个 Agent Token？</AlertDialogTitle><AlertDialogDescription className="text-stone">本地设备“{revoking?.name}”将无法继续获取新的账本查询权限。需要恢复访问时，请创建一个新 Token。</AlertDialogDescription></AlertDialogHeader>
+        <AlertDialogHeader><AlertDialogTitle>吊销这个 Agent Token？</AlertDialogTitle><AlertDialogDescription className="text-stone">本地设备“{revoking?.name}”将无法继续获取新的账本工具权限。需要恢复访问时，请创建一个新 Token。</AlertDialogDescription></AlertDialogHeader>
         <AlertDialogFooter><AlertDialogCancel disabled={saving}>取消</AlertDialogCancel><Button type="button" variant="destructive" disabled={saving} onClick={() => void confirmRevoke()}>{saving ? "吊销中…" : "确认吊销"}</Button></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -219,7 +219,7 @@ export function agentTokenPresentation(token: AgentAccessTokenSummary, now = Dat
   if (token.revokedAt) return { label: "已吊销", active: false };
   const expiresAt = new Date(token.expiresAt).getTime();
   if (Number.isFinite(expiresAt) && expiresAt <= now) return { label: "已过期", active: false };
-  return { label: "只读", active: true };
+  return { label: "可用", active: true };
 }
 
 export function agentTokenUsageLabel(token: AgentAccessTokenSummary) {

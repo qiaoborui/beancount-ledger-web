@@ -23,10 +23,7 @@ import (
 
 const (
 	agentServiceRequestTimeout = 14 * time.Minute
-	// The Bub interaction timeout is bounded below the hosted request timeout.
-	// Capability and preview
-	// confirmation tokens must remain valid for that entire human pause.
-	agentCapabilityLifetime = 15 * time.Minute
+	agentCapabilityLifetime    = 15 * time.Minute
 )
 
 type agentCapabilityClaims struct {
@@ -36,21 +33,11 @@ type agentCapabilityClaims struct {
 	SensitiveUnlocked bool             `json:"sensitiveUnlocked"`
 	AllowedTools      []string         `json:"allowedTools"`
 	Subject           string           `json:"subject,omitempty"`
-	Trusted           bool             `json:"trusted,omitempty"`
 	ExpiresAt         int64            `json:"expiresAt"`
 }
 
 type agentCapabilityRequest struct {
-	Arguments         json.RawMessage `json:"arguments"`
-	ConfirmationToken string          `json:"confirmationToken,omitempty"`
-}
-
-type agentConfirmationClaims struct {
-	SessionID     string `json:"sessionId"`
-	ClusterID     string `json:"clusterId"`
-	ToolName      string `json:"toolName"`
-	ArgumentsHash string `json:"argumentsHash"`
-	ExpiresAt     int64  `json:"expiresAt"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 var newAgentServiceHTTPClient = func(ctx context.Context, audience string) (*http.Client, error) {
@@ -87,7 +74,6 @@ func (s *Server) proxyLedgerAgentTurn(c *gin.Context, input AgentTurnRequest) er
 		"sessionId":       input.SessionID,
 		"message":         strings.TrimSpace(input.Message),
 		"context":         input.Context,
-		"approvalPolicy":  normalizeAgentApprovalPolicy(input.ApprovalPolicy),
 		"capabilityToken": capabilityToken,
 		"systemPrompt":    agentSystemPrompt(input.Context, memories),
 	}
@@ -219,54 +205,6 @@ func agentCapabilitySignature(payload, secret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (s *Server) mintAgentConfirmationToken(claims agentConfirmationClaims) (string, error) {
-	raw, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-	payload := base64.RawURLEncoding.EncodeToString(raw)
-	return payload + "." + agentConfirmationSignature(payload, s.cfg.AgentServiceToken), nil
-}
-
-func (s *Server) parseAgentConfirmationToken(token string) (agentConfirmationClaims, error) {
-	payload, signature, found := strings.Cut(strings.TrimSpace(token), ".")
-	if !found || payload == "" || signature == "" {
-		return agentConfirmationClaims{}, errors.New("write confirmation token is required")
-	}
-	want := agentConfirmationSignature(payload, s.cfg.AgentServiceToken)
-	if subtle.ConstantTimeCompare([]byte(signature), []byte(want)) != 1 {
-		return agentConfirmationClaims{}, errors.New("invalid write confirmation token")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(payload)
-	if err != nil {
-		return agentConfirmationClaims{}, errors.New("invalid write confirmation token")
-	}
-	var claims agentConfirmationClaims
-	if json.Unmarshal(raw, &claims) != nil || claims.ExpiresAt < time.Now().Unix() {
-		return agentConfirmationClaims{}, errors.New("write confirmation token has expired or is invalid")
-	}
-	return claims, nil
-}
-
-func agentConfirmationSignature(payload, secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte("agent-write-confirmation." + payload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-func canonicalAgentArgumentsHash(raw json.RawMessage) (string, error) {
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", err
-	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(canonical)
-	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
-}
-
 func (s *Server) requireAgentService(c *gin.Context) bool {
 	want := strings.TrimSpace(s.cfg.AgentServiceToken)
 	got := strings.TrimSpace(c.GetHeader("X-Agent-Service-Token"))
@@ -295,53 +233,10 @@ func (s *Server) internalAgentTools(c *gin.Context) {
 		tool := tools[name]
 		result = append(result, map[string]any{
 			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-			"title": tool.Title, "requiresApproval": tool.RequiresApproval, "approvalMessage": tool.ApprovalMessage,
-			"executionStatus": tool.ExecutionStatus, "readOnly": tool.ReadOnly,
+			"title": tool.Title, "executionStatus": tool.ExecutionStatus, "readOnly": tool.ReadOnly,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"tools": result})
-}
-
-func (s *Server) internalAgentToolPreview(c *gin.Context) {
-	claims, request, ok := s.authorizeAgentCapabilityCall(c)
-	if !ok {
-		return
-	}
-	toolName := c.Param("toolName")
-	if !agentCapabilityAllowsTool(claims, toolName) {
-		errorJSON(c, http.StatusForbidden, errors.New("Agent capability does not allow this tool"))
-		return
-	}
-	tool, exists := s.agentTools()[toolName]
-	if !exists || !tool.RequiresApproval {
-		errorJSON(c, http.StatusNotFound, errors.New("Agent tool preview is not available"))
-		return
-	}
-	if _, _, _, err := validateAgentToolCall(s.agentTools(), agentModelToolCall{ID: "capability-preview", Type: "function", Function: agentModelFunctionCall{Name: toolName, Arguments: string(request.Arguments)}}, map[string]struct{}{}); err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	execution, err := s.previewAgentWrite(c.Request.Context(), toolName, request.Arguments, claims.Context)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	argumentsHash, err := canonicalAgentArgumentsHash(request.Arguments)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	confirmationToken, err := s.mintAgentConfirmationToken(agentConfirmationClaims{
-		SessionID: claims.SessionID, ClusterID: claims.ClusterID, ToolName: toolName,
-		ArgumentsHash: argumentsHash, ExpiresAt: time.Now().Add(agentCapabilityLifetime).Unix(),
-	})
-	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return
-	}
-	response := agentCapabilityExecutionResponse(execution)
-	response["confirmationToken"] = confirmationToken
-	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) internalAgentToolExecute(c *gin.Context) {
@@ -360,17 +255,6 @@ func (s *Server) internalAgentToolExecute(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if tool.RequiresApproval && !claims.Trusted {
-		confirmation, confirmationErr := s.parseAgentConfirmationToken(request.ConfirmationToken)
-		argumentsHash, hashErr := canonicalAgentArgumentsHash(arguments)
-		if confirmationErr != nil || hashErr != nil || confirmation.SessionID != claims.SessionID || confirmation.ClusterID != claims.ClusterID || confirmation.ToolName != toolName || confirmation.ArgumentsHash != argumentsHash {
-			if confirmationErr == nil {
-				confirmationErr = errors.New("write confirmation token does not match this tool call")
-			}
-			errorJSON(c, http.StatusForbidden, confirmationErr)
-			return
-		}
-	}
 	execution, err := tool.Execute(c.Request.Context(), arguments, claims.Context)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -384,6 +268,15 @@ func (s *Server) authorizeAgentCapabilityCall(c *gin.Context) (agentCapabilityCl
 	claims, err := s.parseAgentCapabilityToken(token)
 	if err != nil {
 		errorJSON(c, http.StatusUnauthorized, err)
+		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
+	}
+	active, err := s.agentCapabilitySubjectActive(c.Request.Context(), claims.Subject)
+	if err != nil {
+		errorJSON(c, http.StatusInternalServerError, err)
+		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
+	}
+	if !active {
+		errorJSON(c, http.StatusUnauthorized, errors.New("Agent access token has been revoked or expired"))
 		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
 	}
 	var request agentCapabilityRequest

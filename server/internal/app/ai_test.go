@@ -209,7 +209,7 @@ func TestAgentCapabilityExecutionResponseUsesEmptyArtifactArray(t *testing.T) {
 	}
 }
 
-func TestWriteCapabilityRequiresMatchingPreviewConfirmation(t *testing.T) {
+func TestWriteCapabilityExecutesThroughUnifiedToolEndpoint(t *testing.T) {
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "agent-secret"
 	router := newRouter(server.cfg, server)
@@ -217,7 +217,7 @@ func TestWriteCapabilityRequiresMatchingPreviewConfirmation(t *testing.T) {
 		SessionID: "session-write", ClusterID: ledgerClusterID(server.cfg),
 		SensitiveUnlocked: true, Context: AgentPageContext{SensitiveUnlocked: true},
 		AllowedTools: []string{"upsert_memory"},
-		ExpiresAt: time.Now().Add(time.Minute).Unix(),
+		ExpiresAt:    time.Now().Add(time.Minute).Unix(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -233,24 +233,9 @@ func TestWriteCapabilityRequiresMatchingPreviewConfirmation(t *testing.T) {
 		return res
 	}
 
-	preview := request("/api/internal/agent/tools/upsert_memory/preview", body)
-	if preview.Code != http.StatusOK {
-		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
-	}
-	var previewBody struct {
-		ConfirmationToken string `json:"confirmationToken"`
-	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &previewBody); err != nil || previewBody.ConfirmationToken == "" {
-		t.Fatalf("preview confirmation token missing: body=%s err=%v", preview.Body.String(), err)
-	}
-	withoutConfirmation := request("/api/internal/agent/tools/upsert_memory/execute", body)
-	if withoutConfirmation.Code != http.StatusForbidden {
-		t.Fatalf("write without confirmation status=%d body=%s", withoutConfirmation.Code, withoutConfirmation.Body.String())
-	}
-	executeBody, _ := json.Marshal(map[string]any{"arguments": arguments, "confirmationToken": previewBody.ConfirmationToken})
-	executed := request("/api/internal/agent/tools/upsert_memory/execute", executeBody)
+	executed := request("/api/internal/agent/tools/upsert_memory/execute", body)
 	if executed.Code != http.StatusOK {
-		t.Fatalf("confirmed write status=%d body=%s", executed.Code, executed.Body.String())
+		t.Fatalf("write status=%d body=%s", executed.Code, executed.Body.String())
 	}
 }
 
@@ -334,8 +319,8 @@ func TestLedgerAgentExposesCompleteTransactionWriteTools(t *testing.T) {
 	tools := testAgentServer(t).agentTools()
 	for _, name := range []string{"append_transactions", "update_transaction", "delete_transaction", "reverse_transaction"} {
 		tool, ok := tools[name]
-		if !ok || !tool.RequiresApproval || tool.ReadOnly {
-			t.Fatalf("transaction write tool %q must require approval: %#v", name, tool)
+		if !ok || tool.ReadOnly {
+			t.Fatalf("transaction write tool %q must be present and writable: %#v", name, tool)
 		}
 	}
 }

@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.responses import StreamingResponse
 
 from .config import Settings
-from .protocol import InteractionResponse, OnboardingRequest, TurnRequest
+from .protocol import OnboardingRequest, TurnRequest
 from .runtime import AgentGateway
 
 
@@ -61,18 +61,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield _sse(event, payload)
 
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
-
-    @app.post("/v1/interactions/{interaction_id}", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(authorize)])
-    async def resolve_interaction(
-        interaction_id: str,
-        input: InteractionResponse,
-        agent: AgentGateway = Depends(runtime),
-    ) -> dict[str, bool]:
-        try:
-            await agent.broker.resolve(interaction_id, input.approved)
-        except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interaction not found") from exc
-        return {"accepted": True}
 
     @app.get("/v1/sessions/{session_id}/timeline", dependencies=[Depends(authorize)])
     async def timeline(

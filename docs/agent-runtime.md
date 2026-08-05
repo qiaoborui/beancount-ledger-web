@@ -14,7 +14,7 @@ Browser -> Go API -> Bub Web Channel -> Bub model client -> Go model proxy
                     +-> signed capability -> Go ledger tools
 
 Telegram ----------> Bub Telegram Channel
-Local bub chat -----> Bub CLI Channel -> remote read-only capability
+Local bub chat -----> Bub CLI Channel -> remote capability
 ```
 
 The Agent service never receives a ledger checkout, GitHub token, provider API
@@ -28,14 +28,18 @@ Conversation tapes and projected UI timelines use the existing
 there is no repository-owned TapeStore implementation. Deploy the Agent as one
 instance because same-session turns are serialized in-process.
 
-Write tools keep the existing boundary:
+Write tools use the same capability and execution path as read tools. Safety is
+enforced as a conversational protocol plus the existing Go write boundary:
 
-1. Go validates arguments and builds a preview artifact.
-2. Bub pauses the tool call and emits `approval_required` on the open SSE turn.
-3. The browser resolves the interaction through Go.
-4. Bub supplies the preview-bound confirmation token and calls Go's execute
-   endpoint.
-5. Go runs the existing writer, `bean-check`, commit, and rollback path.
+1. The model may use read, draft, and validation tools to prepare the exact
+   change.
+2. The model shows the complete proposed modification in its reply and ends
+   the turn without calling a write tool.
+3. The user explicitly confirms that exact proposal in the next relevant turn.
+4. The model calls the ordinary write tool; there is no runtime approval event,
+   confirmation token, approval card, or paused tool call.
+5. Go validates the schema and source revision, performs the write, runs
+   `bean-check`, commits, and rolls back on failure.
 
 The public API does not contain a legacy Go Agent loop or runtime fallback.
 Rollback is performed by deploying an earlier Git revision.
@@ -46,23 +50,26 @@ Rollback is performed by deploying an earlier Git revision.
   exposes it at `POST /v1/channels/web/messages` and projects Bub stream events
   into the product timeline over SSE.
 - Telegram uses Bub's native long-polling Channel. The project plugin adds the
-  ledger prompt, tools, preview, and exact next-message confirmation policy.
-  Pending writes are serialized per chat and bound to the Telegram user who
-  initiated them, so another allowed member of a group cannot approve or
-  cancel that write.
+  ledger prompt, tools, and exact next-message confirmation policy. A
+  confirmation is simply a new model turn; the Agent process does not need to
+  remain resident between the draft and confirmation turns.
 - Local `bub chat` uses Bub's native CLI Channel. It exchanges a revocable
-  `blw_agent_...` credential for a 15-minute capability containing only tools
-  marked read-only.
+  `blw_agent_...` credential for a 15-minute capability containing the full
+  allowed tool catalog. Revoking or expiring the parent Token immediately
+  invalidates capabilities that were already issued from it.
 
 The hosted gateway uses `AGENT_SERVICE_TOKEN` and can receive the complete Go
-tool catalog. Browser write tools still use the capability minted for that Web
-turn. Telegram write tools require preview and one of these exact replies:
+tool catalog. Web, Telegram, and local CLI all follow the same cross-turn write
+protocol. Telegram accepts one of these exact replies:
 `确认写入`, `确认入账`, or `confirm write`. Short acknowledgements such as `好`,
-`OK`, and `👍` never approve a write.
+`OK`, and `👍` never approve a write. In group chats, the prompt also requires
+the confirming message's Telegram `sender_id` to match the user who requested
+and received the draft.
 
-Web, onboarding, and Telegram messages are passed to Bub as model prompts, not
-as CLI command strings. Bub's comma-prefixed local command mode remains
-available only to the operator running the native CLI Channel.
+Ordinary Web, onboarding, and Telegram messages are passed to Bub as model
+prompts. Web, Telegram, and the native CLI Channel preserve Bub's
+comma-prefixed command mode; those strings reach Bub's command runner without
+being rewritten as model input.
 
 Required Agent environment:
 
@@ -84,8 +91,9 @@ BUB_TELEGRAM_ALLOW_CHATS=<comma-separated Telegram chat IDs>
 ```
 
 Keep the hosted Agent at one maximum instance while Telegram long polling is
-enabled. Multiple instances would poll the same bot token and split in-process
-approval/session state.
+enabled. Multiple instances would poll the same bot token and compete for
+updates. This is a Telegram polling constraint, not a requirement to keep an
+Agent alive while waiting for write confirmation.
 
 `AGENT_SERVICE_URL` and `AGENT_SERVICE_TOKEN` configure the Go gateway. Hosted
 deployments also set `AGENT_SERVICE_AUDIENCE` so Go obtains a Cloud Run OIDC
@@ -112,30 +120,14 @@ API key remain in the remote instance's **实例运行配置**.
 `BUB_MODEL=openai:ledger-agent` is the local alias for that OpenAI-compatible
 proxy, not a second provider configuration.
 
-### Local write access (opt-in)
+### Local write access
 
-By default a local `bub chat` session is read-only: the server mints a
-15-minute capability containing only read-only tools, and write tools are never
-downloaded. To let the local operator also write to the ledger, enable the
-**允许本地 Agent 写入账本** toggle under Settings → 实例运行配置. The setting is
-stored in the database `runtime_config` (no environment variable, no restart
-needed).
-
-With this enabled, every `blw_agent_...` token bootstrap returns the complete
-tool catalog (including `append_transactions`, `update_transaction`,
+Every valid `blw_agent_...` token bootstrap returns the complete allowed tool
+catalog, including `append_transactions`, `update_transaction`,
 `delete_transaction`, `reverse_transaction`, `apply_account_operations`, and
-`upsert_memory`). The CLI channel has no interactive approval surface (it is a
-synchronous REPL), so the system prompt instructs the agent to explain the
-pending Beancount changes and ask for explicit confirmation in the conversation
-before calling a write tool; it must never write without that confirmation. The
-write itself still goes through the server's normal writer, `bean-check`,
-commit, and rollback path — only the per-call approval handshake is skipped,
-replaced by the in-dialog confirmation.
-
-Instances without a configured database (filesystem-only) default to read-only
-and cannot expose local write tools.
-
-This is an all-or-nothing switch: it applies to every local access token. Keep
-it off unless you specifically want write capability from a local CLI. Web and
-Telegram write tools are unaffected — they keep their existing confirmation
-flows regardless of this flag.
+`upsert_memory`. There is no local-write configuration switch and no separate
+approval surface. The system prompt requires the Agent to show the complete
+pending Beancount change, end its reply, and wait for explicit confirmation in
+the next user turn before calling a write tool. The write itself still goes
+through schema validation, source revision checks, the server writer,
+`bean-check`, commit, and rollback.

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -70,7 +69,7 @@ func TestAgentAccessTokenNameLimitCountsCharacters(t *testing.T) {
 	}
 }
 
-func TestAgentAccessTokenBootstrapIsReadOnlyAndRevocable(t *testing.T) {
+func TestAgentAccessTokenBootstrapIncludesWriteToolsAndIsRevocable(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "agent-service-secret"
@@ -106,6 +105,7 @@ func TestAgentAccessTokenBootstrapIsReadOnlyAndRevocable(t *testing.T) {
 	}
 	var bootstrapBody struct {
 		CapabilityToken string `json:"capabilityToken"`
+		SystemPrompt    string `json:"systemPrompt"`
 		Tools           []struct {
 			Name     string `json:"name"`
 			ReadOnly bool   `json:"readOnly"`
@@ -117,10 +117,20 @@ func TestAgentAccessTokenBootstrapIsReadOnlyAndRevocable(t *testing.T) {
 	if bootstrapBody.CapabilityToken == "" || len(bootstrapBody.Tools) == 0 {
 		t.Fatalf("bootstrap missing capability or tools: %s", bootstrap.Body.String())
 	}
+	writeToolFound := false
 	for _, tool := range bootstrapBody.Tools {
-		if !tool.ReadOnly || tool.Name == "append_transactions" {
-			t.Fatalf("external bootstrap exposed write tool: %#v", tool)
+		if tool.Name == "append_transactions" {
+			writeToolFound = true
+			if tool.ReadOnly {
+				t.Fatalf("append_transactions must be exposed as a write tool: %#v", tool)
+			}
 		}
+	}
+	if !writeToolFound {
+		t.Fatalf("external bootstrap is missing append_transactions: %s", bootstrap.Body.String())
+	}
+	if !strings.Contains(bootstrapBody.SystemPrompt, "不会弹出程序审批框") || !strings.Contains(bootstrapBody.SystemPrompt, "紧邻上一条助手回复") {
+		t.Fatalf("bootstrap system prompt must require cross-turn conversational confirmation: %s", bootstrapBody.SystemPrompt)
 	}
 
 	writeRequest := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
@@ -128,13 +138,21 @@ func TestAgentAccessTokenBootstrapIsReadOnlyAndRevocable(t *testing.T) {
 	writeRequest.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
 	writeResponse := httptest.NewRecorder()
 	router.ServeHTTP(writeResponse, writeRequest)
-	if writeResponse.Code != http.StatusForbidden {
-		t.Fatalf("read-only capability write status=%d body=%s", writeResponse.Code, writeResponse.Body.String())
+	if writeResponse.Code != http.StatusBadRequest {
+		t.Fatalf("write execute status=%d body=%s (want 400: empty entries rejected before write)", writeResponse.Code, writeResponse.Body.String())
 	}
 
 	revoked := requestWithCookies(router, http.MethodDelete, "/api/agent/access-tokens/"+createBody.Credential.ID, "", nil)
 	if revoked.Code != http.StatusNoContent {
 		t.Fatalf("revoke status=%d body=%s", revoked.Code, revoked.Body.String())
+	}
+	writeAfterRevoke := httptest.NewRecorder()
+	requestAfterCapabilityRevoke := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
+	requestAfterCapabilityRevoke.Header.Set("Content-Type", "application/json")
+	requestAfterCapabilityRevoke.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
+	router.ServeHTTP(writeAfterRevoke, requestAfterCapabilityRevoke)
+	if writeAfterRevoke.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked token capability status=%d body=%s", writeAfterRevoke.Code, writeAfterRevoke.Body.String())
 	}
 	bootstrapAfterRevoke := httptest.NewRecorder()
 	requestAfterRevoke := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli"}`))
@@ -211,94 +229,6 @@ func TestExternalAgentModelProxyKeepsProviderCredentialsServerSide(t *testing.T)
 	}
 }
 
-type stubAgentTokenWrite struct {
-	enabled bool
-}
-
-func (s stubAgentTokenWrite) AgentTokenWriteEnabled(context.Context) (bool, error) {
-	return s.enabled, nil
-}
-
-func TestAgentAccessTokenBootstrapCanEnableWrite(t *testing.T) {
-	t.Setenv("LEDGER_AUTH_DISABLED", "true")
-	server := testAgentServer(t)
-	server.cfg.AgentServiceToken = "agent-service-secret"
-	server.agentTokenWrite = stubAgentTokenWrite{enabled: true}
-	router := newRouter(server.cfg, server)
-
-	created := requestWithCookies(router, http.MethodPost, "/api/agent/access-tokens", `{"name":"Local Write Bub"}`, nil)
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create token status=%d body=%s", created.Code, created.Body.String())
-	}
-	var createBody struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(created.Body.Bytes(), &createBody); err != nil {
-		t.Fatal(err)
-	}
-
-	bootstrapRequest := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
-	bootstrapRequest.Header.Set("Content-Type", "application/json")
-	bootstrapRequest.Header.Set("Authorization", "Bearer "+createBody.Token)
-	bootstrap := httptest.NewRecorder()
-	router.ServeHTTP(bootstrap, bootstrapRequest)
-	if bootstrap.Code != http.StatusOK {
-		t.Fatalf("bootstrap status=%d body=%s", bootstrap.Code, bootstrap.Body.String())
-	}
-	var bootstrapBody struct {
-		CapabilityToken string `json:"capabilityToken"`
-		SystemPrompt    string `json:"systemPrompt"`
-		Tools           []struct {
-			Name             string `json:"name"`
-			ReadOnly         bool   `json:"readOnly"`
-			RequiresApproval bool   `json:"requiresApproval"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(bootstrap.Body.Bytes(), &bootstrapBody); err != nil {
-		t.Fatal(err)
-	}
-	if bootstrapBody.CapabilityToken == "" || len(bootstrapBody.Tools) == 0 {
-		t.Fatalf("bootstrap missing capability or tools: %s", bootstrap.Body.String())
-	}
-	var writeTool *struct {
-		Name             string `json:"name"`
-		ReadOnly         bool   `json:"readOnly"`
-		RequiresApproval bool   `json:"requiresApproval"`
-	}
-	for index := range bootstrapBody.Tools {
-		tool := &bootstrapBody.Tools[index]
-		if tool.Name == "append_transactions" {
-			writeTool = tool
-		}
-	}
-	if writeTool == nil {
-		t.Fatalf("write-enabled external bootstrap is missing append_transactions: %s", bootstrap.Body.String())
-	}
-	if writeTool.ReadOnly || writeTool.RequiresApproval {
-		t.Fatalf("write-enabled external bootstrap must expose append_transactions without approval: %#v", writeTool)
-	}
-	if !strings.Contains(bootstrapBody.SystemPrompt, "本地模式") || !strings.Contains(bootstrapBody.SystemPrompt, "询问确认") || !strings.Contains(bootstrapBody.SystemPrompt, "明确回复确认") {
-		t.Fatalf("write-enabled bootstrap system prompt must require in-dialog confirmation before writes: %s", bootstrapBody.SystemPrompt)
-	}
-
-	claims, err := server.parseAgentCapabilityToken(bootstrapBody.CapabilityToken)
-	if err != nil {
-		t.Fatalf("parse capability token: %v", err)
-	}
-	if !claims.Trusted {
-		t.Fatalf("write-enabled capability must be trusted: %#v", claims)
-	}
-
-	writeRequest := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
-	writeRequest.Header.Set("Content-Type", "application/json")
-	writeRequest.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
-	writeResponse := httptest.NewRecorder()
-	router.ServeHTTP(writeResponse, writeRequest)
-	if writeResponse.Code != http.StatusBadRequest {
-		t.Fatalf("trusted write execute status=%d body=%s (want 400: empty entries rejected before write)", writeResponse.Code, writeResponse.Body.String())
-	}
-}
-
 func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
@@ -356,7 +286,10 @@ func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 		!strings.Contains(body.SystemPrompt, "结果是否已经足以回答用户原问题") ||
 		!strings.Contains(body.SystemPrompt, "不得为了探索相邻问题而调用额外工具") ||
 		!strings.Contains(body.SystemPrompt, "原问题确实需要时可以使用多个工具") ||
-		!strings.Contains(body.SystemPrompt, "系统会自动展示") {
+		!strings.Contains(body.SystemPrompt, "不会弹出程序审批框") ||
+		!strings.Contains(body.SystemPrompt, "下一条消息明确确认") ||
+		!strings.Contains(body.SystemPrompt, "sender_id") ||
+		!strings.Contains(body.SystemPrompt, "确认写入") {
 		t.Fatalf("telegram bootstrap must use the Telegram system prompt: %s", response.Body.String())
 	}
 	if !strings.Contains(descriptions["get_ledger_summary"], "首选工具") ||

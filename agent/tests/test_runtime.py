@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,27 +10,11 @@ from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
 from bub.builtin.model_runner import ModelRunner
 from bub.errors import BubError, ErrorKind
-from bub.hooks.interception import ToolCall
 from bub.streaming import AsyncStreamEvents, StreamEvent
 
 from ledger_agent_service.config import Settings
-from ledger_agent_service.interactions import InteractionBroker
 from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
-from ledger_agent_service.runtime import AgentGateway, CONFIRM_PHRASES, LedgerPlugin, LedgerTelegramChannel
-
-
-class FakeBroker:
-    def __init__(self) -> None:
-        self.pending = True
-        self.resolutions: list[bool] = []
-
-    async def has_pending_session(self, session_id: str, subject: str | None = None) -> bool:
-        return self.pending and session_id == "telegram:123" and subject in {None, "user-1"}
-
-    async def resolve_session(self, session_id: str, approved: bool, subject: str = "") -> None:
-        assert session_id == "telegram:123"
-        assert subject == "user-1"
-        self.resolutions.append(approved)
+from ledger_agent_service.runtime import AgentGateway, LedgerPlugin, LedgerTelegramChannel
 
 
 @pytest.mark.asyncio
@@ -115,128 +98,61 @@ async def test_telegram_unknown_tool_starts_fresh_context_and_retries_once() -> 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("phrase", sorted(CONFIRM_PHRASES))
-async def test_telegram_only_consumes_exact_write_confirmations(phrase: str) -> None:
+async def test_telegram_confirmation_is_a_normal_model_turn() -> None:
     plugin = object.__new__(LedgerPlugin)
-    plugin.broker = FakeBroker()
     message = ChannelMessage(
         session_id="telegram:123",
         channel="telegram",
         chat_id="123",
-        content=phrase,
-        context={"_ledger_sender_id": "user-1"},
-    )
-
-    decision = await plugin.admit_message(
-        "telegram:123",
-        message,
-        TurnSnapshot("telegram:123", True, 1, 0),
-    )
-
-    assert plugin.broker.resolutions == [True]
-    assert decision is not None and decision.action == "drop"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("phrase", ["好", "OK", "👍"])
-async def test_telegram_short_acknowledgements_never_confirm_writes(phrase: str) -> None:
-    plugin = object.__new__(LedgerPlugin)
-    plugin.broker = FakeBroker()
-    message = ChannelMessage(
-        session_id="telegram:123",
-        channel="telegram",
-        chat_id="123",
-        content=phrase,
-        context={"_ledger_sender_id": "user-1"},
-    )
-
-    decision = await plugin.admit_message(
-        "telegram:123",
-        message,
-        TurnSnapshot("telegram:123", True, 1, 0),
-    )
-
-    assert plugin.broker.resolutions == [False]
-    assert decision is not None and decision.action == "follow_up"
-
-
-@pytest.mark.asyncio
-async def test_telegram_confirmation_cannot_be_resolved_by_another_sender() -> None:
-    plugin = object.__new__(LedgerPlugin)
-    plugin.broker = InteractionBroker(30)
-    interaction, future = await plugin.broker.create("telegram:group", "user-a")
-    message = ChannelMessage(
-        session_id="telegram:group",
-        channel="telegram",
-        chat_id="group",
         content="确认写入",
-        context={"_ledger_sender_id": "user-b"},
     )
 
-    decision = await plugin.admit_message(
-        "telegram:group",
+    idle = await plugin.admit_message(
+        "telegram:123",
         message,
-        TurnSnapshot("telegram:group", True, 1, 0),
+        TurnSnapshot("telegram:123", False, 0, 0),
+    )
+    running = await plugin.admit_message(
+        "telegram:123",
+        message,
+        TurnSnapshot("telegram:123", True, 1, 0),
     )
 
-    assert decision is not None and decision.action == "drop"
-    assert not future.done()
-    await plugin.broker.discard(interaction.id)
+    assert idle is None
+    assert running is not None and running.action == "follow_up"
 
 
 @pytest.mark.asyncio
-async def test_concurrent_telegram_writes_are_confirmed_one_at_a_time() -> None:
+async def test_web_loads_complete_catalog_after_telegram_subset() -> None:
     plugin = object.__new__(LedgerPlugin)
-    plugin.broker = InteractionBroker(30)
-    plugin.approval_locks = defaultdict(asyncio.Lock)
-    sent: list[str] = []
+    plugin.tool_specs = {}
+    plugin.complete_tool_catalog_loaded = False
+    plugin.tools_lock = asyncio.Lock()
+    telegram_tool = ToolSpec.model_validate({
+        "name": "telegram_test_tool",
+        "description": "telegram",
+        "parameters": {"type": "object", "properties": {}},
+        "title": "Telegram test",
+        "readOnly": True,
+    })
+    web_tool = ToolSpec.model_validate({
+        "name": "web_test_tool",
+        "description": "web",
+        "parameters": {"type": "object", "properties": {}},
+        "title": "Web test",
+        "readOnly": True,
+    })
 
     class Capabilities:
-        async def preview(self, _tool: str, arguments: dict, _token: str):
-            return SimpleNamespace(confirmation_token=f"token-{arguments['index']}", artifacts=[])
+        async def specs(self) -> list[ToolSpec]:
+            return [telegram_tool, web_tool]
 
     plugin.capabilities = Capabilities()
+    await plugin.ensure_ledger_tools([telegram_tool])
+    await plugin.ensure_ledger_tools()
 
-    async def send_approval(_state: dict, _spec: ToolSpec, _artifacts: list[dict]) -> None:
-        sent.append("approval")
-
-    plugin._send_telegram_approval = send_approval
-    spec = ToolSpec.model_validate({
-        "name": "append_transactions",
-        "description": "write",
-        "parameters": {},
-        "title": "写入",
-        "requiresApproval": True,
-        "readOnly": False,
-    })
-    plugin.tool_specs = {spec.name: spec}
-    state = {
-        "mode": "ledger",
-        "session_id": "telegram:123",
-        "channel": "telegram",
-        "sender_id": "user-1",
-        "capability_token": "capability",
-        "confirmation_tokens": {},
-        "allowed_tools": [spec.name],
-        "approval_policy": "on-write",
-    }
-    first = asyncio.create_task(plugin.before_tool_call(
-        ToolCall("run-1", "append_transactions", {"index": 1}), state,
-    ))
-    while len(sent) < 1:
-        await asyncio.sleep(0)
-    second = asyncio.create_task(plugin.before_tool_call(
-        ToolCall("run-2", "append_transactions", {"index": 2}), state,
-    ))
-    await asyncio.sleep(0)
-
-    assert sent == ["approval"]
-    await plugin.broker.resolve_session("telegram:123", True, "user-1")
-    assert (await first).action == "proceed"
-    while len(sent) < 2:
-        await asyncio.sleep(0)
-    await plugin.broker.resolve_session("telegram:123", True, "user-1")
-    assert (await second).action == "proceed"
+    assert set(plugin.tool_specs) == {"telegram_test_tool", "web_test_tool"}
+    assert plugin.complete_tool_catalog_loaded is True
 
 
 @pytest.mark.asyncio
@@ -245,6 +161,16 @@ async def test_web_prompt_exposes_bub_comma_command_mode() -> None:
     message = ChannelMessage(session_id="session-1", channel="web", content=",env")
 
     prompt = await plugin.build_prompt(message, "session-1", {"mode": "ledger"})
+
+    assert prompt == ",env"
+
+
+@pytest.mark.asyncio
+async def test_telegram_prompt_exposes_bub_comma_command_mode() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    message = ChannelMessage(session_id="telegram:123", channel="telegram", content=",env")
+
+    prompt = await plugin.build_prompt(message, "telegram:123", {"mode": "ledger"})
 
     assert prompt == ",env"
 
@@ -390,6 +316,47 @@ async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(t
             "user",
             "assistant",
         ]
+
+        await gateway.plugin.record_ui_event(
+            "legacy_pending",
+            "message",
+            {"id": "legacy-user", "kind": "message", "role": "user", "content": "写入这笔交易"},
+        )
+        await gateway.plugin.record_ui_event(
+            "legacy_pending",
+            "approval_required",
+            {"id": "approval-old", "toolName": "append_transactions"},
+        )
+        await gateway.plugin.record_ui_event(
+            "legacy_pending",
+            "message",
+            {"id": "new-user", "kind": "message", "role": "user", "content": "查询余额"},
+        )
+        await gateway.plugin.record_ui_event(
+            "legacy_pending",
+            "message",
+            {"id": "new-assistant", "kind": "message", "role": "assistant", "content": "余额已查询"},
+        )
+        legacy_timeline = await gateway.timeline("legacy_pending", 0)
+        assert legacy_timeline["items"][1] == {
+            "id": "legacy-approval-approval-old",
+            "kind": "message",
+            "role": "assistant",
+            "content": "旧版待确认操作已结束，请重新发送请求并按新的对话确认流程操作。",
+        }
+        assert legacy_timeline["items"][-1]["content"] == "余额已查询"
+        await gateway.plugin.record_ui_event(
+            "legacy_resolved",
+            "approval_required",
+            {"id": "approval-resolved", "toolName": "append_transactions"},
+        )
+        await gateway.plugin.record_ui_event(
+            "legacy_resolved",
+            "approval_resolution",
+            {"id": "approval-resolved", "approved": True},
+        )
+        resolved_timeline = await gateway.timeline("legacy_resolved", 0)
+        assert resolved_timeline["items"] == []
 
 
 @pytest.mark.asyncio

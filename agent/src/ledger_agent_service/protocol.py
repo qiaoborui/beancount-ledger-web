@@ -22,7 +22,6 @@ class TurnRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
     message: str
     context: PageContext = Field(default_factory=PageContext)
-    approval_policy: Literal["on-write", "always"] = Field("on-write", alias="approvalPolicy")
     capability_token: str = Field(alias="capabilityToken")
     system_prompt: str = Field(alias="systemPrompt")
 
@@ -33,10 +32,6 @@ class TurnRequest(BaseModel):
         if not value:
             raise ValueError("sessionId is required")
         return value
-
-
-class InteractionResponse(BaseModel):
-    approved: bool
 
 
 class OnboardingMessage(BaseModel):
@@ -64,8 +59,6 @@ class ToolSpec(BaseModel):
     description: str
     parameters: dict[str, Any]
     title: str
-    requires_approval: bool = Field(alias="requiresApproval")
-    approval_message: str = Field("", alias="approvalMessage")
     execution_status: str = Field("", alias="executionStatus")
     read_only: bool = Field(alias="readOnly")
 
@@ -77,7 +70,6 @@ class CapabilityResult(BaseModel):
     client_output: Any = Field(None, alias="clientOutput")
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     refresh_ledger: bool = Field(False, alias="refreshLedger")
-    confirmation_token: str = Field("", alias="confirmationToken")
 
     @field_validator("artifacts", mode="before")
     @classmethod

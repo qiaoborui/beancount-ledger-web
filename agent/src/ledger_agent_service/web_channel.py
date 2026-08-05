@@ -62,7 +62,6 @@ class LedgerWebChannel(Interface):
             context={
                 "_ledger_capability_token": request.capability_token,
                 "_ledger_system_prompt": request.system_prompt,
-                "_ledger_approval_policy": request.approval_policy,
                 "page": request.context.model_dump(by_alias=True),
             },
         ):

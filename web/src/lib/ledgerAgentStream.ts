@@ -21,22 +21,10 @@ export type AgentArtifact = {
   data: unknown;
 };
 
-export type AgentApproval = {
-  id: string;
-  sessionId: string;
-  toolCallId: string;
-  toolName: string;
-  toolTitle: string;
-  summary: string;
-  createdAt: string;
-  expiresAt: string;
-};
-
 export type AgentFinal = {
   sessionId: string;
   message: string;
-  status?: "completed" | "approval_pending" | "budget_exhausted" | "cancelled" | "failed";
-  pendingApprovalId?: string;
+  status?: "completed" | "cancelled" | "failed";
   refreshLedger?: boolean;
 };
 
@@ -54,7 +42,6 @@ export async function readLedgerAgentStream(
     onStatus?: (text: string) => void;
     onTool?: (tool: AgentToolEvent) => void;
     onArtifact?: (artifact: AgentArtifact) => void;
-    onApproval?: (approval: AgentApproval) => void;
     onOnboardingDraft?: (event: AgentOnboardingDraftEvent) => void;
   }
 ): Promise<AgentFinal> {
@@ -91,9 +78,6 @@ export async function readLedgerAgentStream(
           } else if (event.type === "artifact") {
             const artifact = payload as AgentArtifact;
             if (artifact.id && artifact.type && artifact.title) options.onArtifact?.(artifact);
-          } else if (event.type === "approval_required") {
-            const approval = payload as AgentApproval;
-            if (approval.id && approval.sessionId && approval.toolName) options.onApproval?.(approval);
           } else if (event.type === "onboarding_draft") {
             const draft = payload as Partial<AgentOnboardingDraftEvent>;
             if (draft.draft && typeof draft.ready === "boolean") options.onOnboardingDraft?.(draft as AgentOnboardingDraftEvent);

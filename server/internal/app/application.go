@@ -55,7 +55,6 @@ func NewApplication(cfg Config) (*Application, error) {
 		cfg:                  dependencies.cfg,
 		runtimeStore:         dependencies.runtimeStore,
 		runtimeConfig:        dependencies.runtimeConfig,
-		agentTokenWrite:      dependencies.runtimeConfig,
 		bqlHistoryRepository: dependencies.bqlHistoryRepository,
 		quickUnlocks:         dependencies.quickUnlocks,
 		gmailRepository:      dependencies.gmailRepository,
