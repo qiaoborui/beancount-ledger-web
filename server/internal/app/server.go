@@ -44,14 +44,6 @@ type Server struct {
 	txService            *TransactionService
 	limiter              RateLimiter
 	agentModel           AgentModelClient
-	agentTokenWrite      agentTokenWriteResolver
-}
-
-// agentTokenWriteResolver reports whether local Agent access tokens may write
-// to the ledger. It is backed by the database runtime config when available,
-// and defaults to read-only otherwise.
-type agentTokenWriteResolver interface {
-	AgentTokenWriteEnabled(context.Context) (bool, error)
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
@@ -215,7 +207,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/agent/turn", s.aiAgentTurn)
-	api.POST("/ai/agent/interactions/:interactionID", s.aiAgentInteraction)
 	api.GET("/ai/agent/sessions/:sessionID/timeline", noStore(), s.aiAgentTimeline)
 	api.DELETE("/ai/agent/sessions/:sessionID", s.aiAgentSessionDelete)
 	api.GET("/agent/access-tokens", noStore(), s.agentAccessTokens)
@@ -225,7 +216,6 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/agent/model/chat/completions", s.externalAgentModelProxy)
 	api.POST("/internal/agent/bootstrap", noStore(), s.internalAgentBootstrap)
 	api.GET("/internal/agent/tools", s.internalAgentTools)
-	api.POST("/internal/agent/tools/:toolName/preview", s.internalAgentToolPreview)
 	api.POST("/internal/agent/tools/:toolName/execute", s.internalAgentToolExecute)
 	api.POST("/internal/agent/model/chat/completions", s.internalAgentModelProxy)
 

@@ -19,7 +19,6 @@ def test_runtime_is_injected_instead_of_exposed_as_query_parameter(monkeypatch) 
     operations = (
         schema["paths"]["/v1/channels/web/messages"]["post"],
         schema["paths"]["/v1/onboarding/turn"]["post"],
-        schema["paths"]["/v1/interactions/{interaction_id}"]["post"],
         schema["paths"]["/v1/sessions/{session_id}/timeline"]["get"],
         schema["paths"]["/v1/sessions/{session_id}"]["delete"],
     )

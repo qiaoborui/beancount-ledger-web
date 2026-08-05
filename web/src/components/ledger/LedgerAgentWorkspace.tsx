@@ -2,18 +2,16 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, Database, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
+import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
-import { readLedgerAgentStream, type AgentApproval, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { readLedgerAgentStream, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MessageResponse } from "@/components/ai-elements/message";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { useDesktopViewport } from "./hooks/useDesktopViewport";
 import type { AccountOperation } from "./types";
-
-type AgentApprovalPolicy = "on-write" | "always";
 
 type AgentContext = {
   page: string;
@@ -33,8 +31,7 @@ export type LedgerAgentRequest = {
 type MessageItem = { kind: "message"; id: string; role: "user" | "assistant"; content: string };
 type ToolItem = { kind: "tool"; id: string; tool: AgentToolEvent };
 type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
-type ApprovalItem = { kind: "approval"; id: string; approval: AgentApproval; resolved?: boolean };
-type TimelineItem = MessageItem | ToolItem | ArtifactItem | ApprovalItem;
+type TimelineItem = MessageItem | ToolItem | ArtifactItem;
 type AgentSession = { id: string; serverSessionId: string; title: string; archived: boolean; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
 const MAX_STORED_SESSIONS = 30;
 const AGENT_TIMELINE_PAGE_SIZE = 80;
@@ -114,7 +111,6 @@ export function LedgerAgentWorkspace({
 }) {
   const stored = useMemo(() => readStoredAgent(), []);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const [approvalPolicy, setApprovalPolicy] = useState<AgentApprovalPolicy>(stored.approvalPolicy);
   const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
   const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
   const [showArchivedSessions, setShowArchivedSessions] = useState(false);
@@ -124,7 +120,6 @@ export function LedgerAgentWorkspace({
   const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [resolvingInteractionID, setResolvingInteractionID] = useState("");
   const [status, setStatus] = useState("就绪");
   const [streamingText, setStreamingText] = useState("");
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
@@ -144,9 +139,6 @@ export function LedgerAgentWorkspace({
   const timeline = activeSession.timeline;
   const archivedSessionCount = sessions.filter((session) => session.archived).length;
   const sidebarSessions = sessions.filter((session) => !session.archived || showArchivedSessions);
-  const lastAssistantMessage = [...timeline].reverse().find((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
-  const pendingApproval = timeline.find((item): item is ApprovalItem => item.kind === "approval" && !item.resolved);
-  const canContinue = !pendingApproval && (lastAssistantMessage?.content.includes("本次请求已完成 8 轮工具处理") ?? false);
   const liveTools = busy ? activeTurnTools(timeline) : [];
   const liveToolIDs = new Set(liveTools.map((item) => item.id));
 
@@ -191,7 +183,7 @@ export function LedgerAgentWorkspace({
   }
 
   async function deleteSession(session: AgentSession) {
-    if (busy || sessionMutationID || (session.id === activeSession.id && pendingApproval)) return;
+    if (busy || sessionMutationID) return;
     if (!window.confirm(`删除“${sessionLabel(session)}”及其 Agent 会话记录？此操作无法恢复。`)) return;
     setSessionMutationID(session.id);
     try {
@@ -222,8 +214,8 @@ export function LedgerAgentWorkspace({
   }
 
   useEffect(() => {
-    writeStoredAgent({ approvalPolicy, activeSessionId, sessions });
-  }, [activeSessionId, approvalPolicy, sessions]);
+    writeStoredAgent({ activeSessionId, sessions });
+  }, [activeSessionId, sessions]);
 
   useEffect(() => {
     void loadTimelinePage(sessionId);
@@ -323,10 +315,6 @@ export function LedgerAgentWorkspace({
       showToast("error", "请勿在 Agent 对话中输入密码、验证码、令牌或完整卡号");
       return;
     }
-    if (pendingApproval) {
-      showToast("info", "请先确认或取消待处理操作");
-      return;
-    }
     setOpen(true);
     setBusy(true);
     setInput("");
@@ -338,7 +326,7 @@ export function LedgerAgentWorkspace({
       const response = await apiFetch("/api/ai/agent/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: prompt, context, approvalPolicy }),
+        body: JSON.stringify({ sessionId, message: prompt, context }),
       }, { kind: "write" });
       const final = await consumeStream(response);
       finishTurn(final);
@@ -364,21 +352,12 @@ export function LedgerAgentWorkspace({
       onStatus: setStatus,
       onTool: upsertTool,
       onArtifact: (artifact) => updateTimeline((current) => [...current, { kind: "artifact", id: artifact.id, artifact }]),
-      onApproval: (approval) => updateTimeline((current) => [...current, { kind: "approval", id: approval.id, approval }]),
     });
   }
 
   function finishTurn(final: AgentFinal) {
     updateActiveSession((session) => ({ ...session, serverSessionId: final.sessionId, updatedAt: Date.now() }));
-    setStatus(
-      final.pendingApprovalId || final.status === "approval_pending"
-        ? "等待确认"
-        : final.status === "budget_exhausted"
-          ? "任务已暂停"
-          : final.status === "cancelled"
-            ? "已取消"
-            : "就绪"
-    );
+    setStatus(final.status === "cancelled" ? "已取消" : "就绪");
     const message = final.message.trim();
     if (message) {
       const messageID = streamingMessageIDRef.current || nextID();
@@ -398,27 +377,6 @@ export function LedgerAgentWorkspace({
       if (index < 0) return [...current, { kind: "tool", id: tool.id, tool }];
       return current.map((item, itemIndex) => itemIndex === index && item.kind === "tool" ? { ...item, tool: { ...item.tool, ...tool } } : item);
     });
-  }
-
-  async function resolveApproval(approval: AgentApproval, approved: boolean) {
-    if (resolvingInteractionID) return;
-    setResolvingInteractionID(approval.id);
-    setStatus(approved ? "正在执行已确认操作" : "正在取消操作");
-    updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: true } : item));
-    try {
-      await apiFetch(`/api/ai/agent/interactions/${encodeURIComponent(approval.id)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      }, { kind: "write" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "审批处理失败";
-      updateTimeline((current) => current.map((item) => item.kind === "approval" && item.approval.id === approval.id ? { ...item, resolved: false } : item));
-      setStatus("审批失败");
-      showToast("error", message);
-    } finally {
-      setResolvingInteractionID("");
-    }
   }
 
   function handleSubmit() {
@@ -448,7 +406,7 @@ export function LedgerAgentWorkspace({
           {presentation === "dock" && <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45 md:h-8 md:w-8" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(pendingApproval) || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45 md:h-8 md:w-8" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-line bg-paper text-ink">
               <DropdownMenuItem onSelect={() => archiveSession(activeSession, !activeSession.archived)}>{activeSession.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{activeSession.archived ? "取消归档" : "归档会话"}</DropdownMenuItem>
@@ -471,8 +429,7 @@ export function LedgerAgentWorkspace({
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
             if (item.kind === "tool" && liveToolIDs.has(item.id)) return null;
             if (item.kind === "tool") return <ToolCard key={item.id} tool={item.tool} expanded={Boolean(expandedTools[item.id])} onToggle={() => setExpandedTools((current) => ({ ...current, [item.id]: !current[item.id] }))} />;
-            if (item.kind === "artifact") return <ArtifactCard key={item.id} artifact={item.artifact} onApplyBQL={onApplyBQL} onNavigate={onNavigate} />;
-            return <ApprovalCard key={item.id} approval={item.approval} resolved={item.resolved} busy={resolvingInteractionID === item.approval.id} onResolve={resolveApproval} />;
+            return <ArtifactCard key={item.id} artifact={item.artifact} onApplyBQL={onApplyBQL} onNavigate={onNavigate} />;
           })}
           {busy && <AgentWorkStatus
             status={status}
@@ -485,31 +442,6 @@ export function LedgerAgentWorkspace({
       </div>
 
       <footer className="shrink-0 border-t border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-2 md:p-3">
-        <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
-          <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone">
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />
-            <span className="truncate">{approvalPolicy === "always" ? "逐项确认" : "写入时确认"}</span>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-xs font-medium text-ink active:scale-95 hover:bg-tag" aria-label="设置 Agent 审批策略">
-                审批<ChevronDown className="h-3.5 w-3.5 text-stone" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 border-line bg-paper text-ink">
-              <DropdownMenuLabel className="text-xs text-stone">审批策略</DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-line" />
-              <DropdownMenuRadioGroup value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as AgentApprovalPolicy)}>
-                <DropdownMenuRadioItem value="on-write" className="py-2.5 text-sm focus:bg-tag focus:text-ink">
-                  <span><span className="block font-medium">写入时确认</span><span className="mt-0.5 block text-xs text-stone">读取自动执行，账本写入始终确认</span></span>
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="always" className="py-2.5 text-sm focus:bg-tag focus:text-ink">
-                  <span><span className="block font-medium">逐项确认</span><span className="mt-0.5 block text-xs text-stone">每个 Agent 工具调用都要你确认</span></span>
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
         <div className="overflow-hidden rounded-md border border-line bg-paper focus-within:ring-2 focus-within:ring-brand/25">
           <textarea
             ref={textareaRef}
@@ -523,12 +455,12 @@ export function LedgerAgentWorkspace({
               }
             }}
             placeholder="询问账本，或从工具开始"
-            disabled={busy || Boolean(pendingApproval)}
+            disabled={busy}
           />
           <div className="flex items-center justify-between border-t border-line px-2 py-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy || Boolean(pendingApproval)} aria-label="打开 Agent 工具">
+                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy} aria-label="打开 Agent 工具">
                   <SlidersHorizontal className="h-3.5 w-3.5 text-brand" />工具
                 </button>
               </DropdownMenuTrigger>
@@ -542,9 +474,8 @@ export function LedgerAgentWorkspace({
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="flex items-center gap-1.5">
-              {canContinue && <button type="button" className="inline-flex h-8 items-center rounded-md border border-line px-2.5 text-xs font-medium text-brand hover:bg-tag disabled:opacity-45" onClick={() => void sendMessage("继续")} disabled={busy}>继续处理</button>}
               <span className="hidden text-[11px] text-stone sm:inline">Enter 发送</span>
-              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || Boolean(pendingApproval) || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
+              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
             </div>
           </div>
         </div>
@@ -657,16 +588,6 @@ function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded
       {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
     </button>
     {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line p-3 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
-  </div>;
-}
-
-function ApprovalCard({ approval, resolved, busy, onResolve }: { approval: AgentApproval; resolved?: boolean; busy: boolean; onResolve: (approval: AgentApproval, approved: boolean) => void }) {
-  return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-[var(--warning)] bg-panel p-3">
-    <div className="flex items-start gap-2"><Database className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" /><div className="min-w-0"><div className="text-sm font-semibold text-ink">{approval.toolTitle}</div><div className="mt-1 text-sm text-stone">{approval.summary}</div></div></div>
-    <div className="mt-3 flex justify-end gap-2">
-      <button type="button" className="h-8 rounded-md border border-line px-3 text-sm text-stone hover:bg-tag disabled:opacity-50" onClick={() => onResolve(approval, false)} disabled={busy || resolved}>取消</button>
-      <button type="button" className="h-8 rounded-md bg-brand px-3 text-sm text-paper hover:bg-brand/90 disabled:opacity-50" onClick={() => onResolve(approval, true)} disabled={busy || resolved}>{resolved ? "处理中" : "确认执行"}</button>
-    </div>
   </div>;
 }
 
@@ -787,25 +708,21 @@ function storageKey() {
   return `ledger.agent.workspace.v2:${apiEndpointLedgerScope()}`;
 }
 
-function readStoredAgent(): { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] } {
+function readStoredAgent(): { activeSessionId: string; sessions: AgentSession[] } {
   try {
     const raw = window.localStorage.getItem(storageKey());
     if (!raw) {
       const session = createAgentSession();
-      return { approvalPolicy: "on-write", activeSessionId: session.id, sessions: [session] };
+      return { activeSessionId: session.id, sessions: [session] };
     }
-    const value = JSON.parse(raw) as { approvalPolicy?: string; activeSessionId?: string; sessions?: unknown; sessionId?: string; timeline?: unknown; messages?: unknown };
+    const value = JSON.parse(raw) as { activeSessionId?: string; sessions?: unknown; sessionId?: string; timeline?: unknown; messages?: unknown };
     const sessions = restoreSessions(value.sessions);
     if (!sessions.length) sessions.push(createAgentSession(restoreTimeline(value.timeline ?? value.messages), typeof value.sessionId === "string" ? value.sessionId : ""));
     const activeSessionId = typeof value.activeSessionId === "string" && sessions.some((session) => session.id === value.activeSessionId) ? value.activeSessionId : sessions[0].id;
-    return {
-      approvalPolicy: value.approvalPolicy === "always" ? "always" : "on-write",
-      activeSessionId,
-      sessions,
-    };
+    return { activeSessionId, sessions };
   } catch {
     const session = createAgentSession();
-    return { approvalPolicy: "on-write", activeSessionId: session.id, sessions: [session] };
+    return { activeSessionId: session.id, sessions: [session] };
   }
 }
 
@@ -844,10 +761,6 @@ export function restoreTimeline(value: unknown): TimelineItem[] {
       const artifact = candidate.artifact;
       return Boolean(artifact && typeof artifact === "object" && typeof (artifact as Record<string, unknown>).id === "string" && typeof (artifact as Record<string, unknown>).type === "string" && typeof (artifact as Record<string, unknown>).title === "string" && "data" in (artifact as Record<string, unknown>));
     }
-    if (candidate.kind === "approval") {
-      const approval = candidate.approval;
-      return Boolean(approval && typeof approval === "object" && typeof (approval as Record<string, unknown>).id === "string" && typeof (approval as Record<string, unknown>).sessionId === "string" && typeof (approval as Record<string, unknown>).toolName === "string");
-    }
     return false;
   });
 }
@@ -879,7 +792,7 @@ export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {
   };
 }
 
-function writeStoredAgent(value: { approvalPolicy: AgentApprovalPolicy; activeSessionId: string; sessions: AgentSession[] }) {
+function writeStoredAgent(value: { activeSessionId: string; sessions: AgentSession[] }) {
   try {
     window.localStorage.setItem(storageKey(), JSON.stringify({
       ...value,

@@ -326,10 +326,11 @@ are injected into the main service.
 When `BUB_TELEGRAM_TOKEN` is mapped, the same single Agent revision also runs
 Bub's Telegram long-polling Channel. The workflow switches that service to one
 minimum instance with always-allocated CPU, and keeps `--max-instances=1`; these
-settings keep polling alive, avoid competing bot pollers, and preserve
-in-process write approval state. Without Telegram, the Agent remains
-request-based and may scale to zero. Configure at least one user or chat allow
-list before enabling the bot.
+settings keep polling alive and ensure there is only one active long poller.
+Write confirmation is ordinary multi-turn conversation
+state in the shared tape store, not a paused in-process approval. Without
+Telegram, the Agent remains request-based and may scale to zero. Configure at
+least one user or chat allow list before enabling the bot.
 
 The main service keeps request-based 1 vCPU, zero minimum instances, two maximum
 instances, concurrency eight, a 15-minute request timeout, and 512 MiB memory.

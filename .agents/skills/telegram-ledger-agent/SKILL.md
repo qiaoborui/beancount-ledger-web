@@ -14,7 +14,7 @@ alwaysAllow:
 
 Use this skill when acting as a Telegram-facing personal ledger assistant. The goal is to turn short chat messages into safe, concise ledger interactions.
 
-This skill focuses on **orchestration, safety, privacy, and reply style**. It may route read-only insight requests to a Beancount analysis workflow and write-like requests to a separate confirmed-write workflow.
+This skill focuses on **orchestration, safety, privacy, and reply style**. Read and write tools use the same normal tool mechanism; write safety comes from a strict cross-turn conversational confirmation protocol plus server-side validation.
 
 ## Applicability
 
@@ -30,7 +30,7 @@ Do **not** use this skill as the primary implementation for:
 - Bulk statement imports; use `alipay-bill-import` or `wechat-bill-import`.
 - Detailed read-only reports outside Telegram; use `beancount-insights`.
 - Direct bookkeeping outside a chat orchestration context; use `beancount-bookkeeping`.
-- Maintenance operations such as account renames, git operations, or file rewrites.
+- Bulk account renames, git operations, or file rewrites.
 
 ## Core Behavior
 
@@ -86,8 +86,14 @@ Return a draft and ask for exact confirmation if writing is desired.
 
 Only allowed after:
 
-1. A clear draft was shown.
-2. The user's next relevant message confirms that exact draft with an accepted phrase.
+1. The Agent used read/draft/validation tools as needed to prepare the exact change.
+2. A complete draft was shown in the previous assistant reply and that turn ended without a write call.
+3. The user's next relevant message confirms that exact draft with an accepted phrase.
+4. The Agent calls the ordinary write tool in the confirmation turn.
+
+There is no runtime approval object, confirmation token, approval card, or paused tool call. Confirmation is a new model turn, so the Agent does not need to remain resident while waiting.
+
+In a group chat, compare the `sender_id` included in Telegram message metadata. Only the same user who requested and received the draft may confirm it; another member's confirmation must not trigger a write.
 
 Accepted confirmation phrases:
 
@@ -107,11 +113,13 @@ Do **not** treat casual replies as confirmation, including:
 
 If the user changes the date, amount, account, category, payee, or narration after a draft, regenerate the draft and ask for confirmation again.
 
+Supported account create, metadata update, and close operations use the same draft and cross-turn confirmation workflow as transactions.
+
 ### Level 4 — Maintenance / Git / Bulk Edits
 
 Do not perform automatically in Telegram. Examples:
 
-- Rename accounts
+- Bulk rename accounts
 - Bulk rewrite transactions
 - Modify budgets
 - Reorder files
@@ -149,8 +157,9 @@ Workflow:
 
 1. Parse the likely date, payee, amount, payment source, and expense category.
 2. If any required part is ambiguous, ask one short clarifying question.
-3. Show a draft.
-4. Ask the user to reply with `确认写入` if they want it saved.
+3. Use read/draft/validation tools as needed and show the complete draft.
+4. Ask the user to reply with `确认写入` if they want it saved, then end the turn without calling a write tool.
+5. If the next relevant message exactly confirms the unchanged draft, call the ordinary write tool.
 
 Example reply:
 
@@ -166,7 +175,7 @@ Example reply:
 
 ### Maintenance Requests
 
-For requests that would rewrite files, rename accounts, import statements, or use git, do not perform the operation in Telegram. Reply briefly:
+For requests that would bulk rewrite files, rename existing accounts, import statements, or use git, do not perform the operation in Telegram. Supported account create, metadata update, and close operations are Level 2/3 writes and may proceed through the normal draft and confirmation protocol. For unsupported maintenance, reply briefly:
 
 ```text
 这个属于维护操作，我不会在 Telegram 里直接执行。请在桌面/维护流程里明确发起，我再按计划处理。
@@ -290,7 +299,7 @@ After the draft, ask exactly:
 确认无误请回复：确认写入
 ```
 
-Only proceed if the user's next relevant message contains an accepted exact confirmation phrase. If the user edits details instead, regenerate the draft and ask again.
+Only proceed if the user's next relevant message contains an accepted exact confirmation phrase. The confirmation is handled as a normal new model turn and the write uses the ordinary tool endpoint. If the user edits details instead, regenerate the draft, end the turn, and ask again.
 
 ## Account and Category Ambiguity
 
@@ -330,6 +339,6 @@ Never do these automatically in Telegram:
 - Delete, move, or rewrite ledger files.
 - Run git push/pull/commit.
 - Import full statements.
-- Rename accounts or alter account structure.
+- Bulk rename accounts or rewrite account structure outside the supported account-operation tool.
 - Reveal full ledger paths, tokens, API keys, or environment dumps.
 - Output long raw command logs unless explicitly requested for debugging.

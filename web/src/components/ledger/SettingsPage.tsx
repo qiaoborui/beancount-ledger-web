@@ -203,7 +203,6 @@ type RuntimeConfigView = {
   aiBaseUrl?: string;
   aiModel?: string;
   aiApiKeyConfigured: boolean;
-  agentTokenWriteEnabled: boolean;
   indexerIntervalSeconds?: number;
   indexerRetryInitialSeconds?: number;
   indexerRetryMaximumSeconds?: number;
@@ -215,7 +214,7 @@ function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocke
     githubOwner: "", githubRepo: "", githubBranch: "main", githubApiUrl: "",
     githubWriteToken: "", githubIndexToken: "",
     aiProvider: "openai-compatible", aiBaseUrl: "", aiModel: "", aiApiKey: "",
-    adminPassword: "", agentTokenWriteEnabled: false, indexerIntervalSeconds: 60, indexerRetryInitialSeconds: 5, indexerRetryMaximumSeconds: 60,
+    adminPassword: "", indexerIntervalSeconds: 60, indexerRetryInitialSeconds: 5, indexerRetryMaximumSeconds: 60,
   });
   const [saving, setSaving] = useState(false);
 
@@ -238,7 +237,6 @@ function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocke
           aiProvider: next.aiProvider ?? "openai-compatible",
           aiBaseUrl: next.aiBaseUrl ?? "",
           aiModel: next.aiModel ?? "",
-          agentTokenWriteEnabled: next.agentTokenWriteEnabled ?? false,
           indexerIntervalSeconds: next.indexerIntervalSeconds ?? 60,
           indexerRetryInitialSeconds: next.indexerRetryInitialSeconds ?? 5,
           indexerRetryMaximumSeconds: next.indexerRetryMaximumSeconds ?? 60,
@@ -314,13 +312,6 @@ function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocke
             ["最大重试秒数", "indexerRetryMaximumSeconds"],
           ] as const).map(([label, key]) => <RuntimeField key={key} label={label}><input type="number" min={1} className={inputClass} value={form[key]} onChange={(event) => update(key, Number(event.target.value))} /></RuntimeField>)}
         </div>
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-panel p-4">
-          <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--brand)]" checked={form.agentTokenWriteEnabled} onChange={(event) => update("agentTokenWriteEnabled", event.target.checked)} />
-          <span className="grid gap-1">
-            <span className="text-sm font-medium text-ink">允许本地 Agent 写入账本</span>
-            <span className="text-xs leading-5 text-stone">开启后，本机 <code className="rounded bg-tag px-1 py-0.5 font-mono text-[11px]">bub chat</code> 访问令牌可获得完整工具目录（含写入）。CLI 下写工具会先向你在对话中确认再执行；建议仅在本机可信环境开启。</span>
-          </span>
-        </label>
         <button type="button" disabled={saving} onClick={() => void save()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-medium text-paper transition-transform active:scale-[0.98] disabled:opacity-50">
           {saving ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? "保存中…" : "保存实例配置"}
         </button>

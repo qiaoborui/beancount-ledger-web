@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,34 +64,6 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 			errorJSON(c, http.StatusBadGateway, err)
 		}
 	}
-}
-
-func (s *Server) aiAgentInteraction(c *gin.Context) {
-	if !s.limiter.Check(c, "ai.agent_interaction", 30, 5*time.Minute) {
-		return
-	}
-	if !requireAuth(c) {
-		return
-	}
-	var input struct {
-		Approved bool `json:"approved"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	turnCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-	response, err := s.agentServiceRequest(turnCtx, http.MethodPost, "/v1/interactions/"+url.PathEscape(c.Param("interactionID")), input)
-	if err != nil {
-		errorJSON(c, http.StatusBadGateway, err)
-		return
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		errorJSON(c, response.StatusCode, agentServiceResponseError(response))
-		return
-	}
-	c.Status(http.StatusAccepted)
 }
 
 func (s *Server) aiAgentTimeline(c *gin.Context) {

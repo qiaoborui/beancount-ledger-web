@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
-from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -27,12 +25,10 @@ from bub.tape import AsyncTapeStoreAdapter, TapeContext, TapeEntry, TapeQuery
 from bub.tools import REGISTRY, Tool, ToolContext
 from .capabilities import LedgerCapabilities
 from .config import Settings
-from .interactions import InteractionBroker
 from .onboarding import default_draft, is_ready, normalize_draft, onboarding_tools, prompt as onboarding_prompt
 from .protocol import OnboardingRequest, ToolSpec, TurnRequest
 from .web_channel import LedgerWebChannel, WebTurn
 
-CONFIRM_PHRASES = {"确认写入", "确认入账", "confirm write"}
 _PLUGINS: WeakKeyDictionary[BubFramework, LedgerPlugin] = WeakKeyDictionary()
 _GATEWAY_SETTINGS: WeakKeyDictionary[BubFramework, Settings] = WeakKeyDictionary()
 
@@ -47,15 +43,12 @@ class LedgerTelegramChannel:
         class OutboundTelegramChannel(TelegramChannel):
             @property
             def needs_debounce(self) -> bool:
-                # A chat may contain multiple allowed users. Keep each sender's
-                # identity attached to its own message for write confirmation.
+                # Keep each Telegram message as its own model turn.
                 return False
 
             async def _build_message(self, message):
                 inbound = await super()._build_message(message)
                 inbound.output_channel = self.name
-                if message.from_user is not None:
-                    inbound.context["_ledger_sender_id"] = str(message.from_user.id)
                 return inbound
 
             async def stop(self) -> None:
@@ -91,11 +84,10 @@ class LedgerPlugin:
             service_token=self.settings.service_token,
             access_token=self.settings.access_token,
         )
-        self.broker = InteractionBroker(self.settings.approval_timeout_seconds)
-        self.approval_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.ready = asyncio.Event()
         self.agent = Agent(framework)
         self.tool_specs: dict[str, ToolSpec] = {}
+        self.complete_tool_catalog_loaded = False
         self.tools_lock = asyncio.Lock()
         self.async_store: AsyncTapeStoreAdapter | None = None
         self.web_channel: LedgerWebChannel | None = None
@@ -118,10 +110,7 @@ class LedgerPlugin:
         state: dict[str, Any] = {
             "mode": mode,
             "session_id": session_id,
-            "confirmation_tokens": {},
             "channel": message.channel,
-            "chat_id": message.chat_id,
-            "sender_id": str(message.context.get("_ledger_sender_id") or ""),
         }
         if mode == "onboarding":
             request = message.context.get("_ledger_onboarding_request")
@@ -140,7 +129,6 @@ class LedgerPlugin:
             state.update({
                 "capability_token": str(message.context.get("_ledger_capability_token") or ""),
                 "system_prompt": str(message.context.get("_ledger_system_prompt") or ""),
-                "approval_policy": str(message.context.get("_ledger_approval_policy") or "on-write"),
                 "allowed_tools": list(self.tool_specs),
                 "allowed_skills": [],
             })
@@ -154,7 +142,6 @@ class LedgerPlugin:
             state.update({
                 "capability_token": bootstrap.capability_token,
                 "system_prompt": bootstrap.system_prompt,
-                "approval_policy": "on-write",
                 "allowed_tools": [spec.name for spec in bootstrap.tools],
                 "allowed_skills": ["telegram-ledger-agent", "telegram"] if message.channel == "telegram" else [],
             })
@@ -184,7 +171,10 @@ class LedgerPlugin:
                     prompt = f"此前建账对话：\n{history}\n\n当前用户消息：\n{prompt}"
                 return [{"type": "text", "text": prompt}]
         if message.channel == "telegram":
-            return "$telegram-ledger-agent $telegram\n" + content_of(message)
+            content = content_of(message)
+            if content.strip().startswith(","):
+                return content
+            return "$telegram-ledger-agent $telegram\n" + content
         if message.channel == "web":
             return content_of(message)
         return None
@@ -282,72 +272,7 @@ class LedgerPlugin:
         spec = self.tool_specs.get(call.tool)
         if spec is None or call.tool not in set(state.get("allowed_tools") or []):
             return ToolCallDecision.deny(f"当前 Channel 不允许工具：{call.tool}")
-        if not spec.requires_approval and state.get("approval_policy") != "always":
-            return None
-
-        session_id = str(state["session_id"])
-        async with self.approval_locks[session_id]:
-            return await self._approve_tool_call(call, state, spec, session_id)
-
-    async def _approve_tool_call(
-        self,
-        call: ToolCall,
-        state: dict[str, Any],
-        spec: ToolSpec,
-        session_id: str,
-    ) -> ToolCallDecision:
-        preview = None
-        confirmation_key = f"{call.tool}:{_arguments_hash(call.arguments)}"
-        if spec.requires_approval:
-            try:
-                preview = await self.capabilities.preview(
-                    call.tool,
-                    call.arguments,
-                    str(state["capability_token"]),
-                )
-            except Exception as exc:
-                return ToolCallDecision.deny(str(exc))
-            state.setdefault("confirmation_tokens", {})[confirmation_key] = preview.confirmation_token
-
-        interaction, future = await self.broker.create(session_id, str(state.get("sender_id") or ""))
-        approval = {
-            "id": interaction.id,
-            "sessionId": session_id,
-            "toolCallId": f"{call.run_id}:{call.tool}:{_arguments_hash(call.arguments)}",
-            "toolName": call.tool,
-            "toolTitle": spec.title,
-            "summary": spec.approval_message or _approval_summary(call.tool, call.arguments),
-            "createdAt": interaction.created_at.isoformat(),
-            "expiresAt": interaction.expires_at.isoformat(),
-        }
-        emit = state.get("emit")
-        try:
-            if state.get("channel") == "telegram":
-                await self._send_telegram_approval(state, spec, preview.artifacts if preview else [])
-            else:
-                if not callable(emit):
-                    await self.broker.discard(interaction.id)
-                    state.setdefault("confirmation_tokens", {}).pop(confirmation_key, None)
-                    return ToolCallDecision.deny("当前 Channel 不支持写入确认")
-                if preview:
-                    for artifact in preview.artifacts:
-                        await emit("artifact", artifact)
-                await emit("approval_required", approval)
-            approved = await self.broker.wait(interaction, future)
-        except TimeoutError:
-            if callable(emit):
-                await emit("approval_resolution", {"id": interaction.id, "approved": False})
-            state.setdefault("confirmation_tokens", {}).pop(confirmation_key, None)
-            return ToolCallDecision.deny("确认已超时，工具未执行")
-        except BaseException:
-            await self.broker.discard(interaction.id)
-            state.setdefault("confirmation_tokens", {}).pop(confirmation_key, None)
-            raise
-        if callable(emit):
-            await emit("approval_resolution", {"id": interaction.id, "approved": approved})
-        if not approved:
-            state.setdefault("confirmation_tokens", {}).pop(confirmation_key, None)
-        return ToolCallDecision.proceed() if approved else ToolCallDecision.deny("用户取消了这次工具调用")
+        return None
 
     @hookimpl
     async def admit_message(
@@ -356,24 +281,21 @@ class LedgerPlugin:
         message: ChannelMessage,
         turn: TurnSnapshot,
     ) -> AdmitDecision | None:
-        if message.channel == "telegram" and await self.broker.has_pending_session(session_id):
-            sender_id = str(message.context.get("_ledger_sender_id") or "")
-            if not sender_id or not await self.broker.has_pending_session(session_id, sender_id):
-                return AdmitDecision("drop", "telegram confirmation sender does not match pending write")
-            text = _channel_text(message.content).strip().casefold()
-            approved = text in {phrase.casefold() for phrase in CONFIRM_PHRASES}
-            await self.broker.resolve_session(session_id, approved, sender_id)
-            if approved:
-                return AdmitDecision("drop", "telegram write confirmation consumed")
+        del session_id, message
         if turn.is_running:
             return AdmitDecision("follow_up", "serialize messages for the same ledger session")
         return None
 
     async def ensure_ledger_tools(self, specs: list[ToolSpec] | None = None) -> None:
-        if specs is None and self.tool_specs:
+        if specs is None and self.complete_tool_catalog_loaded:
             return
         async with self.tools_lock:
-            resolved = specs or (await self.capabilities.specs())
+            if specs is None:
+                if self.complete_tool_catalog_loaded:
+                    return
+                resolved = await self.capabilities.specs()
+            else:
+                resolved = specs
             for spec in resolved:
                 self.tool_specs[spec.name] = spec
                 REGISTRY[spec.name] = Tool(
@@ -383,16 +305,15 @@ class LedgerPlugin:
                     context=True,
                     handler=self._ledger_tool_handler(spec.name),
                 )
+            if specs is None:
+                self.complete_tool_catalog_loaded = True
 
     def _ledger_tool_handler(self, name: str) -> Callable[..., Awaitable[dict[str, Any]]]:
         async def execute(*, context: ToolContext, **arguments: Any) -> dict[str, Any]:
-            confirmation_key = f"{name}:{_arguments_hash(arguments)}"
-            confirmation_token = context.state.setdefault("confirmation_tokens", {}).pop(confirmation_key, "")
             result = await self.capabilities.execute(
                 name,
                 arguments,
                 str(context.state["capability_token"]),
-                confirmation_token,
             )
             return result.model_dump(by_alias=True)
 
@@ -401,24 +322,6 @@ class LedgerPlugin:
     def _register_onboarding_tools(self) -> None:
         for name, tool in onboarding_tools().items():
             REGISTRY[name] = tool
-
-    async def _send_telegram_approval(
-        self,
-        state: dict[str, Any],
-        spec: ToolSpec,
-        artifacts: list[dict[str, Any]],
-    ) -> None:
-        summary = spec.approval_message or "待确认账本写入"
-        if artifacts:
-            summary += "\n\n" + json.dumps(artifacts[0].get("data"), ensure_ascii=False, indent=2)
-        summary += "\n\n确认无误请回复：确认写入"
-        await self.framework.dispatch_via_channel_router(ChannelMessage(
-            session_id=str(state["session_id"]),
-            channel="telegram",
-            output_channel="telegram",
-            chat_id=str(state.get("chat_id") or "default"),
-            content=summary,
-        ))
 
     def bind_store(self) -> None:
         store = self.framework.get_tape_store()
@@ -430,6 +333,7 @@ class LedgerPlugin:
         ))
         items: list[dict[str, Any]] = []
         positions: dict[str, int] = {}
+        pending_legacy_approvals: set[str] = set()
         for entry in entries:
             if entry.payload.get("name") != "ui":
                 continue
@@ -452,12 +356,22 @@ class LedgerPlugin:
             elif event == "artifact":
                 items.append({"id": payload.get("id"), "kind": "artifact", "artifact": payload})
             elif event == "approval_required":
-                positions[str(payload.get("id"))] = len(items)
-                items.append({"id": payload.get("id"), "kind": "approval", "approval": payload})
+                approval_id = str(payload.get("id") or "unknown")
+                pending_legacy_approvals.add(approval_id)
+                items.append({
+                    "id": f"legacy-approval-{approval_id}",
+                    "kind": "message",
+                    "role": "assistant",
+                    "content": "旧版待确认操作已结束，请重新发送请求并按新的对话确认流程操作。",
+                    "_legacy_approval_id": approval_id,
+                })
             elif event == "approval_resolution":
-                index = positions.get(str(payload.get("id")))
-                if index is not None:
-                    items[index]["resolved"] = True
+                pending_legacy_approvals.discard(str(payload.get("id") or "unknown"))
+        items = [
+            {key: value for key, value in item.items() if key != "_legacy_approval_id"}
+            for item in items
+            if "_legacy_approval_id" not in item or item["_legacy_approval_id"] in pending_legacy_approvals
+        ]
         end = min(before, len(items)) if before > 0 else len(items)
         start = max(0, end - min(max(limit, 1), 80))
         return {"items": items[start:end], "nextBefore": start if start > 0 else None}
@@ -539,12 +453,6 @@ class AgentGateway:
         return self.plugin.web_channel
 
     @property
-    def broker(self) -> InteractionBroker:
-        if self.plugin is None:
-            raise RuntimeError("ledger plugin is not available")
-        return self.plugin.broker
-
-    @property
     def healthy(self) -> bool:
         return bool(
             self.task is not None
@@ -591,29 +499,6 @@ def _sqlalchemy_url(database_url: str) -> str:
     if database_url.startswith("postgresql://"):
         return "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
     return database_url
-
-
-def _arguments_hash(arguments: dict[str, Any]) -> str:
-    raw = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _approval_summary(name: str, arguments: dict[str, Any]) -> str:
-    if name == "append_transactions":
-        return f"写入 {len(arguments.get('entries') or [])} 条账本记录"
-    if name == "apply_account_operations":
-        return f"执行 {len(arguments.get('operations') or [])} 个账户操作"
-    return "确认执行工具调用"
-
-
-def _channel_text(content: str) -> str:
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return content
-    if isinstance(payload, dict) and isinstance(payload.get("message"), str):
-        return payload["message"]
-    return content
 
 
 def _unknown_tool_name(error: BubError) -> str | None:

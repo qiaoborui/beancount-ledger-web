@@ -165,21 +165,9 @@ func (s *Server) externalAgentBootstrap(c *gin.Context) {
 	if rawSessionID == "" {
 		rawSessionID = channel + ":default"
 	}
-	// Local write access is an instance setting stored in the database
-	// runtime config. Without a configured resolver the safe default is
-	// read-only: external tokens never receive write tools.
-	writeEnabled := false
-	if s.agentTokenWrite != nil {
-		var err error
-		writeEnabled, err = s.agentTokenWrite.AgentTokenWriteEnabled(c.Request.Context())
-		if err != nil {
-			errorJSON(c, http.StatusServiceUnavailable, err)
-			return
-		}
-	}
 	sessionID := agentCapabilitySessionID("token:"+record.ID, rawSessionID)
 	input.Context.SensitiveUnlocked = true
-	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(!writeEnabled), writeEnabled, false)
+	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(false), false)
 }
 
 func (s *Server) internalAgentBootstrap(c *gin.Context) {
@@ -215,7 +203,6 @@ func (s *Server) internalAgentBootstrap(c *gin.Context) {
 		subject,
 		input.Context,
 		allowedTools,
-		false,
 		telegram,
 	)
 }
@@ -226,7 +213,6 @@ func (s *Server) writeAgentBootstrap(
 	subject string,
 	page AgentPageContext,
 	allowedTools []string,
-	trusted bool,
 	telegram bool,
 ) {
 	memories, err := s.listAgentMemories(c.Request.Context())
@@ -234,7 +220,7 @@ func (s *Server) writeAgentBootstrap(
 		errorJSON(c, http.StatusInternalServerError, err)
 		return
 	}
-	systemPrompt := agentSystemPromptMode(page, memories, trusted)
+	systemPrompt := agentSystemPrompt(page, memories)
 	if telegram {
 		systemPrompt = agentTelegramSystemPrompt(page, memories)
 	}
@@ -242,7 +228,7 @@ func (s *Server) writeAgentBootstrap(
 	capabilityToken, err := s.mintAgentCapabilityToken(agentCapabilityClaims{
 		SessionID: sessionID, ClusterID: ledgerClusterID(s.cfg), Context: page,
 		SensitiveUnlocked: true, AllowedTools: allowedTools, Subject: subject,
-		Trusted: trusted, ExpiresAt: expiresAt.Unix(),
+		ExpiresAt: expiresAt.Unix(),
 	})
 	if err != nil {
 		errorJSON(c, http.StatusInternalServerError, err)
@@ -252,20 +238,9 @@ func (s *Server) writeAgentBootstrap(
 	result := make([]map[string]any, 0, len(allowedTools))
 	for _, name := range allowedTools {
 		tool := tools[name]
-		// Trusted capabilities (local bub chat with write enabled) expose write
-		// tools without the per-call approval handshake: the synchronous CLI
-		// channel has no interactive approval surface. Confirmation happens in
-		// the conversation instead, driven by the trusted system prompt. The Go
-		// execute endpoint still enforces this via the Trusted claim, so the
-		// registry's own RequiresApproval flag is left untouched.
-		requiresApproval := tool.RequiresApproval
-		if trusted && !tool.ReadOnly {
-			requiresApproval = false
-		}
 		result = append(result, map[string]any{
 			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-			"title": tool.Title, "requiresApproval": requiresApproval,
-			"approvalMessage": tool.ApprovalMessage, "executionStatus": tool.ExecutionStatus,
+			"title": tool.Title, "executionStatus": tool.ExecutionStatus,
 			"readOnly": tool.ReadOnly,
 		})
 	}
@@ -342,6 +317,33 @@ func (s *Server) authenticateAgentAccessToken(c *gin.Context) (agentAccessTokenR
 		return agentAccessTokenRecord{}, false
 	}
 	return authenticated, true
+}
+
+func (s *Server) agentCapabilitySubjectActive(ctx context.Context, subject string) (bool, error) {
+	const tokenSubjectPrefix = "token:"
+	if !strings.HasPrefix(subject, tokenSubjectPrefix) {
+		return true, nil
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(subject, tokenSubjectPrefix))
+	if id == "" {
+		return false, nil
+	}
+	active := false
+	err := s.runtime().WithLock(ctx, "agent-access-tokens", func(lockCtx context.Context) error {
+		store, readErr := s.readAgentAccessTokens(lockCtx)
+		if readErr != nil {
+			return readErr
+		}
+		now := time.Now().UTC()
+		for _, record := range store.Tokens {
+			if record.ID == id && record.RevokedAt == nil && record.ExpiresAt.After(now) {
+				active = true
+				break
+			}
+		}
+		return nil
+	})
+	return active, err
 }
 
 func (s *Server) readAgentAccessTokens(ctx context.Context) (agentAccessTokenStore, error) {

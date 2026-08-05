@@ -54,30 +54,16 @@ class LedgerCapabilities:
             raise RuntimeError(str(detail))
         return AgentBootstrap.model_validate(response.json())
 
-    async def preview(self, name: str, arguments: dict[str, Any], capability_token: str) -> CapabilityResult:
-        return await self._call(name, "preview", arguments, capability_token)
-
     async def execute(
         self,
         name: str,
         arguments: dict[str, Any],
         capability_token: str,
-        confirmation_token: str = "",
-    ) -> CapabilityResult:
-        return await self._call(name, "execute", arguments, capability_token, confirmation_token)
-
-    async def _call(
-        self,
-        name: str,
-        action: str,
-        arguments: dict[str, Any],
-        capability_token: str,
-        confirmation_token: str = "",
     ) -> CapabilityResult:
         response = await self.client.post(
-            f"{self.base_url}/api/internal/agent/tools/{name}/{action}",
+            f"{self.base_url}/api/internal/agent/tools/{name}/execute",
             headers={"Authorization": f"Bearer {capability_token}"},
-            json={"arguments": arguments, "confirmationToken": confirmation_token},
+            json={"arguments": arguments},
         )
         if response.is_error:
             detail = response.json().get("error", response.text)

@@ -17,13 +17,9 @@ class Settings:
     ledger_api_url: str
     service_token: str = ""
     access_token: str = ""
-    approval_timeout_seconds: int = 600
 
     @classmethod
     def load(cls) -> "Settings":
-        timeout = int(os.environ.get("AGENT_APPROVAL_TIMEOUT_SECONDS", "600"))
-        if timeout < 30 or timeout > 720:
-            raise RuntimeError("AGENT_APPROVAL_TIMEOUT_SECONDS must be between 30 and 720")
         service_token = os.environ.get("AGENT_SERVICE_TOKEN", "").strip()
         access_token = os.environ.get("LEDGER_AGENT_TOKEN", "").strip()
         if not service_token and not access_token:
@@ -46,7 +42,6 @@ class Settings:
             ledger_api_url=ledger_api_url,
             service_token=service_token,
             access_token=access_token,
-            approval_timeout_seconds=timeout,
         )
 
     @property
