@@ -165,9 +165,21 @@ func (s *Server) externalAgentBootstrap(c *gin.Context) {
 	if rawSessionID == "" {
 		rawSessionID = channel + ":default"
 	}
+	// Local write access is an instance setting stored in the database
+	// runtime config. Without a configured resolver the safe default is
+	// read-only: external tokens never receive write tools.
+	writeEnabled := false
+	if s.agentTokenWrite != nil {
+		var err error
+		writeEnabled, err = s.agentTokenWrite.AgentTokenWriteEnabled(c.Request.Context())
+		if err != nil {
+			errorJSON(c, http.StatusServiceUnavailable, err)
+			return
+		}
+	}
 	sessionID := agentCapabilitySessionID("token:"+record.ID, rawSessionID)
 	input.Context.SensitiveUnlocked = true
-	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(true))
+	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(!writeEnabled), writeEnabled)
 }
 
 func (s *Server) internalAgentBootstrap(c *gin.Context) {
@@ -198,6 +210,7 @@ func (s *Server) internalAgentBootstrap(c *gin.Context) {
 		subject,
 		input.Context,
 		s.agentToolNames(false),
+		false,
 	)
 }
 
@@ -207,6 +220,7 @@ func (s *Server) writeAgentBootstrap(
 	subject string,
 	page AgentPageContext,
 	allowedTools []string,
+	trusted bool,
 ) {
 	memories, err := s.listAgentMemories(c.Request.Context())
 	if err != nil {
@@ -217,7 +231,7 @@ func (s *Server) writeAgentBootstrap(
 	capabilityToken, err := s.mintAgentCapabilityToken(agentCapabilityClaims{
 		SessionID: sessionID, ClusterID: ledgerClusterID(s.cfg), Context: page,
 		SensitiveUnlocked: true, AllowedTools: allowedTools, Subject: subject,
-		ExpiresAt: expiresAt.Unix(),
+		Trusted: trusted, ExpiresAt: expiresAt.Unix(),
 	})
 	if err != nil {
 		errorJSON(c, http.StatusInternalServerError, err)
@@ -227,16 +241,26 @@ func (s *Server) writeAgentBootstrap(
 	result := make([]map[string]any, 0, len(allowedTools))
 	for _, name := range allowedTools {
 		tool := tools[name]
+		// Trusted capabilities (local bub chat with write enabled) expose write
+		// tools without the per-call approval handshake: the synchronous CLI
+		// channel has no interactive approval surface. Confirmation happens in
+		// the conversation instead, driven by the trusted system prompt. The Go
+		// execute endpoint still enforces this via the Trusted claim, so the
+		// registry's own RequiresApproval flag is left untouched.
+		requiresApproval := tool.RequiresApproval
+		if trusted && !tool.ReadOnly {
+			requiresApproval = false
+		}
 		result = append(result, map[string]any{
 			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-			"title": tool.Title, "requiresApproval": tool.RequiresApproval,
+			"title": tool.Title, "requiresApproval": requiresApproval,
 			"approvalMessage": tool.ApprovalMessage, "executionStatus": tool.ExecutionStatus,
 			"readOnly": tool.ReadOnly,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"capabilityToken": capabilityToken,
-		"systemPrompt":    agentSystemPrompt(page, memories),
+		"systemPrompt":    agentSystemPromptMode(page, memories, trusted),
 		"tools":           result,
 		"expiresAt":       expiresAt.UTC().Format(time.RFC3339),
 	})

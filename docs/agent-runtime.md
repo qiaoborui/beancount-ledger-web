@@ -106,8 +106,36 @@ uv run bub chat
 
 The installed `bub-tapestore-sqlalchemy` plugin defaults to a local SQLite tape
 database when `DATABASE_URL` is absent. The local process never receives the
-remote Postgres URL, GitHub credentials, or a write capability. It also sends
-model requests through `/api/agent/model`, so the actual provider, base URL,
-model name, and provider API key remain in the remote instance's **实例运行配置**.
+remote Postgres URL or GitHub credentials. It also sends model requests through
+`/api/agent/model`, so the actual provider, base URL, model name, and provider
+API key remain in the remote instance's **实例运行配置**.
 `BUB_MODEL=openai:ledger-agent` is the local alias for that OpenAI-compatible
 proxy, not a second provider configuration.
+
+### Local write access (opt-in)
+
+By default a local `bub chat` session is read-only: the server mints a
+15-minute capability containing only read-only tools, and write tools are never
+downloaded. To let the local operator also write to the ledger, enable the
+**允许本地 Agent 写入账本** toggle under Settings → 实例运行配置. The setting is
+stored in the database `runtime_config` (no environment variable, no restart
+needed).
+
+With this enabled, every `blw_agent_...` token bootstrap returns the complete
+tool catalog (including `append_transactions`, `update_transaction`,
+`delete_transaction`, `reverse_transaction`, `apply_account_operations`, and
+`upsert_memory`). The CLI channel has no interactive approval surface (it is a
+synchronous REPL), so the system prompt instructs the agent to explain the
+pending Beancount changes and ask for explicit confirmation in the conversation
+before calling a write tool; it must never write without that confirmation. The
+write itself still goes through the server's normal writer, `bean-check`,
+commit, and rollback path — only the per-call approval handshake is skipped,
+replaced by the in-dialog confirmation.
+
+Instances without a configured database (filesystem-only) default to read-only
+and cannot expose local write tools.
+
+This is an all-or-nothing switch: it applies to every local access token. Keep
+it off unless you specifically want write capability from a local CLI. Web and
+Telegram write tools are unaffected — they keep their existing confirmation
+flows regardless of this flag.

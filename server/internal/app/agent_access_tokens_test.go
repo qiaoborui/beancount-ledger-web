@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -207,6 +208,94 @@ func TestExternalAgentModelProxyKeepsProviderCredentialsServerSide(t *testing.T)
 
 	if response.Code != http.StatusOK || received["model"] != "server-model" || strings.Contains(response.Body.String(), "provider-secret") {
 		t.Fatalf("model proxy status=%d received=%#v body=%s", response.Code, received, response.Body.String())
+	}
+}
+
+type stubAgentTokenWrite struct {
+	enabled bool
+}
+
+func (s stubAgentTokenWrite) AgentTokenWriteEnabled(context.Context) (bool, error) {
+	return s.enabled, nil
+}
+
+func TestAgentAccessTokenBootstrapCanEnableWrite(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	server.cfg.AgentServiceToken = "agent-service-secret"
+	server.agentTokenWrite = stubAgentTokenWrite{enabled: true}
+	router := newRouter(server.cfg, server)
+
+	created := requestWithCookies(router, http.MethodPost, "/api/agent/access-tokens", `{"name":"Local Write Bub"}`, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create token status=%d body=%s", created.Code, created.Body.String())
+	}
+	var createBody struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createBody); err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrapRequest := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
+	bootstrapRequest.Header.Set("Content-Type", "application/json")
+	bootstrapRequest.Header.Set("Authorization", "Bearer "+createBody.Token)
+	bootstrap := httptest.NewRecorder()
+	router.ServeHTTP(bootstrap, bootstrapRequest)
+	if bootstrap.Code != http.StatusOK {
+		t.Fatalf("bootstrap status=%d body=%s", bootstrap.Code, bootstrap.Body.String())
+	}
+	var bootstrapBody struct {
+		CapabilityToken string `json:"capabilityToken"`
+		SystemPrompt    string `json:"systemPrompt"`
+		Tools           []struct {
+			Name             string `json:"name"`
+			ReadOnly         bool   `json:"readOnly"`
+			RequiresApproval bool   `json:"requiresApproval"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(bootstrap.Body.Bytes(), &bootstrapBody); err != nil {
+		t.Fatal(err)
+	}
+	if bootstrapBody.CapabilityToken == "" || len(bootstrapBody.Tools) == 0 {
+		t.Fatalf("bootstrap missing capability or tools: %s", bootstrap.Body.String())
+	}
+	var writeTool *struct {
+		Name             string `json:"name"`
+		ReadOnly         bool   `json:"readOnly"`
+		RequiresApproval bool   `json:"requiresApproval"`
+	}
+	for index := range bootstrapBody.Tools {
+		tool := &bootstrapBody.Tools[index]
+		if tool.Name == "append_transactions" {
+			writeTool = tool
+		}
+	}
+	if writeTool == nil {
+		t.Fatalf("write-enabled external bootstrap is missing append_transactions: %s", bootstrap.Body.String())
+	}
+	if writeTool.ReadOnly || writeTool.RequiresApproval {
+		t.Fatalf("write-enabled external bootstrap must expose append_transactions without approval: %#v", writeTool)
+	}
+	if !strings.Contains(bootstrapBody.SystemPrompt, "本地模式") || !strings.Contains(bootstrapBody.SystemPrompt, "询问确认") || !strings.Contains(bootstrapBody.SystemPrompt, "明确回复确认") {
+		t.Fatalf("write-enabled bootstrap system prompt must require in-dialog confirmation before writes: %s", bootstrapBody.SystemPrompt)
+	}
+
+	claims, err := server.parseAgentCapabilityToken(bootstrapBody.CapabilityToken)
+	if err != nil {
+		t.Fatalf("parse capability token: %v", err)
+	}
+	if !claims.Trusted {
+		t.Fatalf("write-enabled capability must be trusted: %#v", claims)
+	}
+
+	writeRequest := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
+	writeRequest.Header.Set("Content-Type", "application/json")
+	writeRequest.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
+	writeResponse := httptest.NewRecorder()
+	router.ServeHTTP(writeResponse, writeRequest)
+	if writeResponse.Code != http.StatusBadRequest {
+		t.Fatalf("trusted write execute status=%d body=%s (want 400: empty entries rejected before write)", writeResponse.Code, writeResponse.Body.String())
 	}
 }
 
