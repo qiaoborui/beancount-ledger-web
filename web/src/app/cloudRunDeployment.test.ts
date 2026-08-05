@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const deploymentWorkflow = readFileSync(new URL("../../../.github/workflows/deploy-google-cloud.yml", import.meta.url), "utf8");
 const ciWorkflow = readFileSync(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
 const imagePublishingWorkflow = readFileSync(new URL("../../../.github/workflows/publish-images.yml", import.meta.url), "utf8");
+const artifactTagUpdater = readFileSync(new URL("../../../.github/scripts/update-artifact-latest-tag.sh", import.meta.url), "utf8");
 const dockerfile = readFileSync(new URL("../../../docker/Dockerfile", import.meta.url), "utf8");
 
 describe("Cloud Run deployment", () => {
@@ -35,6 +36,13 @@ describe("Cloud Run deployment", () => {
     expect(deploymentWorkflow).toContain("name: Verify current main commit");
     expect(deploymentWorkflow).toContain("vars.GCP_BUILD_SERVICE_ACCOUNT");
     expect(deploymentWorkflow).toContain("environment: google-cloud-production");
+    expect(deploymentWorkflow).not.toContain("gcloud artifacts docker tags add");
+    expect(deploymentWorkflow.match(/\.github\/scripts\/update-artifact-latest-tag\.sh/g)).toHaveLength(3);
+    expect(artifactTagUpdater).toContain("gcloud artifacts tags list");
+    expect(artifactTagUpdater).toContain("grep -Fxq latest");
+    expect(artifactTagUpdater).toContain("tag_action=create");
+    expect(artifactTagUpdater).toContain("tag_action=update");
+    expect(artifactTagUpdater).toContain('gcloud artifacts tags "${tag_action}" latest');
     expect(deploymentWorkflow.indexOf("build-standalone:")).toBeLessThan(deploymentWorkflow.indexOf("deploy:"));
     expect(deploymentWorkflow.indexOf("checks:")).toBeLessThan(deploymentWorkflow.indexOf("deploy:"));
   });

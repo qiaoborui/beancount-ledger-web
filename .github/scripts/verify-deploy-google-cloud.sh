@@ -5,8 +5,9 @@ deployment="${1:-.github/workflows/deploy-google-cloud.yml}"
 ci="${2:-.github/workflows/ci.yml}"
 publisher="${3:-.github/workflows/publish-images.yml}"
 component_planner="${4:-.github/scripts/plan-components.sh}"
+tag_updater="${5:-.github/scripts/update-artifact-latest-tag.sh}"
 
-for file in "$deployment" "$ci" "$publisher" "$component_planner"; do
+for file in "$deployment" "$ci" "$publisher" "$component_planner" "$tag_updater"; do
   if [[ ! -f "$file" ]]; then
     echo "required workflow file is missing: ${file}" >&2
     exit 1
@@ -103,6 +104,28 @@ for job in build-standalone build-agent build-zip-worker; do
   fi
   if [[ "$build_job" == *'vars.GCP_DEPLOY_SERVICE_ACCOUNT'* ]]; then
     echo "production image build job ${job} must not receive the Cloud Run deploy identity" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -x "$tag_updater" ]]; then
+  echo "Artifact Registry tag updater must be executable" >&2
+  exit 1
+fi
+
+if grep -Fq 'gcloud artifacts docker tags add' "$deployment" "$tag_updater"; then
+  echo "latest tags must be moved with tag update/create permissions, not tag deletion" >&2
+  exit 1
+fi
+
+if [[ "$(grep -Fc '.github/scripts/update-artifact-latest-tag.sh' "$deployment")" -ne 3 ]]; then
+  echo "each deployed image must use the shared latest-tag updater" >&2
+  exit 1
+fi
+
+for required in 'gcloud artifacts tags list' 'grep -Fxq latest' 'tag_action=create' 'tag_action=update' 'gcloud artifacts tags "${tag_action}" latest'; do
+  if ! grep -Fq "$required" "$tag_updater"; then
+    echo "latest-tag updater is missing: ${required}" >&2
     exit 1
   fi
 done
