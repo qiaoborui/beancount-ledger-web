@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
 from bub.builtin.model_runner import ModelRunner
+from bub.errors import BubError, ErrorKind
 from bub.hooks.interception import ToolCall
 from bub.streaming import AsyncStreamEvents, StreamEvent
 
@@ -30,6 +32,86 @@ class FakeBroker:
         assert session_id == "telegram:123"
         assert subject == "user-1"
         self.resolutions.append(approved)
+
+
+@pytest.mark.asyncio
+async def test_model_stream_converts_frozen_bub_errors_before_channel_cleanup() -> None:
+    plugin = object.__new__(LedgerPlugin)
+
+    async def events():
+        raise BubError(ErrorKind.TOOL, "Unknown tool name: open_page.")
+        yield
+
+    class FailingAgent:
+        async def run_stream(self, **_kwargs) -> AsyncStreamEvents:
+            return AsyncStreamEvents(events())
+
+    @asynccontextmanager
+    async def channel_lifespan():
+        yield
+
+    plugin.agent = FailingAgent()
+    stream = await plugin.run_model_stream(
+        prompt="查询本月支出",
+        session_id="telegram:123",
+        state={"allowed_tools": [], "allowed_skills": []},
+    )
+
+    with pytest.raises(RuntimeError, match=r"\[tool\] Unknown tool name: open_page\.") as caught:
+        async with channel_lifespan():
+            async for _event in stream:
+                pass
+
+    assert isinstance(caught.value.__cause__, BubError)
+    assert "cannot assign to field '__traceback__'" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_telegram_unknown_tool_starts_fresh_context_and_retries_once() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    handoffs: list[tuple[str, dict]] = []
+
+    class SessionTape:
+        async def handoff(self, *, name: str, state: dict) -> None:
+            handoffs.append((name, state))
+
+    class TapeRoot:
+        def session_tape(self, session_id: str, workspace: Path) -> SessionTape:
+            assert session_id == "telegram:123"
+            assert workspace == Path("/workspace")
+            return SessionTape()
+
+    class RecoveringAgent:
+        def __init__(self) -> None:
+            self.attempts = 0
+            self.tape = TapeRoot()
+
+        async def run_stream(self, **_kwargs) -> AsyncStreamEvents:
+            self.attempts += 1
+
+            async def events():
+                if self.attempts == 1:
+                    raise BubError(ErrorKind.TOOL, "Unknown tool name: open_page.")
+                yield StreamEvent("text", {"delta": "本月支出已查到"})
+                yield StreamEvent("final", {"ok": True, "text": "本月支出已查到"})
+
+            return AsyncStreamEvents(events())
+
+    agent = RecoveringAgent()
+    plugin.agent = agent
+    plugin.framework = SimpleNamespace(workspace=Path("/workspace"))
+    state = {
+        "channel": "telegram",
+        "allowed_tools": ["query_ledger"],
+        "allowed_skills": ["telegram-ledger-agent", "telegram"],
+    }
+
+    stream = await plugin.run_model_stream("查询本月支出", "telegram:123", state)
+    received = [event async for event in stream]
+
+    assert agent.attempts == 2
+    assert handoffs == [("recovery/unknown_tool", {"tool": "open_page"})]
+    assert [event.data.get("delta") for event in received if event.kind == "text"] == ["本月支出已查到"]
 
 
 @pytest.mark.asyncio

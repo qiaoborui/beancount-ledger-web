@@ -18,10 +18,11 @@ from bub.channels.message import ChannelMessage
 from bub.builtin.agent import Agent
 from bub.builtin.context import default_tape_context
 from bub.envelope import content_of
+from bub.errors import BubError, ErrorKind
 from bub.framework import BubFramework
 from bub.hooks import hookimpl
 from bub.hooks.interception import ToolCall, ToolCallDecision
-from bub.streaming import AsyncStreamEvents
+from bub.streaming import AsyncStreamEvents, StreamState
 from bub.tape import AsyncTapeStoreAdapter, TapeContext, TapeEntry, TapeQuery
 from bub.tools import REGISTRY, Tool, ToolContext
 from .capabilities import LedgerCapabilities
@@ -237,14 +238,42 @@ class LedgerPlugin:
         session_id: str,
         state: dict[str, Any],
     ) -> AsyncStreamEvents:
-        return await self.agent.run_stream(
-            session_id=session_id,
-            prompt=prompt,
-            state=state,
-            model=state.get("model"),
-            allowed_tools=list(state.get("allowed_tools") or []),
-            allowed_skills=list(state.get("allowed_skills") or []),
-        )
+        async def start_stream() -> AsyncStreamEvents:
+            return await self.agent.run_stream(
+                session_id=session_id,
+                prompt=prompt,
+                state=state,
+                model=state.get("model"),
+                allowed_tools=list(state.get("allowed_tools") or []),
+                allowed_skills=list(state.get("allowed_skills") or []),
+            )
+
+        stream = await start_stream()
+        adapted_state = StreamState()
+
+        async def events():
+            nonlocal stream
+            recovered = False
+            try:
+                while True:
+                    try:
+                        async for event in stream:
+                            yield event
+                        return
+                    except BubError as error:
+                        tool_name = _unknown_tool_name(error)
+                        if state.get("channel") == "telegram" and tool_name and not recovered:
+                            recovered = True
+                            tape = self.agent.tape.session_tape(session_id, self.framework.workspace)
+                            await tape.handoff(name="recovery/unknown_tool", state={"tool": tool_name})
+                            stream = await start_stream()
+                            continue
+                        raise RuntimeError(str(error)) from error
+            finally:
+                adapted_state.error = stream.error
+                adapted_state.usage = stream.usage
+
+        return AsyncStreamEvents(events(), state=adapted_state)
 
     @hookimpl
     async def before_tool_call(self, call: ToolCall, state: dict[str, Any]) -> ToolCallDecision | None:
@@ -585,3 +614,10 @@ def _channel_text(content: str) -> str:
     if isinstance(payload, dict) and isinstance(payload.get("message"), str):
         return payload["message"]
     return content
+
+
+def _unknown_tool_name(error: BubError) -> str | None:
+    prefix = "Unknown tool name: "
+    if error.kind != ErrorKind.TOOL or not error.message.startswith(prefix) or not error.message.endswith("."):
+        return None
+    return error.message.removeprefix(prefix).removesuffix(".").strip() or None
