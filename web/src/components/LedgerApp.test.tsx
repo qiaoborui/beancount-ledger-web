@@ -20,6 +20,7 @@ describe("LedgerApp routes", () => {
 
   it("keeps Agent route loading visible and does not replay route requests in the dock", () => {
     expect(source).toContain('fallback={props.presentation === "page" ? <AgentPageLoading /> : null}');
+    expect(source).toContain("ledger-agent-page flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))]");
     expect(source).toContain('request={null}');
   });
 });
