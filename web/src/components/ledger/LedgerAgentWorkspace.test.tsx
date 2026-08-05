@@ -16,9 +16,18 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("createPortal(panel");
     expect(source).toContain("const desktopViewport = useDesktopViewport();");
     expect(source).toContain('desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"');
-    expect(source).toContain("return desktopViewport ? pageWorkspace : createPortal(pageWorkspace, document.body);");
+    expect(source).toContain("desktopViewport ? pageWorkspace : createPortal(pageWorkspace, document.body)");
     expect(source).toContain("pt-[calc(env(safe-area-inset-top)+0.75rem)]");
     expect(source).toContain("h-9 w-9");
+  });
+
+  it("renders mobile session history from page presentation", () => {
+    const pageBranchStart = source.indexOf('if (presentation === "page")');
+    const dockBranchStart = source.indexOf('return <>\n    <aside className={`ledger-agent-dock', pageBranchStart);
+    const pageBranch = source.slice(pageBranchStart, dockBranchStart);
+
+    expect(pageBranch).toContain("mobileSessionListOpen && mobileSessionList");
+    expect(source).toContain("open && mobileSessionListOpen && mobileSessionList");
   });
 
   it("uses approval and typed artifact events", () => {
