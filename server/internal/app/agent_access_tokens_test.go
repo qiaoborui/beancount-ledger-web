@@ -299,7 +299,7 @@ func TestAgentAccessTokenBootstrapCanEnableWrite(t *testing.T) {
 	}
 }
 
-func TestInternalAgentBootstrapUsesServiceTokenAndIncludesWriteTools(t *testing.T) {
+func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "gateway-secret"
@@ -320,6 +320,7 @@ func TestInternalAgentBootstrapUsesServiceTokenAndIncludesWriteTools(t *testing.
 	}
 	var body struct {
 		CapabilityToken string `json:"capabilityToken"`
+		SystemPrompt    string `json:"systemPrompt"`
 		Tools           []struct {
 			Name     string `json:"name"`
 			ReadOnly bool   `json:"readOnly"`
@@ -329,16 +330,41 @@ func TestInternalAgentBootstrapUsesServiceTokenAndIncludesWriteTools(t *testing.
 		t.Fatal(err)
 	}
 	foundWriteTool := false
+	foundOpenPage := false
 	for _, tool := range body.Tools {
 		if tool.Name == "append_transactions" && !tool.ReadOnly {
 			foundWriteTool = true
+		}
+		if tool.Name == "open_page" {
+			foundOpenPage = true
 		}
 	}
 	if body.CapabilityToken == "" || !foundWriteTool {
 		t.Fatalf("internal bootstrap missing capability or write tools: %s", response.Body.String())
 	}
+	if foundOpenPage {
+		t.Fatalf("telegram bootstrap must not expose web-only open_page tool: %s", response.Body.String())
+	}
+	if !strings.Contains(body.SystemPrompt, "Telegram") ||
+		!strings.Contains(body.SystemPrompt, "问候、闲聊或不明确的请求") ||
+		!strings.Contains(body.SystemPrompt, "系统会自动展示") {
+		t.Fatalf("telegram bootstrap must use the Telegram system prompt: %s", response.Body.String())
+	}
 	claims, err := server.parseAgentCapabilityToken(body.CapabilityToken)
 	if err != nil || claims.Subject != "channel:telegram" || claims.SessionID == "telegram:123" {
 		t.Fatalf("unexpected internal bootstrap claims: %#v err=%v", claims, err)
+	}
+}
+
+func TestAgentTelegramToolNamesOnlyRemovesWebNavigation(t *testing.T) {
+	got := agentTelegramToolNames([]string{"get_accounts", "open_page", "append_transactions"})
+	want := []string{"get_accounts", "append_transactions"}
+	if len(got) != len(want) {
+		t.Fatalf("telegram tool names = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("telegram tool names = %v, want %v", got, want)
+		}
 	}
 }
