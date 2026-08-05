@@ -42,6 +42,22 @@ if ! grep -Fq '  workflow_call:' "$ci"; then
   exit 1
 fi
 
+for required in \
+  'reusable_call:' \
+  'reusable_call: true' \
+  'INPUT_REUSABLE_CALL: ${{ inputs.reusable_call }}' \
+  'if [[ "${INPUT_REUSABLE_CALL}" == "true" ]]'; do
+  if ! grep -Fq "$required" "$ci" "$deployment"; then
+    echo "reusable CI must use an explicit invocation marker: ${required}" >&2
+    exit 1
+  fi
+done
+
+if grep -Fq "github.event_name != 'workflow_call'" "$ci" || grep -Fq 'github.event_name }}" == "workflow_call"' "$ci"; then
+  echo "reusable CI must not infer its invocation mode from the caller event" >&2
+  exit 1
+fi
+
 if grep -Fq '  push:' "$ci"; then
   echo "main pushes must not start a second serial CI workflow" >&2
   exit 1

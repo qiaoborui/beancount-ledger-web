@@ -95,6 +95,7 @@ jobs:
     needs: plan
     uses: ./.github/workflows/ci.yml
     with:
+      reusable_call: true
       backend: ${{ needs.plan.outputs.backend == 'true' }}
       agent: ${{ needs.plan.outputs.agent == 'true' }}
       web: ${{ needs.plan.outputs.web == 'true' }}
