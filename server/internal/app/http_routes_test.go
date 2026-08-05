@@ -444,6 +444,11 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ai/parse":                             true,
 		"POST /api/ai/agent/turn":                        true,
 		"POST /api/ai/agent/interactions/:interactionID": true,
+		"GET /api/agent/access-tokens":                   true,
+		"POST /api/agent/access-tokens":                  true,
+		"DELETE /api/agent/access-tokens/:tokenID":       true,
+		"POST /api/agent/bootstrap":                      true,
+		"POST /api/agent/model/chat/completions":         true,
 		"GET /api/push/subscription":                     true,
 		"POST /api/push/subscription":                    true,
 		"DELETE /api/push/subscription":                  true,
@@ -463,6 +468,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	covered["GET /api/ai/agent/sessions/:sessionID/timeline"] = true
 	covered["DELETE /api/ai/agent/sessions/:sessionID"] = true
 	covered["GET /api/internal/agent/tools"] = true
+	covered["POST /api/internal/agent/bootstrap"] = true
 	covered["POST /api/internal/agent/tools/:toolName/preview"] = true
 	covered["POST /api/internal/agent/tools/:toolName/execute"] = true
 	covered["POST /api/internal/agent/model/chat/completions"] = true

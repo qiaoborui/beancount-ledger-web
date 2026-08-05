@@ -210,6 +210,12 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/ai/agent/interactions/:interactionID", s.aiAgentInteraction)
 	api.GET("/ai/agent/sessions/:sessionID/timeline", noStore(), s.aiAgentTimeline)
 	api.DELETE("/ai/agent/sessions/:sessionID", s.aiAgentSessionDelete)
+	api.GET("/agent/access-tokens", noStore(), s.agentAccessTokens)
+	api.POST("/agent/access-tokens", noStore(), s.createAgentAccessToken)
+	api.DELETE("/agent/access-tokens/:tokenID", noStore(), s.revokeAgentAccessToken)
+	api.POST("/agent/bootstrap", noStore(), s.externalAgentBootstrap)
+	api.POST("/agent/model/chat/completions", s.externalAgentModelProxy)
+	api.POST("/internal/agent/bootstrap", noStore(), s.internalAgentBootstrap)
 	api.GET("/internal/agent/tools", s.internalAgentTools)
 	api.POST("/internal/agent/tools/:toolName/preview", s.internalAgentToolPreview)
 	api.POST("/internal/agent/tools/:toolName/execute", s.internalAgentToolExecute)
@@ -251,7 +257,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "passkey-management-v1"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "passkey-management-v1", "agent-access-tokens-v1"},
 	}
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)

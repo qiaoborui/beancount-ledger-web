@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 class Interaction:
     id: str
     session_id: str
+    subject: str
     created_at: datetime
     expires_at: datetime
 
@@ -21,11 +22,12 @@ class InteractionBroker:
         self._metadata: dict[str, Interaction] = {}
         self._lock = asyncio.Lock()
 
-    async def create(self, session_id: str) -> tuple[Interaction, asyncio.Future[bool]]:
+    async def create(self, session_id: str, subject: str = "") -> tuple[Interaction, asyncio.Future[bool]]:
         now = datetime.now(UTC)
         interaction = Interaction(
             id="interaction-" + secrets.token_hex(12),
             session_id=session_id,
+            subject=subject,
             created_at=now,
             expires_at=now + timedelta(seconds=self.timeout_seconds),
         )
@@ -43,6 +45,38 @@ class InteractionBroker:
                 raise KeyError(interaction_id)
             future.set_result(approved)
             return interaction
+
+    async def resolve_session(self, session_id: str, approved: bool, subject: str = "") -> Interaction | None:
+        async with self._lock:
+            for interaction_id, interaction in self._metadata.items():
+                future = self._pending.get(interaction_id)
+                if (
+                    interaction.session_id != session_id
+                    or interaction.subject != subject
+                    or future is None
+                    or future.done()
+                ):
+                    continue
+                future.set_result(approved)
+                return interaction
+        return None
+
+    async def has_pending_session(self, session_id: str, subject: str | None = None) -> bool:
+        async with self._lock:
+            return any(
+                interaction.session_id == session_id
+                and (subject is None or interaction.subject == subject)
+                and (future := self._pending.get(interaction_id)) is not None
+                and not future.done()
+                for interaction_id, interaction in self._metadata.items()
+            )
+
+    async def discard(self, interaction_id: str) -> None:
+        async with self._lock:
+            future = self._pending.pop(interaction_id, None)
+            self._metadata.pop(interaction_id, None)
+            if future is not None and not future.done():
+                future.cancel()
 
     async def wait(self, interaction: Interaction, future: asyncio.Future[bool]) -> bool:
         try:

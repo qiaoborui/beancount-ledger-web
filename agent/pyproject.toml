@@ -21,6 +21,9 @@ dev = [
 [project.scripts]
 ledger-agent = "ledger_agent_service.app:main"
 
+[project.entry-points."bub"]
+ledger-web = "ledger_agent_service.runtime:LedgerPlugin"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

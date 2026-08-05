@@ -24,6 +24,8 @@ env:
   AGENT_SERVICE: ${{ vars.GCP_AGENT_SERVICE || 'beancount-ledger-agent' }}
   ZIP_WORKER_SERVICE: ${{ vars.GCP_ZIP_WORKER_SERVICE || 'beancount-ledger-zip-worker' }}
   BUB_MODEL: ${{ vars.BUB_MODEL || 'openai:ledger-agent' }}
+  BUB_TELEGRAM_ALLOW_USERS: ${{ vars.BUB_TELEGRAM_ALLOW_USERS }}
+  BUB_TELEGRAM_ALLOW_CHATS: ${{ vars.BUB_TELEGRAM_ALLOW_CHATS }}
   DEEPSEEK_SECRET_NAME: ${{ vars.GCP_DEEPSEEK_SECRET }}
 
 jobs:
@@ -246,10 +248,18 @@ jobs:
           fi
 
           agent_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
-            | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN"' \
+            | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN" || $1 == "BUB_TELEGRAM_TOKEN"' \
             | paste -sd, -)"
           agent_image="${{ steps.image.outputs.agent_name }}@${{ steps.build-agent-image.outputs.digest }}"
-          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model"
+          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}"
+          agent_runtime_args=(--cpu-throttling --min-instances=0)
+          if [[ ",${agent_secret_mappings}," == *",BUB_TELEGRAM_TOKEN="* ]]; then
+            if [[ -z "${BUB_TELEGRAM_ALLOW_USERS}" && -z "${BUB_TELEGRAM_ALLOW_CHATS}" ]]; then
+              echo "::error::BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled"
+              exit 1
+            fi
+            agent_runtime_args=(--no-cpu-throttling --min-instances=1)
+          fi
           gcloud run deploy "${AGENT_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
@@ -261,9 +271,8 @@ jobs:
             --port=8080 \
             --cpu=1 \
             --memory=1Gi \
-            --cpu-throttling \
             --concurrency=8 \
-            --min-instances=0 \
+            "${agent_runtime_args[@]}" \
             --max-instances=1 \
             --timeout=900s \
             --set-env-vars="${agent_env}" \
@@ -386,7 +395,7 @@ jobs:
           fi
 
           platform_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
-            | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY"' \
+            | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY" && $1 != "BUB_TELEGRAM_TOKEN"' \
             | paste -sd, -)"
           candidate_secret_mappings="${platform_secret_mappings}"
           env_vars="^|^PUBLIC_ORIGIN=${PUBLIC_ORIGIN}|WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}|WEBAUTHN_PUBLIC_ORIGIN=${WEBAUTHN_PUBLIC_ORIGIN}|LEDGER_NOTIFICATION_REFRESH_INTERVAL=off|ZIP_WORKER_URL=${ZIP_WORKER_URL}|ZIP_WORKER_AUDIENCE=${ZIP_WORKER_URL}|AGENT_SERVICE_URL=${AGENT_SERVICE_URL}|AGENT_SERVICE_AUDIENCE=${AGENT_SERVICE_URL}"
@@ -512,7 +521,7 @@ jobs:
 
           if [[ "${{ steps.deploy-candidate.outputs.legacy_migration_required }}" == "true" ]]; then
             platform_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
-              | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY"' \
+              | awk -F= '$1 != "APP_PASSWORD" && $1 != "LEDGER_GITHUB_TOKEN" && $1 != "LEDGER_GITHUB_INDEX_TOKEN" && $1 != "DEEPSEEK_API_KEY" && $1 != "OPENAI_API_KEY" && $1 != "BUB_TELEGRAM_TOKEN"' \
               | paste -sd, -)"
             gcloud run services update "${CLOUD_RUN_SERVICE}" \
               --project="${GCP_PROJECT_ID}" \

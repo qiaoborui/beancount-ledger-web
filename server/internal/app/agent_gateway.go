@@ -34,6 +34,8 @@ type agentCapabilityClaims struct {
 	ClusterID         string           `json:"clusterId"`
 	Context           AgentPageContext `json:"context"`
 	SensitiveUnlocked bool             `json:"sensitiveUnlocked"`
+	AllowedTools      []string         `json:"allowedTools"`
+	Subject           string           `json:"subject,omitempty"`
 	ExpiresAt         int64            `json:"expiresAt"`
 }
 
@@ -73,6 +75,8 @@ func (s *Server) proxyLedgerAgentTurn(c *gin.Context, input AgentTurnRequest) er
 		ClusterID:         ledgerClusterID(s.cfg),
 		Context:           input.Context,
 		SensitiveUnlocked: input.Context.SensitiveUnlocked,
+		AllowedTools:      s.agentToolNames(false),
+		Subject:           "web",
 		ExpiresAt:         time.Now().Add(agentCapabilityLifetime).Unix(),
 	})
 	if err != nil {
@@ -86,7 +90,7 @@ func (s *Server) proxyLedgerAgentTurn(c *gin.Context, input AgentTurnRequest) er
 		"capabilityToken": capabilityToken,
 		"systemPrompt":    agentSystemPrompt(input.Context, memories),
 	}
-	return s.proxyAgentSSE(c, "/v1/turn", payload)
+	return s.proxyAgentSSE(c, "/v1/channels/web/messages", payload)
 }
 
 func (s *Server) proxyAgentSSE(c *gin.Context, path string, payload any) error {
@@ -303,6 +307,10 @@ func (s *Server) internalAgentToolPreview(c *gin.Context) {
 		return
 	}
 	toolName := c.Param("toolName")
+	if !agentCapabilityAllowsTool(claims, toolName) {
+		errorJSON(c, http.StatusForbidden, errors.New("Agent capability does not allow this tool"))
+		return
+	}
 	tool, exists := s.agentTools()[toolName]
 	if !exists || !tool.RequiresApproval {
 		errorJSON(c, http.StatusNotFound, errors.New("Agent tool preview is not available"))
@@ -341,6 +349,10 @@ func (s *Server) internalAgentToolExecute(c *gin.Context) {
 		return
 	}
 	toolName := c.Param("toolName")
+	if !agentCapabilityAllowsTool(claims, toolName) {
+		errorJSON(c, http.StatusForbidden, errors.New("Agent capability does not allow this tool"))
+		return
+	}
 	tools := s.agentTools()
 	tool, arguments, _, err := validateAgentToolCall(tools, agentModelToolCall{ID: "capability-execute", Type: "function", Function: agentModelFunctionCall{Name: toolName, Arguments: string(request.Arguments)}}, map[string]struct{}{})
 	if err != nil {
@@ -399,10 +411,36 @@ func agentCapabilityExecutionResponse(execution agentToolExecution) gin.H {
 	}
 }
 
+func (s *Server) agentToolNames(readOnly bool) []string {
+	tools := s.agentTools()
+	names := make([]string, 0, len(tools))
+	for name, tool := range tools {
+		if readOnly && !tool.ReadOnly {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func agentCapabilityAllowsTool(claims agentCapabilityClaims, toolName string) bool {
+	for _, allowed := range claims.AllowedTools {
+		if allowed == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) internalAgentModelProxy(c *gin.Context) {
 	if !s.requireAgentService(c) {
 		return
 	}
+	s.proxyAgentModelRequest(c)
+}
+
+func (s *Server) proxyAgentModelRequest(c *gin.Context) {
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 8<<20))
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)

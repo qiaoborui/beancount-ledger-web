@@ -8,6 +8,7 @@ import { fetchJson } from "@/lib/clientFetch";
 import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatus, applyApiEndpointProbe, createApiEndpointId, displayApiEndpointUrl, hasKnownApiEndpointAuthentication, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, withActiveApiEndpoint, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
 import { getWebPushPresentation, useWebPush } from "./hooks/useWebPush";
 import { PasskeySettingsPanel } from "./PasskeySettingsPanel";
+import { AgentAccessTokenSettings } from "./AgentAccessTokenSettings";
 import type { PasskeyCredentialSummary } from "./passkeys";
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
@@ -93,6 +94,7 @@ export function SettingsPage({
   return <div className="space-y-6">
     <LocalAccessPanel />
     <RuntimeConfigPanel sensitiveUnlocked={sensitiveUnlocked} showToast={showToast} />
+    <AgentAccessTokenSettings sensitiveUnlocked={sensitiveUnlocked} showToast={showToast} />
     <PasskeySettingsPanel onRegister={onRegisterPasskey} onRegisteredChange={onPasskeyRegisteredChange} showToast={showToast} />
     <NotificationSettingsPanel showToast={showToast} />
     <ApiEndpointSettingsPanel showToast={showToast} />

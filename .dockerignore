@@ -1,6 +1,8 @@
 .git
 .github
-.agents
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 .codegraph
 .vercel
 gha-creds-*.json

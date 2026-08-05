@@ -178,7 +178,7 @@ mounts them only on the zero-traffic candidate, verifies
 `configSource=database`, promotes it, then creates a clean revision without the
 legacy mappings.
 
-Feature-specific secrets include `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+Feature-specific secrets include `BUB_TELEGRAM_TOKEN`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
 `WEB_PUSH_VAPID_PRIVATE_KEY`, `GMAIL_CLIENT_SECRET`,
 `GMAIL_TOKEN_ENCRYPTION_KEY`, `GMAIL_ZIP_PASSWORDS`, and the transition-only
 `CRON_SECRET`.
@@ -208,6 +208,11 @@ to Secret Manager versions:
 AUTH_SECRET=ledger-auth-secret:latest,DATABASE_URL=ledger-database-url:latest,AGENT_SERVICE_TOKEN=ledger-agent-service-token:latest
 ```
 
+To enable Telegram, append
+`BUB_TELEGRAM_TOKEN=ledger-telegram-bot-token:latest`. The deployment workflow
+mounts that secret only into the private Bub Agent revision, not the public Go
+service.
+
 During the existing-production migration, temporarily keep the old
 `APP_PASSWORD`, `LEDGER_GITHUB_TOKEN`, and AI key mappings in the same secret.
 They are filtered from the final revision automatically. Add feature-specific
@@ -230,6 +235,8 @@ level so the workflow can evaluate its configuration gate:
 | `GCP_AGENT_SERVICE` | Private Bub Agent service name, normally `beancount-ledger-agent` |
 | `GCP_ZIP_WORKER_SERVICE` | Private ZIP worker service name, normally `beancount-ledger-zip-worker` |
 | `BUB_MODEL` | Bub model identifier; defaults to `openai:ledger-agent` and uses the Go model proxy |
+| `BUB_TELEGRAM_ALLOW_USERS` | Optional comma-separated Telegram user IDs allowed to use the bot |
+| `BUB_TELEGRAM_ALLOW_CHATS` | Optional comma-separated Telegram chat IDs allowed to use the bot |
 | `GCP_DEEPSEEK_SECRET` | Optional Secret Manager secret containing the DeepSeek API key |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
@@ -271,6 +278,14 @@ the same runtime service account as its only invoker. The Agent receives only
 Postgres, the public Go API origin, the internal service token, and model-proxy
 configuration. It has no ledger or GitHub credential. Its URL and OIDC audience
 are injected into the main service.
+
+When `BUB_TELEGRAM_TOKEN` is mapped, the same single Agent revision also runs
+Bub's Telegram long-polling Channel. The workflow switches that service to one
+minimum instance with always-allocated CPU, and keeps `--max-instances=1`; these
+settings keep polling alive, avoid competing bot pollers, and preserve
+in-process write approval state. Without Telegram, the Agent remains
+request-based and may scale to zero. Configure at least one user or chat allow
+list before enabling the bot.
 
 The main service keeps request-based 1 vCPU, zero minimum instances, two maximum
 instances, concurrency eight, a 15-minute request timeout, and 512 MiB memory.

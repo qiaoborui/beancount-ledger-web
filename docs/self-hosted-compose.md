@@ -35,6 +35,19 @@ LEDGER_UID=<$(id -u)>
 LEDGER_GID=<$(id -g)>
 ```
 
+To enable Bub's Telegram Channel, also set the BotFather token and restrict it
+to known numeric user or chat IDs:
+
+```text
+BUB_TELEGRAM_TOKEN=<telegram bot token>
+BUB_TELEGRAM_ALLOW_USERS=123456789
+BUB_TELEGRAM_ALLOW_CHATS=123456789
+```
+
+Leave `BUB_TELEGRAM_TOKEN` empty to disable the Channel. Compose runs exactly
+one `agent` container, which is required for Telegram long polling and pending
+write confirmations.
+
 Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
 safe in Compose and PostgreSQL environment variables. `SELFHOST_IMAGE_TAG`
 defaults to `latest`; pin it to a published commit tag for a repeatable update.
@@ -90,6 +103,12 @@ publishes a revision; a failed GitHub commit stays out of the active Postgres
 read model. Application writes and imports keep their existing GitHub API
 transaction, preview, and commit-conflict protection; the API never edits a
 local checkout.
+
+The browser connects to Bub through Go's Web Channel gateway. Telegram connects
+directly to Bub's native Channel but still obtains ledger tools and model access
+through the internal Go API. For a laptop or workstation, create a revocable
+read-only Token in Settings -> 本地 Agent 访问 and follow
+`docs/agent-runtime.md`; no Postgres or GitHub credential is copied locally.
 
 ## LAN and HTTPS
 

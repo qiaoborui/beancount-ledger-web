@@ -68,7 +68,7 @@ func TestLedgerAgentUsesAvailableOpenAIConfigurationByDefault(t *testing.T) {
 func TestAgentGatewayProxiesTurnAndMintsCapability(t *testing.T) {
 	var received map[string]any
 	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/turn" || r.Header.Get("X-Agent-Service-Token") != "agent-secret" {
+		if r.URL.Path != "/v1/channels/web/messages" || r.Header.Get("X-Agent-Service-Token") != "agent-secret" {
 			t.Fatalf("unexpected Agent request: %s token=%q", r.URL.Path, r.Header.Get("X-Agent-Service-Token"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
@@ -102,7 +102,7 @@ func TestAgentGatewayDoesNotDeadlockWhenRuntimeConfigRefreshIsDueDuringCallback(
 	var ledgerURL string
 	callbackResult := make(chan error, 1)
 	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/turn" {
+		if r.URL.Path != "/v1/channels/web/messages" {
 			http.Error(w, "unexpected Agent path", http.StatusNotFound)
 			return
 		}
@@ -216,6 +216,7 @@ func TestWriteCapabilityRequiresMatchingPreviewConfirmation(t *testing.T) {
 	capability, err := server.mintAgentCapabilityToken(agentCapabilityClaims{
 		SessionID: "session-write", ClusterID: ledgerClusterID(server.cfg),
 		SensitiveUnlocked: true, Context: AgentPageContext{SensitiveUnlocked: true},
+		AllowedTools: []string{"upsert_memory"},
 		ExpiresAt: time.Now().Add(time.Minute).Unix(),
 	})
 	if err != nil {

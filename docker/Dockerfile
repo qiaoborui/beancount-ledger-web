@@ -21,9 +21,12 @@ WORKDIR /app/agent
 ENV PATH=/app/agent/.venv/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 RUN groupadd --system ledger \
-  && useradd --system --gid ledger --home-dir /app/agent ledger
+  && useradd --system --gid ledger --home-dir /app/agent ledger \
+  && mkdir -p /app/agent/.bub \
+  && chown ledger:ledger /app/agent/.bub
 COPY --from=agent-builder --chown=ledger:ledger /app/agent/.venv /app/agent/.venv
 COPY --from=agent-builder --chown=ledger:ledger /app/agent/src /app/agent/src
+COPY --chown=ledger:ledger .agents/skills /app/agent/.agents/skills
 USER ledger
 EXPOSE 8080
 CMD ["ledger-agent"]
