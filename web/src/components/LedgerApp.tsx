@@ -42,6 +42,7 @@ import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
 import { useThemeMode } from "./ledger/hooks/useThemeMode";
 import { useToast } from "./ledger/hooks/useToast";
+import { useDesktopViewport } from "./ledger/hooks/useDesktopViewport";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
 import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
@@ -120,15 +121,14 @@ function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
 }
 
 function AgentPageLoading() {
-  return createPortal(
-    <section className="ledger-agent-page fixed inset-0 z-40 flex min-h-0 min-w-0 max-w-full items-center justify-center overflow-hidden bg-paper" aria-busy="true" aria-label="正在打开账本 Agent">
+  const desktopViewport = useDesktopViewport();
+  const loading = <section className={`ledger-agent-page flex min-h-0 min-w-0 max-w-full items-center justify-center overflow-hidden bg-paper ${desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"}`} aria-busy="true" aria-label="正在打开账本 Agent">
       <div className="flex items-center gap-3 text-sm text-stone">
         <Bot className="h-5 w-5 animate-pulse text-brand" />
         <span>正在打开账本 Agent…</span>
       </div>
-    </section>,
-    document.body,
-  );
+    </section>;
+  return desktopViewport ? loading : createPortal(loading, document.body);
 }
 
 function LedgerAgentWorkspace(props: ComponentProps<typeof LazyLedgerAgentWorkspace>) {

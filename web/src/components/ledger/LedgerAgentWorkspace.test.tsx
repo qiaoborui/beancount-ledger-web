@@ -14,8 +14,9 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
     expect(source).toContain("createPortal(panel");
-    expect(source).toContain("if (presentation === \"page\") return createPortal(");
-    expect(source).toContain("ledger-agent-page fixed inset-0 z-40");
+    expect(source).toContain("const desktopViewport = useDesktopViewport();");
+    expect(source).toContain('desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"');
+    expect(source).toContain("return desktopViewport ? pageWorkspace : createPortal(pageWorkspace, document.body);");
     expect(source).toContain("pt-[calc(env(safe-area-inset-top)+0.75rem)]");
     expect(source).toContain("h-9 w-9");
   });
