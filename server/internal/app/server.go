@@ -44,6 +44,14 @@ type Server struct {
 	txService            *TransactionService
 	limiter              RateLimiter
 	agentModel           AgentModelClient
+	agentTokenWrite      agentTokenWriteResolver
+}
+
+// agentTokenWriteResolver reports whether local Agent access tokens may write
+// to the ledger. It is backed by the database runtime config when available,
+// and defaults to read-only otherwise.
+type agentTokenWriteResolver interface {
+	AgentTokenWriteEnabled(context.Context) (bool, error)
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {

@@ -36,6 +36,7 @@ type agentCapabilityClaims struct {
 	SensitiveUnlocked bool             `json:"sensitiveUnlocked"`
 	AllowedTools      []string         `json:"allowedTools"`
 	Subject           string           `json:"subject,omitempty"`
+	Trusted           bool             `json:"trusted,omitempty"`
 	ExpiresAt         int64            `json:"expiresAt"`
 }
 
@@ -359,7 +360,7 @@ func (s *Server) internalAgentToolExecute(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	if tool.RequiresApproval {
+	if tool.RequiresApproval && !claims.Trusted {
 		confirmation, confirmationErr := s.parseAgentConfirmationToken(request.ConfirmationToken)
 		argumentsHash, hashErr := canonicalAgentArgumentsHash(arguments)
 		if confirmationErr != nil || hashErr != nil || confirmation.SessionID != claims.SessionID || confirmation.ClusterID != claims.ClusterID || confirmation.ToolName != toolName || confirmation.ArgumentsHash != argumentsHash {

@@ -656,12 +656,24 @@ func (s *Server) validateAgentEntries(entries []LedgerEntry) ([]LedgerEntry, err
 	return validateAIEntries(entries, activeAccounts(snapshot.Accounts))
 }
 func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) string {
+	return agentSystemPromptMode(page, memories, false)
+}
+
+// agentSystemPromptMode builds the system prompt. In trusted mode (local bub
+// chat with write enabled) write tools execute without the per-call approval
+// handshake, so rule 6 must not promise a confirmation step that will not
+// happen.
+func agentSystemPromptMode(page AgentPageContext, memories []AgentMemoryRecord, trusted bool) string {
 	contextText := fmt.Sprintf("当前日期：%s。当前页面：%s，路径：%s，页面时间范围：%s 到 %s，折算币种：%s。", time.Now().Format("2006-01-02"), page.Page, page.Path, page.Start, page.End, page.ValuationCurrency)
 	if strings.TrimSpace(page.BQLQuery) != "" {
 		contextText += " 当前 BQL 编辑器内容：" + page.BQLQuery
 	}
 	if memoryText := agentMemoryContext(memories); memoryText != "" {
 		contextText += "\n已确认的用户偏好记忆如下，只能作为偏好指导，不能当作账本事实：\n" + memoryText
+	}
+	writeRule := "6. 所有写操作都会暂停并要求逐次人工确认。确认前会显示原始 Beancount 片段及拟议变更。"
+	if trusted {
+		writeRule = "6. 当前是本地模式：写工具调用会直接执行、不会弹出底层确认框。因此每次写操作前，必须先向用户说明拟写入的 Beancount 内容并询问确认；只有用户明确回复确认后才调用写工具。绝不能在用户未确认时直接写入。"
 	}
 	return `你是 Beancount Ledger Web 的全局账本 Agent。你必须通过工具读取事实和执行操作，不能假装调用工具，也不能编造账本数据。
 
@@ -671,7 +683,7 @@ func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) stri
 3. 生成账户操作前先 get_accounts，再 draft_account_operations。
 4. 用户要新增交易时使用 append_transactions；要修改既有交易时，先 search_transactions，再使用 update_transaction；要删除既有交易时，先 search_transactions，再使用 delete_transaction；只有明确要求冲销时才用 reverse_transaction。绝不能用追加替代更新或删除。
 5. 所有工具传入或返回的金额都是元单位（amountUnit=major）：例如 12.34 CNY，绝不是分。不要把任何金额乘以 100。search_transactions 的交易金额可原样填入 LedgerEntry；run_bql 和 get_ledger_summary 的聚合金额同样是元单位。
-6. 所有写操作都会暂停并要求逐次人工确认。确认前会显示原始 Beancount 片段及拟议变更。
+` + writeRule + `
 7. 在工具真正返回成功前，绝不能说已经写入。
 8. 不提供 Shell、任意文件访问或绕过 Writer 的能力。
 9. 用户问“记得什么”或要求核对习惯时，使用 search_memories。只有用户明确要求记住、更新记忆，或确认了稳定习惯时，才能调用 upsert_memory；不得静默保存。
