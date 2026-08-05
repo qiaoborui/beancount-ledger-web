@@ -198,6 +198,18 @@ if [[ "$agent_step" != *"needs.plan.outputs.agent_service == 'true'"* ]]; then
   exit 1
 fi
 
+for required in \
+  'telegram_secret_mapped=false' \
+  'telegram_allow_list_configured=false' \
+  'CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured' \
+  'BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled' \
+  'agent_runtime_args=(--no-cpu-throttling --min-instances=1)'; do
+  if [[ "$agent_step" != *"$required"* ]]; then
+    echo "Bub Agent Telegram deployment guard is missing: ${required}" >&2
+    exit 1
+  fi
+done
+
 deploy_step="$(awk '
   /^      - name: Deploy Cloud Run service$/ { capture = 1 }
   /^      - name: Verify candidate and promote traffic$/ { capture = 0 }
