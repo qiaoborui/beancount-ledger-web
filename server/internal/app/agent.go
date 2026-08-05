@@ -241,7 +241,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "run_bql", Description: "运行只读 BQL，并返回可绘制为表格、柱状图、饼图或折线图的结果。统计支出应过滤 account LIKE 'Expenses:%'，不要用 type 代替账户类别。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "run_bql", Description: "仅在 get_ledger_summary 无法回答的明细、分组、排序、筛选或自定义计算中运行只读 BQL。不要用它重复验证已经返回的简单汇总。统计支出应过滤 account LIKE 'Expenses:%'，不要用 type 代替账户类别。", Parameters: objectSchema(map[string]any{
 				"query":             stringSchema("要运行的 BQL SQL"),
 				"valuationCurrency": stringSchema("折算币种，例如 CNY"),
 				"visualization":     enumSchema("auto", "table", "bar", "pie", "line"),
@@ -320,7 +320,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "读取指定日期范围的收入、支出、净额和账户汇总。返回给你的所有金额均为元单位字符串（amountUnit=major），可直接阅读，绝不能乘以 100。", Parameters: objectSchema(map[string]any{
+			agentToolSpec: agentToolSpec{Name: "get_ledger_summary", Description: "简单总额、收入、支出、净额、分类汇总或日期范围汇总的首选工具。读取指定日期范围的汇总；一次结果足以回答时，应基于结果组织回复。返回金额均为元单位字符串（amountUnit=major），绝不能乘以 100。", Parameters: objectSchema(map[string]any{
 				"start": stringSchema("起始日期 YYYY-MM-DD"), "end": stringSchema("结束日期 YYYY-MM-DD，开区间"), "valuationCurrency": stringSchema("折算币种"),
 			}, nil)},
 			Title: "读取账本汇总", ReadOnly: true,
@@ -372,7 +372,7 @@ func (s *Server) agentTools() map[string]agentTool {
 			},
 		},
 		{
-			agentToolSpec: agentToolSpec{Name: "search_memories", Description: "检索已确认的 Agent 偏好和习惯记忆。记忆仅可作为偏好指导，不是账本事实。", Parameters: objectSchema(map[string]any{"query": stringSchema("可选关键词")}, nil)},
+			agentToolSpec: agentToolSpec{Name: "search_memories", Description: "仅当用户明确询问已记住的偏好或习惯，或当前回答确实依赖已保存偏好时检索记忆。不得用于一般账本查询、统计或探索；记忆不是账本事实。", Parameters: objectSchema(map[string]any{"query": stringSchema("可选关键词")}, nil)},
 			Title:         "查询 Agent 记忆", ReadOnly: true,
 			Execute: func(ctx context.Context, raw json.RawMessage, page AgentPageContext) (agentToolExecution, error) {
 				if err := requireAgentSensitive(page); err != nil {
@@ -705,13 +705,16 @@ func agentTelegramSystemPrompt(page AgentPageContext, memories []AgentMemoryReco
 
 回复规则：
 1. 问候、闲聊或不明确的请求：直接简短回复，不要调用任何工具。
-2. 只有用户明确要求查询、统计或记账时才调用工具；查询、统计优先调用只读工具。
-3. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
-4. 只有用户明确要求写入时才调用写工具。写工具调用后，系统会自动展示包含日期、金额、账户和摘要的 Beancount 预览并暂停；只有用户明确回复“确认写入”后才会真正执行。
-5. 工具传入或返回的金额都是元单位（amountUnit=major）：例如 12.34 CNY，绝不是分。
-6. 在工具真正返回成功前，绝不能说已经写入。
-7. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
-8. 不显示完整账本或原始导入文件，默认只给最小有用结果集。
+2. 简单总额、收入、支出、净额、分类汇总或日期范围汇总，优先只调用 get_ledger_summary。
+3. 只有 get_ledger_summary 无法回答的明细、分组、排序、筛选或自定义计算，才使用 run_bql；不要用 run_bql 重复验证已经返回的简单汇总。
+4. search_memories 只用于用户明确询问已记住的偏好或习惯，或当前回答确实依赖已保存偏好；不得用于一般账本查询、统计或探索。
+5. 每次工具返回后，先判断结果是否已经足以回答用户原问题。足够时应读取结果、综合并生成自然语言回复；只有证据不足时才调用下一项必要工具。不得为了探索相邻问题而调用额外工具；原问题确实需要时可以使用多个工具。
+6. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
+7. 只有用户明确要求写入时才调用写工具。写工具调用后，系统会自动展示包含日期、金额、账户和摘要的 Beancount 预览并暂停；只有用户明确回复“确认写入”后才会真正执行。
+8. 工具传入或返回的金额都是元单位（amountUnit=major）：例如 12.34 CNY，绝不是分。
+9. 在工具真正返回成功前，绝不能说已经写入。
+10. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
+11. 不显示完整账本或原始导入文件，默认只给最小有用结果集。
 
 ` + contextText
 }

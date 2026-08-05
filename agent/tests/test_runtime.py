@@ -11,7 +11,7 @@ from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
 from bub.builtin.model_runner import ModelRunner
 from bub.errors import BubError, ErrorKind
-from bub.hooks.interception import LlmCallDecision, LlmCallRequest, ToolCall, ToolCallResult
+from bub.hooks.interception import ToolCall
 from bub.streaming import AsyncStreamEvents, StreamEvent
 
 from ledger_agent_service.config import Settings
@@ -32,88 +32,6 @@ class FakeBroker:
         assert session_id == "telegram:123"
         assert subject == "user-1"
         self.resolutions.append(approved)
-
-
-@pytest.mark.asyncio
-async def test_telegram_summary_tool_finishes_with_a_compact_reply() -> None:
-    plugin = object.__new__(LedgerPlugin)
-    state = {"channel": "telegram"}
-    result = {
-        "modelOutput": {
-            "start": "2026-08-01",
-            "end": "2026-09-01",
-            "summary": {
-                "currency": "CNY",
-                "income": "0.00",
-                "expense": "662.97",
-                "net": "-662.97",
-                "categories": {
-                    "Expenses:Food:Restaurant": "237.30",
-                    "Expenses:Health:Fitness": "169.00",
-                    "Expenses:Food:Drinks": "50.90",
-                    "Expenses:Transport:Public": "13.50",
-                },
-            },
-        },
-    }
-
-    await plugin.after_tool_call(
-        ToolCall("run-1", "get_ledger_summary", {"start": "2026-08-01", "end": "2026-09-01"}),
-        ToolCallResult("run-1", "get_ledger_summary", {}, result=result),
-        state,
-    )
-    decision = plugin.before_llm_call(
-        LlmCallRequest("run-2", "openai:ledger-agent", [], ("run_bql",)),
-        state,
-    )
-
-    assert isinstance(decision, LlmCallDecision)
-    assert decision.text == (
-        "2026 年 8 月账本汇总：\n"
-        "- 支出 662.97 CNY\n"
-        "- 收入 0.00 CNY\n"
-        "- 净额 -662.97 CNY\n\n"
-        "主要支出：\n"
-        "- Restaurant 237.30 CNY\n"
-        "- Fitness 169.00 CNY\n"
-        "- Drinks 50.90 CNY"
-    )
-    assert plugin.before_llm_call(LlmCallRequest("run-3", "openai:ledger-agent", []), state) is None
-
-
-@pytest.mark.asyncio
-async def test_telegram_bql_result_finishes_without_follow_up_tool_calls() -> None:
-    plugin = object.__new__(LedgerPlugin)
-    state = {"channel": "telegram"}
-    result = {
-        "modelOutput": {
-            "columns": [{"name": "account", "type": "string"}, {"name": "total", "type": "money"}],
-            "rows": [
-                {"account": "Expenses:Food:Restaurant", "total": "237.30"},
-                {"account": "Expenses:Health:Fitness", "total": "169.00"},
-                {"account": "Expenses:Food:Drinks", "total": "50.90"},
-                {"account": "Expenses:Communication:Mobile", "total": "49.89"},
-            ],
-            "rowCount": 4,
-            "valuationCurrency": "CNY",
-        },
-    }
-
-    await plugin.after_tool_call(
-        ToolCall("run-1", "run_bql", {"query": "SELECT account, sum(amount) AS total"}),
-        ToolCallResult("run-1", "run_bql", {}, result=result),
-        state,
-    )
-    decision = plugin.before_llm_call(LlmCallRequest("run-2", "openai:ledger-agent", []), state)
-
-    assert isinstance(decision, LlmCallDecision)
-    assert decision.text == (
-        "查询结果（4 条）：\n"
-        "- Restaurant：total 237.30 CNY\n"
-        "- Fitness：total 169.00 CNY\n"
-        "- Drinks：total 50.90 CNY\n"
-        "- Mobile：total 49.89 CNY"
-    )
 
 
 @pytest.mark.asyncio

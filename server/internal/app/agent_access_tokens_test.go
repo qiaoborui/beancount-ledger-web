@@ -322,8 +322,9 @@ func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 		CapabilityToken string `json:"capabilityToken"`
 		SystemPrompt    string `json:"systemPrompt"`
 		Tools           []struct {
-			Name     string `json:"name"`
-			ReadOnly bool   `json:"readOnly"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			ReadOnly    bool   `json:"readOnly"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
@@ -331,7 +332,9 @@ func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 	}
 	foundWriteTool := false
 	foundOpenPage := false
+	descriptions := map[string]string{}
 	for _, tool := range body.Tools {
+		descriptions[tool.Name] = tool.Description
 		if tool.Name == "append_transactions" && !tool.ReadOnly {
 			foundWriteTool = true
 		}
@@ -347,8 +350,20 @@ func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
 	}
 	if !strings.Contains(body.SystemPrompt, "Telegram") ||
 		!strings.Contains(body.SystemPrompt, "问候、闲聊或不明确的请求") ||
+		!strings.Contains(body.SystemPrompt, "优先只调用 get_ledger_summary") ||
+		!strings.Contains(body.SystemPrompt, "不要用 run_bql 重复验证") ||
+		!strings.Contains(body.SystemPrompt, "不得用于一般账本查询、统计或探索") ||
+		!strings.Contains(body.SystemPrompt, "结果是否已经足以回答用户原问题") ||
+		!strings.Contains(body.SystemPrompt, "不得为了探索相邻问题而调用额外工具") ||
+		!strings.Contains(body.SystemPrompt, "原问题确实需要时可以使用多个工具") ||
 		!strings.Contains(body.SystemPrompt, "系统会自动展示") {
 		t.Fatalf("telegram bootstrap must use the Telegram system prompt: %s", response.Body.String())
+	}
+	if !strings.Contains(descriptions["get_ledger_summary"], "首选工具") ||
+		!strings.Contains(descriptions["run_bql"], "仅在 get_ledger_summary 无法回答") ||
+		!strings.Contains(descriptions["run_bql"], "不要用它重复验证") ||
+		!strings.Contains(descriptions["search_memories"], "不得用于一般账本查询、统计或探索") {
+		t.Fatalf("telegram tool descriptions lack routing policy: %#v", descriptions)
 	}
 	claims, err := server.parseAgentCapabilityToken(body.CapabilityToken)
 	if err != nil || claims.Subject != "channel:telegram" || claims.SessionID == "telegram:123" {
