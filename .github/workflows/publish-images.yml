@@ -1,0 +1,314 @@
+name: Publish container images
+
+on:
+  workflow_run:
+    workflows: [Deploy Google Cloud]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: publish-container-images
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  plan:
+    name: Plan image publishing
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.plan.outputs.backend }}
+      agent: ${{ steps.plan.outputs.agent }}
+      web: ${{ steps.plan.outputs.web }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      short_sha: ${{ steps.plan.outputs.short_sha }}
+      record_state: ${{ steps.plan.outputs.record_state }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Plan cumulative image publishing
+        id: plan
+        env:
+          PIPELINE_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            source_sha="${GITHUB_SHA}"
+          else
+            source_sha="${PIPELINE_SHA}"
+          fi
+
+          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::container publishing source SHA is invalid"
+            exit 1
+          fi
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ -z "$current_main" ]]; then
+            echo "::error::could not resolve the current main branch commit"
+            exit 1
+          fi
+          if [[ "$source_sha" != "$current_main" ]]; then
+            plan_json="$(printf '' | .github/scripts/plan-components.sh)"
+            record_state=false
+            reason="a newer main commit is available"
+          else
+            base_sha=""
+            while IFS= read -r previous_run_id; do
+              state_dir="$(mktemp -d)"
+              if ! gh run download "$previous_run_id" --repo "$GITHUB_REPOSITORY" --name container-publish-state --dir "$state_dir" >/dev/null 2>&1; then
+                continue
+              fi
+              candidate_sha="$(jq -r '.source_sha // empty' "$state_dir/container-publish-state.json")"
+              if [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]] &&
+                 git cat-file -e "${candidate_sha}^{commit}" 2>/dev/null &&
+                 git merge-base --is-ancestor "$candidate_sha" "$source_sha"; then
+                base_sha="$candidate_sha"
+                break
+              fi
+            done < <(gh run list --workflow publish-images.yml --status success --limit 100 --json databaseId --jq '.[].databaseId')
+
+            if [[ -n "$base_sha" ]]; then
+              files="$(git diff --name-only "$base_sha" "$source_sha")"
+              plan_json="$(printf '%s\n' "$files" | .github/scripts/plan-components.sh)"
+              reason="changes since ${base_sha}"
+            else
+              plan_json="$(.github/scripts/plan-components.sh --all)"
+              reason="no usable previous publication state"
+            fi
+            record_state=true
+          fi
+
+          backend="$(jq -r '.backend' <<< "$plan_json")"
+          agent="$(jq -r '.agent' <<< "$plan_json")"
+          web="$(jq -r '.web' <<< "$plan_json")"
+          short_sha="${source_sha:0:7}"
+
+          echo "backend=${backend}" >> "$GITHUB_OUTPUT"
+          echo "agent=${agent}" >> "$GITHUB_OUTPUT"
+          echo "web=${web}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "record_state=${record_state}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Container publishing plan"
+            echo
+            echo "- Backend images: \`${backend}\`"
+            echo "- Agent image: \`${agent}\`"
+            echo "- Frontend image: \`${web}\`"
+            echo "- Source: \`${source_sha}\`"
+            echo "- Reason: ${reason}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  agent-image:
+    name: Agent image
+    needs: plan
+    if: ${{ needs.plan.outputs.agent == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-agent
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ needs.plan.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-agent
+            org.opencontainers.image.description=Bub Agent runtime with PostgreSQL tape storage
+      - name: Build Agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: agent
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=agent-image
+          cache-to: type=gha,scope=agent-image,mode=max
+
+  server-image:
+    name: Server image
+    needs: plan
+    if: ${{ needs.plan.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-server
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ needs.plan.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-server
+            org.opencontainers.image.description=Minimal stateless ledger-web API server image
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.vercel
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=server-image
+          cache-to: type=gha,scope=server-image,mode=max
+
+  indexer-image:
+    name: Indexer image
+    needs: plan
+    if: ${{ needs.plan.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-indexer
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ needs.plan.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-indexer
+            org.opencontainers.image.description=Ledger read-model indexer image
+      - name: Build indexer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: indexer
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=indexer-image
+          cache-to: type=gha,scope=indexer-image,mode=max
+
+  frontend-image:
+    name: Frontend image
+    needs: plan
+    if: ${{ needs.plan.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ needs.plan.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.title=beancount-ledger-web-frontend
+            org.opencontainers.image.description=Static frontend image for Beancount Ledger Web
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend-image
+          cache-to: type=gha,scope=frontend-image,mode=max
+
+  record-state:
+    name: Record published commit
+    needs: [plan, agent-image, server-image, indexer-image, frontend-image]
+    if: >-
+      ${{ always() &&
+          needs.plan.result == 'success' &&
+          needs.plan.outputs.record_state == 'true' &&
+          (needs.plan.outputs.agent != 'true' || needs.agent-image.result == 'success') &&
+          (needs.plan.outputs.backend != 'true' ||
+           (needs.server-image.result == 'success' && needs.indexer-image.result == 'success')) &&
+          (needs.plan.outputs.web != 'true' || needs.frontend-image.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write publication state
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          jq -n --arg source_sha "$SOURCE_SHA" '{source_sha: $source_sha}' > container-publish-state.json
+      - name: Publish publication state
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-publish-state
+          path: container-publish-state.json
+          retention-days: 90
