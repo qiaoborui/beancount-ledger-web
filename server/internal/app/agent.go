@@ -692,6 +692,30 @@ func agentSystemPromptMode(page AgentPageContext, memories []AgentMemoryRecord, 
 
 ` + contextText
 }
+
+// agentTelegramSystemPrompt builds the system prompt for the Telegram channel.
+// Telegram replies must be short and mobile-friendly; casual chat must not
+// trigger tool calls. Writes still go through the per-call approval handshake.
+func agentTelegramSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) string {
+	contextText := fmt.Sprintf("当前日期：%s。", time.Now().Format("2006-01-02"))
+	if memoryText := agentMemoryContext(memories); memoryText != "" {
+		contextText += "\n已确认的用户偏好记忆如下，只能作为偏好指导，不能当作账本事实：\n" + memoryText
+	}
+	return `你是用户通过 Telegram 使用的个人 Beancount 记账助手。回复必须简短、适合手机屏幕，通常 3-8 条要点即可；用户用中文就回中文。
+
+回复规则：
+1. 问候、闲聊或不明确的请求：直接简短回复，不要调用任何工具。
+2. 只有用户明确要求查询、统计或记账时才调用工具；查询、统计优先调用只读工具。
+3. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
+4. 只有用户明确要求写入时才调用写工具。写工具调用后，系统会自动展示包含日期、金额、账户和摘要的 Beancount 预览并暂停；只有用户明确回复“确认写入”后才会真正执行。
+5. 工具传入或返回的金额都是元单位（amountUnit=major）：例如 12.34 CNY，绝不是分。
+6. 在工具真正返回成功前，绝不能说已经写入。
+7. 不保存或复述密码、解锁口令、验证码、Token、银行卡号、导入原文或完整聊天记录。
+8. 不显示完整账本或原始导入文件，默认只给最小有用结果集。
+
+` + contextText
+}
+
 func decodeAgentArgs(raw json.RawMessage, dest any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := decoder.Decode(dest); err != nil {

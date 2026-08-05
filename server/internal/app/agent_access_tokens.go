@@ -179,7 +179,7 @@ func (s *Server) externalAgentBootstrap(c *gin.Context) {
 	}
 	sessionID := agentCapabilitySessionID("token:"+record.ID, rawSessionID)
 	input.Context.SensitiveUnlocked = true
-	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(!writeEnabled), writeEnabled)
+	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(!writeEnabled), writeEnabled, false)
 }
 
 func (s *Server) internalAgentBootstrap(c *gin.Context) {
@@ -204,13 +204,19 @@ func (s *Server) internalAgentBootstrap(c *gin.Context) {
 	}
 	subject := "channel:" + channel
 	input.Context.SensitiveUnlocked = true
+	allowedTools := s.agentToolNames(false)
+	telegram := channel == "telegram"
+	if telegram {
+		allowedTools = agentTelegramToolNames(allowedTools)
+	}
 	s.writeAgentBootstrap(
 		c,
 		agentCapabilitySessionID(subject, rawSessionID),
 		subject,
 		input.Context,
-		s.agentToolNames(false),
+		allowedTools,
 		false,
+		telegram,
 	)
 }
 
@@ -221,11 +227,16 @@ func (s *Server) writeAgentBootstrap(
 	page AgentPageContext,
 	allowedTools []string,
 	trusted bool,
+	telegram bool,
 ) {
 	memories, err := s.listAgentMemories(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusInternalServerError, err)
 		return
+	}
+	systemPrompt := agentSystemPromptMode(page, memories, trusted)
+	if telegram {
+		systemPrompt = agentTelegramSystemPrompt(page, memories)
 	}
 	expiresAt := time.Now().Add(agentCapabilityLifetime)
 	capabilityToken, err := s.mintAgentCapabilityToken(agentCapabilityClaims{
@@ -260,10 +271,22 @@ func (s *Server) writeAgentBootstrap(
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"capabilityToken": capabilityToken,
-		"systemPrompt":    agentSystemPromptMode(page, memories, trusted),
+		"systemPrompt":    systemPrompt,
 		"tools":           result,
 		"expiresAt":       expiresAt.UTC().Format(time.RFC3339),
 	})
+}
+
+// agentTelegramToolNames removes web-only tools that are meaningless for the
+// Telegram channel, such as frontend page navigation.
+func agentTelegramToolNames(allowed []string) []string {
+	filtered := make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		if name != "open_page" {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) externalAgentModelProxy(c *gin.Context) {
