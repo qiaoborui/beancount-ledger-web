@@ -82,6 +82,41 @@ async def test_telegram_summary_tool_finishes_with_a_compact_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_telegram_bql_result_finishes_without_follow_up_tool_calls() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    state = {"channel": "telegram"}
+    result = {
+        "modelOutput": {
+            "columns": [{"name": "account", "type": "string"}, {"name": "total", "type": "money"}],
+            "rows": [
+                {"account": "Expenses:Food:Restaurant", "total": "237.30"},
+                {"account": "Expenses:Health:Fitness", "total": "169.00"},
+                {"account": "Expenses:Food:Drinks", "total": "50.90"},
+                {"account": "Expenses:Communication:Mobile", "total": "49.89"},
+            ],
+            "rowCount": 4,
+            "valuationCurrency": "CNY",
+        },
+    }
+
+    await plugin.after_tool_call(
+        ToolCall("run-1", "run_bql", {"query": "SELECT account, sum(amount) AS total"}),
+        ToolCallResult("run-1", "run_bql", {}, result=result),
+        state,
+    )
+    decision = plugin.before_llm_call(LlmCallRequest("run-2", "openai:ledger-agent", []), state)
+
+    assert isinstance(decision, LlmCallDecision)
+    assert decision.text == (
+        "查询结果（4 条）：\n"
+        "- Restaurant：total 237.30 CNY\n"
+        "- Fitness：total 169.00 CNY\n"
+        "- Drinks：total 50.90 CNY\n"
+        "- Mobile：total 49.89 CNY"
+    )
+
+
+@pytest.mark.asyncio
 async def test_model_stream_converts_frozen_bub_errors_before_channel_cleanup() -> None:
     plugin = object.__new__(LedgerPlugin)
 

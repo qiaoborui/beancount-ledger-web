@@ -236,16 +236,16 @@ class LedgerPlugin:
     @hookimpl
     def before_llm_call(self, request: LlmCallRequest, state: dict[str, Any]) -> LlmCallDecision | None:
         del request
-        reply = state.pop("_ledger_telegram_summary_reply", None)
+        reply = state.pop("_ledger_telegram_final_reply", None)
         return LlmCallDecision.finish(reply) if isinstance(reply, str) and reply else None
 
     @hookimpl
     async def after_tool_call(self, call: ToolCall, result: ToolCallResult, state: dict[str, Any]) -> None:
-        if state.get("channel") != "telegram" or call.tool != "get_ledger_summary" or result.error is not None:
+        if state.get("channel") != "telegram" or result.error is not None:
             return
-        reply = _telegram_summary_reply(result.result)
+        reply = _telegram_tool_reply(call.tool, result.result)
         if reply:
-            state["_ledger_telegram_summary_reply"] = reply
+            state["_ledger_telegram_final_reply"] = reply
 
     @hookimpl
     async def run_model_stream(
@@ -677,4 +677,37 @@ def _telegram_summary_reply(result: Any) -> str | None:
     if ranked:
         lines.extend(["", "主要支出："])
         lines.extend(f"- {label} {value:.2f} {currency}" for value, label in ranked[:3])
+    return "\n".join(lines)
+
+
+def _telegram_tool_reply(tool: str, result: Any) -> str | None:
+    if tool == "get_ledger_summary":
+        return _telegram_summary_reply(result)
+    if tool != "run_bql" or not isinstance(result, dict):
+        return None
+    output = result.get("modelOutput")
+    if not isinstance(output, dict) or not isinstance(output.get("rows"), list) or not output["rows"]:
+        return None
+    rows = [row for row in output["rows"] if isinstance(row, dict)]
+    if not rows:
+        return None
+    columns = output.get("columns")
+    money_columns = set()
+    if isinstance(columns, list):
+        money_columns = {
+            str(column.get("name"))
+            for column in columns
+            if isinstance(column, dict) and column.get("type") == "money"
+        }
+    currency = str(output.get("valuationCurrency") or "CNY")
+    lines = [f"查询结果（{int(output.get('rowCount') or len(rows))} 条）："]
+    for row in rows[:5]:
+        items = list(row.items())
+        label_name, label_value = items[0]
+        label = str(label_value).rsplit(":", 1)[-1] if len(items) > 1 else str(label_name)
+        values = []
+        for name, value in items[1:] if len(items) > 1 else items:
+            suffix = f" {currency}" if name in money_columns else ""
+            values.append(f"{name} {value}{suffix}" if len(items) > 1 else f"{value}{suffix}")
+        lines.append(f"- {label}：{'；'.join(values)}")
     return "\n".join(lines)
