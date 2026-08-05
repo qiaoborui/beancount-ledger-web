@@ -20,8 +20,9 @@ describe("LedgerApp routes", () => {
 
   it("keeps Agent route loading visible and does not replay route requests in the dock", () => {
     expect(source).toContain('fallback={props.presentation === "page" ? <AgentPageLoading /> : null}');
-    expect(source).toContain("return createPortal(");
-    expect(source).toContain("ledger-agent-page fixed inset-0 z-40");
+    expect(source).toContain("const desktopViewport = useDesktopViewport();");
+    expect(source).toContain('desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"');
+    expect(source).toContain("return desktopViewport ? loading : createPortal(loading, document.body);");
     expect(source).toContain('request={null}');
   });
 });
