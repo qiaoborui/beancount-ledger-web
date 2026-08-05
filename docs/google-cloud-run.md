@@ -15,11 +15,18 @@ Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
 ```
 
 The deployment workflow lives at
-`.github/workflows/deploy-google-cloud.yml`. It waits for a successful `CI` run,
-then uses CI's change plan to publish an immutable image and deploy its digest
-to Cloud Run. Frontend-only changes leave the ZIP worker untouched; backend or
-container changes update both services. Missing Google Cloud repository
-variables leave the deployment job skipped.
+`.github/workflows/deploy-google-cloud.yml`. On each `main` push it plans the
+affected components, starts reusable application checks and the required
+Artifact Registry builds in parallel, then deploys only after both sides of the
+gate succeed. Images are pushed under the commit SHA before validation and are
+never referenced by Cloud Run unless the matching checks pass. Frontend-only
+changes leave the Bub Agent and ZIP worker untouched; backend, agent, or
+container changes update only their affected services. Missing Google Cloud
+repository variables leave the build and deployment jobs skipped.
+
+Multi-architecture GHCR images are published later by
+`.github/workflows/publish-images.yml` after the production pipeline succeeds.
+That distribution work no longer blocks the Cloud Run deployment path.
 
 ## Prerequisites
 
@@ -45,6 +52,7 @@ export AGENT_SERVICE=beancount-ledger-agent
 export ZIP_WORKER_SERVICE=beancount-ledger-zip-worker
 export RUNTIME_SERVICE_ACCOUNT=ledger-web-runtime
 export ZIP_WORKER_SERVICE_ACCOUNT=ledger-zip-worker
+export BUILD_SERVICE_ACCOUNT=ledger-web-builder
 export DEPLOY_SERVICE_ACCOUNT=ledger-web-deploy
 export SCHEDULER_SERVICE_ACCOUNT=ledger-web-scheduler
 export WORKLOAD_IDENTITY_POOL=github
@@ -77,6 +85,10 @@ gcloud iam service-accounts create "$ZIP_WORKER_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --display-name "Beancount Ledger ZIP worker"
 
+gcloud iam service-accounts create "$BUILD_SERVICE_ACCOUNT" \
+  --project "$PROJECT_ID" \
+  --display-name "Beancount Ledger image builder"
+
 gcloud iam service-accounts create "$DEPLOY_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --display-name "Beancount Ledger Web deployer"
@@ -86,7 +98,8 @@ gcloud iam service-accounts create "$SCHEDULER_SERVICE_ACCOUNT" \
   --display-name "Beancount Ledger Web scheduler"
 ```
 
-Grant the deploy identity the permissions used by the workflow:
+Grant the builder only Artifact Registry access, while the deploy identity keeps
+the Cloud Run and service-account permissions used after validation:
 
 ```bash
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
@@ -99,8 +112,18 @@ gcloud artifacts repositories add-iam-policy-binding "$ARTIFACT_REPOSITORY" \
   --member "serviceAccount:${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role roles/artifactregistry.writer
 
+gcloud artifacts repositories add-iam-policy-binding "$ARTIFACT_REPOSITORY" \
+  --project "$PROJECT_ID" \
+  --location "$REGION" \
+  --member "serviceAccount:${BUILD_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role roles/artifactregistry.writer
+
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role roles/serviceusage.serviceUsageConsumer
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:${BUILD_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role roles/serviceusage.serviceUsageConsumer
 
 gcloud iam service-accounts add-iam-policy-binding \
@@ -138,16 +161,34 @@ gcloud iam workload-identity-pools providers create-oidc "$WORKLOAD_IDENTITY_PRO
   --attribute-condition "assertion.repository_id=='${GITHUB_REPOSITORY_ID}' && assertion.repository_owner_id=='${GITHUB_OWNER_ID}' && assertion.ref=='refs/heads/main' && assertion.workflow_ref=='${GITHUB_WORKFLOW_REF}'"
 
 gcloud iam service-accounts add-iam-policy-binding \
-  "${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  "${BUILD_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --project "$PROJECT_ID" \
   --role roles/iam.workloadIdentityUser \
   --member "principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WORKLOAD_IDENTITY_POOL}/attribute.repository_id/${GITHUB_REPOSITORY_ID}"
+
+gcloud iam service-accounts add-iam-policy-binding \
+  "${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --project "$PROJECT_ID" \
+  --role roles/iam.workloadIdentityUser \
+  --member "principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WORKLOAD_IDENTITY_POOL}/subject/repo:${GITHUB_REPOSITORY}:environment:google-cloud-production"
 
 gcloud iam workload-identity-pools providers describe "$WORKLOAD_IDENTITY_PROVIDER" \
   --project "$PROJECT_ID" \
   --location global \
   --workload-identity-pool "$WORKLOAD_IDENTITY_POOL" \
   --format 'value(name)'
+```
+
+Existing installations that previously granted the deploy identity to the
+repository-wide principal set must remove that broader binding after adding the
+environment-subject binding above:
+
+```bash
+gcloud iam service-accounts remove-iam-policy-binding \
+  "${DEPLOY_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --project "$PROJECT_ID" \
+  --role roles/iam.workloadIdentityUser \
+  --member "principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WORKLOAD_IDENTITY_POOL}/attribute.repository_id/${GITHUB_REPOSITORY_ID}"
 ```
 
 Use the returned provider name as `GCP_WORKLOAD_IDENTITY_PROVIDER`. The workflow
@@ -239,6 +280,7 @@ level so the workflow can evaluate its configuration gate:
 | `BUB_TELEGRAM_ALLOW_CHATS` | Optional comma-separated Telegram chat IDs allowed to use the bot |
 | `GCP_DEEPSEEK_SECRET` | Optional Secret Manager secret containing the DeepSeek API key |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
+| `GCP_BUILD_SERVICE_ACCOUNT` | Artifact Registry-only builder service-account email |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service-account email |
 | `GCP_RUNTIME_SERVICE_ACCOUNT` | Runtime service-account email |
 | `GCP_ZIP_WORKER_SERVICE_ACCOUNT` | Dedicated ZIP worker service-account email with no ledger or secret access |
@@ -264,8 +306,10 @@ LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com
 
 ## First deployment
 
-Merge the deployment change, configure the repository values, then run `Deploy
-Google Cloud` from `main`. The workflow deploys an IAM-protected ZIP
+Configure the builder identity, environment-scoped deploy binding, and
+repository values before merging a workflow change. Main pushes now start the
+pipeline automatically; `Deploy Google Cloud` can still be dispatched manually
+from `main` when a complete rebuild is required. The workflow deploys an IAM-protected ZIP
 Worker with 8 vCPU, 4 GiB memory, concurrency one, zero minimum instances, one
 maximum instance, and a 15-minute request timeout. It sets the main runtime
 service account as the Worker's only explicit `roles/run.invoker` member and

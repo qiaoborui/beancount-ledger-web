@@ -1,19 +1,12 @@
 name: Deploy Google Cloud
 
 on:
-  workflow_run:
-    workflows: [CI]
+  push:
     branches: [main]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
-
-concurrency:
-  group: google-cloud-production
-  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -30,104 +23,116 @@ env:
 
 jobs:
   plan:
-    name: Plan Cloud Run deployment
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event.workflow_run.event == 'push' &&
-           github.event.workflow_run.conclusion == 'success') }}
+    name: Plan pipeline
     runs-on: ubuntu-latest
     outputs:
-      deploy: ${{ steps.plan.outputs.deploy }}
-      zip_worker: ${{ steps.plan.outputs.zip_worker }}
-    steps:
-      - name: Read validated CI change plan
-        id: plan
-        env:
-          CI_RUN_ID: ${{ github.event.workflow_run.id }}
-          CI_SHA: ${{ github.event.workflow_run.head_sha }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            deploy=true
-            zip_worker=true
-            reason="manual deployment"
-          else
-            gh run download "${CI_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name cloud-run-plan --dir cloud-run-plan
-            plan_file="cloud-run-plan/cloud-run-plan.json"
-            deploy="$(jq -r '.cloud_run' "${plan_file}")"
-            zip_worker="$(jq -r '.zip_worker' "${plan_file}")"
-            if [[ "${deploy}" != "true" && "${deploy}" != "false" ]] || [[ "${zip_worker}" != "true" && "${zip_worker}" != "false" ]]; then
-              echo "::error::CI change plan is invalid"
-              exit 1
-            fi
-
-            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-            if [[ -z "${current_main}" ]]; then
-              echo "::error::could not resolve the current main branch commit"
-              exit 1
-            fi
-            if [[ "${CI_SHA}" != "${current_main}" ]]; then
-              deploy=false
-              zip_worker=false
-              reason="a newer main commit is already available"
-            else
-              reason="validated CI change plan"
-            fi
-          fi
-
-          echo "deploy=${deploy}" >> "$GITHUB_OUTPUT"
-          echo "zip_worker=${zip_worker}" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Cloud Run deployment plan"
-            echo
-            echo "- Deploy: \`${deploy}\`"
-            echo "- Update ZIP worker: \`${zip_worker}\`"
-            echo "- Reason: ${reason}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  deploy:
-    name: Verify and deploy Cloud Run
-    needs: plan
-    if: >-
-      ${{ needs.plan.outputs.deploy == 'true' &&
-          vars.GCP_PROJECT_ID != '' &&
-          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
-          vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' &&
-          vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' &&
-          vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT != '' }}
-    runs-on: ubuntu-latest
-    environment: google-cloud-production
-    permissions:
-      contents: read
-      id-token: write
+      backend: ${{ steps.changes.outputs.backend }}
+      agent: ${{ steps.changes.outputs.agent }}
+      web: ${{ steps.changes.outputs.web }}
+      cloud_run: ${{ steps.changes.outputs.cloud_run }}
+      agent_service: ${{ steps.changes.outputs.agent_service }}
+      zip_worker: ${{ steps.changes.outputs.zip_worker }}
+      deploy_any: ${{ steps.changes.outputs.deploy_any }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
+      - name: Verify deployment workflow guards
+        run: bash .github/scripts/verify-deploy-google-cloud.sh
+
+      - name: Detect changed components
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            files=""
+          elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
+            files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
+          else
+            files="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            plan_json="$(.github/scripts/plan-components.sh --all)"
+          else
+            plan_json="$(printf '%s\n' "$files" | .github/scripts/plan-components.sh)"
+          fi
+
+          backend="$(jq -r '.backend' <<< "$plan_json")"
+          agent="$(jq -r '.agent' <<< "$plan_json")"
+          web="$(jq -r '.web' <<< "$plan_json")"
+          cloud_run="$(jq -r '.cloud_run' <<< "$plan_json")"
+          agent_service="$(jq -r '.agent_service' <<< "$plan_json")"
+          zip_worker="$(jq -r '.zip_worker' <<< "$plan_json")"
+          deploy_any="$(jq -r '.deploy_any' <<< "$plan_json")"
+
+          echo "backend=${backend}" >> "$GITHUB_OUTPUT"
+          echo "agent=${agent}" >> "$GITHUB_OUTPUT"
+          echo "web=${web}" >> "$GITHUB_OUTPUT"
+          echo "cloud_run=${cloud_run}" >> "$GITHUB_OUTPUT"
+          echo "agent_service=${agent_service}" >> "$GITHUB_OUTPUT"
+          echo "zip_worker=${zip_worker}" >> "$GITHUB_OUTPUT"
+          echo "deploy_any=${deploy_any}" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --argjson backend "$backend" \
+            --argjson agent "$agent" \
+            --argjson web "$web" \
+            '{backend: $backend, agent: $agent, web: $web}' \
+            > container-publish-plan.json
+          {
+            echo "## Production pipeline plan"
+            echo
+            echo "- Backend checks: \`${backend}\`"
+            echo "- Agent checks: \`${agent}\`"
+            echo "- Web checks: \`${web}\`"
+            echo "- Cloud Run app: \`${cloud_run}\`"
+            echo "- Bub Agent service: \`${agent_service}\`"
+            echo "- ZIP worker: \`${zip_worker}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  checks:
+    name: Application checks
+    needs: plan
+    uses: ./.github/workflows/ci.yml
+    with:
+      backend: ${{ needs.plan.outputs.backend == 'true' }}
+      agent: ${{ needs.plan.outputs.agent == 'true' }}
+      web: ${{ needs.plan.outputs.web == 'true' }}
+
+  build-standalone:
+    name: Build Cloud Run app
+    needs: plan
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          needs.plan.outputs.cloud_run == 'true' &&
+          vars.GCP_PROJECT_ID != '' &&
+          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+          vars.GCP_BUILD_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-
+          service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
-
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
-
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
       - name: Resolve image name
         id: image
         run: |
           base="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
           echo "name=${base}/${CLOUD_RUN_SERVICE}" >> "$GITHUB_OUTPUT"
-          echo "agent_name=${base}/${AGENT_SERVICE}" >> "$GITHUB_OUTPUT"
-          echo "zip_worker_name=${base}/${ZIP_WORKER_SERVICE}" >> "$GITHUB_OUTPUT"
-
       - name: Build and push standalone image
-        id: build-image
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -135,30 +140,44 @@ jobs:
           target: standalone
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
-            ${{ steps.image.outputs.name }}:latest
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
           cache-from: type=gha,scope=cloud-run-standalone
           cache-to: type=gha,scope=cloud-run-standalone,mode=max
 
-      - name: Build and push ZIP worker image
-        id: build-zip-worker-image
-        if: ${{ needs.plan.outputs.zip_worker == 'true' }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+  build-agent:
+    name: Build Bub Agent
+    needs: plan
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          needs.plan.outputs.agent_service == 'true' &&
+          vars.GCP_PROJECT_ID != '' &&
+          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+          vars.GCP_BUILD_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
-          context: .
-          file: docker/Dockerfile
-          target: zip-worker
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ steps.image.outputs.zip_worker_name }}:${{ github.sha }}
-            ${{ steps.image.outputs.zip_worker_name }}:latest
-          cache-from: type=gha,scope=cloud-run-zip-worker
-          cache-to: type=gha,scope=cloud-run-zip-worker,mode=max
-
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Resolve image name
+        id: image
+        run: |
+          base="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+          echo "name=${base}/${AGENT_SERVICE}" >> "$GITHUB_OUTPUT"
       - name: Build and push Bub Agent image
-        id: build-agent-image
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -166,20 +185,115 @@ jobs:
           target: agent
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.image.outputs.agent_name }}:${{ github.sha }}
-            ${{ steps.image.outputs.agent_name }}:latest
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
           cache-from: type=gha,scope=cloud-run-agent
           cache-to: type=gha,scope=cloud-run-agent,mode=max
 
+  build-zip-worker:
+    name: Build ZIP worker
+    needs: plan
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          needs.plan.outputs.zip_worker == 'true' &&
+          vars.GCP_PROJECT_ID != '' &&
+          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+          vars.GCP_BUILD_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Resolve image name
+        id: image
+        run: |
+          base="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+          echo "name=${base}/${ZIP_WORKER_SERVICE}" >> "$GITHUB_OUTPUT"
+      - name: Build and push ZIP worker image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: zip-worker
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=cloud-run-zip-worker
+          cache-to: type=gha,scope=cloud-run-zip-worker,mode=max
+
+  deploy:
+    name: Verify and deploy Cloud Run
+    needs: [plan, checks, build-standalone, build-agent, build-zip-worker]
+    if: >-
+      ${{ always() &&
+          github.ref == 'refs/heads/main' &&
+          needs.plan.outputs.deploy_any == 'true' &&
+          needs.checks.result == 'success' &&
+          (needs.plan.outputs.cloud_run != 'true' || needs.build-standalone.result == 'success') &&
+          (needs.plan.outputs.agent_service != 'true' || needs.build-agent.result == 'success') &&
+          (needs.plan.outputs.zip_worker != 'true' || needs.build-zip-worker.result == 'success') &&
+          vars.GCP_PROJECT_ID != '' &&
+          vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+          vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' &&
+          vars.GCP_RUNTIME_SERVICE_ACCOUNT != '' &&
+          vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest
+    environment: google-cloud-production
+    concurrency:
+      group: google-cloud-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify current main commit
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ -z "${current_main}" ]]; then
+            echo "::error::could not resolve the current main branch commit"
+            exit 1
+          fi
+          if [[ "${GITHUB_SHA}" != "${current_main}" ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "A newer main commit is available; skipping this deployment." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud
+        if: ${{ steps.freshness.outputs.proceed == 'true' }}
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        if: ${{ steps.freshness.outputs.proceed == 'true' }}
+
       - name: Deploy private ZIP worker
         id: deploy-zip-worker
-        if: ${{ needs.plan.outputs.zip_worker == 'true' }}
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.zip_worker == 'true' }}
         env:
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           GCP_ZIP_WORKER_SERVICE_ACCOUNT: ${{ vars.GCP_ZIP_WORKER_SERVICE_ACCOUNT }}
         run: |
-          worker_image="${{ steps.image.outputs.zip_worker_name }}@${{ steps.build-zip-worker-image.outputs.digest }}"
+          worker_image="${{ needs.build-zip-worker.outputs.image }}@${{ needs.build-zip-worker.outputs.digest }}"
           gcloud run deploy "${ZIP_WORKER_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
@@ -229,8 +343,17 @@ jobs:
           echo "url=${worker_url}" >> "$GITHUB_OUTPUT"
           echo "ZIP Worker: ${worker_url}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Tag deployed ZIP worker image as latest
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.zip_worker == 'true' }}
+        run: >-
+          gcloud artifacts docker tags add
+          "${{ needs.build-zip-worker.outputs.image }}@${{ needs.build-zip-worker.outputs.digest }}"
+          "${{ needs.build-zip-worker.outputs.image }}:latest"
+          --quiet
+
       - name: Deploy private Bub Agent
         id: deploy-agent
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' }}
         env:
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
@@ -250,7 +373,7 @@ jobs:
           agent_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
             | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN" || $1 == "BUB_TELEGRAM_TOKEN"' \
             | paste -sd, -)"
-          agent_image="${{ steps.image.outputs.agent_name }}@${{ steps.build-agent-image.outputs.digest }}"
+          agent_image="${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
           agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}"
           agent_runtime_args=(--cpu-throttling --min-instances=0)
           if [[ ",${agent_secret_mappings}," == *",BUB_TELEGRAM_TOKEN="* ]]; then
@@ -306,8 +429,17 @@ jobs:
           echo "url=${agent_url}" >> "$GITHUB_OUTPUT"
           echo "Bub Agent: ${agent_url}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Tag deployed Bub Agent image as latest
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' }}
+        run: >-
+          gcloud artifacts docker tags add
+          "${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
+          "${{ needs.build-agent.outputs.image }}:latest"
+          --quiet
+
       - name: Deploy Cloud Run service
         id: deploy-candidate
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.cloud_run == 'true' }}
         env:
           GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           LEDGER_GITHUB_OWNER: ${{ vars.LEDGER_GITHUB_OWNER }}
@@ -325,6 +457,9 @@ jobs:
           AGENT_SERVICE_URL="${DEPLOYED_AGENT_URL}"
           if [[ -z "${ZIP_WORKER_URL}" ]]; then
             ZIP_WORKER_URL="$(gcloud run services describe "${ZIP_WORKER_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          fi
+          if [[ -z "${AGENT_SERVICE_URL}" ]]; then
+            AGENT_SERVICE_URL="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
           fi
           if [[ "${ZIP_WORKER_URL}" != https://* ]]; then
             echo "::error::ZIP worker URL was not published; run a manual deployment to create it"
@@ -423,7 +558,7 @@ jobs:
           fi
 
           revision_tag="candidate-${GITHUB_SHA::12}"
-          candidate_image="${{ steps.image.outputs.name }}@${{ steps.build-image.outputs.digest }}"
+          candidate_image="${{ needs.build-standalone.outputs.image }}@${{ needs.build-standalone.outputs.digest }}"
           echo "previous_traffic=${previous_traffic}" >> "$GITHUB_OUTPUT"
           echo "revision_tag=${revision_tag}" >> "$GITHUB_OUTPUT"
           echo "service_existed=${service_existed}" >> "$GITHUB_OUTPUT"
@@ -458,6 +593,7 @@ jobs:
 
       - name: Verify candidate and promote traffic
         id: verify-promote
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.cloud_run == 'true' }}
         env:
           REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
@@ -541,7 +677,7 @@ jobs:
           echo "Cloud Run: ${service_url}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore failed promotion
-        if: ${{ always() && steps.deploy-candidate.outputs.revision_tag != '' }}
+        if: ${{ always() && steps.freshness.outputs.proceed == 'true' && steps.deploy-candidate.outputs.revision_tag != '' }}
         env:
           CANDIDATE_IMAGE: ${{ steps.deploy-candidate.outputs.candidate_image }}
           PREVIOUS_TRAFFIC: ${{ steps.deploy-candidate.outputs.previous_traffic }}
@@ -608,7 +744,7 @@ jobs:
           fi
 
       - name: Remove candidate traffic tag
-        if: ${{ always() && steps.deploy-candidate.outputs.revision_tag != '' }}
+        if: ${{ always() && steps.freshness.outputs.proceed == 'true' && steps.deploy-candidate.outputs.revision_tag != '' }}
         env:
           REVISION_TAG: ${{ steps.deploy-candidate.outputs.revision_tag }}
         run: |
@@ -632,3 +768,11 @@ jobs:
             --region="${GCP_REGION}" \
             --remove-tags="${REVISION_TAG}" \
             --quiet
+
+      - name: Tag deployed Cloud Run image as latest
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.cloud_run == 'true' && steps.verify-promote.outcome == 'success' }}
+        run: >-
+          gcloud artifacts docker tags add
+          "${{ needs.build-standalone.outputs.image }}@${{ needs.build-standalone.outputs.digest }}"
+          "${{ needs.build-standalone.outputs.image }}:latest"
+          --quiet
