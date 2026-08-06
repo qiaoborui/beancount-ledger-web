@@ -717,6 +717,10 @@ jobs:
             echo "::error::failed to read Telegram webhook secrets from Secret Manager"
             exit 1
           fi
+          if [[ ! "${secret_token}" =~ ^[A-Za-z0-9_-]{1,256}$ ]]; then
+            echo "::error::Telegram secret_token must match ^[A-Za-z0-9_-]{1,256}$"
+            exit 1
+          fi
           webhook_url="${PUBLIC_ORIGIN}/api/integrations/telegram/webhook"
           result="$(curl --silent --show-error --fail-with-body --max-time 30 \
             --data-urlencode "url=${webhook_url}" \

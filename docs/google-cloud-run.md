@@ -255,7 +255,7 @@ mounts that secret only into the private Bub Agent revision, not the public Go
 service. Webhook mode additionally appends
 `TELEGRAM_WEBHOOK_SECRET=ledger-telegram-webhook-secret:latest`, which is
 mounted into the public Go service and used as the Telegram `secret_token`.
-Generate the webhook secret with `openssl rand -base64 32`.
+Generate the webhook secret with `openssl rand -hex 32`.
 
 The deployment workflow calls `setWebhook` (or `deleteWebhook` when rolling
 back to polling) using the bot token and webhook secret from Secret Manager, so

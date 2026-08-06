@@ -6,8 +6,9 @@ ci="${2:-.github/workflows/ci.yml}"
 publisher="${3:-.github/workflows/publish-images.yml}"
 component_planner="${4:-.github/scripts/plan-components.sh}"
 tag_updater="${5:-.github/scripts/update-artifact-latest-tag.sh}"
+telegram_docs="${6:-docs/google-cloud-run.md}"
 
-for file in "$deployment" "$ci" "$publisher" "$component_planner" "$tag_updater"; do
+for file in "$deployment" "$ci" "$publisher" "$component_planner" "$tag_updater" "$telegram_docs"; do
   if [[ ! -f "$file" ]]; then
     echo "required workflow file is missing: ${file}" >&2
     exit 1
@@ -248,6 +249,7 @@ for required in \
   'gcloud secrets versions access' \
   'setWebhook' \
   'secret_token' \
+  'Telegram secret_token must match ^[A-Za-z0-9_-]{1,256}$' \
   'allowed_updates=["message"]' \
   'max_connections=1'; do
   if [[ "$webhook_step" != *"$required"* ]]; then
@@ -255,6 +257,11 @@ for required in \
     exit 1
   fi
 done
+
+if ! grep -Fq 'Generate the webhook secret with `openssl rand -hex 32`.' "$telegram_docs"; then
+  echo "Telegram webhook documentation must use a Telegram-compatible secret generator" >&2
+  exit 1
+fi
 
 if [[ "$webhook_step" == *'drop_pending_updates'* ]]; then
   echo "Telegram webhook must not drop pending updates" >&2
