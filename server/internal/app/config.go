@@ -206,6 +206,7 @@ func loadBaseConfig() Config {
 		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
 		AgentServiceAudience:        strings.TrimSpace(os.Getenv("AGENT_SERVICE_AUDIENCE")),
 		AgentServiceToken:           strings.TrimSpace(os.Getenv("AGENT_SERVICE_TOKEN")),
+		TelegramWebhookSecret:       strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),
@@ -276,6 +277,9 @@ func ValidateWebConfig(cfg Config) error {
 	if err := validateGmailAutomationConfig(cfg); err != nil {
 		return err
 	}
+	if err := validateTelegramWebhookConfig(cfg); err != nil {
+		return err
+	}
 	if cfg.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
@@ -343,6 +347,9 @@ func ValidateConfig(cfg Config) error {
 	if err := validateGmailAutomationConfig(cfg); err != nil {
 		return err
 	}
+	if err := validateTelegramWebhookConfig(cfg); err != nil {
+		return err
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.LedgerStorage)) {
 	case "", "filesystem", "file", "github_api":
 	case "remote_git", "git":
@@ -388,6 +395,23 @@ func validateAgentServiceConfig(cfg Config, required bool) error {
 		if err != nil || parsedAudience.Scheme != "https" || parsedAudience.Host == "" {
 			return errors.New("AGENT_SERVICE_AUDIENCE must be an HTTPS URL")
 		}
+	}
+	return nil
+}
+
+func validateTelegramWebhookConfig(cfg Config) error {
+	secret := strings.TrimSpace(cfg.TelegramWebhookSecret)
+	if secret == "" {
+		return nil
+	}
+	if len(secret) > 256 {
+		return errors.New("TELEGRAM_WEBHOOK_SECRET must match ^[A-Za-z0-9_-]{1,256}$")
+	}
+	for _, char := range []byte(secret) {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+			continue
+		}
+		return errors.New("TELEGRAM_WEBHOOK_SECRET must match ^[A-Za-z0-9_-]{1,256}$")
 	}
 	return nil
 }

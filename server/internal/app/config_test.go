@@ -56,10 +56,28 @@ func TestLoadConfigReadsZIPWorker(t *testing.T) {
 	}
 }
 
+func TestLoadWebConfigReadsTelegramWebhookSecret(t *testing.T) {
+	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "telegram-webhook-secret")
+
+	cfg := LoadWebConfig()
+
+	if cfg.TelegramWebhookSecret != "telegram-webhook-secret" {
+		t.Fatalf("TelegramWebhookSecret=%q, want configured secret", cfg.TelegramWebhookSecret)
+	}
+}
+
 func TestValidateConfigRejectsInsecureZIPWorkerURL(t *testing.T) {
 	cfg := Config{LedgerStorage: "filesystem", ZIPWorkerURL: "http://zip-worker.example", ZIPWorkerAudience: "http://zip-worker.example"}
 
 	if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestValidateConfigRejectsInvalidTelegramWebhookSecret(t *testing.T) {
+	cfg := Config{LedgerStorage: "filesystem", TelegramWebhookSecret: "base64+secret="}
+
+	if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "TELEGRAM_WEBHOOK_SECRET") {
 		t.Fatalf("error=%v", err)
 	}
 }
