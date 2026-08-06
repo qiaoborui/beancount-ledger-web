@@ -49,6 +49,10 @@ one `agent` container because Telegram permits only one long poller for a bot
 token. Write confirmation is ordinary multi-turn conversation state and does
 not require a paused tool call or resident Agent turn.
 
+Compose keeps `BUB_TELEGRAM_MODE=polling` by default. Webhook mode is intended
+for the hosted Cloud Run deployment where the public Go API receives Telegram's
+webhook; a LAN self-hosted instance should keep polling.
+
 Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
 safe in Compose and PostgreSQL environment variables. `SELFHOST_IMAGE_TAG`
 defaults to `latest`; pin it to a published commit tag for a repeatable update.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -337,6 +338,115 @@ def test_project_telegram_skill_uses_restricted_final_response_tools() -> None:
     assert "telegram_rich.py" not in body
 
 
+def _telegram_update_payload(chat_id: int = 123, user_id: int = 456, text: str = "本月支出") -> bytes:
+    return json.dumps({
+        "update_id": 7,
+        "message": {
+            "message_id": 1207,
+            "date": 1750000000,
+            "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": user_id, "is_bot": False, "first_name": "Test", "username": "tester"},
+            "text": text,
+        },
+    }).encode()
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_update_dispatches_to_webhook_processor() -> None:
+    processed: list[ChannelMessage] = []
+
+    async def webhook_processor(message: ChannelMessage) -> None:
+        processed.append(message)
+
+    channel = LedgerTelegramChannel.create(
+        lambda _message: None,
+        webhook_processor=webhook_processor,
+        mode="webhook",
+    )
+    channel._app = SimpleNamespace(bot=SimpleNamespace(id=123, username="bub_bot"))
+
+    await channel.process_raw_update(_telegram_update_payload())
+
+    assert len(processed) == 1
+    message = processed[0]
+    assert message.channel == "telegram"
+    assert message.chat_id == "123"
+    assert message.output_channel == "null"
+    assert json.loads(message.content)["message"] == "本月支出"
+    assert json.loads(message.content)["sender_id"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_comma_commands_keep_bub_channel_output() -> None:
+    processed: list[ChannelMessage] = []
+
+    async def webhook_processor(message: ChannelMessage) -> None:
+        processed.append(message)
+
+    channel = LedgerTelegramChannel.create(
+        lambda _message: None,
+        webhook_processor=webhook_processor,
+        mode="webhook",
+    )
+    channel._app = SimpleNamespace(bot=SimpleNamespace(id=123, username="bub_bot"))
+
+    await channel.process_raw_update(_telegram_update_payload(text=",env"))
+
+    assert len(processed) == 1
+    assert processed[0].content == ",env"
+    assert processed[0].output_channel == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_enforces_allow_lists() -> None:
+    sent: list[dict] = []
+
+    class Bot:
+        async def send_message(self, **kwargs) -> SimpleNamespace:
+            sent.append(kwargs)
+            return SimpleNamespace(message_id=1)
+
+    processed: list[ChannelMessage] = []
+
+    async def webhook_processor(message: ChannelMessage) -> None:
+        processed.append(message)
+
+    channel = LedgerTelegramChannel.create(
+        lambda _message: None,
+        webhook_processor=webhook_processor,
+        mode="webhook",
+    )
+    channel._app = SimpleNamespace(bot=Bot())
+    channel._allow_users = {"999"}
+    channel._allow_chats = set()
+
+    await channel.process_raw_update(_telegram_update_payload())
+
+    assert processed == []
+    assert sent and sent[0]["chat_id"] == 123
+    assert "Access denied." in sent[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_rejects_malformed_payloads() -> None:
+    channel = LedgerTelegramChannel.create(lambda _message: None, mode="webhook")
+    channel._app = SimpleNamespace(bot=SimpleNamespace(id=123, username="bub_bot"))
+
+    with pytest.raises(ValueError, match="invalid Telegram update payload"):
+        await channel.process_raw_update(b"not json")
+
+    with pytest.raises(ValueError, match="invalid Telegram update payload"):
+        await channel.process_raw_update(b"[]")
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_requires_a_running_channel() -> None:
+    channel = LedgerTelegramChannel.create(lambda _message: None, mode="webhook")
+
+    with pytest.raises(RuntimeError, match="Telegram channel is not running"):
+        await channel.process_raw_update(_telegram_update_payload())
+
+
 @pytest.mark.asyncio
 async def test_web_loads_complete_catalog_after_telegram_subset() -> None:
     plugin = object.__new__(LedgerPlugin)
@@ -480,7 +590,11 @@ async def test_gateway_startup_fails_when_a_channel_does_not_start(tmp_path: Pat
         async def admit_message(self, **_kwargs):
             return None
 
-    monkeypatch.setattr(LedgerTelegramChannel, "create", staticmethod(lambda _handler: FailingTelegramChannel()))
+    monkeypatch.setattr(
+        LedgerTelegramChannel,
+        "create",
+        staticmethod(lambda _handler, **_kwargs: FailingTelegramChannel()),
+    )
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'failed-start.db'}",
         ledger_api_url="https://ledger.example",

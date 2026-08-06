@@ -81,6 +81,7 @@ services:
       BUB_TELEGRAM_TOKEN: "${BUB_TELEGRAM_TOKEN:-}"
       BUB_TELEGRAM_ALLOW_USERS: "${BUB_TELEGRAM_ALLOW_USERS:-}"
       BUB_TELEGRAM_ALLOW_CHATS: "${BUB_TELEGRAM_ALLOW_CHATS:-}"
+      BUB_TELEGRAM_MODE: "${BUB_TELEGRAM_MODE:-polling}"
     expose:
       - "8080"
     healthcheck:

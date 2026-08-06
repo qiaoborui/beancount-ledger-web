@@ -58,6 +58,7 @@ type Config struct {
 	AgentServiceURL             string
 	AgentServiceAudience        string
 	AgentServiceToken           string
+	TelegramWebhookSecret       string
 	CronSecret                  string
 	CronOIDCAudience            string
 	CronOIDCServiceAccount      string
@@ -126,6 +127,7 @@ func LoadConfig() Config {
 		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
 		AgentServiceAudience:        strings.TrimSpace(os.Getenv("AGENT_SERVICE_AUDIENCE")),
 		AgentServiceToken:           strings.TrimSpace(os.Getenv("AGENT_SERVICE_TOKEN")),
+		TelegramWebhookSecret:       strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
 		CronSecret:                  strings.TrimSpace(os.Getenv("CRON_SECRET")),
 		CronOIDCAudience:            strings.TrimSpace(os.Getenv("CRON_OIDC_AUDIENCE")),
 		CronOIDCServiceAccount:      strings.ToLower(strings.TrimSpace(os.Getenv("CRON_OIDC_SERVICE_ACCOUNT"))),

@@ -203,7 +203,9 @@ for required in \
   'telegram_allow_list_configured=false' \
   'CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured' \
   'BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled' \
-  'agent_runtime_args=(--no-cpu-throttling --min-instances=1)'; do
+  'agent_runtime_args=(--cpu-throttling --min-instances=0)' \
+  'agent_runtime_args=(--no-cpu-throttling --min-instances=1)' \
+  '[[ "${BUB_TELEGRAM_MODE}" == "webhook" ]]'; do
   if [[ "$agent_step" != *"$required"* ]]; then
     echo "Bub Agent Telegram deployment guard is missing: ${required}" >&2
     exit 1
@@ -221,9 +223,62 @@ for required in \
   'legacy_migration_required=false' \
   'legacy_environment_present=' \
   '.configSource // empty' \
+  'CLOUD_RUN_SECRET_MAPPINGS must define TELEGRAM_WEBHOOK_SECRET when Telegram webhook mode is enabled' \
   '--set-secrets="${candidate_secret_mappings}"'; do
   if [[ "$deploy_step" != *"$required"* ]]; then
     echo "Cloud Run candidate deployment is missing guard: ${required}" >&2
+    exit 1
+  fi
+done
+
+webhook_step="$(awk '
+  /^      - name: Configure Telegram webhook$/ { capture = 1 }
+  /^      - name: Remove stale Telegram webhook$/ { capture = 0 }
+  capture { print }
+' "$deployment")"
+
+if [[ -z "$webhook_step" ]]; then
+  echo "Telegram webhook configuration step is missing" >&2
+  exit 1
+fi
+
+for required in \
+  "steps.verify-promote.outcome == 'success'" \
+  "env.BUB_TELEGRAM_MODE == 'webhook'" \
+  'gcloud secrets versions access' \
+  'setWebhook' \
+  'secret_token' \
+  'allowed_updates=["message"]' \
+  'max_connections=1'; do
+  if [[ "$webhook_step" != *"$required"* ]]; then
+    echo "Telegram webhook configuration is missing: ${required}" >&2
+    exit 1
+  fi
+done
+
+if [[ "$webhook_step" == *'drop_pending_updates'* ]]; then
+  echo "Telegram webhook must not drop pending updates" >&2
+  exit 1
+fi
+
+stale_webhook_step="$(awk '
+  /^      - name: Remove stale Telegram webhook$/ { capture = 1 }
+  /^      - name: Restore failed promotion$/ { capture = 0 }
+  capture { print }
+' "$deployment")"
+
+if [[ -z "$stale_webhook_step" ]]; then
+  echo "Telegram stale webhook removal step is missing" >&2
+  exit 1
+fi
+
+for required in \
+  "needs.plan.outputs.agent_service == 'true'" \
+  "env.BUB_TELEGRAM_MODE != 'webhook'" \
+  'gcloud secrets versions access' \
+  'deleteWebhook'; do
+  if [[ "$stale_webhook_step" != *"$required"* ]]; then
+    echo "Telegram stale webhook removal is missing: ${required}" >&2
     exit 1
   fi
 done

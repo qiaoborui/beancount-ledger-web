@@ -26,3 +26,21 @@ def test_telegram_requires_an_explicit_allow_list(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS"):
         Settings.load()
+
+
+def test_telegram_mode_defaults_to_polling_and_validates_value(monkeypatch) -> None:
+    monkeypatch.setenv("LEDGER_API_URL", "https://ledger.example")
+    monkeypatch.setenv("AGENT_SERVICE_TOKEN", "shared-token")
+    monkeypatch.delenv("BUB_TELEGRAM_MODE", raising=False)
+
+    assert Settings.load().telegram_mode == "polling"
+
+    monkeypatch.setenv("BUB_TELEGRAM_MODE", "webhook")
+    assert Settings.load().telegram_mode == "webhook"
+
+    monkeypatch.setenv("BUB_TELEGRAM_MODE", "WebHook")
+    assert Settings.load().telegram_mode == "webhook"
+
+    monkeypatch.setenv("BUB_TELEGRAM_MODE", "invalid")
+    with pytest.raises(RuntimeError, match="BUB_TELEGRAM_MODE"):
+        Settings.load()

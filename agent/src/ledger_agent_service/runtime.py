@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from weakref import WeakKeyDictionary
 
+from loguru import logger
 from bub.channels.admission import AdmitDecision, TurnSnapshot
 from bub.channels.base import Lifecycle
 from bub.channels.contracts import MessageHandler
@@ -40,14 +41,97 @@ class LedgerTelegramChannel:
     """Keep Bub's transport while making model replies explicit Telegram tool calls."""
 
     @staticmethod
-    def create(on_receive: MessageHandler):
+    def create(
+        on_receive: MessageHandler,
+        *,
+        webhook_processor: MessageHandler | None = None,
+        mode: str = "polling",
+    ):
         from bub.channels.telegram import TelegramChannel
 
         class SkillTelegramChannel(TelegramChannel):
+            def __init__(self, on_receive: MessageHandler) -> None:
+                super().__init__(on_receive)
+                self._webhook_processor = webhook_processor
+                self._mode = mode
+
             @property
             def needs_debounce(self) -> bool:
                 # Keep each Telegram message as its own model turn.
                 return False
+
+            @property
+            def webhook_mode(self) -> bool:
+                return self._mode == "webhook"
+
+            async def start(self, stop_event: asyncio.Event) -> None:
+                from telegram.ext import Application, CommandHandler, filters
+                from telegram.ext import MessageHandler as TelegramMessageHandler
+                from telegram.request import HTTPXRequest
+
+                del stop_event
+                proxy = self._settings.proxy
+                logger.info(
+                    "telegram.start allow_users_count={} allow_chats_count={} proxy_enabled={} webhook_mode={}",
+                    len(self._allow_users),
+                    len(self._allow_chats),
+                    bool(proxy),
+                    self.webhook_mode,
+                )
+                get_updates_request = HTTPXRequest(read_timeout=30, proxy=proxy)
+                builder = Application.builder().token(self._settings.token).get_updates_request(get_updates_request)
+                if proxy:
+                    builder = builder.proxy(proxy)
+                self._app = builder.build()
+                self._app.add_handler(CommandHandler("start", self._on_start))
+                self._app.add_handler(CommandHandler("bub", self._on_message, has_args=True, block=False))
+                self._app.add_handler(TelegramMessageHandler(~filters.COMMAND, self._on_message, block=False))
+                await self._app.initialize()
+                await self._app.start()
+                if self.webhook_mode:
+                    # Incoming updates arrive through the Go webhook gateway and
+                    # are processed synchronously; never start getUpdates polling.
+                    logger.info("telegram.start webhook mode, polling disabled")
+                    return
+                updater = self._app.updater
+                if updater is None:
+                    return
+                await updater.start_polling(drop_pending_updates=True, allowed_updates=["message"])
+                logger.info("telegram.start polling")
+
+            async def process_raw_update(self, raw: bytes | str) -> None:
+                from telegram import Update
+
+                if not hasattr(self, "_app") or self._app is None:
+                    raise RuntimeError("Telegram channel is not running")
+                try:
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, TypeError) as exc:
+                    raise ValueError("invalid Telegram update payload") from exc
+                if not isinstance(data, dict):
+                    raise ValueError("invalid Telegram update payload")
+                update = Update.de_json(data, self._app.bot)
+                if update is None:
+                    raise ValueError("invalid Telegram update payload")
+                await self.process_update(update)
+
+            async def process_update(self, update: Update) -> None:
+                await self._handle_update(update, self._webhook_processor or self._on_receive)
+
+            async def _handle_update(self, update: Update, handler: MessageHandler) -> None:
+                if update.message is None or update.effective_user is None:
+                    return
+                chat_id = str(update.message.chat_id)
+                if self._allow_chats and chat_id not in self._allow_chats:
+                    return
+                user = update.effective_user
+                sender_tokens = {str(user.id)}
+                if user.username:
+                    sender_tokens.add(user.username)
+                if self._allow_users and sender_tokens.isdisjoint(self._allow_users):
+                    await update.message.reply_text("Access denied.")
+                    return
+                await handler(await self._build_message(update.message))
 
             async def _build_message(self, message):
                 inbound = await super()._build_message(message)
@@ -154,10 +238,22 @@ class LedgerPlugin:
     @hookimpl
     def provide_channels(self, message_handler: MessageHandler) -> list[Any]:
         web = LedgerWebChannel(message_handler, self.tool_specs, self.record_ui_event)
-        telegram = LedgerTelegramChannel.create(message_handler)
+        telegram = LedgerTelegramChannel.create(
+            message_handler,
+            webhook_processor=self._telegram_webhook_processor,
+            mode=self.settings.telegram_mode,
+        )
         self.web_channel = web
         self.telegram_channel = telegram
         return [web, telegram, GatewayReadiness(self.ready)]
+
+    async def _telegram_webhook_processor(self, message: ChannelMessage) -> None:
+        if self.framework is None:
+            raise RuntimeError("Bub framework is not running")
+        # Process the turn inline so the HTTP webhook request stays open for the
+        # whole turn. Go serializes Telegram updates, so bypassing the manager
+        # queue cannot interleave turns for the same chat.
+        await self.framework.process_inbound(message, stream_output=True)
 
     @hookimpl
     async def load_state(self, message: ChannelMessage, session_id: str) -> dict[str, Any]:
@@ -649,6 +745,12 @@ class AgentGateway:
         self.ensure_healthy()
         async for item in self.web.onboarding(request):
             yield item
+
+    async def telegram_update(self, raw: bytes) -> None:
+        self.ensure_healthy()
+        if self.plugin is None or self.plugin.telegram_channel is None:
+            raise RuntimeError("Telegram channel is not running")
+        await self.plugin.telegram_channel.process_raw_update(raw)
 
     async def timeline(self, session_id: str, before: int) -> dict[str, Any]:
         assert self.plugin is not None
