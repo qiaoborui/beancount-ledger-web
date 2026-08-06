@@ -19,7 +19,7 @@ from bub.envelope import content_of
 from bub.errors import BubError, ErrorKind
 from bub.framework import BubFramework
 from bub.hooks import hookimpl
-from bub.hooks.interception import ToolCall, ToolCallDecision
+from bub.hooks.interception import LlmCallDecision, LlmCallRequest, ToolCall, ToolCallDecision
 from bub.streaming import AsyncStreamEvents, StreamState
 from bub.tape import AsyncTapeStoreAdapter, TapeContext, TapeEntry, TapeQuery
 from bub.tools import REGISTRY, Tool, ToolContext
@@ -31,16 +31,19 @@ from .web_channel import LedgerWebChannel, WebTurn
 
 _PLUGINS: WeakKeyDictionary[BubFramework, LedgerPlugin] = WeakKeyDictionary()
 _GATEWAY_SETTINGS: WeakKeyDictionary[BubFramework, Settings] = WeakKeyDictionary()
+TELEGRAM_SEND_TOOL = "telegram_send"
+TELEGRAM_SEND_RICH_TOOL = "telegram_send_rich"
+TELEGRAM_TOOL_NAMES = {TELEGRAM_SEND_TOOL, TELEGRAM_SEND_RICH_TOOL}
 
 
 class LedgerTelegramChannel:
-    """Factory wrapper that keeps Bub's Telegram implementation and enables normal outbound replies."""
+    """Keep Bub's transport while making model replies explicit Telegram tool calls."""
 
     @staticmethod
     def create(on_receive: MessageHandler):
         from bub.channels.telegram import TelegramChannel
 
-        class OutboundTelegramChannel(TelegramChannel):
+        class SkillTelegramChannel(TelegramChannel):
             @property
             def needs_debounce(self) -> bool:
                 # Keep each Telegram message as its own model turn.
@@ -48,15 +51,63 @@ class LedgerTelegramChannel:
 
             async def _build_message(self, message):
                 inbound = await super()._build_message(message)
-                inbound.output_channel = self.name
+                if content_of(inbound).strip().startswith(","):
+                    # Comma commands bypass the model and therefore cannot use
+                    # the Telegram response skill.
+                    inbound.output_channel = self.name
                 return inbound
+
+            async def send_agent_text(self, chat_id: str, text: str, reply_to: int | None) -> int | None:
+                from telegram.error import BadRequest
+
+                try:
+                    sent = await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        reply_to_message_id=reply_to,
+                    )
+                except BadRequest:
+                    if reply_to is None:
+                        raise
+                    sent = await self._app.bot.send_message(chat_id=chat_id, text=text)
+                return getattr(sent, "message_id", None)
+
+            async def send_agent_rich(
+                self,
+                chat_id: str,
+                content: str,
+                format: str,
+                reply_to: int | None,
+            ) -> int | None:
+                from telegram.error import BadRequest
+
+                rich_message = json.dumps({format: content}, ensure_ascii=False)
+                payload = {
+                    "chat_id": chat_id,
+                    "rich_message": rich_message,
+                    "reply_to_message_id": reply_to,
+                }
+                try:
+                    sent = await self._app.bot._post("sendRichMessage", data=payload)
+                except BadRequest:
+                    if reply_to is None:
+                        raise
+                    payload.pop("reply_to_message_id", None)
+                    sent = await self._app.bot._post("sendRichMessage", data=payload)
+                if not isinstance(sent, dict):
+                    return None
+                message_id = sent.get("message_id")
+                if not isinstance(message_id, int):
+                    nested = sent.get("result")
+                    message_id = nested.get("message_id") if isinstance(nested, dict) else None
+                return message_id if isinstance(message_id, int) else None
 
             async def stop(self) -> None:
                 if not hasattr(self, "_app"):
                     return
                 await super().stop()
 
-        return OutboundTelegramChannel(on_receive=on_receive)
+        return SkillTelegramChannel(on_receive=on_receive)
 
 
 class GatewayReadiness(Lifecycle):
@@ -91,7 +142,9 @@ class LedgerPlugin:
         self.tools_lock = asyncio.Lock()
         self.async_store: AsyncTapeStoreAdapter | None = None
         self.web_channel: LedgerWebChannel | None = None
+        self.telegram_channel: Any | None = None
         self._register_onboarding_tools()
+        self._register_telegram_tools()
         _PLUGINS[framework] = self
 
     @hookimpl
@@ -101,8 +154,10 @@ class LedgerPlugin:
     @hookimpl
     def provide_channels(self, message_handler: MessageHandler) -> list[Any]:
         web = LedgerWebChannel(message_handler, self.tool_specs, self.record_ui_event)
+        telegram = LedgerTelegramChannel.create(message_handler)
         self.web_channel = web
-        return [web, LedgerTelegramChannel.create(message_handler), GatewayReadiness(self.ready)]
+        self.telegram_channel = telegram
+        return [web, telegram, GatewayReadiness(self.ready)]
 
     @hookimpl
     async def load_state(self, message: ChannelMessage, session_id: str) -> dict[str, Any]:
@@ -112,6 +167,12 @@ class LedgerPlugin:
             "session_id": session_id,
             "channel": message.channel,
         }
+        if message.channel == "telegram":
+            state.update({
+                "chat_id": message.chat_id,
+                "telegram_message_id": _telegram_message_id(message),
+                "_telegram_send_lock": asyncio.Lock(),
+            })
         if mode == "onboarding":
             request = message.context.get("_ledger_onboarding_request")
             if not isinstance(request, OnboardingRequest):
@@ -142,7 +203,10 @@ class LedgerPlugin:
             state.update({
                 "capability_token": bootstrap.capability_token,
                 "system_prompt": bootstrap.system_prompt,
-                "allowed_tools": [spec.name for spec in bootstrap.tools],
+                "allowed_tools": [
+                    *[spec.name for spec in bootstrap.tools],
+                    *(sorted(TELEGRAM_TOOL_NAMES) if message.channel == "telegram" else []),
+                ],
                 "allowed_skills": ["telegram-ledger-agent", "telegram"] if message.channel == "telegram" else [],
             })
         turn = message.context.get("_ledger_web_turn")
@@ -266,8 +330,17 @@ class LedgerPlugin:
         return AsyncStreamEvents(events(), state=adapted_state)
 
     @hookimpl
+    def before_llm_call(self, request: LlmCallRequest, state: dict[str, Any]) -> LlmCallDecision | None:
+        del request
+        if state.get("channel") == "telegram" and state.get("_telegram_reply_sent"):
+            return LlmCallDecision.finish("")
+        return None
+
+    @hookimpl
     async def before_tool_call(self, call: ToolCall, state: dict[str, Any]) -> ToolCallDecision | None:
         if state.get("mode") != "ledger":
+            return None
+        if call.tool in TELEGRAM_TOOL_NAMES and call.tool in set(state.get("allowed_tools") or []):
             return None
         spec = self.tool_specs.get(call.tool)
         if spec is None or call.tool not in set(state.get("allowed_tools") or []):
@@ -322,6 +395,106 @@ class LedgerPlugin:
     def _register_onboarding_tools(self) -> None:
         for name, tool in onboarding_tools().items():
             REGISTRY[name] = tool
+
+    def _register_telegram_tools(self) -> None:
+        REGISTRY[TELEGRAM_SEND_TOOL] = Tool(
+            name=TELEGRAM_SEND_TOOL,
+            description=(
+                "向当前 Telegram 会话发送一条简短纯文本最终回复。"
+                "目标 chat 和回复消息由运行时绑定，模型不能指定。"
+                "成功后立即结束当前 turn，不要再次调用任何工具。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string", "description": "要发送的最终纯文本回复"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            context=True,
+            handler=self._telegram_send_handler,
+        )
+        REGISTRY[TELEGRAM_SEND_RICH_TOOL] = Tool(
+            name=TELEGRAM_SEND_RICH_TOOL,
+            description=(
+                "向当前 Telegram 会话发送一条结构化富文本最终回复，支持 rich HTML 或 rich Markdown。"
+                "适合标题、列表、表格、引用和代码块。"
+                "成功后立即结束当前 turn，不要再次调用任何工具。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "完整的富文本内容"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["html", "markdown"],
+                        "description": "富文本格式",
+                    },
+                },
+                "required": ["content", "format"],
+                "additionalProperties": False,
+            },
+            context=True,
+            handler=self._telegram_send_rich_handler,
+        )
+
+    async def _telegram_send_handler(self, *, context: ToolContext, text: str) -> dict[str, Any]:
+        text = text.strip()
+        if not text:
+            raise ValueError("Telegram reply cannot be empty")
+        if len(text) > 4096:
+            raise ValueError("Telegram plain reply exceeds 4096 characters; use a shorter reply")
+        return await self._send_telegram_reply(context, text=text)
+
+    async def _telegram_send_rich_handler(
+        self,
+        *,
+        context: ToolContext,
+        content: str,
+        format: str,
+    ) -> dict[str, Any]:
+        content = content.strip()
+        if not content:
+            raise ValueError("Telegram rich reply cannot be empty")
+        if len(content) > 16000:
+            raise ValueError("Telegram rich reply exceeds 16000 characters")
+        if format not in {"html", "markdown"}:
+            raise ValueError("Telegram rich reply format must be html or markdown")
+        return await self._send_telegram_reply(context, content=content, format=format)
+
+    async def _send_telegram_reply(
+        self,
+        context: ToolContext,
+        *,
+        text: str | None = None,
+        content: str | None = None,
+        format: str | None = None,
+    ) -> dict[str, Any]:
+        state = context.state
+        if state.get("channel") != "telegram":
+            raise RuntimeError("Telegram send tools are only available in Telegram turns")
+        lock = state.get("_telegram_send_lock")
+        if not isinstance(lock, asyncio.Lock):
+            lock = asyncio.Lock()
+            state["_telegram_send_lock"] = lock
+        async with lock:
+            if state.get("_telegram_reply_sent"):
+                return {"sent": True, "alreadySent": True}
+            if self.telegram_channel is None:
+                raise RuntimeError("Telegram channel is not running")
+            chat_id = str(state.get("chat_id") or "").strip()
+            if not chat_id or chat_id == "default":
+                raise RuntimeError("Telegram chat is missing")
+            reply_to = state.get("telegram_message_id")
+            reply_to = reply_to if isinstance(reply_to, int) else None
+            if text is not None:
+                message_id = await self.telegram_channel.send_agent_text(chat_id, text, reply_to)
+                output_format = "text"
+            else:
+                assert content is not None and format is not None
+                message_id = await self.telegram_channel.send_agent_rich(chat_id, content, format, reply_to)
+                output_format = format
+            state["_telegram_reply_sent"] = True
+            return {"sent": True, "messageId": message_id, "format": output_format}
 
     def bind_store(self) -> None:
         store = self.framework.get_tape_store()
@@ -506,3 +679,12 @@ def _unknown_tool_name(error: BubError) -> str | None:
     if error.kind != ErrorKind.TOOL or not error.message.startswith(prefix) or not error.message.endswith("."):
         return None
     return error.message.removeprefix(prefix).removesuffix(".").strip() or None
+
+
+def _telegram_message_id(message: ChannelMessage) -> int | None:
+    try:
+        payload = json.loads(content_of(message))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    message_id = payload.get("message_id") if isinstance(payload, dict) else None
+    return message_id if isinstance(message_id, int) else None
