@@ -49,10 +49,15 @@ Rollback is performed by deploying an earlier Git revision.
 - The browser is a regular Bub `Interface` named `web`. The Agent service
   exposes it at `POST /v1/channels/web/messages` and projects Bub stream events
   into the product timeline over SSE.
-- Telegram uses Bub's native long-polling Channel. The project plugin adds the
-  ledger prompt, tools, and exact next-message confirmation policy. A
-  confirmation is simply a new model turn; the Agent process does not need to
-  remain resident between the draft and confirmation turns.
+- Telegram uses Bub's native long-polling transport. Normal model output is
+  disabled for this channel; after completing its reasoning and ledger tool
+  calls, the Agent sends exactly one final response through the restricted
+  `telegram_send` or `telegram_send_rich` tool. The tools bind the current chat
+  and source message in runtime state, so the model cannot choose another chat
+  or access the bot token. Comma-prefixed Bub commands still reply through the
+  Channel directly because they bypass the model and skills. A confirmation is
+  simply a new model turn; the Agent process does not need to remain resident
+  between the draft and confirmation turns.
 - Local `bub chat` uses Bub's native CLI Channel. It exchanges a revocable
   `blw_agent_...` credential for a 15-minute capability containing the full
   allowed tool catalog. Revoking or expiring the parent Token immediately

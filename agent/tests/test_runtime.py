@@ -10,11 +10,20 @@ from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
 from bub.builtin.model_runner import ModelRunner
 from bub.errors import BubError, ErrorKind
+from bub.hooks.interception import LlmCallRequest, ToolCall
+from bub.skills import discover_skills
 from bub.streaming import AsyncStreamEvents, StreamEvent
+from bub.tools import ToolContext
 
 from ledger_agent_service.config import Settings
 from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
-from ledger_agent_service.runtime import AgentGateway, LedgerPlugin, LedgerTelegramChannel
+from ledger_agent_service.runtime import (
+    TELEGRAM_SEND_RICH_TOOL,
+    TELEGRAM_SEND_TOOL,
+    AgentGateway,
+    LedgerPlugin,
+    LedgerTelegramChannel,
+)
 
 
 @pytest.mark.asyncio
@@ -120,6 +129,212 @@ async def test_telegram_confirmation_is_a_normal_model_turn() -> None:
 
     assert idle is None
     assert running is not None and running.action == "follow_up"
+
+
+@pytest.mark.asyncio
+async def test_telegram_channel_keeps_model_output_null_but_returns_comma_commands(monkeypatch) -> None:
+    from bub.channels.telegram import TelegramChannel
+
+    async def build_message(_self, message: ChannelMessage) -> ChannelMessage:
+        return message
+
+    monkeypatch.setattr(TelegramChannel, "_build_message", build_message)
+    channel = LedgerTelegramChannel.create(lambda _message: None)
+
+    normal = await channel._build_message(ChannelMessage(
+        session_id="telegram:123",
+        channel="telegram",
+        chat_id="123",
+        content='{"message":"本月支出"}',
+        output_channel="null",
+    ))
+    command = await channel._build_message(ChannelMessage(
+        session_id="telegram:123",
+        channel="telegram",
+        chat_id="123",
+        content=",env",
+        output_channel="null",
+    ))
+
+    assert normal.output_channel == "null"
+    assert command.output_channel == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_telegram_channel_sends_rich_payload_through_bot_api() -> None:
+    requests: list[tuple[str, dict]] = []
+
+    class Bot:
+        async def _post(self, endpoint: str, data: dict):
+            requests.append((endpoint, data))
+            return {"message_id": 456}
+
+    channel = LedgerTelegramChannel.create(lambda _message: None)
+    channel._app = SimpleNamespace(bot=Bot())
+
+    message_id = await channel.send_agent_rich(
+        "123",
+        "<table><tr><td>餐饮</td><td>237.30</td></tr></table>",
+        "html",
+        1207,
+    )
+
+    assert message_id == 456
+    assert requests == [(
+        "sendRichMessage",
+        {
+            "chat_id": "123",
+            "rich_message": '{"html": "<table><tr><td>餐饮</td><td>237.30</td></tr></table>"}',
+            "reply_to_message_id": 1207,
+        },
+    )]
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_tool_is_bound_to_current_turn_and_finishes_loop() -> None:
+    calls: list[tuple[str, str, int | None]] = []
+
+    class TelegramChannel:
+        async def send_agent_text(self, chat_id: str, text: str, reply_to: int | None) -> int:
+            calls.append((chat_id, text, reply_to))
+            return 321
+
+    plugin = object.__new__(LedgerPlugin)
+    plugin.telegram_channel = TelegramChannel()
+    state = {
+        "channel": "telegram",
+        "chat_id": "123",
+        "telegram_message_id": 1207,
+    }
+    context = ToolContext(tape=SimpleNamespace(), run_id="run-1", state=state)
+
+    first = await plugin._telegram_send_handler(context=context, text="处理完成")
+    second = await plugin._telegram_send_handler(context=context, text="不应重复发送")
+    decision = plugin.before_llm_call(
+        LlmCallRequest("run-2", "openai:ledger-agent", [], (TELEGRAM_SEND_TOOL,)),
+        state,
+    )
+
+    assert calls == [("123", "处理完成", 1207)]
+    assert first == {"sent": True, "messageId": 321, "format": "text"}
+    assert second == {"sent": True, "alreadySent": True}
+    assert decision is not None and decision.text == ""
+
+
+@pytest.mark.asyncio
+async def test_parallel_telegram_send_calls_emit_only_one_message() -> None:
+    calls: list[str] = []
+
+    class TelegramChannel:
+        async def send_agent_text(self, _chat_id: str, text: str, _reply_to: int | None) -> int:
+            await asyncio.sleep(0)
+            calls.append(text)
+            return 321
+
+    plugin = object.__new__(LedgerPlugin)
+    plugin.telegram_channel = TelegramChannel()
+    state = {
+        "channel": "telegram",
+        "chat_id": "123",
+        "telegram_message_id": 1207,
+        "_telegram_send_lock": asyncio.Lock(),
+    }
+    context = ToolContext(tape=SimpleNamespace(), run_id="run-parallel", state=state)
+
+    results = await asyncio.gather(
+        plugin._telegram_send_handler(context=context, text="第一条"),
+        plugin._telegram_send_handler(context=context, text="第二条"),
+    )
+
+    assert len(calls) == 1
+    assert sum(result.get("alreadySent") is True for result in results) == 1
+
+
+@pytest.mark.asyncio
+async def test_telegram_rich_tool_sends_structured_final_reply() -> None:
+    calls: list[tuple[str, str, str, int | None]] = []
+
+    class TelegramChannel:
+        async def send_agent_rich(
+            self,
+            chat_id: str,
+            content: str,
+            format: str,
+            reply_to: int | None,
+        ) -> int:
+            calls.append((chat_id, content, format, reply_to))
+            return 654
+
+    plugin = object.__new__(LedgerPlugin)
+    plugin.telegram_channel = TelegramChannel()
+    state = {"channel": "telegram", "chat_id": "123", "telegram_message_id": 1207}
+    context = ToolContext(tape=SimpleNamespace(), run_id="run-rich", state=state)
+
+    result = await plugin._telegram_send_rich_handler(
+        context=context,
+        content="<table><tr><td>餐饮</td><td>237.30</td></tr></table>",
+        format="html",
+    )
+
+    assert calls == [("123", "<table><tr><td>餐饮</td><td>237.30</td></tr></table>", "html", 1207)]
+    assert result == {"sent": True, "messageId": 654, "format": "html"}
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_tools_are_allowed_only_when_exposed_to_the_turn() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    plugin.tool_specs = {}
+    call = ToolCall("run-1", TELEGRAM_SEND_RICH_TOOL, {"content": "<p>ok</p>", "format": "html"})
+
+    allowed = await plugin.before_tool_call(
+        call,
+        {"mode": "ledger", "allowed_tools": [TELEGRAM_SEND_RICH_TOOL]},
+    )
+    denied = await plugin.before_tool_call(call, {"mode": "ledger", "allowed_tools": []})
+
+    assert allowed is None
+    assert denied is not None and denied.action == "deny"
+
+
+@pytest.mark.asyncio
+async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> None:
+    plugin = object.__new__(LedgerPlugin)
+
+    class Capabilities:
+        async def bootstrap(self, **_kwargs):
+            return SimpleNamespace(capability_token="capability", system_prompt="prompt", tools=[])
+
+    async def ensure_ledger_tools(_specs=None) -> None:
+        return None
+
+    plugin.capabilities = Capabilities()
+    plugin.ensure_ledger_tools = ensure_ledger_tools
+    message = ChannelMessage(
+        session_id="telegram:123",
+        channel="telegram",
+        chat_id="123",
+        content='{"message":"发个表格","message_id":1207}',
+        output_channel="null",
+    )
+
+    state = await plugin.load_state(message, "telegram:123")
+
+    assert state["chat_id"] == "123"
+    assert state["telegram_message_id"] == 1207
+    assert set(state["allowed_tools"]) == {TELEGRAM_SEND_TOOL, TELEGRAM_SEND_RICH_TOOL}
+    assert state["allowed_skills"] == ["telegram-ledger-agent", "telegram"]
+
+
+def test_project_telegram_skill_uses_restricted_final_response_tools() -> None:
+    workspace = Path(__file__).resolve().parents[2]
+    skill = next(item for item in discover_skills(workspace) if item.name == "telegram")
+    body = skill.body()
+
+    assert skill.source == "project"
+    assert "telegram_send" in body
+    assert "telegram_send_rich" in body
+    assert "Do not send an acknowledgment before doing the work" in body
+    assert "telegram_rich.py" not in body
 
 
 @pytest.mark.asyncio
@@ -238,7 +453,7 @@ async def test_gateway_loads_ledger_plugin_channels_and_sqlalchemy_store(tmp_pat
         assert gateway.framework._plugin_status["tapestore-sqlalchemy"].is_success
         assert gateway.manager is not None
         assert gateway.manager.get_channel("web") is gateway.web
-        assert type(gateway.manager.get_channel("telegram")).__name__ == "OutboundTelegramChannel"
+        assert type(gateway.manager.get_channel("telegram")).__name__ == "SkillTelegramChannel"
         assert type(gateway.framework.get_tape_store()).__name__ == "SQLAlchemyTapeStore"
         assert gateway.healthy
 
