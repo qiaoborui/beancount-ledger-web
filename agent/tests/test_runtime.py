@@ -377,6 +377,66 @@ async def test_telegram_webhook_update_dispatches_to_webhook_processor() -> None
 
 
 @pytest.mark.asyncio
+async def test_telegram_webhook_sends_model_output_when_send_tool_was_not_called() -> None:
+    calls: list[tuple[str, str, int | None]] = []
+
+    class Framework:
+        async def process_inbound(self, _message, stream_output: bool):
+            assert stream_output is True
+            return SimpleNamespace(model_output="这是最终回复", state={"_telegram_reply_sent": False})
+
+    class TelegramChannel:
+        async def send_agent_text(self, chat_id: str, text: str, reply_to: int | None) -> int:
+            calls.append((chat_id, text, reply_to))
+            return 321
+
+    plugin = object.__new__(LedgerPlugin)
+    plugin.framework = Framework()
+    plugin.telegram_channel = TelegramChannel()
+    message = ChannelMessage(
+        session_id="telegram:123",
+        channel="telegram",
+        chat_id="123",
+        content='{"message":"测试","message_id":1207}',
+        output_channel="null",
+    )
+
+    await plugin._telegram_webhook_processor(message)
+
+    assert calls == [("123", "这是最终回复", 1207)]
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_does_not_duplicate_send_tool_reply() -> None:
+    calls: list[tuple[str, str, int | None]] = []
+
+    class Framework:
+        async def process_inbound(self, _message, stream_output: bool):
+            assert stream_output is True
+            return SimpleNamespace(model_output="不应再次发送", state={"_telegram_reply_sent": True})
+
+    class TelegramChannel:
+        async def send_agent_text(self, chat_id: str, text: str, reply_to: int | None) -> int:
+            calls.append((chat_id, text, reply_to))
+            return 321
+
+    plugin = object.__new__(LedgerPlugin)
+    plugin.framework = Framework()
+    plugin.telegram_channel = TelegramChannel()
+    message = ChannelMessage(
+        session_id="telegram:123",
+        channel="telegram",
+        chat_id="123",
+        content='{"message":"测试","message_id":1207}',
+        output_channel="null",
+    )
+
+    await plugin._telegram_webhook_processor(message)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_telegram_webhook_comma_commands_keep_bub_channel_output() -> None:
     processed: list[ChannelMessage] = []
 

@@ -253,7 +253,29 @@ class LedgerPlugin:
         # Process the turn inline so the HTTP webhook request stays open for the
         # whole turn. Go serializes Telegram updates, so bypassing the manager
         # queue cannot interleave turns for the same chat.
-        await self.framework.process_inbound(message, stream_output=True)
+        result = await self.framework.process_inbound(message, stream_output=True)
+        if result.state.get("_telegram_reply_sent"):
+            return
+        text = result.model_output.strip()
+        if not text:
+            return
+        if self.telegram_channel is None:
+            raise RuntimeError("Telegram channel is not running")
+        chat_id = str(result.state.get("chat_id") or message.chat_id or "").strip()
+        if not chat_id or chat_id == "default":
+            raise RuntimeError("Telegram chat is missing")
+        reply_to = result.state.get("telegram_message_id")
+        reply_to = reply_to if isinstance(reply_to, int) else _telegram_message_id(message)
+        if len(text) > 4096:
+            text = text[:4095] + "…"
+        message_id = await self.telegram_channel.send_agent_text(chat_id, text, reply_to)
+        result.state["_telegram_reply_sent"] = True
+        logger.info(
+            "telegram.webhook fallback reply sent session_id={} chars={} message_id={}",
+            message.session_id,
+            len(text),
+            message_id,
+        )
 
     @hookimpl
     async def load_state(self, message: ChannelMessage, session_id: str) -> dict[str, Any]:
