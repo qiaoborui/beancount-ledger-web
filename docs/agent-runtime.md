@@ -13,8 +13,9 @@ Browser -> Go API -> Bub Web Channel -> Bub model client -> Go model proxy
                     |                 +-> bub-tapestore-sqlalchemy -> Postgres
                     +-> signed capability -> Go ledger tools
 
-Telegram ----------> Bub Telegram Channel
-Local bub chat -----> Bub CLI Channel -> remote capability
+Telegram webhook -> Go API -> Bub Telegram Channel (webhook mode)
+Telegram ---------> Bub Telegram Channel (polling mode)
+Local bub chat ---> Bub CLI Channel -> remote capability
 ```
 
 The Agent service never receives a ledger checkout, GitHub token, provider API
@@ -49,15 +50,27 @@ Rollback is performed by deploying an earlier Git revision.
 - The browser is a regular Bub `Interface` named `web`. The Agent service
   exposes it at `POST /v1/channels/web/messages` and projects Bub stream events
   into the product timeline over SSE.
-- Telegram uses Bub's native long-polling transport. Normal model output is
-  disabled for this channel; after completing its reasoning and ledger tool
-  calls, the Agent sends exactly one final response through the restricted
-  `telegram_send` or `telegram_send_rich` tool. The tools bind the current chat
-  and source message in runtime state, so the model cannot choose another chat
-  or access the bot token. Comma-prefixed Bub commands still reply through the
-  Channel directly because they bypass the model and skills. A confirmation is
-  simply a new model turn; the Agent process does not need to remain resident
-  between the draft and confirmation turns.
+- Telegram uses Bub's native Telegram Channel. Normal model output is disabled
+  for this channel; after completing its reasoning and ledger tool calls, the
+  Agent sends exactly one final response through the restricted `telegram_send`
+  or `telegram_send_rich` tool. The tools bind the current chat and source
+  message in runtime state, so the model cannot choose another chat or access
+  the bot token. Comma-prefixed Bub commands still reply through the Channel
+  directly because they bypass the model and skills. A confirmation is simply a
+  new model turn; the Agent process does not need to remain resident between
+  the draft and confirmation turns.
+- `BUB_TELEGRAM_MODE=polling` (default) uses Telegram long polling and keeps the
+  local/self-hosted behavior. `BUB_TELEGRAM_MODE=webhook` initializes the
+  Telegram Application and Bot but never starts `getUpdates`; the Go API
+  receives the webhook, verifies the secret token, and forwards the raw update
+  to `POST /v1/channels/telegram/updates` with the internal service token. The
+  Agent parses the update with python-telegram-bot and processes the whole turn
+  synchronously so the request stays open (Cloud Run keeps CPU allocated). The
+  Go gateway serializes updates and deduplicates completed `update_id` values;
+  a duplicate webhook delivery is acknowledged without a second reply. If the
+  Agent finishes a reply but the process crashes before the completion is
+  recorded, Telegram may still retry the update once, so the reply can
+  theoretically be sent twice; this window cannot be fully eliminated.
 - Local `bub chat` uses Bub's native CLI Channel. It exchanges a revocable
   `blw_agent_...` credential for a 15-minute capability containing the full
   allowed tool catalog. Revoking or expiring the parent Token immediately
@@ -93,12 +106,26 @@ Optional Telegram environment:
 BUB_TELEGRAM_TOKEN=<BotFather token>
 BUB_TELEGRAM_ALLOW_USERS=<comma-separated Telegram user IDs>
 BUB_TELEGRAM_ALLOW_CHATS=<comma-separated Telegram chat IDs>
+BUB_TELEGRAM_MODE=polling|webhook
 ```
 
-Keep the hosted Agent at one maximum instance while Telegram long polling is
-enabled. Multiple instances would poll the same bot token and compete for
-updates. This is a Telegram polling constraint, not a requirement to keep an
-Agent alive while waiting for write confirmation.
+Keep the hosted Agent at one maximum instance for both Telegram modes.
+Multiple polling instances would compete for updates with the same bot token,
+and the in-process session scheduler serializes same-chat turns. Webhook mode
+additionally lets the Agent scale to zero between messages: Cloud Run requests
+start a cold instance, process the turn, and shut down. Long-polling mode
+instead requires one minimum instance with always-allocated CPU to keep the
+poll alive.
+
+Webhook mode requires the Go gateway to know the same
+`TELEGRAM_WEBHOOK_SECRET` used as the Telegram `secret_token`, and Telegram
+must be configured with `setWebhook` pointing at
+`<PUBLIC_ORIGIN>/api/integrations/telegram/webhook` with
+`allowed_updates=["message"]` and `max_connections=1`. The production workflow
+performs that switch after deploying the webhook-capable Agent and the Go
+route; the rollback order is `deleteWebhook`, then switch
+`BUB_TELEGRAM_MODE=polling` with `--min-instances=1` and CPU throttling
+disabled.
 
 `AGENT_SERVICE_URL` and `AGENT_SERVICE_TOKEN` configure the Go gateway. Hosted
 deployments also set `AGENT_SERVICE_AUDIENCE` so Go obtains a Cloud Run OIDC

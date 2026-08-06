@@ -19,6 +19,7 @@ env:
   BUB_MODEL: ${{ vars.BUB_MODEL || 'openai:ledger-agent' }}
   BUB_TELEGRAM_ALLOW_USERS: ${{ vars.BUB_TELEGRAM_ALLOW_USERS }}
   BUB_TELEGRAM_ALLOW_CHATS: ${{ vars.BUB_TELEGRAM_ALLOW_CHATS }}
+  BUB_TELEGRAM_MODE: ${{ vars.BUB_TELEGRAM_MODE || 'polling' }}
   DEEPSEEK_SECRET_NAME: ${{ vars.GCP_DEEPSEEK_SECRET }}
 
 jobs:
@@ -374,7 +375,7 @@ jobs:
             | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN" || $1 == "BUB_TELEGRAM_TOKEN"' \
             | paste -sd, -)"
           agent_image="${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
-          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}"
+          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}|BUB_TELEGRAM_MODE=${BUB_TELEGRAM_MODE}"
           agent_runtime_args=(--cpu-throttling --min-instances=0)
           telegram_secret_mapped=false
           telegram_allow_list_configured=false
@@ -393,7 +394,11 @@ jobs:
             exit 1
           fi
           if [[ "${telegram_secret_mapped}" == "true" ]]; then
-            agent_runtime_args=(--no-cpu-throttling --min-instances=1)
+            if [[ "${BUB_TELEGRAM_MODE}" == "webhook" ]]; then
+              agent_runtime_args=(--cpu-throttling --min-instances=0)
+            else
+              agent_runtime_args=(--no-cpu-throttling --min-instances=1)
+            fi
           fi
           gcloud run deploy "${AGENT_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
@@ -502,6 +507,10 @@ jobs:
               exit 1
             fi
           done
+          if [[ "${BUB_TELEGRAM_MODE}" == "webhook" && ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",TELEGRAM_WEBHOOK_SECRET="* ]]; then
+            echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define TELEGRAM_WEBHOOK_SECRET when Telegram webhook mode is enabled"
+            exit 1
+          fi
 
           if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
             echo "::error::PUBLIC_ORIGIN must use HTTPS"
@@ -683,6 +692,68 @@ jobs:
           fi
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/" >/dev/null
           echo "Cloud Run: ${service_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure Telegram webhook
+        if: ${{ steps.verify-promote.outcome == 'success' && env.BUB_TELEGRAM_MODE == 'webhook' && needs.plan.outputs.cloud_run == 'true' }}
+        env:
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+        run: |
+          bot_mapping="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" | awk -F= '$1 == "BUB_TELEGRAM_TOKEN" { sub(/^[^=]*=/, ""); print; exit }')"
+          webhook_mapping="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" | awk -F= '$1 == "TELEGRAM_WEBHOOK_SECRET" { sub(/^[^=]*=/, ""); print; exit }')"
+          if [[ -z "${bot_mapping}" || -z "${webhook_mapping}" ]]; then
+            echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN and TELEGRAM_WEBHOOK_SECRET for the Telegram webhook"
+            exit 1
+          fi
+          bot_secret="${bot_mapping%%:*}"
+          bot_version="${bot_mapping#*:}"
+          [[ -z "${bot_version}" || "${bot_version}" == "${bot_mapping}" ]] && bot_version="latest"
+          webhook_secret="${webhook_mapping%%:*}"
+          webhook_version="${webhook_mapping#*:}"
+          [[ -z "${webhook_version}" || "${webhook_version}" == "${webhook_mapping}" ]] && webhook_version="latest"
+          bot_token="$(gcloud secrets versions access "${bot_version}" --project="${GCP_PROJECT_ID}" --secret="${bot_secret}")"
+          secret_token="$(gcloud secrets versions access "${webhook_version}" --project="${GCP_PROJECT_ID}" --secret="${webhook_secret}")"
+          if [[ -z "${bot_token}" || -z "${secret_token}" ]]; then
+            echo "::error::failed to read Telegram webhook secrets from Secret Manager"
+            exit 1
+          fi
+          webhook_url="${PUBLIC_ORIGIN}/api/integrations/telegram/webhook"
+          result="$(curl --silent --show-error --fail-with-body --max-time 30 \
+            --data-urlencode "url=${webhook_url}" \
+            --data-urlencode "secret_token=${secret_token}" \
+            --data-urlencode 'allowed_updates=["message"]' \
+            --data-urlencode "max_connections=1" \
+            "https://api.telegram.org/bot${bot_token}/setWebhook")"
+          if [[ "$(jq -r '.ok' <<<"${result}")" != "true" ]]; then
+            echo "::error::Telegram setWebhook failed: ${result}"
+            exit 1
+          fi
+          echo "Telegram webhook: ${webhook_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove stale Telegram webhook
+        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' && env.BUB_TELEGRAM_MODE != 'webhook' }}
+        env:
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+        run: |
+          bot_mapping="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" | awk -F= '$1 == "BUB_TELEGRAM_TOKEN" { sub(/^[^=]*=/, ""); print; exit }')"
+          if [[ -z "${bot_mapping}" ]]; then
+            exit 0
+          fi
+          bot_secret="${bot_mapping%%:*}"
+          bot_version="${bot_mapping#*:}"
+          [[ -z "${bot_version}" || "${bot_version}" == "${bot_mapping}" ]] && bot_version="latest"
+          bot_token="$(gcloud secrets versions access "${bot_version}" --project="${GCP_PROJECT_ID}" --secret="${bot_secret}")"
+          if [[ -z "${bot_token}" ]]; then
+            echo "::error::failed to read the Telegram bot token from Secret Manager"
+            exit 1
+          fi
+          result="$(curl --silent --show-error --fail-with-body --max-time 30 \
+            "https://api.telegram.org/bot${bot_token}/deleteWebhook")"
+          if [[ "$(jq -r '.ok' <<<"${result}")" != "true" ]]; then
+            echo "::error::Telegram deleteWebhook failed: ${result}"
+            exit 1
+          fi
+          echo "Telegram webhook removed for polling mode" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore failed promotion
         if: ${{ always() && steps.freshness.outputs.proceed == 'true' && steps.deploy-candidate.outputs.revision_tag != '' }}

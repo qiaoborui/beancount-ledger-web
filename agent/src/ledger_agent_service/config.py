@@ -17,6 +17,7 @@ class Settings:
     ledger_api_url: str
     service_token: str = ""
     access_token: str = ""
+    telegram_mode: str = "polling"
 
     @classmethod
     def load(cls) -> "Settings":
@@ -29,6 +30,9 @@ class Settings:
         telegram_chats = os.environ.get("BUB_TELEGRAM_ALLOW_CHATS", "").strip()
         if telegram_token and not telegram_users and not telegram_chats:
             raise RuntimeError("BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled")
+        telegram_mode = os.environ.get("BUB_TELEGRAM_MODE", "polling").strip().lower()
+        if telegram_mode not in {"polling", "webhook"}:
+            raise RuntimeError("BUB_TELEGRAM_MODE must be 'polling' or 'webhook'")
         credential = service_token or access_token
         ledger_api_url = _required("LEDGER_API_URL").rstrip("/")
         os.environ.setdefault("BUB_MODEL", "openai:ledger-agent")
@@ -42,6 +46,7 @@ class Settings:
             ledger_api_url=ledger_api_url,
             service_token=service_token,
             access_token=access_token,
+            telegram_mode=telegram_mode,
         )
 
     @property

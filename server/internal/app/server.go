@@ -235,6 +235,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/integrations/gmail/pubsub", s.gmailPubSub)
 	api.GET("/integrations/gmail/drain", s.gmailDrain)
 	api.POST("/integrations/gmail/drain", s.gmailDrain)
+	api.POST("/integrations/telegram/webhook", s.telegramWebhook)
 }
 
 func cacheControl(maxAge int) gin.HandlerFunc {

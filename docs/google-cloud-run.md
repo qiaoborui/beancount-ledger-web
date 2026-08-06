@@ -219,8 +219,8 @@ mounts them only on the zero-traffic candidate, verifies
 `configSource=database`, promotes it, then creates a clean revision without the
 legacy mappings.
 
-Feature-specific secrets include `BUB_TELEGRAM_TOKEN`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
-`WEB_PUSH_VAPID_PRIVATE_KEY`, `GMAIL_CLIENT_SECRET`,
+Feature-specific secrets include `BUB_TELEGRAM_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
+`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, `GMAIL_CLIENT_SECRET`,
 `GMAIL_TOKEN_ENCRYPTION_KEY`, `GMAIL_ZIP_PASSWORDS`, and the transition-only
 `CRON_SECRET`.
 
@@ -252,7 +252,17 @@ AUTH_SECRET=ledger-auth-secret:latest,DATABASE_URL=ledger-database-url:latest,AG
 To enable Telegram, append
 `BUB_TELEGRAM_TOKEN=ledger-telegram-bot-token:latest`. The deployment workflow
 mounts that secret only into the private Bub Agent revision, not the public Go
-service.
+service. Webhook mode additionally appends
+`TELEGRAM_WEBHOOK_SECRET=ledger-telegram-webhook-secret:latest`, which is
+mounted into the public Go service and used as the Telegram `secret_token`.
+Generate the webhook secret with `openssl rand -base64 32`.
+
+The deployment workflow calls `setWebhook` (or `deleteWebhook` when rolling
+back to polling) using the bot token and webhook secret from Secret Manager, so
+the deploy identity must hold `roles/secretmanager.secretAccessor` on
+`ledger-telegram-bot-token` and `ledger-telegram-webhook-secret`. Webhook mode
+is disabled by default (`BUB_TELEGRAM_MODE=polling`), so self-hosted and
+legacy deployments keep the long-polling Agent unchanged.
 
 During the existing-production migration, temporarily keep the old
 `APP_PASSWORD`, `LEDGER_GITHUB_TOKEN`, and AI key mappings in the same secret.
@@ -278,6 +288,7 @@ level so the workflow can evaluate its configuration gate:
 | `BUB_MODEL` | Bub model identifier; defaults to `openai:ledger-agent` and uses the Go model proxy |
 | `BUB_TELEGRAM_ALLOW_USERS` | Optional comma-separated Telegram user IDs allowed to use the bot |
 | `BUB_TELEGRAM_ALLOW_CHATS` | Optional comma-separated Telegram chat IDs allowed to use the bot |
+| `BUB_TELEGRAM_MODE` | `polling` (default) or `webhook`; webhook routes Telegram through the Go API and lets the Agent scale to zero |
 | `GCP_DEEPSEEK_SECRET` | Optional Secret Manager secret containing the DeepSeek API key |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider name returned by `gcloud` |
 | `GCP_BUILD_SERVICE_ACCOUNT` | Artifact Registry-only builder service-account email |
@@ -324,13 +335,56 @@ configuration. It has no ledger or GitHub credential. Its URL and OIDC audience
 are injected into the main service.
 
 When `BUB_TELEGRAM_TOKEN` is mapped, the same single Agent revision also runs
-Bub's Telegram long-polling Channel. The workflow switches that service to one
-minimum instance with always-allocated CPU, and keeps `--max-instances=1`; these
-settings keep polling alive and ensure there is only one active long poller.
-Write confirmation is ordinary multi-turn conversation
-state in the shared tape store, not a paused in-process approval. Without
-Telegram, the Agent remains request-based and may scale to zero. Configure at
-least one user or chat allow list before enabling the bot.
+Bub's Telegram Channel. In `BUB_TELEGRAM_MODE=polling` (the default) the
+workflow switches the Agent to one minimum instance with always-allocated CPU
+and keeps `--max-instances=1`; these settings keep the long poller alive and
+ensure only one instance polls the bot token. In `BUB_TELEGRAM_MODE=webhook`
+the Agent keeps `--cpu-throttling --min-instances=0` so it scales to zero
+between messages; the Go webhook holds the request open for the whole turn,
+which keeps Cloud Run CPU allocated during cold starts. Write confirmation is
+ordinary multi-turn conversation state in the shared tape store, not a paused
+in-process approval. Without Telegram, the Agent remains request-based and may
+scale to zero. Configure at least one user or chat allow list before enabling
+the bot.
+
+## Telegram webhook
+
+Webhook mode deploys in this order inside the same pipeline run:
+
+1. Deploy the webhook-capable Agent revision (`BUB_TELEGRAM_MODE=webhook`,
+   `--min-instances=0`, CPU throttling enabled).
+2. Deploy and promote the Go API revision with the
+   `/api/integrations/telegram/webhook` route and `TELEGRAM_WEBHOOK_SECRET`.
+3. Call Telegram `setWebhook` with URL
+   `${PUBLIC_ORIGIN}/api/integrations/telegram/webhook`, `secret_token`,
+   `allowed_updates=["message"]`, and `max_connections=1`. Pending updates are
+   kept (no `drop_pending_updates`) so nothing is lost during the switch.
+
+The Go webhook verifies `X-Telegram-Bot-Api-Secret-Token` with a constant-time
+compare, limits the body size, parses `update_id`, serializes updates through
+the runtime lock, and forwards the raw update to the Agent. It returns `204`
+only after the Agent turn completes; failures return non-2xx so Telegram
+retries. Completed `update_id` values are remembered (bounded, most recent
+1000) so a duplicate delivery is acknowledged without a second reply.
+
+Verify the switch:
+
+```bash
+curl --silent "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" | jq .
+# result.url must equal ${PUBLIC_ORIGIN}/api/integrations/telegram/webhook
+# result.pending_update_count and result.last_error_message should be empty
+```
+
+Also confirm the Agent Cloud Run service reports `--min-instances=0` with CPU
+throttling enabled, and that its logs no longer contain `getUpdates` polling.
+
+### Rollback
+
+Flip `BUB_TELEGRAM_MODE` back to `polling` (or delete it) and deploy. The
+workflow first deploys the polling Agent with `--min-instances=1` and CPU
+throttling disabled, then calls `deleteWebhook` to stop webhook delivery before
+the long poller becomes the only source. No data migration is involved; the
+rollback is a single variable change plus one normal pipeline run.
 
 The main service keeps request-based 1 vCPU, zero minimum instances, two maximum
 instances, concurrency eight, a 15-minute request timeout, and 512 MiB memory.

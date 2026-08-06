@@ -14,9 +14,26 @@ from .protocol import OnboardingRequest, TurnRequest
 from .runtime import AgentGateway
 
 
+TELEGRAM_UPDATE_MAX_BYTES = 1 << 20
+
+
 def _sse(event: str, payload: dict) -> bytes:
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return f"event: {event}\ndata: {raw}\n\n".encode()
+
+
+async def _read_bounded_body(request: Request, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="Telegram update payload is too large",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -50,6 +67,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield _sse(event, payload)
 
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.post("/v1/channels/telegram/updates", dependencies=[Depends(authorize)])
+    async def telegram_updates(request: Request, agent: AgentGateway = Depends(runtime)) -> Response:
+        raw = await _read_bounded_body(request, TELEGRAM_UPDATE_MAX_BYTES)
+        await agent.telegram_update(raw)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/v1/onboarding/turn", dependencies=[Depends(authorize)])
     async def onboarding(
