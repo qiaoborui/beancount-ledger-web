@@ -20,24 +20,30 @@ The gallery uses the safe sample data in `examples/preview-ledger`.
 
 ### Desktop
 
-![Desktop financial overview](docs/assets/demo/desktop-overview.png)
-
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/demo/desktop-analysis.png" alt="Desktop income and expense analysis" /></td>
-    <td width="50%"><img src="docs/assets/demo/desktop-transactions.png" alt="Desktop transaction ledger" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-overview.png" alt="Desktop financial overview" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-analysis.png" alt="Desktop income and expense analysis" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-transactions.png" alt="Desktop transaction ledger" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-net-worth.png" alt="Desktop net worth report" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-investments.png" alt="Desktop investment analysis" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-accounts.png" alt="Desktop account balances" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-income-statement.png" alt="Desktop income statement" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-query.png" alt="Desktop Beancount query workspace" /></td>
   </tr>
 </table>
 
 ### Mobile
 
-<table>
-  <tr>
-    <td width="33%"><img src="docs/assets/demo/mobile-overview.png" alt="Mobile financial overview" /></td>
-    <td width="33%"><img src="docs/assets/demo/mobile-transactions.png" alt="Mobile transaction ledger" /></td>
-    <td width="33%"><img src="docs/assets/demo/mobile-accounts.png" alt="Mobile account balances" /></td>
-  </tr>
-</table>
+![Mobile overview, transactions, and accounts](docs/assets/demo/showcase-mobile-daily.png)
+
+![Mobile analysis, net worth, and investments](docs/assets/demo/showcase-mobile-insights.png)
 
 ## Self-hosted Compose
 
