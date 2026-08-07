@@ -14,6 +14,31 @@ for browsing, reviewing, and safely updating it.
 - Use password login, passkeys on secure origins, and optional web push
 - Run entirely on your own Docker host, or use the hosted GitHub-backed setup
 
+## Screenshots
+
+The gallery uses the safe sample data in `examples/preview-ledger`.
+
+### Desktop
+
+![Desktop financial overview](docs/assets/demo/desktop-overview.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/desktop-analysis.png" alt="Desktop income and expense analysis" /></td>
+    <td width="50%"><img src="docs/assets/demo/desktop-transactions.png" alt="Desktop transaction ledger" /></td>
+  </tr>
+</table>
+
+### Mobile
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/demo/mobile-overview.png" alt="Mobile financial overview" /></td>
+    <td width="33%"><img src="docs/assets/demo/mobile-transactions.png" alt="Mobile transaction ledger" /></td>
+    <td width="33%"><img src="docs/assets/demo/mobile-accounts.png" alt="Mobile account balances" /></td>
+  </tr>
+</table>
+
 ## Self-hosted Compose
 
 The complete self-hosted stack includes Postgres, API, a private Bub Agent,
