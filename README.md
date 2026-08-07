@@ -14,6 +14,37 @@ for browsing, reviewing, and safely updating it.
 - Use password login, passkeys on secure origins, and optional web push
 - Run entirely on your own Docker host, or use the hosted GitHub-backed setup
 
+## Screenshots
+
+The gallery uses the safe sample data in `examples/preview-ledger`.
+
+### Desktop
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-overview.png" alt="Desktop financial overview" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-analysis.png" alt="Desktop income and expense analysis" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-transactions.png" alt="Desktop transaction ledger" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-net-worth.png" alt="Desktop net worth report" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-investments.png" alt="Desktop investment analysis" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-accounts.png" alt="Desktop account balances" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/demo/showcase-income-statement.png" alt="Desktop income statement" /></td>
+    <td width="50%"><img src="docs/assets/demo/showcase-query.png" alt="Desktop Beancount query workspace" /></td>
+  </tr>
+</table>
+
+### Mobile
+
+![Mobile overview, transactions, and accounts](docs/assets/demo/showcase-mobile-daily.png)
+
+![Mobile analysis, net worth, and investments](docs/assets/demo/showcase-mobile-insights.png)
+
 ## Self-hosted Compose
 
 The complete self-hosted stack includes Postgres, API, a private Bub Agent,
