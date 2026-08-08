@@ -14,6 +14,7 @@ class PageContext(BaseModel):
     end: str = ""
     valuation_currency: str = Field("", alias="valuationCurrency")
     bql_query: str = Field("", alias="bqlQuery")
+    sensitive_unlocked: bool = Field(False, alias="sensitiveUnlocked")
 
 
 class TurnRequest(BaseModel):
@@ -22,8 +23,8 @@ class TurnRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
     message: str
     context: PageContext = Field(default_factory=PageContext)
-    capability_token: str = Field(alias="capabilityToken")
     system_prompt: str = Field(alias="systemPrompt")
+    mcp_system_prompt: str = Field("", alias="mcpSystemPrompt")
 
     @field_validator("session_id")
     @classmethod
@@ -60,27 +61,3 @@ class ToolSpec(BaseModel):
     parameters: dict[str, Any]
     title: str
     execution_status: str = Field("", alias="executionStatus")
-    read_only: bool = Field(alias="readOnly")
-
-
-class CapabilityResult(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    model_output: Any = Field(None, alias="modelOutput")
-    client_output: Any = Field(None, alias="clientOutput")
-    artifacts: list[dict[str, Any]] = Field(default_factory=list)
-    refresh_ledger: bool = Field(False, alias="refreshLedger")
-
-    @field_validator("artifacts", mode="before")
-    @classmethod
-    def normalize_artifacts(cls, value: Any) -> Any:
-        return [] if value is None else value
-
-
-class AgentBootstrap(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    capability_token: str = Field(alias="capabilityToken")
-    system_prompt: str = Field(alias="systemPrompt")
-    tools: list[ToolSpec] = Field(default_factory=list)
-    expires_at: str = Field("", alias="expiresAt")

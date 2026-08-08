@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -23,6 +24,8 @@ const (
 	agentAccessTokenPrefix   = "blw_agent_"
 	agentAccessTokenIDBytes  = 9
 	agentAccessTokenKeyBytes = 32
+	agentAccessScopeRead     = "read"
+	agentAccessScopeWrite    = "write"
 )
 
 type agentAccessTokenRecord struct {
@@ -33,6 +36,7 @@ type agentAccessTokenRecord struct {
 	ExpiresAt  time.Time  `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	Scopes     []string   `json:"scopes,omitempty"`
 }
 
 type agentAccessTokenStore struct {
@@ -46,6 +50,8 @@ type agentAccessTokenSummary struct {
 	ExpiresAt  time.Time  `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	Scopes     []string   `json:"scopes"`
+	Legacy     bool       `json:"legacy,omitempty"`
 }
 
 func (s *Server) agentAccessTokens(c *gin.Context) {
@@ -70,7 +76,8 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Name string `json:"name"`
+		Name   string   `json:"name"`
+		Scopes []string `json:"scopes"`
 	}
 	if !bindJSON(c, &input) {
 		return
@@ -78,6 +85,11 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" || utf8.RuneCountInString(name) > 64 {
 		errorJSON(c, http.StatusBadRequest, errors.New("令牌名称长度必须为 1 到 64 个字符"))
+		return
+	}
+	scopes, err := normalizeAgentAccessScopes(input.Scopes)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	id, secret, rawToken, err := newAgentAccessToken()
@@ -88,7 +100,7 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 	now := time.Now().UTC()
 	record := agentAccessTokenRecord{
 		ID: id, Name: name, SecretHash: agentAccessSecretHash(secret),
-		CreatedAt: now, ExpiresAt: now.Add(agentAccessTokenLifetime),
+		CreatedAt: now, ExpiresAt: now.Add(agentAccessTokenLifetime), Scopes: scopes,
 	}
 	err = s.runtime().WithLock(c.Request.Context(), "agent-access-tokens", func(lockCtx context.Context) error {
 		store, readErr := s.readAgentAccessTokens(lockCtx)
@@ -141,129 +153,6 @@ func (s *Server) revokeAgentAccessToken(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (s *Server) externalAgentBootstrap(c *gin.Context) {
-	if !s.limiter.Check(c, "agent.bootstrap", 60, 5*time.Minute) {
-		return
-	}
-	record, ok := s.authenticateAgentAccessToken(c)
-	if !ok {
-		return
-	}
-	var input struct {
-		SessionID string           `json:"sessionId"`
-		Channel   string           `json:"channel"`
-		Context   AgentPageContext `json:"context"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	channel := strings.TrimSpace(input.Channel)
-	if channel == "" {
-		channel = "external"
-	}
-	rawSessionID := strings.TrimSpace(input.SessionID)
-	if rawSessionID == "" {
-		rawSessionID = channel + ":default"
-	}
-	sessionID := agentCapabilitySessionID("token:"+record.ID, rawSessionID)
-	input.Context.SensitiveUnlocked = true
-	s.writeAgentBootstrap(c, sessionID, "token:"+record.ID, input.Context, s.agentToolNames(false), false)
-}
-
-func (s *Server) internalAgentBootstrap(c *gin.Context) {
-	if !s.requireAgentService(c) {
-		return
-	}
-	var input struct {
-		SessionID string           `json:"sessionId"`
-		Channel   string           `json:"channel"`
-		Context   AgentPageContext `json:"context"`
-	}
-	if !bindJSON(c, &input) {
-		return
-	}
-	channel := strings.TrimSpace(input.Channel)
-	if channel == "" {
-		channel = "gateway"
-	}
-	rawSessionID := strings.TrimSpace(input.SessionID)
-	if rawSessionID == "" {
-		rawSessionID = channel + ":default"
-	}
-	subject := "channel:" + channel
-	input.Context.SensitiveUnlocked = true
-	allowedTools := s.agentToolNames(false)
-	telegram := channel == "telegram"
-	if telegram {
-		allowedTools = agentTelegramToolNames(allowedTools)
-	}
-	s.writeAgentBootstrap(
-		c,
-		agentCapabilitySessionID(subject, rawSessionID),
-		subject,
-		input.Context,
-		allowedTools,
-		telegram,
-	)
-}
-
-func (s *Server) writeAgentBootstrap(
-	c *gin.Context,
-	sessionID string,
-	subject string,
-	page AgentPageContext,
-	allowedTools []string,
-	telegram bool,
-) {
-	memories, err := s.listAgentMemories(c.Request.Context())
-	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return
-	}
-	systemPrompt := agentSystemPrompt(page, memories)
-	if telegram {
-		systemPrompt = agentTelegramSystemPrompt(page, memories)
-	}
-	expiresAt := time.Now().Add(agentCapabilityLifetime)
-	capabilityToken, err := s.mintAgentCapabilityToken(agentCapabilityClaims{
-		SessionID: sessionID, ClusterID: ledgerClusterID(s.cfg), Context: page,
-		SensitiveUnlocked: true, AllowedTools: allowedTools, Subject: subject,
-		ExpiresAt: expiresAt.Unix(),
-	})
-	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return
-	}
-	tools := s.agentTools()
-	result := make([]map[string]any, 0, len(allowedTools))
-	for _, name := range allowedTools {
-		tool := tools[name]
-		result = append(result, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-			"title": tool.Title, "executionStatus": tool.ExecutionStatus,
-			"readOnly": tool.ReadOnly,
-		})
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"capabilityToken": capabilityToken,
-		"systemPrompt":    systemPrompt,
-		"tools":           result,
-		"expiresAt":       expiresAt.UTC().Format(time.RFC3339),
-	})
-}
-
-// agentTelegramToolNames removes web-only tools that are meaningless for the
-// Telegram channel, such as frontend page navigation.
-func agentTelegramToolNames(allowed []string) []string {
-	filtered := make([]string, 0, len(allowed))
-	for _, name := range allowed {
-		if name != "open_page" {
-			filtered = append(filtered, name)
-		}
-	}
-	return filtered
-}
-
 func (s *Server) externalAgentModelProxy(c *gin.Context) {
 	if !s.limiter.Check(c, "agent.model", 120, 5*time.Minute) {
 		return
@@ -275,14 +164,40 @@ func (s *Server) externalAgentModelProxy(c *gin.Context) {
 }
 
 func (s *Server) authenticateAgentAccessToken(c *gin.Context) (agentAccessTokenRecord, bool) {
-	raw := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
-	id, secret, ok := parseAgentAccessToken(raw)
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Agent access token"})
+	raw, bearerErr := bearerToken(c.GetHeader("Authorization"))
+	if bearerErr != nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errInvalidAgentAccessToken.Error()})
 		return agentAccessTokenRecord{}, false
 	}
+	authenticated, err := s.authenticateAgentAccessTokenValue(c.Request.Context(), raw)
+	if err != nil {
+		status := http.StatusUnauthorized
+		if !errors.Is(err, errInvalidAgentAccessToken) {
+			status = http.StatusInternalServerError
+		}
+		c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+		return agentAccessTokenRecord{}, false
+	}
+	return authenticated, true
+}
+
+func bearerToken(header string) (string, error) {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || fields[1] == "" {
+		return "", errors.New("invalid bearer authorization")
+	}
+	return fields[1], nil
+}
+
+var errInvalidAgentAccessToken = errors.New("invalid or expired Agent access token")
+
+func (s *Server) authenticateAgentAccessTokenValue(ctx context.Context, raw string) (agentAccessTokenRecord, error) {
+	id, secret, ok := parseAgentAccessToken(raw)
+	if !ok {
+		return agentAccessTokenRecord{}, errInvalidAgentAccessToken
+	}
 	var authenticated agentAccessTokenRecord
-	err := s.runtime().WithLock(c.Request.Context(), "agent-access-tokens", func(lockCtx context.Context) error {
+	err := s.runtime().WithLock(ctx, "agent-access-tokens", func(lockCtx context.Context) error {
 		store, readErr := s.readAgentAccessTokens(lockCtx)
 		if readErr != nil {
 			return readErr
@@ -309,41 +224,12 @@ func (s *Server) authenticateAgentAccessToken(c *gin.Context) (agentAccessTokenR
 		return nil
 	})
 	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return agentAccessTokenRecord{}, false
+		return agentAccessTokenRecord{}, err
 	}
 	if authenticated.ID == "" {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired Agent access token"})
-		return agentAccessTokenRecord{}, false
+		return agentAccessTokenRecord{}, errInvalidAgentAccessToken
 	}
-	return authenticated, true
-}
-
-func (s *Server) agentCapabilitySubjectActive(ctx context.Context, subject string) (bool, error) {
-	const tokenSubjectPrefix = "token:"
-	if !strings.HasPrefix(subject, tokenSubjectPrefix) {
-		return true, nil
-	}
-	id := strings.TrimSpace(strings.TrimPrefix(subject, tokenSubjectPrefix))
-	if id == "" {
-		return false, nil
-	}
-	active := false
-	err := s.runtime().WithLock(ctx, "agent-access-tokens", func(lockCtx context.Context) error {
-		store, readErr := s.readAgentAccessTokens(lockCtx)
-		if readErr != nil {
-			return readErr
-		}
-		now := time.Now().UTC()
-		for _, record := range store.Tokens {
-			if record.ID == id && record.RevokedAt == nil && record.ExpiresAt.After(now) {
-				active = true
-				break
-			}
-		}
-		return nil
-	})
-	return active, err
+	return authenticated, nil
 }
 
 func (s *Server) readAgentAccessTokens(ctx context.Context) (agentAccessTokenStore, error) {
@@ -360,10 +246,52 @@ func (s *Server) writeAgentAccessTokens(ctx context.Context, store agentAccessTo
 }
 
 func summarizeAgentAccessToken(record agentAccessTokenRecord) agentAccessTokenSummary {
+	scopes, legacy := agentAccessScopes(record)
 	return agentAccessTokenSummary{
 		ID: record.ID, Name: record.Name, CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt,
-		LastUsedAt: record.LastUsedAt, RevokedAt: record.RevokedAt,
+		LastUsedAt: record.LastUsedAt, RevokedAt: record.RevokedAt, Scopes: scopes, Legacy: legacy,
 	}
+}
+
+func normalizeAgentAccessScopes(scopes []string) ([]string, error) {
+	if len(scopes) == 0 {
+		return []string{agentAccessScopeRead}, nil
+	}
+	seen := map[string]bool{}
+	for _, scope := range scopes {
+		scope = strings.TrimSpace(scope)
+		if scope != agentAccessScopeRead && scope != agentAccessScopeWrite {
+			return nil, fmt.Errorf("unsupported Agent access scope: %s", scope)
+		}
+		seen[scope] = true
+	}
+	seen[agentAccessScopeRead] = true
+	result := []string{agentAccessScopeRead}
+	if seen[agentAccessScopeWrite] {
+		result = append(result, agentAccessScopeWrite)
+	}
+	return result, nil
+}
+
+func agentAccessScopes(record agentAccessTokenRecord) ([]string, bool) {
+	if len(record.Scopes) == 0 {
+		return []string{agentAccessScopeRead, agentAccessScopeWrite}, true
+	}
+	scopes, err := normalizeAgentAccessScopes(record.Scopes)
+	if err != nil {
+		return []string{agentAccessScopeRead}, false
+	}
+	return scopes, false
+}
+
+func agentAccessTokenCanWrite(record agentAccessTokenRecord) bool {
+	scopes, _ := agentAccessScopes(record)
+	for _, scope := range scopes {
+		if scope == agentAccessScopeWrite {
+			return true
+		}
+	}
+	return false
 }
 
 func newAgentAccessToken() (string, string, string, error) {
@@ -398,11 +326,6 @@ func parseAgentAccessToken(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return id, secret, true
-}
-
-func agentCapabilitySessionID(subject, rawSessionID string) string {
-	sum := sha256.Sum256([]byte(subject + "\x00" + rawSessionID))
-	return "session_" + base64.RawURLEncoding.EncodeToString(sum[:18])
 }
 
 func agentAccessSecretHash(secret string) string {

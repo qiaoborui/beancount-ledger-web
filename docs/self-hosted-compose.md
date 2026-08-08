@@ -92,7 +92,7 @@ dirty worktree rather than overwriting local edits.
 | --- | --- | --- |
 | `database` | Postgres read model and runtime state | `postgres_data` volume |
 | `server` | API; GitHub API reads/writes, preview validation, commits | Postgres runtime state only |
-| `agent` | Private Bub runtime and PostgreSQL conversation tapes; calls only Go capabilities | Postgres only; no ledger mount |
+| `agent` | Private Bub runtime and PostgreSQL conversation tapes; calls the Go MCP and model proxy | Postgres only; no ledger mount |
 | `indexer` | Clones/fetches the ledger, validates and atomically publishes the read model every 60 seconds | dedicated local Git checkout + Postgres |
 | `frontend` | Static React application | container image |
 | `caddy` | Same-origin browser entrypoint; does not expose the Agent service | Caddy volumes |
@@ -110,8 +110,8 @@ transaction, preview, and commit-conflict protection; the API never edits a
 local checkout.
 
 The browser connects to Bub through Go's Web Channel gateway. Telegram connects
-directly to Bub's native Channel but still obtains ledger tools and model access
-through the internal Go API. For a laptop or workstation, create a revocable
+directly to Bub's native Channel; both use the same stateless MCP ledger tools
+and Go model proxy. For a laptop or workstation, create a revocable
 Agent Token in Settings -> 本地 Agent 访问 and follow
 `docs/agent-runtime.md`; no Postgres or GitHub credential is copied locally.
 

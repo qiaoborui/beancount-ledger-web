@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+import secrets
+import threading
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from weakref import WeakKeyDictionary
@@ -24,17 +27,36 @@ from bub.hooks.interception import LlmCallDecision, LlmCallRequest, ToolCall, To
 from bub.streaming import AsyncStreamEvents, StreamState
 from bub.tape import AsyncTapeStoreAdapter, TapeContext, TapeEntry, TapeQuery
 from bub.tools import REGISTRY, Tool, ToolContext
-from .capabilities import LedgerCapabilities
 from .config import Settings
+from .mcp_config import RuntimeMCPConfig
 from .onboarding import default_draft, is_ready, normalize_draft, onboarding_tools, prompt as onboarding_prompt
 from .protocol import OnboardingRequest, ToolSpec, TurnRequest
 from .web_channel import LedgerWebChannel, WebTurn
 
 _PLUGINS: WeakKeyDictionary[BubFramework, LedgerPlugin] = WeakKeyDictionary()
 _GATEWAY_SETTINGS: WeakKeyDictionary[BubFramework, Settings] = WeakKeyDictionary()
+_GATEWAY_OWNER_LOCK = threading.Lock()
+_ACTIVE_GATEWAY: object | None = None
 TELEGRAM_SEND_TOOL = "telegram_send"
 TELEGRAM_SEND_RICH_TOOL = "telegram_send_rich"
 TELEGRAM_TOOL_NAMES = {TELEGRAM_SEND_TOOL, TELEGRAM_SEND_RICH_TOOL}
+LEDGER_MCP_TOOL_PREFIX = "mcp.ledger_"
+LEDGER_MCP_CONTEXT_TOOL = "mcp.ledger_agent_context"
+OPEN_PAGE_TOOL = "open_page"
+LEDGER_MCP_READY_TIMEOUT_SECONDS = 20.0
+
+
+def _decode_mcp_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"ledger MCP returned invalid JSON: {result}") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("ledger MCP returned an unexpected result")
+    if result.get("kind") == "error":
+        raise RuntimeError(str(result.get("message") or "ledger MCP tool failed"))
+    return result
 
 
 class LedgerTelegramChannel:
@@ -195,30 +217,40 @@ class LedgerTelegramChannel:
 
 
 class GatewayReadiness(Lifecycle):
-    """Marks the manager ready only after all preceding channels started successfully."""
+    """Marks the manager ready after the asynchronously bootstrapped MCP server is usable."""
 
     name = "ledger-gateway-readiness"
 
-    def __init__(self, ready: asyncio.Event) -> None:
+    def __init__(self, ready: asyncio.Event, ensure_tools: Any) -> None:
         self.ready = ready
+        self.ensure_tools = ensure_tools
+        self.task: asyncio.Task[None] | None = None
 
     async def start(self, stop_event: asyncio.Event) -> None:
-        del stop_event
-        self.ready.set()
+        async def wait_until_ready() -> None:
+            try:
+                await self.ensure_tools(stop_event=stop_event)
+                self.ready.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("ledger MCP startup failed: {}", exc)
+                stop_event.set()
+
+        self.task = asyncio.create_task(wait_until_ready(), name="ledger.mcp-readiness")
 
     async def stop(self) -> None:
         self.ready.clear()
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        self.task = None
 
 
 class LedgerPlugin:
     def __init__(self, framework: BubFramework) -> None:
         self.framework = framework
         self.settings = _GATEWAY_SETTINGS.get(framework) or Settings.load()
-        self.capabilities = LedgerCapabilities(
-            self.settings.ledger_api_url,
-            service_token=self.settings.service_token,
-            access_token=self.settings.access_token,
-        )
         self.ready = asyncio.Event()
         self.agent = Agent(framework)
         self.tool_specs: dict[str, ToolSpec] = {}
@@ -228,6 +260,7 @@ class LedgerPlugin:
         self.web_channel: LedgerWebChannel | None = None
         self.telegram_channel: Any | None = None
         self._register_onboarding_tools()
+        self._register_open_page_tool()
         self._register_telegram_tools()
         _PLUGINS[framework] = self
 
@@ -245,7 +278,7 @@ class LedgerPlugin:
         )
         self.web_channel = web
         self.telegram_channel = telegram
-        return [web, telegram, GatewayReadiness(self.ready)]
+        return [web, telegram, GatewayReadiness(self.ready, self.ensure_ledger_tools)]
 
     async def _telegram_webhook_processor(self, message: ChannelMessage) -> None:
         if self.framework is None:
@@ -305,24 +338,22 @@ class LedgerPlugin:
             })
         elif message.channel == "web":
             await self.ensure_ledger_tools()
+            page = message.context.get("page")
+            sensitive_unlocked = bool(page.get("sensitiveUnlocked")) if isinstance(page, dict) else False
+            allowed_tools = [OPEN_PAGE_TOOL]
+            if sensitive_unlocked:
+                allowed_tools.extend(sorted(name for name in self.tool_specs if name != OPEN_PAGE_TOOL))
             state.update({
-                "capability_token": str(message.context.get("_ledger_capability_token") or ""),
-                "system_prompt": str(message.context.get("_ledger_system_prompt") or ""),
-                "allowed_tools": list(self.tool_specs),
+                "system_prompt": self._bub_mcp_prompt(str(message.context.get("_ledger_system_prompt") or "")),
+                "allowed_tools": allowed_tools,
                 "allowed_skills": [],
             })
         else:
-            bootstrap = await self.capabilities.bootstrap(
-                session_id=session_id,
-                channel=message.channel,
-                context={key: value for key, value in message.context.items() if not key.startswith("_")},
-            )
-            await self.ensure_ledger_tools(bootstrap.tools)
+            await self.ensure_ledger_tools()
             state.update({
-                "capability_token": bootstrap.capability_token,
-                "system_prompt": bootstrap.system_prompt,
+                "system_prompt": await self._mcp_agent_context(message.channel, message.context),
                 "allowed_tools": [
-                    *[spec.name for spec in bootstrap.tools],
+                    *sorted(name for name in self.tool_specs if name != OPEN_PAGE_TOOL),
                     *(sorted(TELEGRAM_TOOL_NAMES) if message.channel == "telegram" else []),
                 ],
                 "allowed_skills": ["telegram-ledger-agent", "telegram"] if message.channel == "telegram" else [],
@@ -477,42 +508,113 @@ class LedgerPlugin:
             return AdmitDecision("follow_up", "serialize messages for the same ledger session")
         return None
 
-    async def ensure_ledger_tools(self, specs: list[ToolSpec] | None = None) -> None:
-        if specs is None and self.complete_tool_catalog_loaded:
+    async def ensure_ledger_tools(self, *, stop_event: asyncio.Event | None = None) -> None:
+        if self.complete_tool_catalog_loaded:
             return
         async with self.tools_lock:
-            if specs is None:
-                if self.complete_tool_catalog_loaded:
-                    return
-                resolved = await self.capabilities.specs()
-            else:
-                resolved = specs
-            for spec in resolved:
-                self.tool_specs[spec.name] = spec
-                REGISTRY[spec.name] = Tool(
-                    name=spec.name,
-                    description=spec.description,
-                    parameters=spec.parameters,
-                    context=True,
-                    handler=self._ledger_tool_handler(spec.name),
+            if self.complete_tool_catalog_loaded:
+                return
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + LEDGER_MCP_READY_TIMEOUT_SECONDS
+            while LEDGER_MCP_CONTEXT_TOOL not in REGISTRY:
+                if stop_event is not None and stop_event.is_set():
+                    raise RuntimeError("bub-mcp stopped before the ledger server connected")
+                if loop.time() >= deadline:
+                    raise RuntimeError("timed out waiting for bub-mcp to connect the ledger server")
+                await asyncio.sleep(0.05)
+            for name, tool in list(REGISTRY.items()):
+                if not name.startswith(LEDGER_MCP_TOOL_PREFIX) or name == LEDGER_MCP_CONTEXT_TOOL:
+                    continue
+                self.tool_specs[name] = ToolSpec(
+                    name=name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                    title=name,
                 )
-            if specs is None:
-                self.complete_tool_catalog_loaded = True
+            if not any(name.startswith(LEDGER_MCP_TOOL_PREFIX) for name in self.tool_specs):
+                raise RuntimeError("bub-mcp connected without exposing ledger tools")
+            self.complete_tool_catalog_loaded = True
 
-    def _ledger_tool_handler(self, name: str) -> Callable[..., Awaitable[dict[str, Any]]]:
-        async def execute(*, context: ToolContext, **arguments: Any) -> dict[str, Any]:
-            result = await self.capabilities.execute(
-                name,
-                arguments,
-                str(context.state["capability_token"]),
-            )
-            return result.model_dump(by_alias=True)
+    async def _mcp_agent_context(self, channel: str, context: dict[str, Any]) -> str:
+        tool = REGISTRY.get(LEDGER_MCP_CONTEXT_TOOL)
+        if tool is None:
+            raise RuntimeError("ledger MCP context tool is unavailable")
+        page = context.get("page") if isinstance(context.get("page"), dict) else context
+        payload = {
+            "channel": channel if channel in {"web", "telegram", "cli", "external"} else "external",
+            "page": str(page.get("page") or ""),
+            "path": str(page.get("path") or ""),
+            "start": str(page.get("start") or ""),
+            "end": str(page.get("end") or ""),
+            "valuationCurrency": str(page.get("valuationCurrency") or ""),
+            "bqlQuery": str(page.get("bqlQuery") or ""),
+        }
+        result = tool.run(**payload)
+        if inspect.isawaitable(result):
+            result = await result
+        envelope = _decode_mcp_result(result)
+        model_output = envelope.get("modelOutput")
+        prompt = model_output.get("systemPrompt") if isinstance(model_output, dict) else None
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise RuntimeError("ledger MCP context tool returned no system prompt")
+        return self._bub_mcp_prompt(prompt)
 
-        return execute
+    def _bub_mcp_prompt(self, prompt: str) -> str:
+        names = sorted(
+            (name for name in self.tool_specs if name.startswith(LEDGER_MCP_TOOL_PREFIX)),
+            key=len,
+            reverse=True,
+        )
+        for name in names:
+            prompt = prompt.replace(name.removeprefix("mcp."), name)
+        return prompt
 
     def _register_onboarding_tools(self) -> None:
         for name, tool in onboarding_tools().items():
             REGISTRY[name] = tool
+
+    def _register_open_page_tool(self) -> None:
+        parameters = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "enum": [
+                        "/", "/dashboard", "/query", "/transactions", "/accounts", "/net-worth",
+                        "/income-statement", "/investments", "/imports", "/reconcile", "/editor", "/settings",
+                    ],
+                },
+                "label": {"type": "string", "description": "导航说明"},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        }
+        self.tool_specs[OPEN_PAGE_TOOL] = ToolSpec(
+            name=OPEN_PAGE_TOOL,
+            description="请求前端导航到指定账本页面。",
+            parameters=parameters,
+            title="打开页面",
+        )
+        REGISTRY[OPEN_PAGE_TOOL] = Tool(
+            name=OPEN_PAGE_TOOL,
+            description="请求前端导航到指定账本页面。",
+            parameters=parameters,
+            handler=self._open_page_handler,
+        )
+
+    async def _open_page_handler(self, path: str, label: str = "") -> dict[str, Any]:
+        artifact = {
+            "id": f"artifact-{secrets.token_hex(12)}",
+            "type": "navigation",
+            "title": label.strip() or "打开页面",
+            "data": {"path": path},
+        }
+        return {
+            "modelOutput": {"path": path},
+            "clientOutput": {"path": path},
+            "artifacts": [artifact],
+            "refreshLedger": False,
+        }
 
     def _register_telegram_tools(self) -> None:
         REGISTRY[TELEGRAM_SEND_TOOL] = Tool(
@@ -677,7 +779,7 @@ class LedgerPlugin:
         )
 
     async def close(self) -> None:
-        await self.capabilities.close()
+        self.ready.clear()
 
     def _store(self) -> AsyncTapeStoreAdapter:
         if self.async_store is None:
@@ -695,47 +797,110 @@ class AgentGateway:
         self.plugin: LedgerPlugin | None = None
         self.manager: ChannelManager | None = None
         self.task: asyncio.Task | None = None
+        self.mcp_config = RuntimeMCPConfig(settings.ledger_api_url, settings.service_token or settings.access_token)
+        self._claimed_runtime = False
+        self._registry_snapshot: dict[str, Tool] = {}
+        self._tapestore_env_previous: str | None = None
+        self._tapestore_env_set: str | None = None
 
     async def __aenter__(self) -> AgentGateway:
+        self._claim_runtime()
+        self._snapshot_registry()
         if self.settings.database_url:
-            os.environ["BUB_TAPESTORE_SQLALCHEMY_URL"] = _sqlalchemy_url(self.settings.database_url)
-        framework = BubFramework(config_file=Path("/nonexistent/ledger-agent-bub.yml"))
-        _GATEWAY_SETTINGS[framework] = self.settings
-        framework.load_hooks()
-        plugin = plugin_for(framework)
-        manager = ChannelManager(
-            framework,
-            enabled_channels=["web", "telegram"],
-            stream_output=True,
-        )
-        self.framework, self.plugin, self.manager = framework, plugin, manager
-        self.task = asyncio.create_task(manager.listen_and_run())
-        ready_task = asyncio.create_task(plugin.ready.wait())
+            self._tapestore_env_previous = os.environ.get("BUB_TAPESTORE_SQLALCHEMY_URL")
+            self._tapestore_env_set = _sqlalchemy_url(self.settings.database_url)
+            os.environ["BUB_TAPESTORE_SQLALCHEMY_URL"] = self._tapestore_env_set
+        ready_task: asyncio.Task[bool] | None = None
         try:
+            self.mcp_config.activate()
+            for name in [name for name in REGISTRY if name.startswith(LEDGER_MCP_TOOL_PREFIX)]:
+                REGISTRY.pop(name, None)
+            framework = BubFramework(config_file=Path("/nonexistent/ledger-agent-bub.yml"))
+            self.framework = framework
+            _GATEWAY_SETTINGS[framework] = self.settings
+            framework.load_hooks()
+            plugin = plugin_for(framework)
+            manager = ChannelManager(
+                framework,
+                enabled_channels=["web", "telegram"],
+                stream_output=True,
+            )
+            self.plugin, self.manager = plugin, manager
+            self.task = asyncio.create_task(manager.listen_and_run())
+            ready_task = asyncio.create_task(plugin.ready.wait())
             done, _ = await asyncio.wait({self.task, ready_task}, timeout=30, return_when=asyncio.FIRST_COMPLETED)
             if self.task in done:
                 await self.task
             if ready_task not in done or framework.get_tape_store() is None:
                 raise RuntimeError("Bub ChannelManager did not become ready")
+            plugin.bind_store()
         except BaseException:
-            ready_task.cancel()
-            if not self.task.done():
+            if ready_task is not None:
+                ready_task.cancel()
+            if self.task is not None and not self.task.done():
                 self.task.cancel()
-            await asyncio.gather(ready_task, self.task, return_exceptions=True)
-            await plugin.close()
+            await asyncio.gather(
+                *(task for task in (ready_task, self.task) if task is not None),
+                return_exceptions=True,
+            )
+            if self.plugin is not None:
+                await self.plugin.close()
+            self.mcp_config.close()
+            self._cleanup_global_state()
             raise
-        plugin.bind_store()
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
-        if self.task is not None:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-        if self.plugin is not None:
-            await self.plugin.close()
+        try:
+            if self.task is not None:
+                self.task.cancel()
+                await asyncio.gather(self.task, return_exceptions=True)
+            if self.plugin is not None:
+                await self.plugin.close()
+        finally:
+            self.mcp_config.close()
+            self._cleanup_global_state()
+
+    def _claim_runtime(self) -> None:
+        global _ACTIVE_GATEWAY
+        with _GATEWAY_OWNER_LOCK:
+            if _ACTIVE_GATEWAY is not None:
+                raise RuntimeError("another AgentGateway is already active in this process")
+            _ACTIVE_GATEWAY = self
+            self._claimed_runtime = True
+
+    def _snapshot_registry(self) -> None:
+        names = {
+            name for name in REGISTRY
+            if name.startswith(LEDGER_MCP_TOOL_PREFIX) or name in {OPEN_PAGE_TOOL, *TELEGRAM_TOOL_NAMES}
+        }
+        self._registry_snapshot = {name: REGISTRY[name] for name in names}
+
+    def _cleanup_global_state(self) -> None:
+        global _ACTIVE_GATEWAY
+        if self.framework is not None:
+            _GATEWAY_SETTINGS.pop(self.framework, None)
+            _PLUGINS.pop(self.framework, None)
+        for name in list(REGISTRY):
+            if name.startswith(LEDGER_MCP_TOOL_PREFIX) or name in {OPEN_PAGE_TOOL, *TELEGRAM_TOOL_NAMES}:
+                REGISTRY.pop(name, None)
+        REGISTRY.update(self._registry_snapshot)
+        self._registry_snapshot = {}
+        if (
+            self._tapestore_env_set is not None
+            and os.environ.get("BUB_TAPESTORE_SQLALCHEMY_URL") == self._tapestore_env_set
+        ):
+            if self._tapestore_env_previous is None:
+                os.environ.pop("BUB_TAPESTORE_SQLALCHEMY_URL", None)
+            else:
+                os.environ["BUB_TAPESTORE_SQLALCHEMY_URL"] = self._tapestore_env_previous
+        self._tapestore_env_previous = None
+        self._tapestore_env_set = None
+        if self._claimed_runtime:
+            with _GATEWAY_OWNER_LOCK:
+                if _ACTIVE_GATEWAY is self:
+                    _ACTIVE_GATEWAY = None
+            self._claimed_runtime = False
 
     @property
     def web(self) -> LedgerWebChannel:

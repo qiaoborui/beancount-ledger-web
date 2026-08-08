@@ -1,35 +1,35 @@
 # Bub Agent runtime
 
 The conversational Agent runs as a separate Python gateway built on
-`bubbuild/bub` 0.4.1. The service does not contain a second Agent loop: it loads
-the repository's Bub plugin and lets Bub's `ChannelManager` own session queues,
-streaming, model turns, tools, skills, Telegram, and tape persistence. Go and
-the React client depend only on the Channel HTTP/SSE boundary, so another Agent
-can replace Bub without moving ledger parsing or write safety out of Go.
+`bubbuild/bub` 0.4.2. It uses the unmodified `bub-mcp` 0.0.1 plugin for ledger
+tool discovery and execution. The repository plugin still owns product Channel
+integration and policy, while Bub's `ChannelManager` owns session queues,
+streaming, model turns, skills, Telegram, and tape persistence.
 
 ```text
 Browser -> Go API -> Bub Web Channel -> Bub model client -> Go model proxy
                     |                 |
                     |                 +-> bub-tapestore-sqlalchemy -> Postgres
-                    +-> signed capability -> Go ledger tools
+                    +-> bub-mcp -> POST /mcp -> Go ledger tools
 
 Telegram webhook -> Go API -> Bub Telegram Channel (webhook mode)
 Telegram ---------> Bub Telegram Channel (polling mode)
-Local bub chat ---> Bub CLI Channel -> remote capability
+Any MCP client ---------------------> POST /mcp
+Local bub chat ---> Bub CLI Channel -> bub-mcp -> POST /mcp
 ```
 
 The Agent service never receives a ledger checkout, GitHub token, provider API
-key, or Beancount writer. It receives short-lived, ledger-bound capability
-tokens and can call only the tool catalog exposed by Go. Model provider
-credentials remain in the Go runtime configuration; Bub uses the private model
-proxy.
+key, or Beancount writer. At startup it generates a private temporary
+`mcp.json` from `LEDGER_API_URL` and `AGENT_SERVICE_TOKEN`; the file is removed
+at shutdown. Model provider credentials remain in the Go runtime configuration;
+Bub uses the private model proxy.
 
 Conversation tapes and projected UI timelines use the existing
 `bub-tapestore-sqlalchemy` plugin. The dependency is pinned in `agent/uv.lock`;
 there is no repository-owned TapeStore implementation. Deploy the Agent as one
 instance because same-session turns are serialized in-process.
 
-Write tools use the same capability and execution path as read tools. Safety is
+Write tools use the same MCP and Go execution path as read tools. Safety is
 enforced as a conversational protocol plus the existing Go write boundary:
 
 1. The model may use read, draft, and validation tools to prepare the exact
@@ -42,8 +42,37 @@ enforced as a conversational protocol plus the existing Go write boundary:
 5. Go validates the schema and source revision, performs the write, runs
    `bean-check`, commits, and rolls back on failure.
 
-The public API does not contain a legacy Go Agent loop or runtime fallback.
-Rollback is performed by deploying an earlier Git revision.
+The current Agent does not use the former bootstrap/capability wrapper. The Go
+API temporarily retains those endpoints as a deprecated rolling-deployment
+bridge so an older Agent revision can keep working while the Server is promoted
+before the new MCP-based Agent. New integrations must use `/mcp`; the bridge can
+be removed after every deployed Agent has crossed this migration. Runtime
+rollback is still performed by deploying an earlier Git revision.
+
+## Stateless MCP service
+
+The Go server exposes `POST /mcp` using Streamable HTTP in stateless JSON mode.
+It supports the MCP `2026-07-28` discovery flow and legacy `initialize` clients.
+Every request authenticates independently with one of these Bearer credentials:
+
+- `AGENT_SERVICE_TOKEN` for the private hosted gateway. It can discover all
+  ledger tools; Channel-specific `allowed_tools` remains the model boundary.
+- A revocable `blw_agent_...` Token for external MCP clients. New Tokens are
+  read-only by default. A Token created with write scope can also discover and
+  invoke write tools. Existing pre-scope Tokens retain their former read/write
+  access until revoked or expired.
+
+Remote tool names use the `ledger_` prefix. Through `bub-mcp`, the model-visible
+names use `mcp.ledger_`. Browser-only `open_page` remains a local Bub tool and is
+never exposed by the MCP server. `ledger_agent_context` lets runtimes load the
+current system instructions programmatically and is not included in the model's
+allowed tool list.
+
+Production deploys promote and health-check the Server before deploying the
+Agent, because `bub-mcp` verifies `/mcp` during Agent startup. On a first install,
+the workflow starts the Server with a temporary Agent URL, deploys the Agent,
+then binds the published private Agent URL back to the Server. This avoids a
+startup cycle while keeping upgrades available through the deprecated bridge.
 
 ## Channels and capabilities
 
@@ -71,13 +100,14 @@ Rollback is performed by deploying an earlier Git revision.
   Agent finishes a reply but the process crashes before the completion is
   recorded, Telegram may still retry the update once, so the reply can
   theoretically be sent twice; this window cannot be fully eliminated.
-- Local `bub chat` uses Bub's native CLI Channel. It exchanges a revocable
-  `blw_agent_...` credential for a 15-minute capability containing the full
-  allowed tool catalog. Revoking or expiring the parent Token immediately
-  invalidates capabilities that were already issued from it.
+- Local `bub chat` uses Bub's native CLI Channel and the installed `bub-mcp`
+  plugin. The server filters discovery from the Token's scope on every request,
+  so revoking or expiring the Token takes effect immediately.
 
-The hosted gateway uses `AGENT_SERVICE_TOKEN` and can receive the complete Go
-tool catalog. Web, Telegram, and local CLI all follow the same cross-turn write
+The hosted gateway uses `AGENT_SERVICE_TOKEN` and can receive the complete MCP
+tool catalog. A locked Web turn exposes only local `open_page`; an unlocked Web
+turn exposes ledger MCP tools too. Telegram exposes ledger MCP tools plus its
+restricted response tools. Web, Telegram, and local CLI all follow the same cross-turn write
 protocol. Telegram accepts one of these exact replies:
 `确认写入`, `确认入账`, or `confirm write`. Short acknowledgements such as `好`,
 `OK`, and `👍` never approve a write. In group chats, the prompt also requires
@@ -141,8 +171,18 @@ cd agent
 export LEDGER_API_URL=https://your-ledger.example
 export LEDGER_AGENT_TOKEN=blw_agent_...
 uv sync
+uv run bub mcp add \
+  --transport http \
+  --header "Authorization: Bearer ${LEDGER_AGENT_TOKEN}" \
+  ledger \
+  "${LEDGER_API_URL}/mcp"
 uv run bub chat
 ```
+
+`bub mcp add` stores the MCP definition in Bub's runtime config under
+`~/.bub/mcp.json`; protect that file like any other credential-bearing client
+configuration. Other MCP-capable agents can use the same URL and Authorization
+header without installing the repository's Agent package.
 
 The installed `bub-tapestore-sqlalchemy` plugin defaults to a local SQLite tape
 database when `DATABASE_URL` is absent. The local process never receives the
@@ -154,11 +194,11 @@ proxy, not a second provider configuration.
 
 ### Local write access
 
-Every valid `blw_agent_...` token bootstrap returns the complete allowed tool
-catalog, including `append_transactions`, `update_transaction`,
-`delete_transaction`, `reverse_transaction`, `apply_account_operations`, and
-`upsert_memory`. There is no local-write configuration switch and no separate
-approval surface. The system prompt requires the Agent to show the complete
+Write tools appear only for a Token created with **允许写入工具**. They include
+`ledger_append_transactions`, `ledger_update_transaction`,
+`ledger_delete_transaction`, `ledger_reverse_transaction`,
+`ledger_apply_account_operations`, and `ledger_upsert_memory`. There is no
+separate approval surface. The system prompt requires the Agent to show the complete
 pending Beancount change, end its reply, and wait for explicit confirmation in
 the next user turn before calling a write tool. The write itself still goes
 through schema validation, source revision checks, the server writer,

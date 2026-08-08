@@ -25,7 +25,7 @@ type AgentPageContext struct {
 	End               string `json:"end,omitempty"`
 	ValuationCurrency string `json:"valuationCurrency,omitempty"`
 	BQLQuery          string `json:"bqlQuery,omitempty"`
-	SensitiveUnlocked bool   `json:"-"`
+	SensitiveUnlocked bool   `json:"sensitiveUnlocked,omitempty"`
 }
 
 type AgentTurnRequest struct {

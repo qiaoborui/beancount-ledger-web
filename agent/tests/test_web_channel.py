@@ -6,7 +6,8 @@ import pytest
 from bub.channels.message import ChannelMessage
 from bub.streaming import StreamEvent
 
-from ledger_agent_service.web_channel import LedgerWebChannel, WebTurn
+from ledger_agent_service.protocol import ToolSpec
+from ledger_agent_service.web_channel import LedgerWebChannel, WebTurn, _tool_result_payload
 
 
 async def _empty_stream(event: StreamEvent) -> AsyncIterator[StreamEvent]:
@@ -78,3 +79,21 @@ async def test_outbound_messages_are_correlated_to_the_exact_web_turn() -> None:
         "refreshLedger": False,
     }) in second_events
     assert all(not event or "stale final" not in str(event) for event in second_events)
+
+
+def test_mcp_string_results_restore_client_artifacts_and_refresh_state() -> None:
+    spec = ToolSpec(
+        name="mcp.ledger_run_bql",
+        description="query",
+        parameters={"type": "object", "properties": {}},
+        title="运行 BQL",
+    )
+    payload, artifacts, changed = _tool_result_payload(
+        {"id": "tool-1", "name": spec.name, "arguments": {}},
+        spec,
+        '{"modelOutput":{"rows":[]},"clientOutput":{"columns":[]},"artifacts":[{"id":"a1"}],"refreshLedger":true}',
+    )
+
+    assert payload["output"] == {"columns": []}
+    assert artifacts == [{"id": "a1"}]
+    assert changed is True

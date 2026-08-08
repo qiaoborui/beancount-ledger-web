@@ -69,98 +69,129 @@ func TestAgentAccessTokenNameLimitCountsCharacters(t *testing.T) {
 	}
 }
 
-func TestAgentAccessTokenBootstrapIncludesWriteToolsAndIsRevocable(t *testing.T) {
+func TestAgentAccessTokenScopesDefaultReadOnlyAndPreserveLegacyAccess(t *testing.T) {
+	readScopes, err := normalizeAgentAccessScopes(nil)
+	if err != nil || len(readScopes) != 1 || readScopes[0] != agentAccessScopeRead {
+		t.Fatalf("default scopes = %v err=%v", readScopes, err)
+	}
+	writeScopes, err := normalizeAgentAccessScopes([]string{agentAccessScopeWrite})
+	if err != nil || len(writeScopes) != 2 || !agentAccessTokenCanWrite(agentAccessTokenRecord{Scopes: writeScopes}) {
+		t.Fatalf("write scopes = %v err=%v", writeScopes, err)
+	}
+	if agentAccessTokenCanWrite(agentAccessTokenRecord{Scopes: readScopes}) {
+		t.Fatal("read-only token must not allow writes")
+	}
+	if !agentAccessTokenCanWrite(agentAccessTokenRecord{}) {
+		t.Fatal("legacy token without scopes must retain write access")
+	}
+	if _, err := normalizeAgentAccessScopes([]string{"admin"}); err == nil {
+		t.Fatal("unknown scopes must be rejected")
+	}
+}
+
+func TestAgentAccessTokenAPIStoresScopesWithoutLeakingSecret(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	router := newRouter(server.cfg, server)
+	created := requestWithCookies(router, http.MethodPost, "/api/agent/access-tokens", `{"name":"Laptop Bub","scopes":["write"]}`, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create token status=%d body=%s", created.Code, created.Body.String())
+	}
+	var body struct {
+		Token      string                  `json:"token"`
+		Credential agentAccessTokenSummary `json:"credential"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(body.Token, agentAccessTokenPrefix) || strings.Join(body.Credential.Scopes, ",") != "read,write" {
+		t.Fatalf("unexpected create response: %s", created.Body.String())
+	}
+	listed := requestWithCookies(router, http.MethodGet, "/api/agent/access-tokens", "", nil)
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), body.Token) || strings.Contains(listed.Body.String(), "secretHash") {
+		t.Fatalf("token list leaked secret status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	revoked := requestWithCookies(router, http.MethodDelete, "/api/agent/access-tokens/"+body.Credential.ID, "", nil)
+	if revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke status=%d body=%s", revoked.Code, revoked.Body.String())
+	}
+}
+
+func TestLegacyBootstrapBridgeHonorsTokenScopes(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "agent-service-secret"
 	router := newRouter(server.cfg, server)
 
-	created := requestWithCookies(router, http.MethodPost, "/api/agent/access-tokens", `{"name":"Laptop Bub"}`, nil)
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create token status=%d body=%s", created.Code, created.Body.String())
+	for _, testCase := range []struct {
+		name      string
+		scopes    []string
+		wantWrite bool
+	}{{"read", []string{agentAccessScopeRead}, false}, {"write", []string{agentAccessScopeRead, agentAccessScopeWrite}, true}} {
+		t.Run(testCase.name, func(t *testing.T) {
+			token := storeMCPTestToken(t, server, testCase.name, testCase.scopes)
+			request := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("bootstrap status=%d body=%s", response.Code, response.Body.String())
+			}
+			var body struct {
+				CapabilityToken string `json:"capabilityToken"`
+				Deprecated      bool   `json:"deprecated"`
+				Tools           []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+			}
+			if json.Unmarshal(response.Body.Bytes(), &body) != nil || body.CapabilityToken == "" || !body.Deprecated {
+				t.Fatalf("invalid legacy bootstrap: %s", response.Body.String())
+			}
+			foundWrite := false
+			for _, tool := range body.Tools {
+				foundWrite = foundWrite || tool.Name == "append_transactions"
+			}
+			if foundWrite != testCase.wantWrite {
+				t.Fatalf("write tool visibility=%v want=%v tools=%#v", foundWrite, testCase.wantWrite, body.Tools)
+			}
+		})
 	}
-	var createBody struct {
-		Token      string                  `json:"token"`
-		Credential agentAccessTokenSummary `json:"credential"`
-	}
-	if err := json.Unmarshal(created.Body.Bytes(), &createBody); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(createBody.Token, "blw_agent_") || createBody.Credential.ID == "" {
-		t.Fatalf("unexpected create response: %s", created.Body.String())
-	}
+}
 
-	listed := requestWithCookies(router, http.MethodGet, "/api/agent/access-tokens", "", nil)
-	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), createBody.Token) || strings.Contains(listed.Body.String(), "secretHash") {
-		t.Fatalf("token list leaked secret status=%d body=%s", listed.Code, listed.Body.String())
-	}
+func TestLegacyHostedAgentBridgeBootstrapsAndExecutes(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	server.cfg.AgentServiceToken = "gateway-secret"
+	router := newRouter(server.cfg, server)
 
-	bootstrapRequest := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
-	bootstrapRequest.Header.Set("Content-Type", "application/json")
-	bootstrapRequest.Header.Set("Authorization", "Bearer "+createBody.Token)
-	bootstrap := httptest.NewRecorder()
-	router.ServeHTTP(bootstrap, bootstrapRequest)
-	if bootstrap.Code != http.StatusOK {
-		t.Fatalf("bootstrap status=%d body=%s", bootstrap.Code, bootstrap.Body.String())
-	}
-	var bootstrapBody struct {
+	request := httptest.NewRequest(http.MethodPost, "/api/internal/agent/bootstrap", strings.NewReader(`{"sessionId":"telegram:123","channel":"telegram","context":{}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Agent-Service-Token", "gateway-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	var body struct {
 		CapabilityToken string `json:"capabilityToken"`
-		SystemPrompt    string `json:"systemPrompt"`
 		Tools           []struct {
-			Name     string `json:"name"`
-			ReadOnly bool   `json:"readOnly"`
+			Name string `json:"name"`
 		} `json:"tools"`
 	}
-	if err := json.Unmarshal(bootstrap.Body.Bytes(), &bootstrapBody); err != nil {
-		t.Fatal(err)
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || body.CapabilityToken == "" {
+		t.Fatalf("internal legacy bootstrap status=%d body=%s", response.Code, response.Body.String())
 	}
-	if bootstrapBody.CapabilityToken == "" || len(bootstrapBody.Tools) == 0 {
-		t.Fatalf("bootstrap missing capability or tools: %s", bootstrap.Body.String())
-	}
-	writeToolFound := false
-	for _, tool := range bootstrapBody.Tools {
-		if tool.Name == "append_transactions" {
-			writeToolFound = true
-			if tool.ReadOnly {
-				t.Fatalf("append_transactions must be exposed as a write tool: %#v", tool)
-			}
+	for _, tool := range body.Tools {
+		if tool.Name == "open_page" {
+			t.Fatalf("Telegram legacy bootstrap exposed open_page: %s", response.Body.String())
 		}
 	}
-	if !writeToolFound {
-		t.Fatalf("external bootstrap is missing append_transactions: %s", bootstrap.Body.String())
-	}
-	if !strings.Contains(bootstrapBody.SystemPrompt, "不会弹出程序审批框") || !strings.Contains(bootstrapBody.SystemPrompt, "紧邻上一条助手回复") {
-		t.Fatalf("bootstrap system prompt must require cross-turn conversational confirmation: %s", bootstrapBody.SystemPrompt)
-	}
 
-	writeRequest := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
-	writeRequest.Header.Set("Content-Type", "application/json")
-	writeRequest.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
-	writeResponse := httptest.NewRecorder()
-	router.ServeHTTP(writeResponse, writeRequest)
-	if writeResponse.Code != http.StatusBadRequest {
-		t.Fatalf("write execute status=%d body=%s (want 400: empty entries rejected before write)", writeResponse.Code, writeResponse.Body.String())
-	}
-
-	revoked := requestWithCookies(router, http.MethodDelete, "/api/agent/access-tokens/"+createBody.Credential.ID, "", nil)
-	if revoked.Code != http.StatusNoContent {
-		t.Fatalf("revoke status=%d body=%s", revoked.Code, revoked.Body.String())
-	}
-	writeAfterRevoke := httptest.NewRecorder()
-	requestAfterCapabilityRevoke := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/append_transactions/execute", strings.NewReader(`{"arguments":{"entries":[]}}`))
-	requestAfterCapabilityRevoke.Header.Set("Content-Type", "application/json")
-	requestAfterCapabilityRevoke.Header.Set("Authorization", "Bearer "+bootstrapBody.CapabilityToken)
-	router.ServeHTTP(writeAfterRevoke, requestAfterCapabilityRevoke)
-	if writeAfterRevoke.Code != http.StatusUnauthorized {
-		t.Fatalf("revoked token capability status=%d body=%s", writeAfterRevoke.Code, writeAfterRevoke.Body.String())
-	}
-	bootstrapAfterRevoke := httptest.NewRecorder()
-	requestAfterRevoke := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli"}`))
-	requestAfterRevoke.Header.Set("Content-Type", "application/json")
-	requestAfterRevoke.Header.Set("Authorization", "Bearer "+createBody.Token)
-	router.ServeHTTP(bootstrapAfterRevoke, requestAfterRevoke)
-	if bootstrapAfterRevoke.Code != http.StatusUnauthorized {
-		t.Fatalf("revoked token bootstrap status=%d body=%s", bootstrapAfterRevoke.Code, bootstrapAfterRevoke.Body.String())
+	execute := httptest.NewRequest(http.MethodPost, "/api/internal/agent/tools/get_bql_capabilities/execute", strings.NewReader(`{"arguments":{}}`))
+	execute.Header.Set("Content-Type", "application/json")
+	execute.Header.Set("Authorization", "Bearer "+body.CapabilityToken)
+	executeResponse := httptest.NewRecorder()
+	router.ServeHTTP(executeResponse, execute)
+	if executeResponse.Code != http.StatusOK || !strings.Contains(executeResponse.Body.String(), `"modelOutput"`) {
+		t.Fatalf("internal legacy execute status=%d body=%s", executeResponse.Code, executeResponse.Body.String())
 	}
 }
 
@@ -226,93 +257,5 @@ func TestExternalAgentModelProxyKeepsProviderCredentialsServerSide(t *testing.T)
 
 	if response.Code != http.StatusOK || received["model"] != "server-model" || strings.Contains(response.Body.String(), "provider-secret") {
 		t.Fatalf("model proxy status=%d received=%#v body=%s", response.Code, received, response.Body.String())
-	}
-}
-
-func TestInternalAgentBootstrapUsesTelegramPromptAndToolSubset(t *testing.T) {
-	t.Setenv("LEDGER_AUTH_DISABLED", "true")
-	server := testAgentServer(t)
-	server.cfg.AgentServiceToken = "gateway-secret"
-	router := newRouter(server.cfg, server)
-
-	unauthorized := requestWithCookies(router, http.MethodPost, "/api/internal/agent/bootstrap", `{"sessionId":"telegram:123","channel":"telegram"}`, nil)
-	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("internal bootstrap without service token status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/api/internal/agent/bootstrap", strings.NewReader(`{"sessionId":"telegram:123","channel":"telegram","context":{}}`))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Agent-Service-Token", "gateway-secret")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("internal bootstrap status=%d body=%s", response.Code, response.Body.String())
-	}
-	var body struct {
-		CapabilityToken string `json:"capabilityToken"`
-		SystemPrompt    string `json:"systemPrompt"`
-		Tools           []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			ReadOnly    bool   `json:"readOnly"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	foundWriteTool := false
-	foundOpenPage := false
-	descriptions := map[string]string{}
-	for _, tool := range body.Tools {
-		descriptions[tool.Name] = tool.Description
-		if tool.Name == "append_transactions" && !tool.ReadOnly {
-			foundWriteTool = true
-		}
-		if tool.Name == "open_page" {
-			foundOpenPage = true
-		}
-	}
-	if body.CapabilityToken == "" || !foundWriteTool {
-		t.Fatalf("internal bootstrap missing capability or write tools: %s", response.Body.String())
-	}
-	if foundOpenPage {
-		t.Fatalf("telegram bootstrap must not expose web-only open_page tool: %s", response.Body.String())
-	}
-	if !strings.Contains(body.SystemPrompt, "Telegram") ||
-		!strings.Contains(body.SystemPrompt, "问候、闲聊或不明确的请求") ||
-		!strings.Contains(body.SystemPrompt, "优先只调用 get_ledger_summary") ||
-		!strings.Contains(body.SystemPrompt, "不要用 run_bql 重复验证") ||
-		!strings.Contains(body.SystemPrompt, "不得用于一般账本查询、统计或探索") ||
-		!strings.Contains(body.SystemPrompt, "结果是否已经足以回答用户原问题") ||
-		!strings.Contains(body.SystemPrompt, "不得为了探索相邻问题而调用额外工具") ||
-		!strings.Contains(body.SystemPrompt, "原问题确实需要时可以使用多个工具") ||
-		!strings.Contains(body.SystemPrompt, "不会弹出程序审批框") ||
-		!strings.Contains(body.SystemPrompt, "下一条消息明确确认") ||
-		!strings.Contains(body.SystemPrompt, "sender_id") ||
-		!strings.Contains(body.SystemPrompt, "确认写入") {
-		t.Fatalf("telegram bootstrap must use the Telegram system prompt: %s", response.Body.String())
-	}
-	if !strings.Contains(descriptions["get_ledger_summary"], "首选工具") ||
-		!strings.Contains(descriptions["run_bql"], "仅在 get_ledger_summary 无法回答") ||
-		!strings.Contains(descriptions["run_bql"], "不要用它重复验证") ||
-		!strings.Contains(descriptions["search_memories"], "不得用于一般账本查询、统计或探索") {
-		t.Fatalf("telegram tool descriptions lack routing policy: %#v", descriptions)
-	}
-	claims, err := server.parseAgentCapabilityToken(body.CapabilityToken)
-	if err != nil || claims.Subject != "channel:telegram" || claims.SessionID == "telegram:123" {
-		t.Fatalf("unexpected internal bootstrap claims: %#v err=%v", claims, err)
-	}
-}
-
-func TestAgentTelegramToolNamesOnlyRemovesWebNavigation(t *testing.T) {
-	got := agentTelegramToolNames([]string{"get_accounts", "open_page", "append_transactions"})
-	want := []string{"get_accounts", "append_transactions"}
-	if len(got) != len(want) {
-		t.Fatalf("telegram tool names = %v, want %v", got, want)
-	}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("telegram tool names = %v, want %v", got, want)
-		}
 	}
 }

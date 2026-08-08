@@ -60,8 +60,7 @@ class LedgerWebChannel(Interface):
             content=request.message,
             mode="ledger",
             context={
-                "_ledger_capability_token": request.capability_token,
-                "_ledger_system_prompt": request.system_prompt,
+                "_ledger_system_prompt": request.mcp_system_prompt or request.system_prompt,
                 "page": request.context.model_dump(by_alias=True),
             },
         ):
@@ -244,6 +243,13 @@ def _tool_result_payload(
     result: Any,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
     title = spec.title if spec else call["name"]
+    if isinstance(result, str):
+        try:
+            decoded = json.loads(result)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, dict):
+            result = decoded
     if isinstance(result, dict) and "kind" in result and "message" in result:
         return ({
             "id": call["id"], "name": call["name"], "title": title,

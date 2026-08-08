@@ -50,6 +50,15 @@ func newRouter(cfg Config, server *Server) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
+	mcpHandler := server.mcpHandler()
+	router.Any("/mcp", func(c *gin.Context) {
+		if !server.limiter.Check(c, "agent.mcp", 600, 5*time.Minute) {
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		mcpHandler.ServeHTTP(c.Writer, c.Request)
+		c.Abort()
+	})
 	server.registerAPI(router.Group("/api"))
 	if cfg.ServeStatic {
 		router.NoRoute(server.staticFallback)
@@ -256,7 +265,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "passkey-management-v1", "agent-access-tokens-v1"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "ledger-mcp-2026-07-28", "passkey-management-v1", "agent-access-tokens-v2"},
 	}
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)
