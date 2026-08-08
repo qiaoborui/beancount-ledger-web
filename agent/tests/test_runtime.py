@@ -347,6 +347,37 @@ async def test_telegram_send_tools_are_allowed_only_when_exposed_to_the_turn() -
 
 
 @pytest.mark.asyncio
+async def test_model_facing_mcp_tool_alias_respects_runtime_tool_allowlist() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    tool_name = "mcp.ledger_get_bql_capabilities"
+    plugin.tool_specs = {
+        tool_name: ToolSpec(
+            name=tool_name,
+            description="capabilities",
+            parameters={},
+            title="capabilities",
+        )
+    }
+    previous = REGISTRY.get(tool_name)
+    REGISTRY[tool_name] = Tool(name=tool_name, handler=lambda: "{}")
+    call = ToolCall("run-1", "mcp_ledger_get_bql_capabilities", {})
+
+    try:
+        allowed = await plugin.before_tool_call(
+            call,
+            {"mode": "ledger", "allowed_tools": [tool_name]},
+        )
+        denied = await plugin.before_tool_call(call, {"mode": "ledger", "allowed_tools": []})
+    finally:
+        REGISTRY.pop(tool_name, None)
+        if previous is not None:
+            REGISTRY[tool_name] = previous
+
+    assert allowed is None
+    assert denied is not None and denied.action == "deny"
+
+
+@pytest.mark.asyncio
 async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> None:
     plugin = object.__new__(LedgerPlugin)
     plugin.tool_specs = {

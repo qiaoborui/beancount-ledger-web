@@ -19,6 +19,7 @@ from bub.channels.manager import ChannelManager
 from bub.channels.message import ChannelMessage
 from bub.builtin.agent import Agent
 from bub.builtin.context import default_tape_context
+from bub.builtin.tools import resolve_tool_name
 from bub.envelope import content_of
 from bub.errors import BubError, ErrorKind
 from bub.framework import BubFramework
@@ -512,10 +513,12 @@ class LedgerPlugin:
     async def before_tool_call(self, call: ToolCall, state: dict[str, Any]) -> ToolCallDecision | None:
         if state.get("mode") != "ledger":
             return None
-        if call.tool in TELEGRAM_TOOL_NAMES and call.tool in set(state.get("allowed_tools") or []):
+        tool_name = resolve_tool_name(call.tool) or call.tool
+        allowed_tools = set(state.get("allowed_tools") or [])
+        if tool_name in TELEGRAM_TOOL_NAMES and tool_name in allowed_tools:
             return None
-        spec = self.tool_specs.get(call.tool)
-        if spec is None or call.tool not in set(state.get("allowed_tools") or []):
+        spec = self.tool_specs.get(tool_name)
+        if spec is None or tool_name not in allowed_tools:
             return ToolCallDecision.deny(f"当前 Channel 不允许工具：{call.tool}")
         return None
 
