@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import socket
@@ -17,7 +18,7 @@ from bub.errors import BubError, ErrorKind
 from bub.hooks.interception import LlmCallRequest, ToolCall
 from bub.skills import discover_skills
 from bub.streaming import AsyncStreamEvents, StreamEvent
-from bub.tools import REGISTRY, Tool, ToolContext
+from bub.tools import REGISTRY, Tool, ToolContext, model_tools
 from fastmcp import FastMCP
 
 from ledger_agent_service.config import Settings
@@ -620,6 +621,7 @@ async def test_bub_mcp_catalog_is_loaded_without_registering_custom_handlers() -
         await plugin.ensure_ledger_tools()
         assert set(plugin.tool_specs) == {"mcp.ledger_get_accounts"}
         assert REGISTRY[ledger_tool.name] is ledger_tool
+        assert REGISTRY[context_tool.name] is context_tool
         assert plugin.complete_tool_catalog_loaded is True
     finally:
         REGISTRY.pop(context_tool.name, None)
@@ -713,6 +715,17 @@ async def test_gateway_loads_ledger_plugin_channels_and_sqlalchemy_store(tmp_pat
         assert gateway.manager.get_channel("web") is gateway.web
         assert type(gateway.manager.get_channel("telegram")).__name__ == "SkillTelegramChannel"
         assert type(gateway.framework.get_tape_store()).__name__ == "SQLAlchemyTapeStore"
+        account_tool = REGISTRY["mcp.ledger_get_accounts"]
+        context_tool = REGISTRY["mcp.ledger_agent_context"]
+        assert model_tools([account_tool])
+        assert isinstance(account_tool, Tool)
+        assert isinstance(context_tool, Tool)
+        assert account_tool.agent_use is True
+        assert context_tool.agent_use is False
+        account_result = account_tool.run()
+        if inspect.isawaitable(account_result):
+            account_result = await account_result
+        assert json.loads(account_result)["modelOutput"] == {"accounts": []}
         assert await gateway.plugin._mcp_agent_context("telegram", {}) == "telegram prompt: use mcp.ledger_get_accounts"
         assert gateway.healthy
 

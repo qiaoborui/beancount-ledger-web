@@ -59,6 +59,29 @@ def _decode_mcp_result(result: Any) -> dict[str, Any]:
     return result
 
 
+def _adapt_ledger_mcp_tool(name: str, remote_tool: Any) -> Tool:
+    """Convert bub-mcp's tool object to the Tool contract expected by Bub."""
+
+    if isinstance(remote_tool, Tool):
+        return remote_tool
+    handler = getattr(remote_tool, "run", None)
+    description = str(getattr(remote_tool, "description", "") or "")
+    parameters = getattr(remote_tool, "parameters", {}) or {}
+    context = bool(getattr(remote_tool, "context", False))
+    if not callable(handler):
+        raise RuntimeError(f"ledger MCP tool {name} has no callable handler")
+    if not isinstance(parameters, dict):
+        raise RuntimeError(f"ledger MCP tool {name} has an invalid parameter schema")
+    return Tool(
+        name=name,
+        handler=handler,
+        description=description,
+        parameters=parameters,
+        context=context,
+        agent_use=name != LEDGER_MCP_CONTEXT_TOOL,
+    )
+
+
 class LedgerTelegramChannel:
     """Keep Bub's transport while making model replies explicit Telegram tool calls."""
 
@@ -523,7 +546,11 @@ class LedgerPlugin:
                     raise RuntimeError("timed out waiting for bub-mcp to connect the ledger server")
                 await asyncio.sleep(0.05)
             for name, tool in list(REGISTRY.items()):
-                if not name.startswith(LEDGER_MCP_TOOL_PREFIX) or name == LEDGER_MCP_CONTEXT_TOOL:
+                if not name.startswith(LEDGER_MCP_TOOL_PREFIX):
+                    continue
+                tool = _adapt_ledger_mcp_tool(name, tool)
+                REGISTRY[name] = tool
+                if name == LEDGER_MCP_CONTEXT_TOOL:
                     continue
                 self.tool_specs[name] = ToolSpec(
                     name=name,
