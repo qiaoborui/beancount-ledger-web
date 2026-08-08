@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import uvicorn
 from bub.channels.admission import TurnSnapshot
 from bub.channels.message import ChannelMessage
 from bub.builtin.model_runner import ModelRunner
@@ -14,7 +17,8 @@ from bub.errors import BubError, ErrorKind
 from bub.hooks.interception import LlmCallRequest, ToolCall
 from bub.skills import discover_skills
 from bub.streaming import AsyncStreamEvents, StreamEvent
-from bub.tools import ToolContext
+from bub.tools import REGISTRY, Tool, ToolContext
+from fastmcp import FastMCP
 
 from ledger_agent_service.config import Settings
 from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
@@ -25,6 +29,50 @@ from ledger_agent_service.runtime import (
     LedgerPlugin,
     LedgerTelegramChannel,
 )
+
+
+@pytest.fixture
+async def ledger_mcp_url() -> str:
+    server = FastMCP("ledger-test")
+
+    @server.tool(name="ledger_get_accounts")
+    def get_accounts() -> str:
+        return json.dumps({"modelOutput": {"accounts": []}, "clientOutput": {"accounts": []}, "artifacts": [], "refreshLedger": False})
+
+    @server.tool(name="ledger_append_transactions")
+    def append_transactions() -> str:
+        return json.dumps({"modelOutput": {"ok": True}, "clientOutput": {"ok": True}, "artifacts": [], "refreshLedger": True})
+
+    @server.tool(name="ledger_agent_context")
+    def agent_context(
+        channel: str,
+        page: str = "",
+        path: str = "",
+        start: str = "",
+        end: str = "",
+        valuationCurrency: str = "",
+        bqlQuery: str = "",
+    ) -> str:
+        del page, path, start, end, valuationCurrency, bqlQuery
+        prompt = f"{channel} prompt: use ledger_get_accounts"
+        return json.dumps({"modelOutput": {"systemPrompt": prompt}, "clientOutput": {"systemPrompt": prompt}, "artifacts": [], "refreshLedger": False})
+
+    app = server.http_app(path="/mcp", stateless_http=True, json_response=True)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    uvicorn_server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
+    task = asyncio.create_task(uvicorn_server.serve(sockets=[listener]))
+    while not uvicorn_server.started:
+        if task.done():
+            await task
+        await asyncio.sleep(0.01)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        uvicorn_server.should_exit = True
+        await task
 
 
 @pytest.mark.asyncio
@@ -300,16 +348,20 @@ async def test_telegram_send_tools_are_allowed_only_when_exposed_to_the_turn() -
 @pytest.mark.asyncio
 async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> None:
     plugin = object.__new__(LedgerPlugin)
+    plugin.tool_specs = {
+        "mcp.ledger_get_accounts": ToolSpec(
+            name="mcp.ledger_get_accounts",
+            description="accounts",
+            parameters={"type": "object", "properties": {}},
+            title="accounts",
+        )
+    }
 
-    class Capabilities:
-        async def bootstrap(self, **_kwargs):
-            return SimpleNamespace(capability_token="capability", system_prompt="prompt", tools=[])
-
-    async def ensure_ledger_tools(_specs=None) -> None:
+    async def ensure_ledger_tools(**_kwargs) -> None:
         return None
 
-    plugin.capabilities = Capabilities()
     plugin.ensure_ledger_tools = ensure_ledger_tools
+    plugin._mcp_agent_context = lambda *_args, **_kwargs: asyncio.sleep(0, result="prompt")
     message = ChannelMessage(
         session_id="telegram:123",
         channel="telegram",
@@ -322,8 +374,47 @@ async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> N
 
     assert state["chat_id"] == "123"
     assert state["telegram_message_id"] == 1207
-    assert set(state["allowed_tools"]) == {TELEGRAM_SEND_TOOL, TELEGRAM_SEND_RICH_TOOL}
+    assert set(state["allowed_tools"]) == {
+        "mcp.ledger_get_accounts",
+        TELEGRAM_SEND_TOOL,
+        TELEGRAM_SEND_RICH_TOOL,
+    }
     assert state["allowed_skills"] == ["telegram-ledger-agent", "telegram"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sensitive_unlocked", "expected"),
+    [
+        (False, {"open_page"}),
+        (True, {"open_page", "mcp.ledger_get_accounts"}),
+    ],
+)
+async def test_web_state_keeps_mcp_tools_behind_sensitive_unlock(sensitive_unlocked: bool, expected: set[str]) -> None:
+    plugin = object.__new__(LedgerPlugin)
+    plugin.tool_specs = {
+        "open_page": ToolSpec(name="open_page", description="navigation", parameters={}, title="打开页面"),
+        "mcp.ledger_get_accounts": ToolSpec(name="mcp.ledger_get_accounts", description="accounts", parameters={}, title="accounts"),
+    }
+
+    async def ensure_ledger_tools(**_kwargs) -> None:
+        return None
+
+    plugin.ensure_ledger_tools = ensure_ledger_tools
+    message = ChannelMessage(
+        session_id="web:1",
+        channel="web",
+        content="查询账户",
+        context={
+            "_ledger_system_prompt": "use ledger_get_accounts",
+            "page": {"sensitiveUnlocked": sensitive_unlocked},
+        },
+    )
+
+    state = await plugin.load_state(message, "web:1")
+
+    assert set(state["allowed_tools"]) == expected
+    assert "mcp.ledger_get_accounts" in state["system_prompt"]
 
 
 def test_project_telegram_skill_uses_restricted_final_response_tools() -> None:
@@ -508,36 +599,32 @@ async def test_telegram_webhook_requires_a_running_channel() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_loads_complete_catalog_after_telegram_subset() -> None:
+async def test_bub_mcp_catalog_is_loaded_without_registering_custom_handlers() -> None:
     plugin = object.__new__(LedgerPlugin)
     plugin.tool_specs = {}
     plugin.complete_tool_catalog_loaded = False
     plugin.tools_lock = asyncio.Lock()
-    telegram_tool = ToolSpec.model_validate({
-        "name": "telegram_test_tool",
-        "description": "telegram",
-        "parameters": {"type": "object", "properties": {}},
-        "title": "Telegram test",
-        "readOnly": True,
-    })
-    web_tool = ToolSpec.model_validate({
-        "name": "web_test_tool",
-        "description": "web",
-        "parameters": {"type": "object", "properties": {}},
-        "title": "Web test",
-        "readOnly": True,
-    })
-
-    class Capabilities:
-        async def specs(self) -> list[ToolSpec]:
-            return [telegram_tool, web_tool]
-
-    plugin.capabilities = Capabilities()
-    await plugin.ensure_ledger_tools([telegram_tool])
-    await plugin.ensure_ledger_tools()
-
-    assert set(plugin.tool_specs) == {"telegram_test_tool", "web_test_tool"}
-    assert plugin.complete_tool_catalog_loaded is True
+    existing = {name: tool for name, tool in REGISTRY.items() if name.startswith("mcp.ledger_")}
+    for name in existing:
+        REGISTRY.pop(name, None)
+    context_tool = Tool(name="mcp.ledger_agent_context", handler=lambda **_kwargs: "{}")
+    ledger_tool = Tool(
+        name="mcp.ledger_get_accounts",
+        description="accounts",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda: "{}",
+    )
+    REGISTRY[context_tool.name] = context_tool
+    REGISTRY[ledger_tool.name] = ledger_tool
+    try:
+        await plugin.ensure_ledger_tools()
+        assert set(plugin.tool_specs) == {"mcp.ledger_get_accounts"}
+        assert REGISTRY[ledger_tool.name] is ledger_tool
+        assert plugin.complete_tool_catalog_loaded is True
+    finally:
+        REGISTRY.pop(context_tool.name, None)
+        REGISTRY.pop(ledger_tool.name, None)
+        REGISTRY.update(existing)
 
 
 @pytest.mark.asyncio
@@ -609,23 +696,53 @@ async def test_onboarding_history_is_rendered_as_typed_text_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gateway_loads_ledger_plugin_channels_and_sqlalchemy_store(tmp_path: Path, monkeypatch) -> None:
+async def test_gateway_loads_ledger_plugin_channels_and_sqlalchemy_store(tmp_path: Path, monkeypatch, ledger_mcp_url: str) -> None:
     monkeypatch.delenv("BUB_TELEGRAM_TOKEN", raising=False)
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'tapes.db'}",
-        ledger_api_url="https://ledger.example",
+        ledger_api_url=ledger_mcp_url,
         service_token="service-token",
     )
 
     async with AgentGateway(settings) as gateway:
         assert gateway.framework is not None
         assert gateway.framework._plugin_status["ledger-web"].is_success
+        assert gateway.framework._plugin_status["mcp"].is_success
         assert gateway.framework._plugin_status["tapestore-sqlalchemy"].is_success
         assert gateway.manager is not None
         assert gateway.manager.get_channel("web") is gateway.web
         assert type(gateway.manager.get_channel("telegram")).__name__ == "SkillTelegramChannel"
         assert type(gateway.framework.get_tape_store()).__name__ == "SQLAlchemyTapeStore"
+        assert await gateway.plugin._mcp_agent_context("telegram", {}) == "telegram prompt: use mcp.ledger_get_accounts"
         assert gateway.healthy
+
+
+@pytest.mark.asyncio
+async def test_gateway_restores_process_globals_and_rejects_overlap(tmp_path: Path, monkeypatch, ledger_mcp_url: str) -> None:
+    monkeypatch.delenv("BUB_TELEGRAM_TOKEN", raising=False)
+    monkeypatch.setenv("BUB_TAPESTORE_SQLALCHEMY_URL", "sqlite+pysqlite:///existing.db")
+    sentinel = Tool(name="mcp.ledger_existing", description="existing", parameters={}, handler=lambda: None)
+    previous = REGISTRY.get(sentinel.name)
+    REGISTRY[sentinel.name] = sentinel
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'globals.db'}",
+        ledger_api_url=ledger_mcp_url,
+        service_token="service-token",
+    )
+
+    try:
+        async with AgentGateway(settings):
+            assert os.environ["BUB_TAPESTORE_SQLALCHEMY_URL"].endswith("globals.db")
+            with pytest.raises(RuntimeError, match="already active"):
+                async with AgentGateway(settings):
+                    pytest.fail("overlapping gateways must be rejected")
+        assert os.environ["BUB_TAPESTORE_SQLALCHEMY_URL"] == "sqlite+pysqlite:///existing.db"
+        assert REGISTRY.get(sentinel.name) is sentinel
+    finally:
+        if previous is None:
+            REGISTRY.pop(sentinel.name, None)
+        else:
+            REGISTRY[sentinel.name] = previous
 
 
 @pytest.mark.asyncio
@@ -667,11 +784,11 @@ async def test_gateway_startup_fails_when_a_channel_does_not_start(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(tmp_path: Path, monkeypatch) -> None:
+async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(tmp_path: Path, monkeypatch, ledger_mcp_url: str) -> None:
     monkeypatch.delenv("BUB_TELEGRAM_TOKEN", raising=False)
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'turns.db'}",
-        ledger_api_url="https://ledger.example",
+        ledger_api_url=ledger_mcp_url,
         service_token="service-token",
     )
 
@@ -681,7 +798,7 @@ async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(t
     async with AgentGateway(settings) as gateway:
         assert gateway.plugin is not None
 
-        async def ensure_tools(_specs=None) -> None:
+        async def ensure_tools(**_kwargs) -> None:
             return None
 
         async def run_stream(**_kwargs) -> AsyncStreamEvents:
@@ -692,8 +809,8 @@ async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(t
         request = TurnRequest.model_validate({
             "sessionId": "session_test",
             "message": "看看本月支出",
-            "capabilityToken": "capability",
             "systemPrompt": "ledger prompt",
+            "context": {"sensitiveUnlocked": True},
         })
         received = [event async for event in gateway.turn(request)]
 
@@ -749,18 +866,18 @@ async def test_web_turn_runs_through_bub_channel_manager_and_persists_timeline(t
 
 
 @pytest.mark.asyncio
-async def test_web_turn_closes_with_an_error_when_bub_model_fails(tmp_path: Path, monkeypatch) -> None:
+async def test_web_turn_closes_with_an_error_when_bub_model_fails(tmp_path: Path, monkeypatch, ledger_mcp_url: str) -> None:
     monkeypatch.delenv("BUB_TELEGRAM_TOKEN", raising=False)
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'error-turn.db'}",
-        ledger_api_url="https://ledger.example",
+        ledger_api_url=ledger_mcp_url,
         service_token="service-token",
     )
 
     async with AgentGateway(settings) as gateway:
         assert gateway.plugin is not None
 
-        async def ensure_tools(_specs=None) -> None:
+        async def ensure_tools(**_kwargs) -> None:
             return None
 
         async def fail_stream(**_kwargs) -> AsyncStreamEvents:
@@ -771,7 +888,6 @@ async def test_web_turn_closes_with_an_error_when_bub_model_fails(tmp_path: Path
         request = TurnRequest.model_validate({
             "sessionId": "session_error",
             "message": "触发错误",
-            "capabilityToken": "capability",
             "systemPrompt": "ledger prompt",
         })
 

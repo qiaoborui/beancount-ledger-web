@@ -65,7 +65,7 @@ func TestLedgerAgentUsesAvailableOpenAIConfigurationByDefault(t *testing.T) {
 	}
 }
 
-func TestAgentGatewayProxiesTurnAndMintsCapability(t *testing.T) {
+func TestAgentGatewayProxiesTurnWithMCPContext(t *testing.T) {
 	var received map[string]any
 	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/channels/web/messages" || r.Header.Get("X-Agent-Service-Token") != "agent-secret" {
@@ -87,8 +87,12 @@ func TestAgentGatewayProxiesTurnAndMintsCapability(t *testing.T) {
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "event: final") {
 		t.Fatalf("Agent proxy status=%d body=%s", res.Code, res.Body.String())
 	}
-	if received["sessionId"] != "session-test" || received["capabilityToken"] == "" || received["systemPrompt"] == "" {
+	contextPayload, _ := received["context"].(map[string]any)
+	if received["sessionId"] != "session-test" || received["systemPrompt"] == "" || received["mcpSystemPrompt"] == "" || received["capabilityToken"] == "" || contextPayload["sensitiveUnlocked"] != true {
 		t.Fatalf("unexpected forwarded turn: %#v", received)
+	}
+	if strings.Contains(received["systemPrompt"].(string), "ledger_get_ledger_summary") || !strings.Contains(received["mcpSystemPrompt"].(string), "ledger_get_ledger_summary") {
+		t.Fatalf("forwarded prompts must support legacy and MCP agents: %#v", received)
 	}
 }
 
@@ -107,13 +111,15 @@ func TestAgentGatewayDoesNotDeadlockWhenRuntimeConfigRefreshIsDueDuringCallback(
 			return
 		}
 		time.Sleep(2100 * time.Millisecond)
-		callbackRequest, err := http.NewRequest(http.MethodGet, ledgerURL+"/api/internal/agent/tools", nil)
+		callbackRequest, err := http.NewRequest(http.MethodPost, ledgerURL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"deadlock-test","version":"1"}}}`))
 		if err != nil {
 			callbackResult <- err
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		callbackRequest.Header.Set("X-Agent-Service-Token", "agent-secret")
+		callbackRequest.Header.Set("Authorization", "Bearer agent-secret")
+		callbackRequest.Header.Set("Content-Type", "application/json")
+		callbackRequest.Header.Set("Accept", "application/json, text/event-stream")
 		callbackResponse, err := (&http.Client{Timeout: 750 * time.Millisecond}).Do(callbackRequest)
 		if err != nil {
 			callbackResult <- err
@@ -122,7 +128,7 @@ func TestAgentGatewayDoesNotDeadlockWhenRuntimeConfigRefreshIsDueDuringCallback(
 		}
 		defer callbackResponse.Body.Close()
 		if callbackResponse.StatusCode != http.StatusOK {
-			err := fmt.Errorf("tools callback status=%d", callbackResponse.StatusCode)
+			err := fmt.Errorf("MCP callback status=%d", callbackResponse.StatusCode)
 			callbackResult <- err
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -156,86 +162,7 @@ func TestAgentGatewayDoesNotDeadlockWhenRuntimeConfigRefreshIsDueDuringCallback(
 		t.Fatalf("Agent proxy status=%d body=%s", response.StatusCode, body)
 	}
 	if err := <-callbackResult; err != nil {
-		t.Fatalf("Agent tools callback failed: %v", err)
-	}
-}
-
-func TestAgentCapabilityRejectsTamperingAndWrongLedger(t *testing.T) {
-	server := testAgentServer(t)
-	server.cfg.AgentServiceToken = "agent-secret"
-	token, err := server.mintAgentCapabilityToken(agentCapabilityClaims{
-		SessionID: "session-test", ClusterID: ledgerClusterID(server.cfg), SensitiveUnlocked: true, ExpiresAt: time.Now().Add(time.Minute).Unix(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := server.parseAgentCapabilityToken(token + "x"); err == nil {
-		t.Fatal("tampered capability token must be rejected")
-	}
-	server.cfg.LedgerClusterID = "another-ledger"
-	if _, err := server.parseAgentCapabilityToken(token); err == nil {
-		t.Fatal("capability token from another ledger must be rejected")
-	}
-}
-
-func TestInternalAgentToolsRequireServiceToken(t *testing.T) {
-	server := testAgentServer(t)
-	server.cfg.AgentServiceToken = "agent-secret"
-	router := newRouter(server.cfg, server)
-	unauthorized := requestWithCookies(router, http.MethodGet, "/api/internal/agent/tools", "", nil)
-	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized tools status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/internal/agent/tools", nil)
-	req.Header.Set("X-Agent-Service-Token", "agent-secret")
-	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "append_transactions") {
-		t.Fatalf("tools status=%d body=%s", res.Code, res.Body.String())
-	}
-}
-
-func TestAgentCapabilityExecutionResponseUsesEmptyArtifactArray(t *testing.T) {
-	response := agentCapabilityExecutionResponse(agentToolExecution{
-		ModelOutput:  map[string]any{"ok": true},
-		ClientOutput: map[string]any{"ok": true},
-	})
-	payload, err := json.Marshal(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(payload), `"artifacts":[]`) {
-		t.Fatalf("empty artifacts must be encoded as an array: %s", payload)
-	}
-}
-
-func TestWriteCapabilityExecutesThroughUnifiedToolEndpoint(t *testing.T) {
-	server := testAgentServer(t)
-	server.cfg.AgentServiceToken = "agent-secret"
-	router := newRouter(server.cfg, server)
-	capability, err := server.mintAgentCapabilityToken(agentCapabilityClaims{
-		SessionID: "session-write", ClusterID: ledgerClusterID(server.cfg),
-		SensitiveUnlocked: true, Context: AgentPageContext{SensitiveUnlocked: true},
-		AllowedTools: []string{"upsert_memory"},
-		ExpiresAt:    time.Now().Add(time.Minute).Unix(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	arguments := map[string]any{"kind": "preference", "title": "月度汇总", "instruction": "优先给出简洁的月度汇总。"}
-	body, _ := json.Marshal(map[string]any{"arguments": arguments})
-	request := func(path string, payload []byte) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(payload)))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+capability)
-		res := httptest.NewRecorder()
-		router.ServeHTTP(res, req)
-		return res
-	}
-
-	executed := request("/api/internal/agent/tools/upsert_memory/execute", body)
-	if executed.Code != http.StatusOK {
-		t.Fatalf("write status=%d body=%s", executed.Code, executed.Body.String())
+		t.Fatalf("Agent MCP callback failed: %v", err)
 	}
 }
 

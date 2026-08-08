@@ -352,104 +352,6 @@ jobs:
         if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.zip_worker == 'true' }}
         run: .github/scripts/update-artifact-latest-tag.sh "${ZIP_WORKER_SERVICE}" "${{ needs.build-zip-worker.outputs.digest }}"
 
-      - name: Deploy private Bub Agent
-        id: deploy-agent
-        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' }}
-        env:
-          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
-          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
-          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
-        run: |
-          for name in DATABASE_URL AGENT_SERVICE_TOKEN; do
-            if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
-              echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
-              exit 1
-            fi
-          done
-          if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
-            echo "::error::PUBLIC_ORIGIN must use HTTPS"
-            exit 1
-          fi
-
-          agent_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
-            | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN" || $1 == "BUB_TELEGRAM_TOKEN"' \
-            | paste -sd, -)"
-          agent_image="${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
-          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}|BUB_TELEGRAM_MODE=${BUB_TELEGRAM_MODE}"
-          agent_runtime_args=(--cpu-throttling --min-instances=0)
-          telegram_secret_mapped=false
-          telegram_allow_list_configured=false
-          if [[ ",${agent_secret_mappings}," == *",BUB_TELEGRAM_TOKEN="* ]]; then
-            telegram_secret_mapped=true
-          fi
-          if [[ -n "${BUB_TELEGRAM_ALLOW_USERS}" || -n "${BUB_TELEGRAM_ALLOW_CHATS}" ]]; then
-            telegram_allow_list_configured=true
-          fi
-          if [[ "${telegram_allow_list_configured}" == "true" && "${telegram_secret_mapped}" != "true" ]]; then
-            echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured"
-            exit 1
-          fi
-          if [[ "${telegram_secret_mapped}" == "true" && "${telegram_allow_list_configured}" != "true" ]]; then
-            echo "::error::BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled"
-            exit 1
-          fi
-          if [[ "${telegram_secret_mapped}" == "true" ]]; then
-            if [[ "${BUB_TELEGRAM_MODE}" == "webhook" ]]; then
-              agent_runtime_args=(--cpu-throttling --min-instances=0)
-            else
-              agent_runtime_args=(--no-cpu-throttling --min-instances=1)
-            fi
-          fi
-          gcloud run deploy "${AGENT_SERVICE}" \
-            --project="${GCP_PROJECT_ID}" \
-            --region="${GCP_REGION}" \
-            --image="${agent_image}" \
-            --service-account="${GCP_RUNTIME_SERVICE_ACCOUNT}" \
-            --execution-environment=gen2 \
-            --no-allow-unauthenticated \
-            --ingress=all \
-            --port=8080 \
-            --cpu=1 \
-            --memory=1Gi \
-            --concurrency=8 \
-            "${agent_runtime_args[@]}" \
-            --max-instances=1 \
-            --timeout=900s \
-            --set-env-vars="${agent_env}" \
-            --set-secrets="${agent_secret_mappings}" \
-            --quiet
-
-          policy_file="$(mktemp)"
-          jq -n \
-            --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
-            '{bindings: [{role: "roles/run.invoker", members: [$member]}]}' \
-            > "${policy_file}"
-          gcloud run services set-iam-policy "${AGENT_SERVICE}" "${policy_file}" \
-            --project="${GCP_PROJECT_ID}" \
-            --region="${GCP_REGION}" \
-            --quiet
-          rm -f "${policy_file}"
-
-          agent_url="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
-          if [[ "${agent_url}" != https://* ]]; then
-            echo "::error::Bub Agent URL was not published"
-            exit 1
-          fi
-          ready="$(gcloud run services describe "${AGENT_SERVICE}" \
-            --project="${GCP_PROJECT_ID}" \
-            --region="${GCP_REGION}" \
-            --format='value(status.conditions[0].status)')"
-          if [[ "${ready}" != "True" ]]; then
-            echo "::error::Bub Agent service is not ready"
-            exit 1
-          fi
-          echo "url=${agent_url}" >> "$GITHUB_OUTPUT"
-          echo "Bub Agent: ${agent_url}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Tag deployed Bub Agent image as latest
-        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' }}
-        run: .github/scripts/update-artifact-latest-tag.sh "${AGENT_SERVICE}" "${{ needs.build-agent.outputs.digest }}"
-
       - name: Deploy Cloud Run service
         id: deploy-candidate
         if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.cloud_run == 'true' }}
@@ -464,22 +366,24 @@ jobs:
           CLOUD_RUN_EXTRA_ENV_VARS: ${{ vars.CLOUD_RUN_EXTRA_ENV_VARS }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
           DEPLOYED_WORKER_URL: ${{ steps.deploy-zip-worker.outputs.url }}
-          DEPLOYED_AGENT_URL: ${{ steps.deploy-agent.outputs.url }}
         run: |
           ZIP_WORKER_URL="${DEPLOYED_WORKER_URL}"
-          AGENT_SERVICE_URL="${DEPLOYED_AGENT_URL}"
+          AGENT_SERVICE_URL=""
           if [[ -z "${ZIP_WORKER_URL}" ]]; then
             ZIP_WORKER_URL="$(gcloud run services describe "${ZIP_WORKER_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
           fi
-          if [[ -z "${AGENT_SERVICE_URL}" ]]; then
-            AGENT_SERVICE_URL="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          AGENT_SERVICE_URL="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)' 2>/dev/null || true)"
+          agent_url_placeholder=false
+          if [[ "${AGENT_SERVICE_URL}" != https://* && "${{ needs.plan.outputs.agent_service }}" == "true" ]]; then
+            AGENT_SERVICE_URL="${PUBLIC_ORIGIN}"
+            agent_url_placeholder=true
           fi
           if [[ "${ZIP_WORKER_URL}" != https://* ]]; then
             echo "::error::ZIP worker URL was not published; run a manual deployment to create it"
             exit 1
           fi
           if [[ "${AGENT_SERVICE_URL}" != https://* ]]; then
-            echo "::error::Bub Agent URL was not published"
+            echo "::error::Bub Agent URL was not published and no Agent deployment is planned"
             exit 1
           fi
 
@@ -581,6 +485,7 @@ jobs:
           echo "service_existed=${service_existed}" >> "$GITHUB_OUTPUT"
           echo "legacy_migration_required=${legacy_migration_required}" >> "$GITHUB_OUTPUT"
           echo "candidate_image=${candidate_image}" >> "$GITHUB_OUTPUT"
+          echo "agent_url_placeholder=${agent_url_placeholder}" >> "$GITHUB_OUTPUT"
 
           traffic_args=(--tag="${revision_tag}")
           if [[ "${service_existed}" == "true" ]]; then
@@ -693,8 +598,141 @@ jobs:
           curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "${service_url}/" >/dev/null
           echo "Cloud Run: ${service_url}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Deploy private Bub Agent
+        id: deploy-agent
+        if: >-
+          ${{ steps.freshness.outputs.proceed == 'true' &&
+              needs.plan.outputs.agent_service == 'true' &&
+              (needs.plan.outputs.cloud_run != 'true' || steps.verify-promote.outcome == 'success') }}
+        env:
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
+        run: |
+          for name in DATABASE_URL AGENT_SERVICE_TOKEN; do
+            if [[ ",${CLOUD_RUN_SECRET_MAPPINGS}," != *",${name}="* ]]; then
+              echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define ${name}"
+              exit 1
+            fi
+          done
+          if [[ "${PUBLIC_ORIGIN}" != https://* ]]; then
+            echo "::error::PUBLIC_ORIGIN must use HTTPS"
+            exit 1
+          fi
+
+          agent_secret_mappings="$(tr ',' '\n' <<<"${CLOUD_RUN_SECRET_MAPPINGS}" \
+            | awk -F= '$1 == "DATABASE_URL" || $1 == "AGENT_SERVICE_TOKEN" || $1 == "BUB_TELEGRAM_TOKEN"' \
+            | paste -sd, -)"
+          agent_image="${{ needs.build-agent.outputs.image }}@${{ needs.build-agent.outputs.digest }}"
+          agent_env="^|^LEDGER_API_URL=${PUBLIC_ORIGIN}|BUB_MODEL=${BUB_MODEL}|BUB_API_BASE=${PUBLIC_ORIGIN}/api/internal/agent/model|BUB_TELEGRAM_ALLOW_USERS=${BUB_TELEGRAM_ALLOW_USERS}|BUB_TELEGRAM_ALLOW_CHATS=${BUB_TELEGRAM_ALLOW_CHATS}|BUB_TELEGRAM_MODE=${BUB_TELEGRAM_MODE}"
+          agent_runtime_args=(--cpu-throttling --min-instances=0)
+          telegram_secret_mapped=false
+          telegram_allow_list_configured=false
+          if [[ ",${agent_secret_mappings}," == *",BUB_TELEGRAM_TOKEN="* ]]; then
+            telegram_secret_mapped=true
+          fi
+          if [[ -n "${BUB_TELEGRAM_ALLOW_USERS}" || -n "${BUB_TELEGRAM_ALLOW_CHATS}" ]]; then
+            telegram_allow_list_configured=true
+          fi
+          if [[ "${telegram_allow_list_configured}" == "true" && "${telegram_secret_mapped}" != "true" ]]; then
+            echo "::error::CLOUD_RUN_SECRET_MAPPINGS must define BUB_TELEGRAM_TOKEN when a Telegram allow-list is configured"
+            exit 1
+          fi
+          if [[ "${telegram_secret_mapped}" == "true" && "${telegram_allow_list_configured}" != "true" ]]; then
+            echo "::error::BUB_TELEGRAM_ALLOW_USERS or BUB_TELEGRAM_ALLOW_CHATS is required when Telegram is enabled"
+            exit 1
+          fi
+          if [[ "${telegram_secret_mapped}" == "true" ]]; then
+            if [[ "${BUB_TELEGRAM_MODE}" == "webhook" ]]; then
+              agent_runtime_args=(--cpu-throttling --min-instances=0)
+            else
+              agent_runtime_args=(--no-cpu-throttling --min-instances=1)
+            fi
+          fi
+          gcloud run deploy "${AGENT_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${agent_image}" \
+            --service-account="${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --execution-environment=gen2 \
+            --no-allow-unauthenticated \
+            --ingress=all \
+            --port=8080 \
+            --cpu=1 \
+            --memory=1Gi \
+            --concurrency=8 \
+            "${agent_runtime_args[@]}" \
+            --max-instances=1 \
+            --timeout=900s \
+            --set-env-vars="${agent_env}" \
+            --set-secrets="${agent_secret_mappings}" \
+            --quiet
+
+          policy_file="$(mktemp)"
+          jq -n \
+            --arg member "serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            '{bindings: [{role: "roles/run.invoker", members: [$member]}]}' \
+            > "${policy_file}"
+          gcloud run services set-iam-policy "${AGENT_SERVICE}" "${policy_file}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --quiet
+          rm -f "${policy_file}"
+
+          agent_url="$(gcloud run services describe "${AGENT_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          if [[ "${agent_url}" != https://* ]]; then
+            echo "::error::Bub Agent URL was not published"
+            exit 1
+          fi
+          ready="$(gcloud run services describe "${AGENT_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.conditions[0].status)')"
+          if [[ "${ready}" != "True" ]]; then
+            echo "::error::Bub Agent service is not ready"
+            exit 1
+          fi
+          echo "url=${agent_url}" >> "$GITHUB_OUTPUT"
+          echo "Bub Agent: ${agent_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bind first Agent service URL to Cloud Run
+        if: >-
+          ${{ steps.deploy-agent.outcome == 'success' &&
+              needs.plan.outputs.cloud_run == 'true' &&
+              steps.deploy-candidate.outputs.agent_url_placeholder == 'true' }}
+        env:
+          AGENT_SERVICE_URL: ${{ steps.deploy-agent.outputs.url }}
+        run: |
+          gcloud run services update "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --update-env-vars="AGENT_SERVICE_URL=${AGENT_SERVICE_URL},AGENT_SERVICE_AUDIENCE=${AGENT_SERVICE_URL}" \
+            --quiet
+          bound_revision="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.latestReadyRevisionName)')"
+          if [[ -z "${bound_revision}" ]]; then
+            echo "::error::Cloud Run did not publish the Agent-bound revision"
+            exit 1
+          fi
+          gcloud run services update-traffic "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --to-revisions="${bound_revision}=100" \
+            --quiet
+          service_url="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${service_url}/api/health" >/dev/null
+
+      - name: Tag deployed Bub Agent image as latest
+        if: ${{ steps.deploy-agent.outcome == 'success' }}
+        run: .github/scripts/update-artifact-latest-tag.sh "${AGENT_SERVICE}" "${{ needs.build-agent.outputs.digest }}"
+
       - name: Configure Telegram webhook
-        if: ${{ steps.verify-promote.outcome == 'success' && env.BUB_TELEGRAM_MODE == 'webhook' && needs.plan.outputs.cloud_run == 'true' }}
+        if: >-
+          ${{ steps.deploy-agent.outcome == 'success' &&
+              (needs.plan.outputs.cloud_run != 'true' || steps.verify-promote.outcome == 'success') &&
+              env.BUB_TELEGRAM_MODE == 'webhook' }}
         env:
           PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
@@ -735,7 +773,7 @@ jobs:
           echo "Telegram webhook: ${webhook_url}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove stale Telegram webhook
-        if: ${{ steps.freshness.outputs.proceed == 'true' && needs.plan.outputs.agent_service == 'true' && env.BUB_TELEGRAM_MODE != 'webhook' }}
+        if: ${{ needs.plan.outputs.agent_service == 'true' && steps.deploy-agent.outcome == 'success' && env.BUB_TELEGRAM_MODE != 'webhook' }}
         env:
           CLOUD_RUN_SECRET_MAPPINGS: ${{ secrets.CLOUD_RUN_SECRET_MAPPINGS }}
         run: |

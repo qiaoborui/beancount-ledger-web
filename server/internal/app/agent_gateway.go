@@ -3,17 +3,13 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,22 +19,7 @@ import (
 
 const (
 	agentServiceRequestTimeout = 14 * time.Minute
-	agentCapabilityLifetime    = 15 * time.Minute
 )
-
-type agentCapabilityClaims struct {
-	SessionID         string           `json:"sessionId"`
-	ClusterID         string           `json:"clusterId"`
-	Context           AgentPageContext `json:"context"`
-	SensitiveUnlocked bool             `json:"sensitiveUnlocked"`
-	AllowedTools      []string         `json:"allowedTools"`
-	Subject           string           `json:"subject,omitempty"`
-	ExpiresAt         int64            `json:"expiresAt"`
-}
-
-type agentCapabilityRequest struct {
-	Arguments json.RawMessage `json:"arguments"`
-}
 
 var newAgentServiceHTTPClient = func(ctx context.Context, audience string) (*http.Client, error) {
 	if strings.TrimSpace(audience) == "" {
@@ -59,23 +40,18 @@ func (s *Server) proxyLedgerAgentTurn(c *gin.Context, input AgentTurnRequest) er
 		}
 	}
 	capabilityToken, err := s.mintAgentCapabilityToken(agentCapabilityClaims{
-		SessionID:         input.SessionID,
-		ClusterID:         ledgerClusterID(s.cfg),
-		Context:           input.Context,
-		SensitiveUnlocked: input.Context.SensitiveUnlocked,
-		AllowedTools:      s.agentToolNames(false),
-		Subject:           "web",
-		ExpiresAt:         time.Now().Add(agentCapabilityLifetime).Unix(),
+		SessionID: input.SessionID, ClusterID: ledgerClusterID(s.cfg), Context: input.Context,
+		SensitiveUnlocked: input.Context.SensitiveUnlocked, AllowedTools: s.agentToolNames(false),
+		Subject: "web", ExpiresAt: time.Now().Add(agentCapabilityLifetime).Unix(),
 	})
 	if err != nil {
 		return err
 	}
 	payload := map[string]any{
-		"sessionId":       input.SessionID,
-		"message":         strings.TrimSpace(input.Message),
-		"context":         input.Context,
+		"sessionId": input.SessionID, "message": strings.TrimSpace(input.Message), "context": input.Context,
 		"capabilityToken": capabilityToken,
 		"systemPrompt":    agentSystemPrompt(input.Context, memories),
+		"mcpSystemPrompt": s.agentMCPSystemPrompt(input.Context, memories, false),
 	}
 	return s.proxyAgentSSE(c, "/v1/channels/web/messages", payload)
 }
@@ -162,169 +138,17 @@ func agentServiceResponseError(response *http.Response) error {
 	return errors.New(message)
 }
 
-func (s *Server) mintAgentCapabilityToken(claims agentCapabilityClaims) (string, error) {
-	raw, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-	payload := base64.RawURLEncoding.EncodeToString(raw)
-	signature := agentCapabilitySignature(payload, s.cfg.AgentServiceToken)
-	return payload + "." + signature, nil
-}
-
-func (s *Server) parseAgentCapabilityToken(token string) (agentCapabilityClaims, error) {
-	payload, signature, found := strings.Cut(strings.TrimSpace(token), ".")
-	if !found || payload == "" || signature == "" {
-		return agentCapabilityClaims{}, errors.New("invalid Agent capability token")
-	}
-	want := agentCapabilitySignature(payload, s.cfg.AgentServiceToken)
-	if subtle.ConstantTimeCompare([]byte(signature), []byte(want)) != 1 {
-		return agentCapabilityClaims{}, errors.New("invalid Agent capability signature")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(payload)
-	if err != nil {
-		return agentCapabilityClaims{}, errors.New("invalid Agent capability payload")
-	}
-	var claims agentCapabilityClaims
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return agentCapabilityClaims{}, errors.New("invalid Agent capability payload")
-	}
-	if claims.ExpiresAt < time.Now().Unix() {
-		return agentCapabilityClaims{}, errors.New("Agent capability token has expired")
-	}
-	if claims.ClusterID != ledgerClusterID(s.cfg) || normalizeAgentSessionID(claims.SessionID) != claims.SessionID {
-		return agentCapabilityClaims{}, errors.New("Agent capability token is not valid for this ledger")
-	}
-	claims.Context.SensitiveUnlocked = claims.SensitiveUnlocked
-	return claims, nil
-}
-
-func agentCapabilitySignature(payload, secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
 func (s *Server) requireAgentService(c *gin.Context) bool {
 	want := strings.TrimSpace(s.cfg.AgentServiceToken)
 	got := strings.TrimSpace(c.GetHeader("X-Agent-Service-Token"))
 	if got == "" {
-		got = strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		got, _ = bearerToken(c.GetHeader("Authorization"))
 	}
 	if want == "" || len(got) != len(want) || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Agent service token"})
 		return false
 	}
 	return true
-}
-
-func (s *Server) internalAgentTools(c *gin.Context) {
-	if !s.requireAgentService(c) {
-		return
-	}
-	tools := s.agentTools()
-	names := make([]string, 0, len(tools))
-	for name := range tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	result := make([]map[string]any, 0, len(names))
-	for _, name := range names {
-		tool := tools[name]
-		result = append(result, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-			"title": tool.Title, "executionStatus": tool.ExecutionStatus, "readOnly": tool.ReadOnly,
-		})
-	}
-	c.JSON(http.StatusOK, gin.H{"tools": result})
-}
-
-func (s *Server) internalAgentToolExecute(c *gin.Context) {
-	claims, request, ok := s.authorizeAgentCapabilityCall(c)
-	if !ok {
-		return
-	}
-	toolName := c.Param("toolName")
-	if !agentCapabilityAllowsTool(claims, toolName) {
-		errorJSON(c, http.StatusForbidden, errors.New("Agent capability does not allow this tool"))
-		return
-	}
-	tools := s.agentTools()
-	tool, arguments, _, err := validateAgentToolCall(tools, agentModelToolCall{ID: "capability-execute", Type: "function", Function: agentModelFunctionCall{Name: toolName, Arguments: string(request.Arguments)}}, map[string]struct{}{})
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	execution, err := tool.Execute(c.Request.Context(), arguments, claims.Context)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, agentCapabilityExecutionResponse(execution))
-}
-
-func (s *Server) authorizeAgentCapabilityCall(c *gin.Context) (agentCapabilityClaims, agentCapabilityRequest, bool) {
-	token := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
-	claims, err := s.parseAgentCapabilityToken(token)
-	if err != nil {
-		errorJSON(c, http.StatusUnauthorized, err)
-		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
-	}
-	active, err := s.agentCapabilitySubjectActive(c.Request.Context(), claims.Subject)
-	if err != nil {
-		errorJSON(c, http.StatusInternalServerError, err)
-		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
-	}
-	if !active {
-		errorJSON(c, http.StatusUnauthorized, errors.New("Agent access token has been revoked or expired"))
-		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
-	}
-	var request agentCapabilityRequest
-	if !bindJSON(c, &request) {
-		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
-	}
-	if len(request.Arguments) == 0 || !json.Valid(request.Arguments) {
-		errorJSON(c, http.StatusBadRequest, errors.New("arguments must be valid JSON"))
-		return agentCapabilityClaims{}, agentCapabilityRequest{}, false
-	}
-	return claims, request, true
-}
-
-func agentCapabilityExecutionResponse(execution agentToolExecution) gin.H {
-	modelOutput := execution.ModelOutput
-	if modelOutput == nil {
-		modelOutput = execution.ClientOutput
-	}
-	artifacts := execution.Artifacts
-	if artifacts == nil {
-		artifacts = []AgentArtifact{}
-	}
-	return gin.H{
-		"modelOutput": modelOutput, "clientOutput": execution.ClientOutput,
-		"artifacts": artifacts, "refreshLedger": execution.RefreshLedger,
-	}
-}
-
-func (s *Server) agentToolNames(readOnly bool) []string {
-	tools := s.agentTools()
-	names := make([]string, 0, len(tools))
-	for name, tool := range tools {
-		if readOnly && !tool.ReadOnly {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func agentCapabilityAllowsTool(claims agentCapabilityClaims, toolName string) bool {
-	for _, allowed := range claims.AllowedTools {
-		if allowed == toolName {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Server) internalAgentModelProxy(c *gin.Context) {

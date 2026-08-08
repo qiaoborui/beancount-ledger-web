@@ -8,6 +8,8 @@ export type AgentAccessTokenSummary = {
   expiresAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  scopes: string[];
+  legacy?: boolean;
 };
 
 export type CreatedAgentAccessToken = {
@@ -23,7 +25,7 @@ export class AgentAccessTokenManagementUnsupportedError extends Error {
 
 export async function listAgentAccessTokens(): Promise<AgentAccessTokenSummary[]> {
   const endpoint = currentApiEndpoint(readApiEndpointSettings());
-  if (endpoint.capabilities && !endpoint.capabilities.includes("agent-access-tokens-v1")) {
+  if (endpoint.capabilities && !endpoint.capabilities.includes("agent-access-tokens-v2")) {
     throw new AgentAccessTokenManagementUnsupportedError();
   }
   const response = await apiFetch("/api/agent/access-tokens", { method: "GET", cache: "no-store" }, { kind: "auth", endpoint });
@@ -33,11 +35,11 @@ export async function listAgentAccessTokens(): Promise<AgentAccessTokenSummary[]
   return Array.isArray(data.tokens) ? data.tokens : [];
 }
 
-export async function createAgentAccessToken(name: string): Promise<CreatedAgentAccessToken> {
+export async function createAgentAccessToken(name: string, scopes: string[] = ["read"]): Promise<CreatedAgentAccessToken> {
   const response = await apiFetch("/api/agent/access-tokens", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, scopes }),
   }, { kind: "auth" });
   const data = await readJson<CreatedAgentAccessToken & { error?: string }>(response);
   if (!response.ok) throw new Error(data.error || `创建 Agent 访问令牌失败：${response.status}`);

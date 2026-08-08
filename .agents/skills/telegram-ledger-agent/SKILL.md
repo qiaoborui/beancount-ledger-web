@@ -136,9 +136,9 @@ Reply that this requires an explicit non-Telegram maintenance workflow.
 For spending, budget, recent transactions, search, or anomaly questions:
 
 1. Resolve date/month.
-2. For simple totals, income, expenses, net, category summaries, or date-range summaries, prefer one `get_ledger_summary` call.
-3. Use `run_bql` only when the summary cannot answer a requested breakdown, detail, grouping, ordering, filter, or custom calculation. Do not use it to re-check an adequate summary.
-4. Use `search_memories` only when the user explicitly asks about remembered preferences or the answer genuinely depends on a saved preference. Never use memories for ordinary ledger queries or exploration.
+2. For simple totals, income, expenses, net, category summaries, or date-range summaries, prefer one `mcp.ledger_get_ledger_summary` call.
+3. Use `mcp.ledger_run_bql` only when the summary cannot answer a requested breakdown, detail, grouping, ordering, filter, or custom calculation. Do not use it to re-check an adequate summary.
+4. Use `mcp.ledger_search_memories` only when the user explicitly asks about remembered preferences or the answer genuinely depends on a saved preference. Never use memories for ordinary ledger queries or exploration.
 5. After every tool result, decide whether it is sufficient for the user's actual question. If it is, synthesize the answer; if not, call only the next necessary tool.
 6. Do not call adjacent tools merely to explore. Multiple tools remain appropriate when the requested answer genuinely needs them.
 7. Summarize briefly and offer a follow-up only if useful.
@@ -190,7 +190,7 @@ For requests that would bulk rewrite files, rename existing accounts, import sta
 
 ## Ledger Access Rules
 
-- In the hosted Telegram Agent, prefer the channel-provided ledger tools such as `get_ledger_summary`, `search_transactions`, and `run_bql`.
+- In the hosted Telegram Agent, prefer the channel-provided ledger tools such as `mcp.ledger_get_ledger_summary`, `mcp.ledger_search_transactions`, and `mcp.ledger_run_bql`.
 - Prefer packaged skill helper scripts when available:
   - `.agents/skills/telegram-ledger-agent/scripts/bub_query.py`
   - `.agents/skills/telegram-ledger-agent/scripts/bub_append.py`

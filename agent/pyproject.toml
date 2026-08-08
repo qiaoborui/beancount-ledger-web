@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "Bub-based agent runtime for Beancount Ledger Web"
 requires-python = ">=3.12,<4.0"
 dependencies = [
-  "bub==0.4.1",
+  "bub==0.4.2",
+  "bub-mcp==0.0.1",
   "bub-tapestore-sqlalchemy @ git+https://github.com/bubbuild/bub-contrib.git@34715077877041b21472dcca39d91529296a1a9e#subdirectory=packages/bub-tapestore-sqlalchemy",
   "fastapi>=0.116.0,<1",
   "httpx>=0.28.1,<1",
   "psycopg[binary]>=3.2.9,<4",
+  "republic==0.5.8",
   "uvicorn[standard]>=0.35.0,<1",
 ]
 

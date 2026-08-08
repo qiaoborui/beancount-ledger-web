@@ -6,8 +6,8 @@ describe("Agent access token API", () => {
 
   it("keeps plaintext tokens confined to the create response", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") return new Response(JSON.stringify({ token: "blw_agent_secret", credential: { id: "token-1", name: "MacBook", createdAt: "2026-08-05T00:00:00Z", expiresAt: "2026-11-03T00:00:00Z" } }), { status: 201 });
-      return new Response(JSON.stringify({ tokens: [{ id: "token-1", name: "MacBook", createdAt: "2026-08-05T00:00:00Z", expiresAt: "2026-11-03T00:00:00Z" }] }), { status: 200 });
+      if (init?.method === "POST") return new Response(JSON.stringify({ token: "blw_agent_secret", credential: { id: "token-1", name: "MacBook", createdAt: "2026-08-05T00:00:00Z", expiresAt: "2026-11-03T00:00:00Z", scopes: ["read"] } }), { status: 201 });
+      return new Response(JSON.stringify({ tokens: [{ id: "token-1", name: "MacBook", createdAt: "2026-08-05T00:00:00Z", expiresAt: "2026-11-03T00:00:00Z", scopes: ["read"] }] }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -16,6 +16,15 @@ describe("Agent access token API", () => {
 
     expect(created.token).toBe("blw_agent_secret");
     expect(JSON.stringify(listed)).not.toContain("blw_agent_secret");
+  });
+
+  it("sends explicit MCP scopes when creating a token", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify({ token: "token", credential: { id: "1", name: "writer", createdAt: "2026-08-05T00:00:00Z", expiresAt: "2026-11-03T00:00:00Z", scopes: ["read", "write"] } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createAgentAccessToken("writer", ["read", "write"]);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ name: "writer", scopes: ["read", "write"] });
   });
 
   it("uses DELETE without sending the plaintext token", async () => {
