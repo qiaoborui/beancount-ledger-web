@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 
 	"github.com/borui/beancount-ledger-web/server/internal/persistence"
 )
@@ -22,6 +23,10 @@ type applicationStorageAdapters struct {
 }
 
 func openApplicationStorageAdapters(cfg Config) (*applicationStorageAdapters, error) {
+	return openApplicationStorageAdaptersWithLogger(cfg, nil)
+}
+
+func openApplicationStorageAdaptersWithLogger(cfg Config, logger *slog.Logger) (*applicationStorageAdapters, error) {
 	adapters := &applicationStorageAdapters{config: cfg}
 	fail := func(err error) (*applicationStorageAdapters, error) {
 		return nil, errors.Join(err, closeResources(adapters.closers))
@@ -36,7 +41,7 @@ func openApplicationStorageAdapters(cfg Config) (*applicationStorageAdapters, er
 		if err != nil {
 			return fail(err)
 		}
-		adapters.runtimeConfig, err = NewRuntimeConfigStore(db)
+		adapters.runtimeConfig, err = NewRuntimeConfigStore(db, logger)
 		if err != nil {
 			return fail(err)
 		}

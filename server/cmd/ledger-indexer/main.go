@@ -5,9 +5,11 @@ import (
 	"log"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 func main() {
+	logger := logging.New(logging.LoadConfig())
 	cfg := app.LoadIndexerConfig()
 	if err := app.ValidateIndexerConfig(cfg); err != nil {
 		log.Fatal(err)
@@ -20,8 +22,8 @@ func main() {
 		log.Fatal(err)
 	}
 	if result.Skipped {
-		log.Printf("ledger indexer skipped revision=%d version=%s reason=%s", result.RevisionID, result.LedgerVersion.Version, result.SkipReason)
+		logger.Info("ledger indexer skipped", "revision", result.RevisionID, "version", result.LedgerVersion.Version, "reason", result.SkipReason)
 		return
 	}
-	log.Printf("ledger indexer indexed revision=%d version=%s files=%d", result.RevisionID, result.LedgerVersion.Version, result.LedgerVersion.FileCount)
+	logger.Info("ledger indexer indexed", "revision", result.RevisionID, "version", result.LedgerVersion.Version, "files", result.LedgerVersion.FileCount)
 }

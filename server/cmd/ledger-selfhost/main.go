@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -12,22 +13,24 @@ import (
 	"time"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	if err := run(); err != nil {
+	logger := logging.New(logging.LoadConfig())
+	if err := run(logger); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() (err error) {
+func run(logger *slog.Logger) (err error) {
 	cfg := app.LoadSelfHostedConfig()
 	if err := app.ValidateSelfHostedConfig(cfg); err != nil {
 		return err
 	}
-	application, err := app.NewApplication(cfg)
+	application, err := app.NewApplicationWithLogger(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -44,7 +47,7 @@ func run() (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := newHTTPServer(addr, application)
-	log.Printf("self-hosted ledger web listening on %s", addr)
+	logger.Info("self-hosted ledger web listening", "addr", addr)
 	return serveHTTP(ctx, server, listener)
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 type indexerStatus struct {
@@ -29,6 +31,7 @@ type indexerStatus struct {
 }
 
 func main() {
+	logger := logging.New(logging.LoadConfig())
 	cfg := app.LoadIndexerConfig()
 	runtimeConfigURL := strings.TrimSpace(os.Getenv("INDEXER_CONFIG_URL"))
 	validationConfig := cfg
@@ -45,7 +48,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go runIndexer(ctx, cfg, status, interval, retry, maxRetry, runtimeConfigURL)
+	go runIndexer(ctx, logger, cfg, status, interval, retry, maxRetry, runtimeConfigURL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", status.health)
@@ -79,7 +82,7 @@ func newHealthServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, interval, retry, maxRetry time.Duration, runtimeConfigURL string) {
+func runIndexer(ctx context.Context, logger *slog.Logger, cfg app.Config, status *indexerStatus, interval, retry, maxRetry time.Duration, runtimeConfigURL string) {
 	failures := 0
 	for {
 		status.mu.Lock()
@@ -99,7 +102,7 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 				if delay > maxRetry {
 					delay = maxRetry
 				}
-				log.Printf("ledger indexer waiting for runtime config attempt=%d retryIn=%s error=%v", failures, delay, err)
+				logger.Warn("ledger indexer waiting for runtime config", "attempt", failures, "retry_in", delay, "error", err)
 				if !wait(ctx, delay) {
 					return
 				}
@@ -122,7 +125,7 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 				if delay > activeMaxRetry {
 					delay = activeMaxRetry
 				}
-				log.Printf("ledger indexer runtime config invalid attempt=%d retryIn=%s error=%v", failures, delay, err)
+				logger.Warn("ledger indexer runtime config invalid", "attempt", failures, "retry_in", delay, "error", err)
 				if !wait(ctx, delay) {
 					return
 				}
@@ -131,7 +134,7 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 		}
 		requestBoundary, boundaryErr := app.PendingLedgerIndexRequestBoundary(ctx, activeConfig)
 		if boundaryErr != nil {
-			log.Printf("read ledger index request boundary: %v", boundaryErr)
+			logger.Warn("read ledger index request boundary", "error", boundaryErr)
 		}
 		err := app.SyncLedgerGitCheckout(ctx, activeConfig)
 		var result app.LedgerIndexResult
@@ -147,7 +150,7 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 			if delay > activeMaxRetry {
 				delay = activeMaxRetry
 			}
-			log.Printf("ledger indexer failed attempt=%d retryIn=%s error=%v", failures, delay, err)
+			logger.Warn("ledger indexer failed", "attempt", failures, "retry_in", delay, "error", err)
 			if !wait(ctx, delay) {
 				return
 			}
@@ -160,9 +163,9 @@ func runIndexer(ctx context.Context, cfg app.Config, status *indexerStatus, inte
 		status.lastRevision = result.RevisionID
 		status.mu.Unlock()
 		if err := app.CompleteLedgerIndexRequests(ctx, activeConfig, requestBoundary); err != nil {
-			log.Printf("complete ledger index requests: %v", err)
+			logger.Warn("complete ledger index requests", "error", err)
 		}
-		log.Printf("ledger indexer complete revision=%d skipped=%t", result.RevisionID, result.Skipped)
+		logger.Info("ledger indexer complete", "revision", result.RevisionID, "skipped", result.Skipped)
 		if !app.WaitForLedgerIndexTrigger(ctx, activeConfig, activeInterval) {
 			return
 		}

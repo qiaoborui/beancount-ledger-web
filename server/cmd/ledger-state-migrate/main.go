@@ -6,22 +6,26 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 type migration struct {
 	sourceDir string
 	write     bool
 	store     app.RuntimeStore
+	logger    *slog.Logger
 	jsonCount int
 	fileCount int
 }
 
 func main() {
+	logger := logging.New(logging.LoadConfig())
 	sourceDir := flag.String("runtime-dir", strings.TrimSpace(os.Getenv("RUNTIME_DIR")), "legacy runtime directory")
 	databaseURL := flag.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres DATABASE_URL")
 	write := flag.Bool("write", false, "write migrated state; without this flag the command is a dry run")
@@ -38,7 +42,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	m := migration{sourceDir: filepath.Clean(*sourceDir), write: *write, store: store}
+	m := migration{sourceDir: filepath.Clean(*sourceDir), write: *write, store: store, logger: logger}
 	if err := m.run(context.Background()); err != nil {
 		log.Fatal(err)
 	}
@@ -46,7 +50,7 @@ func main() {
 	if m.write {
 		mode = "write"
 	}
-	log.Printf("ledger state migration complete mode=%s json=%d files=%d", mode, m.jsonCount, m.fileCount)
+	logger.Info("ledger state migration complete", "mode", mode, "json", m.jsonCount, "files", m.fileCount)
 }
 
 func (m *migration) run(ctx context.Context) error {
@@ -74,7 +78,7 @@ func (m *migration) migrateJSON(ctx context.Context, path, scope, key string) er
 		return fmt.Errorf("%s is not valid JSON", path)
 	}
 	m.jsonCount++
-	log.Printf("json %s/%s <= %s", scope, key, path)
+	m.logger.Info("json state", "scope", scope, "key", key, "path", path)
 	if !m.write {
 		return nil
 	}
@@ -127,7 +131,7 @@ func (m *migration) migrateImport(ctx context.Context, importID, dir string) err
 			continue
 		}
 		if !isPathInside(dir, path) {
-			log.Printf("skip %s outside legacy import directory: %s", candidate.field, path)
+			m.logger.Warn("skip file outside legacy import directory", "field", candidate.field, "path", path)
 			continue
 		}
 		key, err := m.migrateImportFile(ctx, importID, candidate.key, path)
@@ -142,7 +146,7 @@ func (m *migration) migrateImport(ctx context.Context, importID, dir string) err
 		return err
 	}
 	m.jsonCount++
-	log.Printf("json imports/%s/meta <= %s", importID, metaPath)
+	m.logger.Info("json import meta", "import_id", importID, "path", metaPath)
 	if !m.write {
 		return nil
 	}
@@ -190,7 +194,7 @@ func (m *migration) migrateImportFile(ctx context.Context, importID, name, path 
 	}
 	key := importID + "/" + name
 	m.fileCount++
-	log.Printf("file imports/%s <= %s", key, path)
+	m.logger.Info("file state", "key", key, "path", path)
 	if !m.write {
 		return key, nil
 	}
