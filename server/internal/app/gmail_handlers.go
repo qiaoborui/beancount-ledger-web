@@ -226,9 +226,10 @@ func (s *Server) gmailPubSub(c *gin.Context) {
 }
 
 func (s *Server) gmailPendingImports(c *gin.Context) {
-	if !requireSensitive(c) {
+	if !requireAuth(c) {
 		return
 	}
+	sensitiveUnlocked := isSensitiveUnlocked(c)
 	store, err := s.gmailPendingSnapshot(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -240,6 +241,17 @@ func (s *Server) gmailPendingImports(c *gin.Context) {
 		items[index].SourceKey = ""
 		items[index].OutputFile = ""
 		items[index].StoredBytes = 0
+		if !sensitiveUnlocked {
+			items[index].ImportID = ""
+			items[index].MessageID = ""
+			items[index].ThreadID = ""
+			items[index].Sender = ""
+			items[index].Subject = ""
+			items[index].ReceivedAt = ""
+			items[index].Filename = ""
+			items[index].Provider = ""
+			items[index].Error = ""
+		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if pendingStatusRank(items[i].Status) != pendingStatusRank(items[j].Status) {
