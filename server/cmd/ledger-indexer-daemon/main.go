@@ -50,7 +50,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", status.health)
 	mux.HandleFunc("/ready", status.ready)
-	server := &http.Server{Addr: ":" + strconv.Itoa(intEnv("LEDGER_INDEX_HEALTH_PORT", 3001)), Handler: mux}
+	server := newHealthServer(":"+strconv.Itoa(intEnv("LEDGER_INDEX_HEALTH_PORT", 3001)), mux)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -59,6 +59,23 @@ func main() {
 	}()
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+// newHealthServer returns the /health and /ready server with explicit timeouts
+// so slow or stalled clients cannot hold connections open indefinitely. The
+// handlers are trivial JSON responses, so a short WriteTimeout bounds slow
+// clients, while ReadHeaderTimeout/ReadTimeout reject stalled connections and
+// MaxHeaderBytes caps header size at 1 MiB.
+func newHealthServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 

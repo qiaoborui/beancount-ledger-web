@@ -33,12 +33,7 @@ func run() error {
 	if port == "" {
 		port = "8080"
 	}
-	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           app.NewZIPWorkerHandler(workers),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       30 * time.Second,
-	}
+	server := newHTTPServer(":"+port, app.NewZIPWorkerHandler(workers))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	serveErr := make(chan error, 1)
@@ -56,6 +51,26 @@ func run() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		return errors.Join(server.Shutdown(shutdownCtx), normalizeServerError(<-serveErr))
+	}
+}
+
+// newHTTPServer returns the ZIP worker HTTP server with explicit timeouts so
+// slow or stalled clients cannot hold connections open indefinitely.
+// ReadHeaderTimeout (10s) rejects stalled header reads, ReadTimeout (30s) covers
+// the multi-MB archive upload, and IdleTimeout (60s) bounds idle keep-alive
+// connections. WriteTimeout is generous (15m) because a legitimate password
+// search may run long: the caller cancels the request context on its own import
+// timeout, so the worker must not cut off an in-flight search with a short
+// write deadline.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 
