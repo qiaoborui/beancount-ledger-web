@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	bqlDialectVersion       = 2
 	bqlDefaultLimit         = 100
 	bqlMaxLimit             = 500
 	bqlMaxQueryLength       = 12000
@@ -83,6 +84,25 @@ type bqlCondition struct {
 	op      string
 	values  []bqlLiteral
 	pattern *regexp.Regexp
+}
+
+type bqlValidationIssue struct {
+	Code     string   `json:"code"`
+	Clause   string   `json:"clause,omitempty"`
+	Position int      `json:"position,omitempty"`
+	Message  string   `json:"message"`
+	Expected []string `json:"expected,omitempty"`
+}
+
+type bqlValidationError struct {
+	issue bqlValidationIssue
+}
+
+func (e *bqlValidationError) Error() string {
+	if e.issue.Clause == "" {
+		return e.issue.Message
+	}
+	return e.issue.Clause + ": " + e.issue.Message
 }
 
 type bqlExpression struct {
@@ -177,6 +197,67 @@ func bqlOperatorCapabilities() []string {
 		}
 	}
 	return operators
+}
+
+func bqlConditionOperatorNames() []string {
+	return []string{
+		bqlOpEqual, bqlOpNotEqual, bqlOpGreater, bqlOpGreaterEq, bqlOpLess, bqlOpLessEq,
+		bqlOpLike, bqlOpMatch, bqlOpNotMatch, bqlOpIn, bqlOpBetween, "IS", "NOT",
+	}
+}
+
+func newBQLValidationError(code, clause string, position int, message string, expected ...string) error {
+	return &bqlValidationError{issue: bqlValidationIssue{
+		Code: code, Clause: clause, Position: position, Message: message, Expected: expected,
+	}}
+}
+
+func bqlValidationIssueFromError(err error) bqlValidationIssue {
+	var validationErr *bqlValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.issue
+	}
+
+	message := err.Error()
+	issue := bqlValidationIssue{Code: "invalid_query", Message: message}
+	for _, clause := range []string{"WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "SELECT", "FROM"} {
+		if strings.HasPrefix(message, clause+": ") {
+			issue.Clause = clause
+			issue.Message = strings.TrimPrefix(message, clause+": ")
+			break
+		}
+		if strings.Contains(message, clause) {
+			issue.Clause = clause
+			break
+		}
+	}
+
+	switch {
+	case strings.Contains(message, "长度不能超过"):
+		issue.Code = "query_too_long"
+	case strings.Contains(message, "查询不能为空"):
+		issue.Code = "empty_query"
+	case strings.Contains(message, "只支持只读 SELECT"):
+		issue.Code = "unsupported_statement"
+		issue.Clause = "SELECT"
+		issue.Expected = []string{"SELECT"}
+	case strings.Contains(message, "缺少 FROM"):
+		issue.Code = "missing_from"
+		issue.Clause = "FROM"
+		issue.Expected = []string{"FROM postings", "FROM transactions"}
+	case strings.Contains(message, "不支持的 BQL 表"):
+		issue.Code = "unsupported_table"
+		issue.Clause = "FROM"
+		issue.Expected = []string{"postings", "transactions"}
+	case strings.Contains(message, "正则表达式无效"):
+		issue.Code = "invalid_regex"
+	case strings.Contains(message, "不支持") && strings.Contains(message, "字段"):
+		issue.Code = "unsupported_field"
+	case strings.Contains(message, "LIMIT 必须"):
+		issue.Code = "invalid_limit"
+		issue.Clause = "LIMIT"
+	}
+	return issue
 }
 
 func (s *LedgerReadService) BQL(ctx context.Context, rawQuery, rawValuationCurrency string) (BQLResult, error) {
@@ -589,9 +670,10 @@ func normalizeBQLGroupBy(groupBy []string, selects []bqlSelect) ([]string, error
 }
 
 type bqlToken struct {
-	kind   string
-	text   string
-	quoted bool
+	kind     string
+	text     string
+	quoted   bool
+	position int
 }
 
 type bqlExpressionParser struct {
@@ -604,9 +686,9 @@ func parseBQLExpression(raw, clause string) (*bqlExpression, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
 	}
-	tokens, err := tokenizeBQLExpression(raw)
+	tokens, err := tokenizeBQLExpression(raw, clause)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", clause, err)
+		return nil, err
 	}
 	parser := bqlExpressionParser{clause: clause, tokens: tokens}
 	expression, err := parser.parseOr()
@@ -619,7 +701,7 @@ func parseBQLExpression(raw, clause string) (*bqlExpression, error) {
 	return expression, nil
 }
 
-func tokenizeBQLExpression(raw string) ([]bqlToken, error) {
+func tokenizeBQLExpression(raw, clause string) ([]bqlToken, error) {
 	tokens := []bqlToken{}
 	depth := 0
 	for index := 0; index < len(raw); {
@@ -632,23 +714,24 @@ func tokenizeBQLExpression(raw string) ([]bqlToken, error) {
 		case '(':
 			depth++
 			if depth > bqlMaxExpressionDepth {
-				return nil, fmt.Errorf("表达式括号嵌套不能超过 %d 层", bqlMaxExpressionDepth)
+				return nil, newBQLValidationError("expression_too_complex", clause, index+1, fmt.Sprintf("表达式括号嵌套不能超过 %d 层", bqlMaxExpressionDepth))
 			}
-			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch)})
+			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch), position: index + 1})
 			index++
 			continue
 		case ')':
 			if depth > 0 {
 				depth--
 			}
-			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch)})
+			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch), position: index + 1})
 			index++
 			continue
 		case ',':
-			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch)})
+			tokens = append(tokens, bqlToken{kind: string(ch), text: string(ch), position: index + 1})
 			index++
 			continue
 		case '\'', '"':
+			start := index
 			quote := ch
 			index++
 			var value strings.Builder
@@ -668,9 +751,9 @@ func tokenizeBQLExpression(raw string) ([]bqlToken, error) {
 				index++
 			}
 			if !closed {
-				return nil, errors.New("字符串缺少结束引号")
+				return nil, newBQLValidationError("unterminated_string", clause, start+1, "字符串缺少结束引号", string(quote))
 			}
-			tokens = append(tokens, bqlToken{kind: "value", text: value.String(), quoted: true})
+			tokens = append(tokens, bqlToken{kind: "value", text: value.String(), quoted: true, position: start + 1})
 			continue
 		}
 		if strings.ContainsRune("=<>!~", rune(ch)) {
@@ -681,7 +764,7 @@ func tokenizeBQLExpression(raw string) ([]bqlToken, error) {
 					length = 2
 				}
 			}
-			tokens = append(tokens, bqlToken{kind: "operator", text: raw[index : index+length]})
+			tokens = append(tokens, bqlToken{kind: "operator", text: raw[index : index+length], position: index + 1})
 			index += length
 			continue
 		}
@@ -698,14 +781,14 @@ func tokenizeBQLExpression(raw string) ([]bqlToken, error) {
 			index++
 		}
 		if start == index {
-			return nil, fmt.Errorf("无法识别字符 %q", ch)
+			return nil, newBQLValidationError("invalid_character", clause, index+1, fmt.Sprintf("无法识别字符 %q", ch))
 		}
-		tokens = append(tokens, bqlToken{kind: "value", text: raw[start:index]})
+		tokens = append(tokens, bqlToken{kind: "value", text: raw[start:index], position: start + 1})
 		if len(tokens) > bqlMaxExpressionTokens {
-			return nil, fmt.Errorf("表达式不能超过 %d 个词法单元", bqlMaxExpressionTokens)
+			return nil, newBQLValidationError("expression_too_complex", clause, start+1, fmt.Sprintf("表达式不能超过 %d 个词法单元", bqlMaxExpressionTokens))
 		}
 	}
-	tokens = append(tokens, bqlToken{kind: "eof"})
+	tokens = append(tokens, bqlToken{kind: "eof", position: len(raw) + 1})
 	return tokens, nil
 }
 
@@ -770,7 +853,7 @@ func (p *bqlExpressionParser) parsePrimary() (*bqlExpression, error) {
 			return nil, err
 		}
 		if !p.matchKind(")") {
-			return nil, p.errorf("缺少右括号")
+			return nil, p.issue("expected_right_parenthesis", []string{")"}, "缺少右括号")
 		}
 		return expression, nil
 	}
@@ -868,7 +951,7 @@ func (p *bqlExpressionParser) parseCondition() (bqlCondition, error) {
 
 	operator := p.peek()
 	if operator.kind != "operator" || !bqlDirectOperator(operator.text) {
-		return bqlCondition{}, p.errorf("字段 %q 后缺少支持的比较运算符", field)
+		return bqlCondition{}, p.issue("expected_operator", bqlConditionOperatorNames(), "字段 %q 后缺少支持的比较运算符", field)
 	}
 	p.index++
 	value, err := p.parseLiteral()
@@ -919,7 +1002,7 @@ func (p *bqlExpressionParser) parseLiteral() (bqlLiteral, error) {
 
 func (p *bqlExpressionParser) peek() bqlToken {
 	if p.index >= len(p.tokens) {
-		return bqlToken{kind: "eof"}
+		return bqlToken{kind: "eof", position: 1}
 	}
 	return p.tokens[p.index]
 }
@@ -942,7 +1025,11 @@ func (p *bqlExpressionParser) matchKeyword(keyword string) bool {
 }
 
 func (p *bqlExpressionParser) errorf(format string, args ...any) error {
-	return fmt.Errorf("%s: %s", p.clause, fmt.Sprintf(format, args...))
+	return p.issue("invalid_expression", nil, format, args...)
+}
+
+func (p *bqlExpressionParser) issue(code string, expected []string, format string, args ...any) error {
+	return newBQLValidationError(code, p.clause, p.peek().position, fmt.Sprintf(format, args...), expected...)
 }
 
 func parseBQLTokenLiteral(token bqlToken) (bqlLiteral, error) {

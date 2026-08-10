@@ -106,12 +106,18 @@ func (s *Server) agentTools() map[string]agentTool {
 				if err := decodeAgentArgs(raw, &input); err != nil {
 					return agentToolExecution{}, err
 				}
-				if _, err := parseBQL(input.Query); err != nil {
-					return agentToolExecution{}, err
-				}
 				query := strings.TrimSpace(input.Query)
+				if _, err := parseBQL(input.Query); err != nil {
+					result := map[string]any{
+						"valid":          false,
+						"query":          query,
+						"dialectVersion": bqlDialectVersion,
+						"error":          bqlValidationIssueFromError(err),
+					}
+					return agentToolExecution{ModelOutput: result, ClientOutput: result}, nil
+				}
 				artifact := AgentArtifact{ID: newAgentID("artifact"), Type: "bql_query", Title: "BQL 查询", Data: map[string]any{"query": query}}
-				result := map[string]any{"valid": true, "query": query}
+				result := map[string]any{"valid": true, "query": query, "dialectVersion": bqlDialectVersion}
 				return agentToolExecution{ModelOutput: result, ClientOutput: result, Artifacts: []AgentArtifact{artifact}}, nil
 			},
 		},
@@ -538,7 +544,7 @@ func agentSystemPrompt(page AgentPageContext, memories []AgentMemoryRecord) stri
 	return `你是 Beancount Ledger Web 的全局账本 Agent。你必须通过工具读取事实和执行操作，不能假装调用工具，也不能编造账本数据。
 
 规则：
-1. 查询、统计和搜索优先调用只读工具。涉及 BQL 时先读取能力并校验；用户要求结果时运行 BQL。
+1. 查询、统计和搜索优先调用只读工具。首次生成 BQL 时先读取 get_bql_capabilities。只需要生成或展示查询时调用 validate_bql；用户需要查询结果时直接调用 run_bql，因为 run_bql 已包含校验。运行失败时根据错误修复，最多重试一次。
 2. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
 3. 生成账户操作前先 get_accounts，再 draft_account_operations。
 4. 用户要新增交易时使用 append_transactions；要修改既有交易时，先 search_transactions，再使用 update_transaction；要删除既有交易时，先 search_transactions，再使用 delete_transaction；只有明确要求冲销时才用 reverse_transaction。绝不能用追加替代更新或删除。
@@ -567,7 +573,7 @@ func agentTelegramSystemPrompt(page AgentPageContext, memories []AgentMemoryReco
 回复规则：
 1. 问候、闲聊或不明确的请求：直接简短回复，不要调用任何工具。
 2. 简单总额、收入、支出、净额、分类汇总或日期范围汇总，优先只调用 get_ledger_summary。
-3. 只有 get_ledger_summary 无法回答的明细、分组、排序、筛选或自定义计算，才使用 run_bql；不要用 run_bql 重复验证已经返回的简单汇总。
+3. 只有 get_ledger_summary 无法回答的明细、分组、排序、筛选或自定义计算，才使用 BQL。首次生成 BQL 时先读取 get_bql_capabilities。只需要生成或展示查询时调用 validate_bql；用户需要结果时直接调用 run_bql，因为 run_bql 已包含校验。运行失败时根据错误修复，最多重试一次；不要用 run_bql 重复验证已经返回的简单汇总。
 4. search_memories 只用于用户明确询问已记住的偏好或习惯，或当前回答确实依赖已保存偏好；不得用于一般账本查询、统计或探索。
 5. 每次工具返回后，先判断结果是否已经足以回答用户原问题。足够时应读取结果、综合并生成自然语言回复；只有证据不足时才调用下一项必要工具。不得为了探索相邻问题而调用额外工具；原问题确实需要时可以使用多个工具。
 6. 生成交易前先 get_accounts，再 draft_transactions 或 validate_transactions。交易按每个币种分别平衡。LedgerEntry 的 amount 与 postings[].amount 一律为元单位字符串，例如 13.80；绝不把分金额乘以 100。
@@ -762,6 +768,7 @@ func headRows(rows [][]any, limit int) [][]any {
 }
 func bqlCapabilities() map[string]any {
 	return map[string]any{
+		"dialectVersion": bqlDialectVersion,
 		"tables": map[string]any{
 			"postings":     bqlFieldOrder("postings"),
 			"transactions": bqlFieldOrder("transactions"),
