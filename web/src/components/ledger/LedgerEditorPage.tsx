@@ -1,5 +1,7 @@
 import { ChevronDown, ChevronRight, FileCode2, FolderOpen, RotateCcw, Save, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/apiEndpoints";
 
@@ -36,6 +38,7 @@ type DiffLine = {
 };
 
 export function LedgerEditorPage({ online, onSaved, showToast }: { online: boolean; onSaved: () => void; showToast: ToastFn }) {
+  const { t } = useTranslation();
   const [files, setFiles] = useState<LedgerEditorFile[]>([]);
   const [fileQuery, setFileQuery] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set([""]));
@@ -93,7 +96,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
 
   const loadFile = useCallback(async (path: string, options: { force?: boolean } = {}) => {
     if (!path) return;
-    if (!options.force && dirtyRef.current && !window.confirm("当前文件尚未保存，确定切换到其他文件？")) return;
+    if (!options.force && dirtyRef.current && !window.confirm(t("editorPage.confirmSwitch"))) return;
     setLoadingFile(true);
     setError("");
     try {
@@ -108,13 +111,13 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
         window.setTimeout(() => textareaRef.current?.focus(), 40);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "读取文件失败";
+      const message = err instanceof Error ? err.message : t("editorPage.readFailed");
       setError(message);
       showToast("error", message);
     } finally {
       setLoadingFile(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -128,18 +131,18 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
         await loadFile(firstPath, { force: true });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "读取文件列表失败";
+      const message = err instanceof Error ? err.message : t("editorPage.listFailed");
       setError(message);
       showToast("error", message);
     } finally {
       setLoadingFiles(false);
     }
-  }, [loadFile, showToast]);
+  }, [loadFile, showToast, t]);
 
   const saveFile = useCallback(async () => {
     if (!selectedPath || saving) return;
     if (!online) {
-      showToast("error", "当前离线，无法保存账本文件。");
+      showToast("error", t("editorPage.offlineCannotSave"));
       return;
     }
     setSaving(true);
@@ -153,17 +156,17 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
       setHash(data.hash);
       setModTime(data.modTime);
       setOriginalContent(content);
-      showToast("success", "账本文件已保存，并通过 bean-check。");
+      showToast("success", t("editorPage.saved"));
       onSaved();
       void loadFiles();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "保存失败";
+      const message = err instanceof Error ? err.message : t("editorPage.saveFailed");
       setError(message);
       showToast("error", message);
     } finally {
       setSaving(false);
     }
-  }, [content, hash, loadFiles, onSaved, online, saving, selectedPath, showToast]);
+  }, [content, hash, loadFiles, onSaved, online, saving, selectedPath, showToast, t]);
 
   useEffect(() => {
     void loadFiles();
@@ -226,40 +229,40 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
       <div className="grid min-h-[calc(100dvh-13rem)] min-w-0 lg:grid-cols-[310px_minmax(0,1fr)]">
         <aside className="min-w-0 border-b border-line bg-paper/70 lg:border-b-0 lg:border-r">
           <div className="border-b border-line p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-stone"><FolderOpen className="h-3.5 w-3.5" /> ledger files</div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-stone"><FolderOpen className="h-3.5 w-3.5" /> {t("editorPage.ledgerFiles")}</div>
             <label className="mt-3 flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm text-stone">
               <Search className="h-4 w-4 shrink-0 text-brand" />
-              <input className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-ink shadow-none focus:shadow-none" placeholder="搜索文件" value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
+              <input className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-ink shadow-none focus:shadow-none" placeholder={t("editorPage.searchFiles")} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
             </label>
           </div>
           <div className="max-h-[42dvh] overflow-auto p-2 lg:max-h-[calc(100dvh-18rem)]">
-            {loadingFiles ? <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">正在读取文件列表…</div> : tree.children.length ? tree.children.map((node) => (
+            {loadingFiles ? <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">{t("editorPage.loadingFiles")}</div> : tree.children.length ? tree.children.map((node) => (
               <FileTreeNode key={node.path || node.name} node={node} depth={0} selectedPath={selectedPath} queryActive={fileQuery.trim() !== ""} expandedDirs={expandedDirs} onToggleDir={toggleDir} onOpenFile={loadFile} />
-            )) : <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">没有匹配的可编辑账本文件。</div>}
+            )) : <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">{t("editorPage.noMatch")}</div>}
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-col bg-panel">
           <div className="flex min-w-0 flex-col gap-3 border-b border-line bg-paper px-4 py-3 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="truncate font-mono text-sm font-semibold text-ink">{selectedPath || "未选择文件"}{dirty && <span className="ml-2 text-brand">●</span>}</div>
+              <div className="truncate font-mono text-sm font-semibold text-ink">{selectedPath || t("editorPage.noFileSelected")}{dirty && <span className="ml-2 text-brand">●</span>}</div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
-                <span>{stats.lines} 行</span>
-                <span>{stats.chars} 字符</span>
+                <span>{t("editorPage.lines", { count: stats.lines })}</span>
+                <span>{t("editorPage.chars", { count: stats.chars })}</span>
                 {selectedFile && <span>{formatBytes(selectedFile.size)}</span>}
-                {modTime && <span>{new Date(modTime).toLocaleString()}</span>}
+                {modTime && <span>{new Date(modTime).toLocaleString(i18n.language)}</span>}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <div className="grid h-9 grid-cols-2 overflow-hidden rounded-xl border border-line bg-panel">
-                <button type="button" className={`px-3 text-sm ${mode === "edit" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("edit")}>编辑</button>
+                <button type="button" className={`px-3 text-sm ${mode === "edit" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("edit")}>{t("editorPage.edit")}</button>
                 <button type="button" className={`px-3 text-sm ${mode === "diff" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("diff")}>Diff</button>
               </div>
-              <Button variant="outline" className="rounded-xl bg-panel text-stone" disabled={!dirty || loadingFile || saving} onClick={() => { setContent(originalContent); showToast("info", "已恢复为上次读取的内容。"); }}>
-                <RotateCcw className="h-4 w-4" /> 还原
+              <Button variant="outline" className="rounded-xl bg-panel text-stone" disabled={!dirty || loadingFile || saving} onClick={() => { setContent(originalContent); showToast("info", t("editorPage.reverted")); }}>
+                <RotateCcw className="h-4 w-4" /> {t("editorPage.revert")}
               </Button>
               <Button className="rounded-xl" disabled={!dirty || loadingFile || saving || !selectedPath} onClick={() => void saveFile()}>
-                <Save className="h-4 w-4" /> {saving ? "保存中…" : "保存"}
+                <Save className="h-4 w-4" /> {saving ? t("editorPage.saving") : t("editorPage.save")}
               </Button>
             </div>
           </div>
@@ -267,7 +270,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
           {error && <div className="border-b border-line bg-[var(--danger)]/10 px-4 py-2 text-sm text-[var(--danger)]">{error}</div>}
           {mode === "edit" ? (
             <div className="ledger-code-surface relative min-h-[520px] flex-1 lg:min-h-0">
-              {loadingFile && <div className="ledger-code-loading absolute inset-0 z-20 grid place-items-center text-sm backdrop-blur-sm">正在读取文件…</div>}
+              {loadingFile && <div className="ledger-code-loading absolute inset-0 z-20 grid place-items-center text-sm backdrop-blur-sm">{t("editorPage.loadingFile")}</div>}
               <pre ref={highlightRef} aria-hidden="true" className="ledger-editor-highlight absolute inset-0 overflow-auto p-0">
                 <code className="block min-w-max py-4 pr-6">{renderHighlightedLines(content)}</code>
               </pre>
@@ -280,7 +283,7 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
                 onChange={(event) => setContent(event.target.value)}
                 onScroll={handleEditorScroll}
                 onKeyDown={handleEditorKeyDown}
-                aria-label="Beancount 文件编辑器"
+                aria-label={t("editorPage.editorLabel")}
               />
             </div>
           ) : (
@@ -318,15 +321,16 @@ function FileTreeNode({ node, depth, selectedPath, queryActive, expandedDirs, on
 }
 
 function DiffView({ lines, added, removed }: { lines: DiffLine[]; added: number; removed: number }) {
+  const { t } = useTranslation();
   const hasChanges = added > 0 || removed > 0;
   return (
     <div className="ledger-code-surface flex min-h-[520px] flex-1 flex-col lg:min-h-0">
       <div className="ledger-diff-toolbar flex shrink-0 items-center justify-between px-4 py-2 font-mono text-xs">
-        <span>{hasChanges ? `+${added} / -${removed}` : "没有未保存改动"}</span>
-        <span>working copy diff</span>
+        <span>{hasChanges ? `+${added} / -${removed}` : t("editorPage.noChanges")}</span>
+        <span>{t("editorPage.workingCopyDiff")}</span>
       </div>
       <div className="ledger-diff-view flex-1 overflow-auto py-3">
-        {hasChanges ? lines.map((line, index) => <DiffLineRow key={`${index}-${line.kind}`} line={line} />) : <div className="ledger-diff-empty grid min-h-80 place-items-center text-sm">编辑文件后，这里会显示相对加载版本的 Diff。</div>}
+        {hasChanges ? lines.map((line, index) => <DiffLineRow key={`${index}-${line.kind}`} line={line} />) : <div className="ledger-diff-empty grid min-h-80 place-items-center text-sm">{t("editorPage.diffEmpty")}</div>}
       </div>
     </div>
   );
@@ -429,7 +433,7 @@ async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit): Promi
   const text = await response.text();
   const data = text ? JSON.parse(text) as T & { error?: string } : null;
   if (!response.ok) {
-    throw new Error(data?.error ?? "请求失败");
+    throw new Error(data?.error ?? i18n.t("editorPage.requestFailed"));
   }
   return data as T;
 }

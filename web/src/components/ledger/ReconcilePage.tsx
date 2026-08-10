@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle, Info } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
@@ -26,10 +27,10 @@ function classifyAccount(account: string): "wealth" | "liability" | "cash" {
   return "cash";
 }
 
-const typeMeta: Record<"wealth" | "liability" | "cash", { label: string; cls: string; hint: string }> = {
-  wealth: { label: "利息自动调整", cls: "bg-tag text-brand border-line", hint: "差额将自动走收益/亏损科目" },
-  liability: { label: "差额需核实", cls: "bg-panel text-[var(--danger)] border-line", hint: "负债差额通常说明有漏记账或还款记录需核实" },
-  cash: { label: "差额待调整", cls: "bg-panel text-warm border-line", hint: "差额将记入权益调整科目，后续需补记账" },
+const typeMeta: Record<"wealth" | "liability" | "cash", { labelKey: string; cls: string; hintKey: string }> = {
+  wealth: { labelKey: "reconcile.wealthLabel", cls: "bg-tag text-brand border-line", hintKey: "reconcile.wealthHint" },
+  liability: { labelKey: "reconcile.liabilityLabel", cls: "bg-panel text-[var(--danger)] border-line", hintKey: "reconcile.liabilityHint" },
+  cash: { labelKey: "reconcile.cashLabel", cls: "bg-panel text-warm border-line", hintKey: "reconcile.cashHint" },
 };
 
 function wealthInterestAccount(_account: string): string {
@@ -59,13 +60,12 @@ function adjustmentPreview(account: string, diff: number, date: string): { debit
 }
 
 export function ReconcilePage({ timeRange, rows, onSubmit, statuses }: { timeRange: TimeRange; rows: ReconcileRow[]; onSubmit: (input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) => void; statuses?: AccountStatus[] }) {
+  const { t } = useTranslation();
   return <section className="space-y-4">
     <div className="card p-4">
-      <h2 className="font-serif text-2xl">待对账</h2>
+      <h2 className="font-serif text-2xl">{t("reconcile.title")}</h2>
       <p className="mt-2 text-sm leading-relaxed text-olive">
-        建议节奏：<span className="font-medium text-warm">5 号</span>（工资 + 信用卡还款后）·
-        <span className="font-medium text-warm">17 号</span>（账单日后）·
-        <span className="font-medium text-warm">月末</span>（理财、现金）
+        {t("reconcile.rhythm", { a: "5 号", b: "17 号", c: "月末" })}
       </p>
     </div>
     {rows.map((row) => (
@@ -75,6 +75,7 @@ export function ReconcilePage({ timeRange, rows, onSubmit, statuses }: { timeRan
 }
 
 function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRange; row: ReconcileRow; onSubmit: (input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) => void; status?: AccountStatus }) {
+  const { t } = useTranslation();
   const [actual, setActual] = useState("");
   const [balanceDate, setBalanceDate] = useState(todayStr());
   const actualCents = actual ? Math.round(Number(actual) * 100) : null;
@@ -98,7 +99,7 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
           <div className="flex items-center gap-2">
             <h3 className="font-medium leading-tight">{row.label}</h3>
             <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>
-              {meta.label}
+              {t(meta.labelKey)}
             </span>
           </div>
           <div className="mt-0.5 text-xs text-stone">{row.account}</div>
@@ -106,7 +107,7 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
         <div className="flex items-center gap-2">
           {status && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(status.status)}`} title={statusTitle(status)} />}
           <span className={row.status === "asserted" ? "text-xs text-brand" : "text-xs text-stone"}>
-            {row.status === "asserted" ? "已断言" : "未断言"}
+            {row.status === "asserted" ? t("reconcile.asserted") : t("reconcile.notAsserted")}
           </span>
         </div>
       </div>
@@ -114,21 +115,21 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
       {/* book balance info */}
       <div className="grid grid-cols-2 gap-3 border-t border-line px-4 py-3 text-sm">
         <div>
-          账本余额：<strong>{formatMoney(row.ledgerBalance / 100, row.currency)}</strong>
+          {t("reconcile.bookBalance")}<strong>{formatMoney(row.ledgerBalance / 100, row.currency)}</strong>
         </div>
         <div>
-          最近断言：{row.lastAssertion ? <>{row.lastAssertion.date} {formatMoney(row.lastAssertion.amount / 100, row.lastAssertion.currency)}</> : <span className="text-stone">无</span>}
+          {t("reconcile.lastAssertion")}{row.lastAssertion ? <>{row.lastAssertion.date} {formatMoney(row.lastAssertion.amount / 100, row.lastAssertion.currency)}</> : <span className="text-stone">{t("reconcile.none")}</span>}
         </div>
       </div>
 
       {/* input area */}
       <div className="border-t border-line px-4 py-3">
-        <label className="mb-1 block text-xs text-stone">实际余额（来自 App / 银行 / 对账单）</label>
+        <label className="mb-1 block text-xs text-stone">{t("reconcile.actualBalanceLabel")}</label>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
           <Input
             className="h-11 rounded-xl bg-panel text-sm"
             inputMode="decimal"
-            placeholder={row.account.startsWith("Liabilities") ? "欠款填负数，如 -5000.00" : "如 12345.67"}
+            placeholder={row.account.startsWith("Liabilities") ? t("reconcile.liabilityPlaceholder") : t("reconcile.amountPlaceholder")}
             value={actual}
             onChange={(e) => setActual(e.target.value)}
           />
@@ -137,17 +138,17 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
             type="date"
             value={balanceDate}
             onChange={(e) => setBalanceDate(e.target.value)}
-            title="对账日：余额断言将写在这一天"
+            title={t("reconcile.balanceDateTitle")}
           />
           <Button
             className="h-11 rounded-xl px-5 text-sm"
             disabled={diff == null}
             onClick={handleSubmit}
           >
-            {diff === 0 ? "写入断言" : "调整并断言"}
+            {diff === 0 ? t("reconcile.writeAssertion") : t("reconcile.adjustAndAssert")}
           </Button>
         </div>
-        <p className="mt-1.5 text-xs text-stone">对账日填写余额断言日期；调整分录将自动写入对账日前一天（{adjDate}）。</p>
+        <p className="mt-1.5 text-xs text-stone">{t("reconcile.balanceDateHint", { date: adjDate })}</p>
       </div>
 
       {/* feedback area */}
@@ -156,8 +157,8 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
           {diff === 0 ? (
             <div className="flex items-center gap-2 rounded-xl border border-line bg-panel px-4 py-3">
               <CheckCircle className="h-4 w-4 text-[var(--success)]" />
-              <span className="text-sm font-medium text-warm">账实相符</span>
-              <span className="text-xs text-stone">点击「写入断言」记录本次对账结果。</span>
+              <span className="text-sm font-medium text-warm">{t("reconcile.matches")}</span>
+              <span className="text-xs text-stone">{t("reconcile.matchesHint")}</span>
             </div>
           ) : (
             <>
@@ -165,9 +166,9 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
                 <AlertTriangle className="mt-0.5 h-4 w-4 text-[var(--warning)]" />
                 <div>
                   <p className="text-sm font-medium text-warm">
-                    差额 <span className="tabular-nums text-brand">{formatMoney(diff / 100, row.currency)}</span>
+                    {t("reconcile.difference")} <span className="tabular-nums text-brand">{formatMoney(diff / 100, row.currency)}</span>
                   </p>
-                  <p className="mt-0.5 text-xs text-stone">{meta.hint}</p>
+                  <p className="mt-0.5 text-xs text-stone">{t(meta.hintKey)}</p>
                 </div>
               </div>
 
@@ -175,10 +176,10 @@ function ReconcileCard({ timeRange, row, onSubmit, status }: { timeRange: TimeRa
                 <div className="mt-3 rounded-xl border border-line bg-panel p-3">
                   <div className="mb-2 flex items-center gap-1.5 text-xs text-stone">
                     <Info className="h-3 w-3" />
-                    调整分录预览
+                    {t("reconcile.adjustmentPreview")}
                   </div>
                   <div className="space-y-1 rounded-lg bg-tag px-3 py-2 font-mono text-xs">
-                    <div className="text-stone">{preview.date} * "余额差额调整"</div>
+                    <div className="text-stone">{preview.date} * "{t("reconcile.balanceAdjustmentNarration")}"</div>
                     <div className="flex gap-2 pl-3">
                       <span className="text-warm">{preview.debitLabel}</span>
                       <span className="amount-gold ml-auto">

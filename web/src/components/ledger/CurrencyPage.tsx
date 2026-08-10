@@ -1,6 +1,8 @@
 import { AlertTriangle, Coins } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
+import i18n from "@/i18n";
 import type { AccountBalance, AccountView, Price } from "./types";
 
 type RateSource = "base" | "direct" | "inverse" | "bridge";
@@ -24,6 +26,7 @@ export function CurrencyPage({
   onUnlockSensitive: () => void;
   onValuationCurrencyChange: (currency: string) => void;
 }) {
+  const { t } = useTranslation();
   const currencyOptions = useMemo(() => currencyUniverse(commodities, prices, accountBalances, accounts, valuationCurrency), [accountBalances, accounts, commodities, prices, valuationCurrency]);
   const latestPriceDate = prices.reduce<string | null>((latest, price) => latest == null || price.date > latest ? price.date : latest, null);
 
@@ -43,16 +46,16 @@ export function CurrencyPage({
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 text-xs uppercase text-stone">
             <Coins className="h-3.5 w-3.5 text-brand" />
-            fx rates
+            {t("currencyPage.fxRates")}
           </div>
-          <h2 className="mt-3 font-serif text-3xl font-medium text-ink">当前汇率</h2>
+          <h2 className="mt-3 font-serif text-3xl font-medium text-ink">{t("currencyPage.title")}</h2>
           <p className="mt-2 text-sm leading-6 text-olive">
-            以 <strong className="text-ink">{valuationCurrency}</strong> 为估值口径，展示每个币种的最新换算和历史曲线。
-            {latestPriceDate ? <span className="text-stone"> 最新价格日期 {latestPriceDate}。</span> : <span className="text-stone"> 暂无价格记录。</span>}
+            {t("currencyPage.intro", { currency: <strong className="text-ink">{valuationCurrency}</strong> })}
+            {latestPriceDate ? <span className="text-stone"> {t("currencyPage.latestPriceDate", { date: latestPriceDate })}</span> : <span className="text-stone"> {t("currencyPage.noPriceRecords")}</span>}
           </p>
         </div>
         <div className="min-w-0">
-          <div className="mb-2 text-xs uppercase text-stone">估值币种</div>
+          <div className="mb-2 text-xs uppercase text-stone">{t("currencyPage.valuationCurrency")}</div>
           <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
             {currencyOptions.map((currency) => {
               const active = currency === valuationCurrency;
@@ -67,18 +70,18 @@ export function CurrencyPage({
 
     {missingRateCount > 0 && <section className="rounded-2xl border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-4 text-sm leading-6 text-olive">
       <AlertTriangle className="mr-2 inline h-4 w-4 text-[var(--warning)]" />
-      {missingRateCount} 个币种缺少到 {valuationCurrency} 的价格，无法生成当前汇率。
+      {t("currencyPage.missingRateWarning", { count: missingRateCount, currency: valuationCurrency })}
     </section>}
 
     <section className="card overflow-hidden p-0">
       <div className="hidden grid-cols-[120px_minmax(220px,1fr)_120px_minmax(220px,0.9fr)] gap-4 border-b border-line bg-paper px-5 py-3 text-xs uppercase text-stone md:grid">
-        <div>币种</div>
-        <div>当前汇率</div>
-        <div className="text-right">最近变化</div>
-        <div>曲线</div>
+        <div>{t("currencyPage.currency")}</div>
+        <div>{t("currencyPage.currentRate")}</div>
+        <div className="text-right">{t("currencyPage.recentChange")}</div>
+        <div>{t("currencyPage.chart")}</div>
       </div>
       <div className="divide-y divide-line">
-        {rows.length === 0 ? <div className="p-5 text-sm text-stone">暂无可展示币种。</div> : rows.map((row) => <CurrencyRateRow key={row.currency} row={row} valuationCurrency={valuationCurrency} />)}
+        {rows.length === 0 ? <div className="p-5 text-sm text-stone">{t("currencyPage.noCurrencies")}</div> : rows.map((row) => <CurrencyRateRow key={row.currency} row={row} valuationCurrency={valuationCurrency} />)}
       </div>
     </section>
   </div>;
@@ -101,7 +104,7 @@ function CurrencyRateRow({ row, valuationCurrency }: { row: { currency: string; 
     </div>
     <div className={`text-sm font-medium tabular-nums md:text-right ${changeTone(change)}`}>{formatRateChange(change)}</div>
     <div className="h-24 min-w-0 md:h-20">
-      {row.history.length >= 2 ? <RateSparkline points={row.history} valuationCurrency={valuationCurrency} currency={row.currency} /> : <div className="grid h-full place-items-center rounded-xl border border-dashed border-line bg-paper text-xs text-stone">暂无曲线</div>}
+      {row.history.length >= 2 ? <RateSparkline points={row.history} valuationCurrency={valuationCurrency} currency={row.currency} /> : <div className="grid h-full place-items-center rounded-xl border border-dashed border-line bg-paper text-xs text-stone">{i18n.t("currencyPage.noCurve")}</div>}
     </div>
   </article>;
 }
@@ -123,29 +126,29 @@ function RateSparkline({ points, currency, valuationCurrency }: { points: RatePo
 }
 
 function RateSourceBadge({ currency, valuationCurrency, rate }: { currency: string; valuationCurrency: string; rate: RateInfo }) {
-  if (currency === valuationCurrency) return <span className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-paper">基准</span>;
-  if (!rate) return <span className="rounded-full bg-[var(--danger)]/10 px-2.5 py-1 text-xs font-medium text-[var(--danger)]">缺汇率</span>;
+  if (currency === valuationCurrency) return <span className="rounded-full bg-brand px-2.5 py-1 text-xs font-medium text-paper">{i18n.t("currencyPage.base")}</span>;
+  if (!rate) return <span className="rounded-full bg-[var(--danger)]/10 px-2.5 py-1 text-xs font-medium text-[var(--danger)]">{i18n.t("currencyPage.missingRate")}</span>;
   return <span className="rounded-full bg-tag px-2.5 py-1 text-xs font-medium text-olive">{rateSourceLabel(rate)}</span>;
 }
 
 function rateValue(currency: string, valuationCurrency: string, rate: RateInfo) {
-  if (currency === valuationCurrency) return `1 ${currency} = 1 ${valuationCurrency}`;
-  if (!rate) return `缺少 ${currency}/${valuationCurrency}`;
-  return `1 ${currency} = ${formatRateNumber(rate.rate)} ${valuationCurrency}`;
+  if (currency === valuationCurrency) return i18n.t("currencyPage.baseEqual", { currency, valuation: valuationCurrency });
+  if (!rate) return i18n.t("currencyPage.missingPair", { currency, valuation: valuationCurrency });
+  return i18n.t("currencyPage.equal", { currency, rate: formatRateNumber(rate.rate), valuation: valuationCurrency });
 }
 
 function rateDate(rate: RateInfo) {
-  if (!rate) return "没有可用价格";
-  if (!rate.date) return "当前基准";
+  if (!rate) return i18n.t("currencyPage.noAvailablePrice");
+  if (!rate.date) return i18n.t("currencyPage.currentBaseline");
   return rate.date;
 }
 
 function rateSourceLabel(rate: RateInfo) {
-  if (!rate) return "无法估值";
-  if (rate.source === "base") return "同币种";
-  if (rate.source === "bridge") return "交叉汇率";
-  if (rate.source === "inverse") return "反向价格";
-  return "直接价格";
+  if (!rate) return i18n.t("currencyPage.cannotValue");
+  if (rate.source === "base") return i18n.t("currencyPage.sameCurrency");
+  if (rate.source === "bridge") return i18n.t("currencyPage.crossRate");
+  if (rate.source === "inverse") return i18n.t("currencyPage.inversePrice");
+  return i18n.t("currencyPage.directPrice");
 }
 
 function rateChange(points: RatePoint[]) {
@@ -157,7 +160,7 @@ function rateChange(points: RatePoint[]) {
 }
 
 function formatRateChange(change: number | null) {
-  if (change == null) return "暂无变化";
+  if (change == null) return i18n.t("currencyPage.noChange");
   const sign = change > 0 ? "+" : "";
   return `${sign}${(change * 100).toFixed(2)}%`;
 }
