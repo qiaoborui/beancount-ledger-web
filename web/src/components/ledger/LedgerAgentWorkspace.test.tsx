@@ -10,7 +10,7 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("ledger-agent-dock");
     expect(source).toContain('presentation = "dock"');
     expect(source).toContain('presentation === "page"');
-    expect(source).toContain("账本 Agent 工作区");
+    expect(source).toContain("agentWorkspace.agentWorkspaceLabel");
     expect(source).toContain("min-h-0 w-72");
     expect(source).toContain("w-full min-w-0");
     expect(source).toContain("fixed inset-0");
@@ -35,24 +35,24 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('artifact.type === "bql_query"');
     expect(source).toContain('artifact.type === "transaction_draft"');
     expect(source).toContain('artifact.type === "transaction_change"');
-    expect(source).toContain("原始 Beancount");
+    expect(source).toContain("agentWorkspace.originalBeancount");
     expect(source).toContain('artifact.type === "chart"');
     expect(source).toContain("AgentMessageBubble");
-    expect(source).toContain("全屏查看会话");
-    expect(source).toContain("会话历史");
-    expect(source).toContain("移动端会话历史");
-    expect(source).toContain("查看会话历史");
+    expect(source).toContain("agentWorkspace.fullscreenView");
+    expect(source).toContain("agentWorkspace.sessionHistory");
+    expect(source).toContain("agentWorkspace.mobileSessionHistory");
+    expect(source).toContain("agentWorkspace.viewSessionHistory");
   });
 
   it("keeps the composer compact and exposes safe Agent starters", () => {
     expect(source).toContain("min-h-14");
     expect(source).not.toContain("本次请求已完成 8 轮工具处理");
     expect(source).not.toContain("canContinue");
-    expect(source).toContain("支出分析");
-    expect(source).toContain("生成记账草稿");
-    expect(source).toContain("对账检查");
-    expect(source).toContain("账户维护");
-    expect(source).toContain("导入整理");
+    expect(source).toContain("agentWorkspace.starterExpenseAnalysis");
+    expect(source).toContain("agentWorkspace.starterDraft");
+    expect(source).toContain("agentWorkspace.starterReconcile");
+    expect(source).toContain("agentWorkspace.starterAccounts");
+    expect(source).toContain("agentWorkspace.starterImports");
   });
 
   it("keeps live status, tool progress, and streaming text in one main-flow work region", () => {
@@ -66,7 +66,7 @@ describe("LedgerAgentWorkspace", () => {
     expect(activeTurnTools(timeline).map((item) => item.id)).toEqual(["current-1", "current-2"]);
     expect(source).toContain("AgentWorkStatus");
     expect(source).toContain('aria-live="polite"');
-    expect(source).toContain("Agent 正在工作");
+    expect(source).toContain("agentWorkspace.agentWorking");
     expect(source).not.toContain("{busy && streamingText && <MessageBubble");
   });
 
