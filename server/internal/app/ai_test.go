@@ -185,6 +185,9 @@ func TestRunBQLToolUsesMajorUnitsForModelOutput(t *testing.T) {
 
 func TestBQLCapabilitiesExplainExpenseFiltering(t *testing.T) {
 	capabilities := bqlCapabilities()
+	if capabilities["dialectVersion"] != bqlDialectVersion {
+		t.Fatalf("unexpected BQL dialect version: %#v", capabilities["dialectVersion"])
+	}
 	examples, ok := capabilities["examples"].([]string)
 	if !ok || !strings.Contains(strings.Join(examples, "\n"), "account LIKE 'Expenses:%'") {
 		t.Fatalf("BQL capabilities must include a valid expense query: %#v", capabilities)
@@ -192,6 +195,50 @@ func TestBQLCapabilitiesExplainExpenseFiltering(t *testing.T) {
 	fieldNotes, ok := capabilities["fieldNotes"].(map[string]any)
 	if !ok || !strings.Contains(fmt.Sprint(fieldNotes["type"]), "expense, income, transfer") {
 		t.Fatalf("BQL capabilities must explain type values: %#v", capabilities)
+	}
+}
+
+func TestValidateBQLToolReturnsStructuredResults(t *testing.T) {
+	tool := testAgentServer(t).agentTools()["validate_bql"]
+	valid, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"SELECT date FROM transactions WHERE payee = 'Cafe'"}`), AgentPageContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validOutput := valid.ModelOutput.(map[string]any)
+	if validOutput["valid"] != true || validOutput["dialectVersion"] != bqlDialectVersion || len(valid.Artifacts) != 1 {
+		t.Fatalf("unexpected valid BQL result: %#v artifacts=%#v", validOutput, valid.Artifacts)
+	}
+
+	invalid, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"SELECT date FROM transactions WHERE payee OR 'Cafe'"}`), AgentPageContext{})
+	if err != nil {
+		t.Fatalf("invalid BQL must return a structured validation result: %v", err)
+	}
+	invalidOutput := invalid.ModelOutput.(map[string]any)
+	issue, ok := invalidOutput["error"].(bqlValidationIssue)
+	if invalidOutput["valid"] != false || invalidOutput["dialectVersion"] != bqlDialectVersion || !ok {
+		t.Fatalf("unexpected invalid BQL result: %#v", invalidOutput)
+	}
+	if issue.Code != "expected_operator" || issue.Clause != "WHERE" || issue.Position != 7 || !containsString(issue.Expected, "=") {
+		t.Fatalf("unexpected structured validation issue: %#v", issue)
+	}
+	if len(invalid.Artifacts) != 0 {
+		t.Fatalf("invalid BQL must not create artifacts: %#v", invalid.Artifacts)
+	}
+}
+
+func TestAgentPromptsAvoidRedundantBQLValidation(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"web":      agentSystemPrompt(AgentPageContext{}, nil),
+		"telegram": agentTelegramSystemPrompt(AgentPageContext{}, nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(prompt, "需要") || !strings.Contains(prompt, "直接调用 run_bql") || !strings.Contains(prompt, "最多重试一次") {
+				t.Fatalf("prompt must explain the direct execution flow: %q", prompt)
+			}
+			if strings.Contains(prompt, "先读取能力并校验") {
+				t.Fatalf("prompt must not require redundant validation: %q", prompt)
+			}
+		})
 	}
 }
 

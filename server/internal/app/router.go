@@ -111,6 +111,10 @@ func (s *Server) bql(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
+	if !s.limiter.Check(c, "bql.run", 120, time.Minute) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bqlMaxRequestBodyLength)
 	var input BQLRequest
 	if !bindJSON(c, &input) {
 		return

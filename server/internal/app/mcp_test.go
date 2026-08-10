@@ -134,6 +134,26 @@ func TestMCPServiceTokenSupportsCurrentAndLegacyProtocols(t *testing.T) {
 	if envelope["modelOutput"] == nil || envelope["artifacts"] == nil || envelope["refreshLedger"] != false {
 		t.Fatalf("unexpected MCP result envelope: %#v", envelope)
 	}
+	capabilities, _ := envelope["modelOutput"].(map[string]any)
+	if capabilities["dialectVersion"] != float64(bqlDialectVersion) {
+		t.Fatalf("unexpected MCP BQL dialect version: %#v", capabilities)
+	}
+	validationResult, err := session.CallTool(t.Context(), &mcp.CallToolParams{
+		Name:      "ledger_validate_bql",
+		Arguments: map[string]any{"query": "SELECT date FROM transactions WHERE payee OR 'Cafe'"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validationResult.IsError {
+		t.Fatalf("invalid BQL must be returned as validation data: %#v", validationResult)
+	}
+	validationEnvelope := mcpTestEnvelope(t, validationResult)
+	validationOutput, _ := validationEnvelope["modelOutput"].(map[string]any)
+	validationIssue, _ := validationOutput["error"].(map[string]any)
+	if validationOutput["valid"] != false || validationOutput["dialectVersion"] != float64(bqlDialectVersion) || validationIssue["code"] != "expected_operator" || validationIssue["clause"] != "WHERE" || validationIssue["position"] != float64(7) {
+		t.Fatalf("unexpected MCP validation result: %#v", validationOutput)
+	}
 	contextResult, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      agentMCPContextToolName,
 		Arguments: map[string]any{"channel": "telegram"},
@@ -144,7 +164,7 @@ func TestMCPServiceTokenSupportsCurrentAndLegacyProtocols(t *testing.T) {
 	contextEnvelope := mcpTestEnvelope(t, contextResult)
 	modelOutput, _ := contextEnvelope["modelOutput"].(map[string]any)
 	prompt, _ := modelOutput["systemPrompt"].(string)
-	if !strings.Contains(prompt, "Telegram") || !strings.Contains(prompt, "ledger_get_ledger_summary") || strings.Contains(prompt, " mcp.ledger_") {
+	if !strings.Contains(prompt, "Telegram") || !strings.Contains(prompt, "ledger_get_ledger_summary") || !strings.Contains(prompt, "ledger_run_bql") || !strings.Contains(prompt, "ledger_validate_bql") || strings.Contains(prompt, " mcp.ledger_") {
 		t.Fatalf("unexpected MCP context prompt: %q", prompt)
 	}
 
