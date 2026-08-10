@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { activeTurnTools, normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { activeTurnTools, agentToolNeedsSensitiveUnlock, normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
+const importPageSource = readFileSync(new URL("./ImportPage.tsx", import.meta.url), "utf8");
 
 describe("LedgerAgentWorkspace", () => {
   it("supports docked and mobile full-screen layouts", () => {
@@ -67,6 +68,24 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain('aria-live="polite"');
     expect(source).toContain("Agent 正在工作");
     expect(source).not.toContain("{busy && streamingText && <MessageBubble");
+  });
+
+  it("turns sensitive tool failures into an in-workspace unlock request", () => {
+    expect(agentToolNeedsSensitiveUnlock("请先解锁敏感数据后再使用这个工具")).toBe(true);
+    expect(agentToolNeedsSensitiveUnlock("Sensitive data is locked")).toBe(true);
+    expect(agentToolNeedsSensitiveUnlock("BQL syntax error")).toBe(false);
+    expect(source).toContain("apiSensitiveDataLockedEvent");
+    expect(source).toContain("解锁敏感数据");
+  });
+
+  it("keeps locked Gmail pending items visible and makes Review unlock-aware", () => {
+    const loadGmailStart = importPageSource.indexOf("async function loadGmailAutomation");
+    const connectGmailStart = importPageSource.indexOf("async function connectGmail", loadGmailStart);
+    expect(importPageSource.slice(loadGmailStart, connectGmailStart)).not.toContain("setPendingImports([]);");
+    expect(importPageSource).toContain("收到一份待处理账单");
+    const openPendingStart = importPageSource.indexOf("async function openPendingImport");
+    const dismissPendingStart = importPageSource.indexOf("async function dismissPendingImport", openPendingStart);
+    expect(importPageSource.slice(openPendingStart, dismissPendingStart)).toContain('{ kind: "write" }');
   });
 
   it("converts BQL money values from minor units before charting", () => {

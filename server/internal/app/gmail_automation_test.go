@@ -1069,7 +1069,16 @@ func TestPruneGmailPendingKeepsUnreviewedItems(t *testing.T) {
 func TestGmailRoutesStayAuthenticatedWhenDisabled(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")
-	router := testRouter(t, cfg)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), limiter: NewRateLimiter()}
+	if err := server.writeGmailPending(context.Background(), gmailPendingStore{Version: 1, Items: []GmailPendingImport{{
+		ID: "pending-locked", ImportID: "import-secret", MessageID: "message-secret", ThreadID: "thread-secret",
+		Sender: "billing@example.com", Subject: "July credit card statement", ReceivedAt: "2026-08-10T08:00:00Z",
+		Filename: "statement-secret.pdf", Provider: "cmb", CandidateCount: 3, Status: "ready", Error: "private error",
+		CreatedAt: "2026-08-10T08:00:00Z", UpdatedAt: "2026-08-10T08:00:00Z", StoredBytes: 1024, OutputFile: "imports/private.bean",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	router := newRouter(cfg, server)
 	unauthenticated := requestWithCookies(router, http.MethodGet, "/api/integrations/gmail/status", "", nil)
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d", unauthenticated.Code)
@@ -1082,15 +1091,20 @@ func TestGmailRoutesStayAuthenticatedWhenDisabled(t *testing.T) {
 		}
 	}
 	lockedPending := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/pending", "", sessionOnly)
-	if lockedPending.Code != 423 {
+	if lockedPending.Code != http.StatusOK || !strings.Contains(lockedPending.Body.String(), `"id":"pending-locked"`) || !strings.Contains(lockedPending.Body.String(), `"candidateCount":3`) {
 		t.Fatalf("locked pending=%d body=%s", lockedPending.Code, lockedPending.Body.String())
+	}
+	for _, secret := range []string{"import-secret", "message-secret", "thread-secret", "billing@example.com", "July credit card statement", "statement-secret.pdf", "private error", "imports/private.bean"} {
+		if strings.Contains(lockedPending.Body.String(), secret) {
+			t.Fatalf("locked pending leaked %q: %s", secret, lockedPending.Body.String())
+		}
 	}
 	status := requestWithCookies(router, http.MethodGet, "/api/integrations/gmail/status", "", cookies)
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"configured":false`) {
 		t.Fatalf("status=%d body=%s", status.Code, status.Body.String())
 	}
 	pending := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/pending", "", cookies)
-	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"items":[]`) {
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"subject":"July credit card statement"`) || !strings.Contains(pending.Body.String(), `"filename":"statement-secret.pdf"`) {
 		t.Fatalf("pending=%d body=%s", pending.Code, pending.Body.String())
 	}
 }

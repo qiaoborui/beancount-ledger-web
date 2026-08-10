@@ -527,16 +527,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     try {
       const status = await fetchJson<GmailImportStatus>("/api/integrations/gmail/status", undefined, { configured: false, connected: false }, { kind: "auth" });
       setGmailStatus(status);
-      try {
-        const pending = await fetchJson<{ items: GmailPendingImport[] }>("/api/ledger/imports/pending", undefined, { items: [] }, { kind: "auth" });
-        setPendingImports(pending.items ?? []);
-      } catch (err) {
-        if (err instanceof ApiResponseError && err.status === 423) {
-          setPendingImports([]);
-          return true;
-        }
-        throw err;
-      }
+      const pending = await fetchJson<{ items: GmailPendingImport[] }>("/api/ledger/imports/pending", undefined, { items: [] }, { kind: "auth" });
+      setPendingImports(pending.items ?? []);
       return true;
     } catch (err) {
       if (notifyOnError) reportActionError(err);
@@ -586,7 +578,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     if (item.status !== "ready") return;
     setGmailLoading(true);
     try {
-      const data = await fetchJson<{ item?: GmailPendingImport; preview?: ImportPreview }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, undefined, { kind: "auth" });
+      const data = await fetchJson<{ item?: GmailPendingImport; preview?: ImportPreview }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, undefined, { kind: "write" });
       if (!data.preview?.importId) throw new Error("自动账单预览不存在");
       setFile(null);
       setPreview(data.preview);
@@ -709,21 +701,22 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             <div className="divide-y divide-line border-t border-line">
               {reviewablePendingImports.map((item) => {
                 const actions = gmailPendingImportActions(item.status);
+                const sensitiveDetailsLocked = !item.sender && !item.subject && !item.filename;
                 return (
                   <div key={item.id} className="flex min-w-0 flex-col gap-3 bg-panel px-4 py-3 sm:flex-row sm:items-center sm:px-5">
                     <Inbox className="h-5 w-5 shrink-0 text-brand" />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
-                        <span className="truncate text-sm font-medium text-ink">{item.subject || item.filename}</span>
+                        <span className="truncate text-sm font-medium text-ink">{sensitiveDetailsLocked ? "收到一份待处理账单" : item.subject || item.filename}</span>
                       </div>
-                      <div className="mt-1 truncate text-xs text-stone">{item.sender} · {item.filename}{item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}</div>
+                      <div className="mt-1 truncate text-xs text-stone">{sensitiveDetailsLocked ? `解锁后查看邮件与账单明细${item.status === "ready" ? ` · ${item.candidateCount} 条候选` : ""}` : `${item.sender} · ${item.filename}${item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}`}</div>
                       {item.error ? <div className="mt-1 line-clamp-2 text-xs text-destructive">{item.error}</div> : null}
                     </div>
                     <div className="flex shrink-0 gap-2">
-                      {actions.retry ? <Button variant="outline" size="sm" onClick={() => void retryPendingImport(item)} disabled={gmailLoading}><RefreshCw className="h-4 w-4" />重试</Button> : null}
+                      {actions.retry ? <Button variant="outline" size="sm" onClick={() => void retryPendingImport(item)} disabled={gmailLoading}><RefreshCw className="h-4 w-4" />{sensitiveDetailsLocked ? "解锁并重试" : "重试"}</Button> : null}
                       {actions.dismiss ? <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />忽略</Button> : null}
-                      {actions.review ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>Review<ArrowRight className="h-4 w-4" /></Button> : null}
+                      {actions.review ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>{sensitiveDetailsLocked ? "解锁并 Review" : "Review"}<ArrowRight className="h-4 w-4" /></Button> : null}
                     </div>
                   </div>
                 );

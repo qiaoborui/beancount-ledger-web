@@ -2,9 +2,9 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
+import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, LockKeyhole, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
+import { apiEndpointLedgerScope, apiFetch, apiSensitiveDataLockedEvent } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -62,6 +62,14 @@ function nextID() {
 
 function containsSensitiveAgentInput(value: string) {
   return /密码|口令|验证码|密钥|身份证|\b(password|passcode|pin|otp|token|secret|cvv)\b/i.test(value) || /(?:\d[ -]?){12,}/.test(value);
+}
+
+export function agentToolNeedsSensitiveUnlock(error: string | undefined) {
+  return Boolean(error && (/请先解锁敏感数据/.test(error) || /Sensitive data is locked/i.test(error)));
+}
+
+function requestAgentSensitiveUnlock() {
+  window.dispatchEvent(new Event(apiSensitiveDataLockedEvent));
 }
 
 function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = `session-${nextID()}`): AgentSession {
@@ -372,6 +380,7 @@ export function LedgerAgentWorkspace({
   }
 
   function upsertTool(tool: AgentToolEvent) {
+    if (agentToolNeedsSensitiveUnlock(tool.error)) requestAgentSensitiveUnlock();
     updateTimeline((current) => {
       const index = current.findIndex((item) => item.kind === "tool" && item.tool.id === tool.id);
       if (index < 0) return [...current, { kind: "tool", id: tool.id, tool }];
@@ -573,6 +582,7 @@ function AgentWorkTool({ item, expanded, onToggle }: { item: ToolItem; expanded:
       <span className="flex min-w-0 items-center gap-2">{toolStateIcon(tool.status)}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="hidden truncate font-mono text-[10px] text-stone sm:inline">{tool.name}</span></span>
       {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
     </button>
+    {agentToolNeedsSensitiveUnlock(tool.error) && <AgentUnlockNotice />}
     {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line px-3 py-2.5 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
   </div>;
 }
@@ -587,7 +597,14 @@ function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded
       <span className="flex min-w-0 items-center gap-2">{toolStateIcon(tool.status)}<span className="truncate text-sm font-medium text-ink">{tool.title}</span><span className="truncate font-mono text-[10px] text-stone">{tool.name}</span></span>
       {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" />}
     </button>
+    {agentToolNeedsSensitiveUnlock(tool.error) && <AgentUnlockNotice />}
     {expanded && <pre className="max-h-44 max-w-full overflow-auto border-t border-line p-3 text-[11px] leading-relaxed text-stone [overflow-wrap:anywhere]">{JSON.stringify(tool.error ? { error: tool.error } : tool.output ?? tool.input ?? {}, null, 2)}</pre>}
+  </div>;
+}
+
+function AgentUnlockNotice() {
+  return <div className="border-t border-line bg-[var(--selected-bg)] px-3 py-3">
+    <div className="flex min-w-0 items-start gap-2 text-sm text-ink"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-brand" /><span>这个工具需要解锁敏感数据，解锁后可在当前 Agent 会话继续。</span></div>
   </div>;
 }
 
