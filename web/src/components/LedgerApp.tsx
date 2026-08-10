@@ -778,7 +778,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     load(true);
   };
 
-  const commandActions: CommandAction[] = useMemo(() => [
+  const commandActions: CommandAction[] = [
     { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
     { id: "ai-entry", label: "账本 Agent", detail: "查询、生成 BQL 或创建待确认操作", keywords: ["ai", "agent", "chat"], run: () => openAgent() },
     ...(!unlocked ? [{ id: "unlock-sensitive", label: "解锁敏感数据", detail: "打开解锁框并聚焦密码输入", shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
@@ -788,7 +788,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
     ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
-  ], [applyTransactionQuickView, canNavigateNext, canNavigatePrevious, focusTransactionSearch, offlineSensitiveUnlockAvailable, openAgent, openManualEntry, refreshLedger, timeRange, unlocked]);
+  ];
 
   return (
     <AppShell
