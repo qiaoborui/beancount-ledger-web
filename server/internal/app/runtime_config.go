@@ -12,7 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"regexp"
@@ -124,9 +124,10 @@ type IndexerRuntimeConfig struct {
 type RuntimeConfigStore struct {
 	db        *sql.DB
 	masterKey []byte
+	logger    *slog.Logger
 }
 
-func NewRuntimeConfigStore(db *sql.DB) (*RuntimeConfigStore, error) {
+func NewRuntimeConfigStore(db *sql.DB, logger *slog.Logger) (*RuntimeConfigStore, error) {
 	if db == nil {
 		return nil, errors.New("runtime configuration database is required")
 	}
@@ -138,7 +139,16 @@ func NewRuntimeConfigStore(db *sql.DB) (*RuntimeConfigStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RuntimeConfigStore{db: db, masterKey: key}, nil
+	return &RuntimeConfigStore{db: db, masterKey: key, logger: logger}, nil
+}
+
+// loggerOr returns the injected structured logger, falling back to the
+// standard slog default when none was provided.
+func (s *RuntimeConfigStore) loggerOr() *slog.Logger {
+	if s != nil && s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 func (s *RuntimeConfigStore) VerifyInstallCode(ctx context.Context, code string) (bool, error) {
@@ -198,7 +208,7 @@ func (s *RuntimeConfigStore) Bootstrap(ctx context.Context, boot Config) (Config
 		return boot, err
 	}
 	if installCode != "" {
-		log.Printf("runtime setup required; one-time install code: %s", installCode)
+		s.loggerOr().Info("runtime setup required", "install_code", installCode)
 	}
 	return s.EffectiveConfig(ctx, boot)
 }

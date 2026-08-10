@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -202,7 +201,7 @@ func (s *Server) gmailPubSub(c *gin.Context) {
 	}
 	data, messageID, err := decodeGmailPush(body)
 	if err != nil {
-		log.Printf("gmail pubsub payload ignored: %v", err)
+		s.loggerOr().Warn("gmail pubsub payload ignored", "error", err)
 		c.Status(http.StatusNoContent)
 		return
 	}
@@ -220,7 +219,7 @@ func (s *Server) gmailPubSub(c *gin.Context) {
 		return
 	}
 	if _, err := s.drainGmailPushEvents(c.Request.Context(), 5); err != nil {
-		log.Printf("gmail pubsub immediate drain deferred: %v", err)
+		s.loggerOr().Warn("gmail pubsub immediate drain deferred", "error", err)
 	}
 	c.Status(http.StatusNoContent)
 }

@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +22,22 @@ type LedgerWriter struct {
 	runtimeStore        RuntimeStore
 	indexStore          *LedgerIndexStore
 	commoditiesProvider func() ([]string, error)
+	logger              *slog.Logger
 	mu                  sync.Mutex
+}
+
+// SetLogger attaches the process structured logger for background error
+// reporting (for example index-request enqueue failures after a successful
+// Git commit).
+func (w *LedgerWriter) SetLogger(logger *slog.Logger) {
+	w.logger = logger
+}
+
+func (w *LedgerWriter) loggerOr() *slog.Logger {
+	if w != nil && w.logger != nil {
+		return w.logger
+	}
+	return slog.Default()
 }
 
 var (
@@ -226,7 +241,7 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 				// The Git commit has already succeeded. Polling remains a safe
 				// fallback, so do not turn a committed financial write into an
 				// apparent client-side failure.
-				log.Printf("queue ledger index request sha=%s: %v", gitSHA, err)
+				w.loggerOr().Warn("queue ledger index request", "sha", gitSHA, "error", err)
 			}
 		}
 		if w.cache != nil {

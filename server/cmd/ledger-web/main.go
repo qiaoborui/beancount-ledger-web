@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -15,28 +16,32 @@ import (
 	_ "time/tzdata"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	logger := logging.New(logging.LoadConfig())
 	if pprofAddr := strings.TrimSpace(os.Getenv("PPROF_ADDR")); pprofAddr != "" {
 		go func() {
-			log.Printf("pprof listening on %s", pprofAddr)
-			log.Print(http.ListenAndServe(pprofAddr, nil))
+			logger.Info("pprof listening", "addr", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				logger.Error("pprof server stopped", "error", err)
+			}
 		}()
 	}
-	if err := run(); err != nil {
+	if err := run(logger); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() (err error) {
+func run(logger *slog.Logger) (err error) {
 	cfg := app.LoadWebConfig()
 	if err := app.ValidateWebConfig(cfg); err != nil {
 		return err
 	}
-	application, err := app.NewApplication(cfg)
+	application, err := app.NewApplicationWithLogger(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -53,7 +58,7 @@ func run() (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := newHTTPServer(addr, application)
-	log.Printf("ledger web listening on %s", addr)
+	logger.Info("ledger web listening", "addr", addr)
 	return serveHTTP(ctx, server, listener)
 }
 

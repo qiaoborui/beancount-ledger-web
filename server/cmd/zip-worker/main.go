@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,17 +15,19 @@ import (
 	"time"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	if err := run(); err != nil {
+	logger := logging.New(logging.LoadConfig())
+	if err := run(logger); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() error {
+func run(logger *slog.Logger) error {
 	workers, err := workerCount()
 	if err != nil {
 		return err
@@ -40,7 +43,7 @@ func run() error {
 	go func() {
 		serveErr <- server.ListenAndServe()
 	}()
-	log.Printf("ZIP worker listening on %s with %d workers", server.Addr, workers)
+	logger.Info("ZIP worker listening", "addr", server.Addr, "workers", workers)
 	select {
 	case err := <-serveErr:
 		if errors.Is(err, http.ErrServerClosed) {

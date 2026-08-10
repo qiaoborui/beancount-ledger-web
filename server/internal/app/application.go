@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -47,12 +48,20 @@ type applicationDependencies struct {
 }
 
 func NewApplication(cfg Config) (*Application, error) {
-	dependencies, err := buildApplicationDependencies(cfg)
+	return NewApplicationWithLogger(cfg, nil)
+}
+
+// NewApplicationWithLogger builds the application with an explicit structured
+// logger created by the process entry point. A nil logger falls back to the
+// standard slog default.
+func NewApplicationWithLogger(cfg Config, logger *slog.Logger) (*Application, error) {
+	dependencies, err := buildApplicationDependenciesWithLogger(cfg, logger)
 	if err != nil {
 		return nil, err
 	}
 	server := &Server{
 		cfg:                  dependencies.cfg,
+		logger:               logger,
 		runtimeStore:         dependencies.runtimeStore,
 		runtimeConfig:        dependencies.runtimeConfig,
 		bqlHistoryRepository: dependencies.bqlHistoryRepository,
@@ -79,11 +88,15 @@ func NewApplication(cfg Config) (*Application, error) {
 }
 
 func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) {
+	return buildApplicationDependenciesWithLogger(cfg, nil)
+}
+
+func buildApplicationDependenciesWithLogger(cfg Config, logger *slog.Logger) (*applicationDependencies, error) {
 	dependencies := &applicationDependencies{}
 	fail := func(err error) (*applicationDependencies, error) {
 		return nil, errors.Join(err, closeResources(dependencies.closers))
 	}
-	storageAdapters, err := openApplicationStorageAdapters(cfg)
+	storageAdapters, err := openApplicationStorageAdaptersWithLogger(cfg, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +156,9 @@ func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) 
 		}
 		return snapshot.Commodities, nil
 	})
+	if logger != nil {
+		dependencies.writer.SetLogger(logger)
+	}
 	if indexStore, ok := dependencies.indexStore.(*LedgerIndexStore); ok {
 		dependencies.writer.SetIndexRequestStore(indexStore)
 	}

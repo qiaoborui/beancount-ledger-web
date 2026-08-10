@@ -41,6 +41,11 @@ cmd/ledger-web
 - `application.go` constructs the current service graph and owns its resources.
 - `server.go` owns the transitional `Server`, Gin setup, route registration,
   health, and static fallback selection.
+- `request_logging.go` owns the structured request middleware: it generates or
+  passes through `X-Request-Id`, echoes it on the response, keeps it in the
+  request context for handlers, and emits a JSON access log line per request.
+  The panic-recovery middleware logs through slog with the request id instead of
+  gin's default writer.
 - `*_handlers.go` files own route handlers by API area: auth, ledger, imports,
   and AI.
 - `util.go` owns JSON binding and response helpers.

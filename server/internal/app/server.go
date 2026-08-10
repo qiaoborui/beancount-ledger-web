@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +20,7 @@ import (
 
 type Server struct {
 	cfg                  Config
+	logger               *slog.Logger
 	cfgMu                sync.RWMutex
 	cfgRefreshedAt       time.Time
 	runtimeStore         RuntimeStore
@@ -48,7 +49,8 @@ type Server struct {
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware(), sameOriginMiddleware(), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
+	logger := server.loggerOr()
+	router.Use(requestLoggingMiddleware(logger), recoveryMiddleware(logger), corsMiddleware(), sameOriginMiddleware(), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	mcpHandler := server.mcpHandler()
 	router.Any("/mcp", func(c *gin.Context) {
@@ -68,6 +70,15 @@ func newRouter(cfg Config, server *Server) *gin.Engine {
 		})
 	}
 	return router
+}
+
+// loggerOr returns the injected structured logger, falling back to the
+// standard slog default for direct test construction and nil loggers.
+func (s *Server) loggerOr() *slog.Logger {
+	if s != nil && s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 func (s *Server) configReadLock() gin.HandlerFunc {
@@ -119,7 +130,7 @@ func (s *Server) refreshConfigIfNeeded(ctx context.Context) {
 	effective, err := s.runtimeConfig.EffectiveConfig(ctx, s.cfg)
 	if err != nil {
 		s.cfgRefreshedAt = time.Now()
-		log.Printf("refresh database runtime configuration: %v", err)
+		s.loggerOr().Warn("refresh database runtime configuration", "error", err)
 		return
 	}
 	s.applyConfigLocked(effective)

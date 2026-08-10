@@ -33,7 +33,7 @@ func (s *Server) aiParse(c *gin.Context) {
 	}
 	start := time.Now()
 	entries, err := s.parseNaturalLanguage(input.Input, time.Now().Format("2006-01-02"))
-	logDuration("ai.parse", start, map[string]any{"entries": len(entries)})
+	s.logDuration("ai.parse", start, map[string]any{"entries": len(entries)})
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
@@ -58,7 +58,7 @@ func (s *Server) aiAgentTurn(c *gin.Context) {
 	}
 	start := time.Now()
 	err := s.proxyLedgerAgentTurn(c, input)
-	logDuration("ai.agent.turn", start, nil)
+	s.logDuration("ai.agent.turn", start, nil)
 	if err != nil {
 		if !c.Writer.Written() {
 			errorJSON(c, http.StatusBadGateway, err)
