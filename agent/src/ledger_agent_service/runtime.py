@@ -44,7 +44,12 @@ TELEGRAM_TOOL_NAMES = {TELEGRAM_SEND_TOOL, TELEGRAM_SEND_RICH_TOOL}
 LEDGER_MCP_TOOL_PREFIX = "mcp.ledger_"
 LEDGER_MCP_CONTEXT_TOOL = "mcp.ledger_agent_context"
 OPEN_PAGE_TOOL = "open_page"
+REQUEST_SENSITIVE_UNLOCK_TOOL = "request_sensitive_unlock"
 LEDGER_MCP_READY_TIMEOUT_SECONDS = 20.0
+WEB_SENSITIVE_LOCKED_PROMPT = """当前网页会话尚未解锁敏感数据。
+不要调用任何账本 MCP 工具，也不要编造账本数据。
+用户要求查询、统计、搜索、写入或查看账本时，调用 request_sensitive_unlock。
+普通的产品说明、记账方法或 Beancount 知识问题可以直接回答。"""
 
 
 def _decode_mcp_result(result: Any) -> dict[str, Any]:
@@ -285,6 +290,7 @@ class LedgerPlugin:
         self.telegram_channel: Any | None = None
         self._register_onboarding_tools()
         self._register_open_page_tool()
+        self._register_sensitive_unlock_tool()
         self._register_telegram_tools()
         _PLUGINS[framework] = self
 
@@ -364,11 +370,16 @@ class LedgerPlugin:
             await self.ensure_ledger_tools()
             page = message.context.get("page")
             sensitive_unlocked = bool(page.get("sensitiveUnlocked")) if isinstance(page, dict) else False
-            allowed_tools = [OPEN_PAGE_TOOL]
+            allowed_tools = [OPEN_PAGE_TOOL, REQUEST_SENSITIVE_UNLOCK_TOOL]
+            system_prompt = WEB_SENSITIVE_LOCKED_PROMPT
             if sensitive_unlocked:
-                allowed_tools.extend(sorted(name for name in self.tool_specs if name != OPEN_PAGE_TOOL))
+                allowed_tools = [
+                    OPEN_PAGE_TOOL,
+                    *sorted(name for name in self.tool_specs if name.startswith(LEDGER_MCP_TOOL_PREFIX)),
+                ]
+                system_prompt = self._bub_mcp_prompt(str(message.context.get("_ledger_system_prompt") or ""))
             state.update({
-                "system_prompt": self._bub_mcp_prompt(str(message.context.get("_ledger_system_prompt") or "")),
+                "system_prompt": system_prompt,
                 "allowed_tools": allowed_tools,
                 "allowed_skills": [],
             })
@@ -377,7 +388,7 @@ class LedgerPlugin:
             state.update({
                 "system_prompt": await self._mcp_agent_context(message.channel, message.context),
                 "allowed_tools": [
-                    *sorted(name for name in self.tool_specs if name != OPEN_PAGE_TOOL),
+                    *sorted(name for name in self.tool_specs if name.startswith(LEDGER_MCP_TOOL_PREFIX)),
                     *(sorted(TELEGRAM_TOOL_NAMES) if message.channel == "telegram" else []),
                 ],
                 "allowed_skills": ["telegram-ledger-agent", "telegram"] if message.channel == "telegram" else [],
@@ -646,6 +657,24 @@ class LedgerPlugin:
             "refreshLedger": False,
         }
 
+    def _register_sensitive_unlock_tool(self) -> None:
+        parameters = {"type": "object", "properties": {}, "additionalProperties": False}
+        self.tool_specs[REQUEST_SENSITIVE_UNLOCK_TOOL] = ToolSpec(
+            name=REQUEST_SENSITIVE_UNLOCK_TOOL,
+            description="当网页尚未解锁而用户请求账本数据或账本操作时，请求前端打开敏感数据解锁流程。",
+            parameters=parameters,
+            title="解锁敏感数据",
+        )
+        REGISTRY[REQUEST_SENSITIVE_UNLOCK_TOOL] = Tool(
+            name=REQUEST_SENSITIVE_UNLOCK_TOOL,
+            description="当网页尚未解锁而用户请求账本数据或账本操作时调用。",
+            parameters=parameters,
+            handler=self._request_sensitive_unlock_handler,
+        )
+
+    async def _request_sensitive_unlock_handler(self) -> dict[str, str]:
+        return {"kind": "error", "message": "请先解锁敏感数据后再查询或操作账本。"}
+
     def _register_telegram_tools(self) -> None:
         REGISTRY[TELEGRAM_SEND_TOOL] = Tool(
             name=TELEGRAM_SEND_TOOL,
@@ -902,7 +931,8 @@ class AgentGateway:
     def _snapshot_registry(self) -> None:
         names = {
             name for name in REGISTRY
-            if name.startswith(LEDGER_MCP_TOOL_PREFIX) or name in {OPEN_PAGE_TOOL, *TELEGRAM_TOOL_NAMES}
+            if name.startswith(LEDGER_MCP_TOOL_PREFIX)
+            or name in {OPEN_PAGE_TOOL, REQUEST_SENSITIVE_UNLOCK_TOOL, *TELEGRAM_TOOL_NAMES}
         }
         self._registry_snapshot = {name: REGISTRY[name] for name in names}
 
@@ -912,7 +942,11 @@ class AgentGateway:
             _GATEWAY_SETTINGS.pop(self.framework, None)
             _PLUGINS.pop(self.framework, None)
         for name in list(REGISTRY):
-            if name.startswith(LEDGER_MCP_TOOL_PREFIX) or name in {OPEN_PAGE_TOOL, *TELEGRAM_TOOL_NAMES}:
+            if name.startswith(LEDGER_MCP_TOOL_PREFIX) or name in {
+                OPEN_PAGE_TOOL,
+                REQUEST_SENSITIVE_UNLOCK_TOOL,
+                *TELEGRAM_TOOL_NAMES,
+            }:
                 REGISTRY.pop(name, None)
         REGISTRY.update(self._registry_snapshot)
         self._registry_snapshot = {}

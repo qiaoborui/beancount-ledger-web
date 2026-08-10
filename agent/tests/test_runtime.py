@@ -24,8 +24,10 @@ from fastmcp import FastMCP
 from ledger_agent_service.config import Settings
 from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
 from ledger_agent_service.runtime import (
+    REQUEST_SENSITIVE_UNLOCK_TOOL,
     TELEGRAM_SEND_RICH_TOOL,
     TELEGRAM_SEND_TOOL,
+    WEB_SENSITIVE_LOCKED_PROMPT,
     AgentGateway,
     LedgerPlugin,
     LedgerTelegramChannel,
@@ -418,7 +420,7 @@ async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> N
 @pytest.mark.parametrize(
     ("sensitive_unlocked", "expected"),
     [
-        (False, {"open_page"}),
+        (False, {"open_page", REQUEST_SENSITIVE_UNLOCK_TOOL}),
         (True, {"open_page", "mcp.ledger_get_accounts"}),
     ],
 )
@@ -426,6 +428,12 @@ async def test_web_state_keeps_mcp_tools_behind_sensitive_unlock(sensitive_unloc
     plugin = object.__new__(LedgerPlugin)
     plugin.tool_specs = {
         "open_page": ToolSpec(name="open_page", description="navigation", parameters={}, title="打开页面"),
+        REQUEST_SENSITIVE_UNLOCK_TOOL: ToolSpec(
+            name=REQUEST_SENSITIVE_UNLOCK_TOOL,
+            description="unlock",
+            parameters={},
+            title="解锁敏感数据",
+        ),
         "mcp.ledger_get_accounts": ToolSpec(name="mcp.ledger_get_accounts", description="accounts", parameters={}, title="accounts"),
     }
 
@@ -446,7 +454,21 @@ async def test_web_state_keeps_mcp_tools_behind_sensitive_unlock(sensitive_unloc
     state = await plugin.load_state(message, "web:1")
 
     assert set(state["allowed_tools"]) == expected
-    assert "mcp.ledger_get_accounts" in state["system_prompt"]
+    if sensitive_unlocked:
+        assert "mcp.ledger_get_accounts" in state["system_prompt"]
+        assert REQUEST_SENSITIVE_UNLOCK_TOOL not in state["allowed_tools"]
+    else:
+        assert state["system_prompt"] == WEB_SENSITIVE_LOCKED_PROMPT
+        assert "mcp.ledger_get_accounts" not in state["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_locked_web_unlock_tool_returns_frontend_recognized_error() -> None:
+    plugin = object.__new__(LedgerPlugin)
+
+    result = await plugin._request_sensitive_unlock_handler()
+
+    assert result == {"kind": "error", "message": "请先解锁敏感数据后再查询或操作账本。"}
 
 
 def test_project_telegram_skill_uses_restricted_final_response_tools() -> None:
