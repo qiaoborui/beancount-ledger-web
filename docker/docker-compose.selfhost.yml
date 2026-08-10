@@ -24,7 +24,6 @@ services:
       retries: 20
 
   server:
-    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-server:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -60,7 +59,6 @@ services:
       retries: 12
 
   agent:
-    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-agent:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -91,7 +89,6 @@ services:
       retries: 12
 
   indexer:
-    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-indexer:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -127,7 +124,6 @@ services:
       retries: 20
 
   frontend:
-    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-frontend:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -139,7 +135,6 @@ services:
       - "80"
 
   caddy:
-    image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-caddy:${SELFHOST_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile

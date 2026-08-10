@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Pin this tag to the application release you have verified.
-      image: ghcr.io/qiaoborui/beancount-ledger-web-selfhost-indexer:latest
+      image: ghcr.io/qiaoborui/beancount-ledger-web-indexer:latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
