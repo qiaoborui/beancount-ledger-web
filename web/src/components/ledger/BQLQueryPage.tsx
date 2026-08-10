@@ -97,6 +97,16 @@ GROUP BY month, account
 ORDER BY month DESC
 LIMIT 100`,
   },
+  {
+    label: "复合条件与聚合筛选",
+    query: `SELECT payee, count(*) AS tx_count, sum(value) AS total
+FROM transactions
+WHERE (payee ~ 'coffee|store' OR 'food' IN tags) AND date BETWEEN '2026-01-01' AND '2026-12-31'
+GROUP BY payee
+HAVING tx_count >= 2 OR total > 1000
+ORDER BY total DESC
+LIMIT 50`,
+  },
 ];
 
 const chartColors = [
@@ -412,6 +422,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-stone">
               <span>{statements.length || 0} 条语句</span>
               <span>Cmd/Ctrl + Enter 运行选中或当前语句</span>
+              <span>支持 AND / OR / NOT、括号、IN、BETWEEN、正则、DISTINCT 与 HAVING</span>
             </div>
             {error && <div className="mt-2 flex items-start gap-2 rounded-md border border-line bg-tag px-3 py-2 text-sm text-warm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 amount-danger" />

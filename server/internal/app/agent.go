@@ -763,22 +763,29 @@ func headRows(rows [][]any, limit int) [][]any {
 func bqlCapabilities() map[string]any {
 	return map[string]any{
 		"tables": map[string]any{
-			"postings":     []string{"date", "month", "account", "payee", "narration", "currency", "amount", "value", "type"},
-			"transactions": []string{"date", "month", "payee", "narration", "type", "account", "currency", "amount", "value"},
+			"postings":     bqlFieldOrder("postings"),
+			"transactions": bqlFieldOrder("transactions"),
 		},
-		"aggregates": []string{"count(*)", "sum(amount)", "sum(value)"},
-		"clauses":    []string{"WHERE with AND", "GROUP BY", "ORDER BY", "LIMIT"},
-		"operators":  []string{"=", "!=", ">", ">=", "<", "<=", "LIKE"},
+		"select":     []string{"*", "DISTINCT", "AS aliases"},
+		"aggregates": []string{"count(*)", "count(field)", "sum(field)", "avg(field)", "min(field)", "max(field)"},
+		"clauses":    []string{"WHERE", "GROUP BY", "HAVING with SELECT aliases", "ORDER BY aliases or column ordinals", "LIMIT"},
+		"operators":  bqlOperatorCapabilities(),
 		"limits":     map[string]any{"default": bqlDefaultLimit, "max": bqlMaxLimit},
 		"fieldNotes": map[string]any{
-			"type":    "交易分类，值为 expense, income, transfer；postings 表的每条分录继承所属交易分类，不能用它代替账户类别",
-			"account": "账户路径；统计支出使用 account LIKE 'Expenses:%'，统计收入使用 account LIKE 'Income:%'",
-			"amount":  "原币金额",
-			"value":   "按 valuationCurrency 折算后的金额",
+			"type":           "交易分类，值为 expense, income, transfer；postings 表的每条分录继承所属交易分类，不能用它代替账户类别",
+			"account":        "账户路径；统计支出使用 account LIKE 'Expenses:%'，统计收入使用 account LIKE 'Income:%'",
+			"amount":         "原币金额",
+			"value":          "按 valuationCurrency 折算后的金额",
+			"tags_links":     "tags 和 links 可用正则或 LIKE；也支持 'value' IN tags / links",
+			"accounts":       "transactions 表的账户集合；支持 'Assets:Bank' IN accounts",
+			"having":         "HAVING 中引用 SELECT 结果别名，例如 HAVING total > 1000",
+			"money_literals": "amount/value 的筛选值使用元单位，例如 value > 100 表示大于 100 元",
 		},
 		"examples": []string{
 			"SELECT month, sum(value) AS total_expense FROM postings WHERE account LIKE 'Expenses:%' GROUP BY month ORDER BY month",
 			"SELECT account, sum(value) AS total FROM postings WHERE account LIKE 'Expenses:%' GROUP BY account ORDER BY total DESC LIMIT 20",
+			"SELECT DISTINCT payee FROM transactions WHERE payee ~ 'coffee|store' OR 'food' IN tags ORDER BY 1",
+			"SELECT payee, count(*) AS tx_count, sum(value) AS total FROM transactions GROUP BY payee HAVING tx_count >= 2 OR total > 1000 ORDER BY total DESC",
 		},
 	}
 }

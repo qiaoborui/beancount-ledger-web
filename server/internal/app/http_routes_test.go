@@ -573,6 +573,10 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 			t.Fatalf("%s %s=%d body=%s", route.method, route.path, res.Code, res.Body.String())
 		}
 	}
+	oversizedBQL := requestWithCookies(router, http.MethodPost, "/api/ledger/bql", `{"query":"`+strings.Repeat("x", bqlMaxRequestBodyLength)+`"}`, cookies)
+	if oversizedBQL.Code != http.StatusBadRequest {
+		t.Fatalf("oversized BQL body=%d body=%s", oversizedBQL.Code, oversizedBQL.Body.String())
+	}
 	account := requestWithCookies(router, http.MethodPost, "/api/ledger/accounts", `{"date":"2026-01-01","account":"Expenses:Travel","alias":"差旅","currency":"CNY"}`, cookies)
 	if account.Code != http.StatusOK {
 		t.Fatalf("append account=%d body=%s", account.Code, account.Body.String())

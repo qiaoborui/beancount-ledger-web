@@ -41,7 +41,7 @@ type BQLHistorySaveRequest struct {
 
 func (r BQLHistorySaveRequest) Validate() error {
 	query := strings.TrimSpace(r.Query)
-	if len(query) > 12000 {
+	if len(query) > bqlMaxQueryLength {
 		return errors.New("query is too long")
 	}
 	statements := splitBQLHistoryStatements(query)
