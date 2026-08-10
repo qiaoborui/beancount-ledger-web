@@ -1570,6 +1570,7 @@ export const zhCN = {
     rowLabel: "行 {{index}}",
     justRan: "刚刚运行",
     capabilitiesHint: "支持 AND / OR / NOT、括号、IN、BETWEEN、正则、DISTINCT 与 HAVING",
+    exampleCompound: "复合条件与聚合筛选",
   },
   agentWorkspace: {
     starterExpenseAnalysis: "支出分析",

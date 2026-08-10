@@ -100,7 +100,7 @@ ORDER BY month DESC
 LIMIT 100`,
   },
   {
-    label: "复合条件与聚合筛选",
+    labelKey: "bqlQuery.exampleCompound",
     query: `SELECT payee, count(*) AS tx_count, sum(value) AS total
 FROM transactions
 WHERE (payee ~ 'coffee|store' OR 'food' IN tags) AND date BETWEEN '2026-01-01' AND '2026-12-31'

@@ -1574,6 +1574,7 @@ export const enUS: DeepStringify<TranslationResource> = {
     rowLabel: "Row {{index}}",
     justRan: "Just now",
     capabilitiesHint: "Supports AND / OR / NOT, parentheses, IN, BETWEEN, regex, DISTINCT, and HAVING",
+    exampleCompound: "Compound conditions & aggregate filtering",
   },
   agentWorkspace: {
     starterExpenseAnalysis: "Analyze spending",
