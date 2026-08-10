@@ -64,8 +64,10 @@ function isActivePath(pathname: string, href: LedgerNavHref) {
   return href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppShell({ children, pathname, routePending = false, onAdd, sensitiveUnlocked = false, passkeyEnabled = false, sensitiveUnlockAvailable = passkeyEnabled, sensitiveUnlockLabel = "解锁", sensitiveUnlockTitle = "使用 Face ID / Passkey 解锁敏感数据", onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; sensitiveUnlockAvailable?: boolean; sensitiveUnlockLabel?: string; sensitiveUnlockTitle?: string; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
+export function AppShell({ children, pathname, routePending = false, onAdd, sensitiveUnlocked = false, passkeyEnabled = false, sensitiveUnlockAvailable = passkeyEnabled, sensitiveUnlockLabel, sensitiveUnlockTitle, onUnlockSensitive, onLockSensitive, onActiveRouteTap, themeMode, resolvedTheme, onThemeModeChange }: { children: ReactNode; pathname: string; routePending?: boolean; onAdd?: () => void; sensitiveUnlocked?: boolean; passkeyEnabled?: boolean; sensitiveUnlockAvailable?: boolean; sensitiveUnlockLabel?: string; sensitiveUnlockTitle?: string; onUnlockSensitive?: () => void; onLockSensitive?: () => void; onActiveRouteTap?: () => void; themeMode: ThemeMode; resolvedTheme: ResolvedTheme; onThemeModeChange: (mode: ThemeMode) => void }) {
   const { t } = useTranslation();
+  const effectiveUnlockLabel = sensitiveUnlockLabel ?? t("appShell.unlock");
+  const effectiveUnlockTitle = sensitiveUnlockTitle ?? t("appShell.unlockTitle");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileMenuClosing, setMobileMenuClosing] = useState(false);
   const mobileMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -186,9 +188,9 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
                 className={`inline-flex h-9 items-center gap-2 rounded-md border border-line bg-paper px-2.5 text-sm md:h-8 md:px-2 md:text-xs ${sensitiveUnlocked ? "text-olive hover:bg-tag" : "text-warm hover:bg-tag"}`}
                 aria-label={sensitiveUnlocked ? t("appShell.sensitiveLocked") : t("appShell.sensitiveUnlocked")}
                 aria-pressed={sensitiveUnlocked}
-                title={sensitiveUnlocked ? t("appShell.relockHint") : sensitiveUnlockTitle}
+                title={sensitiveUnlocked ? t("appShell.relockHint") : effectiveUnlockTitle}
               >
-                {sensitiveUnlocked ? <UnlockKeyhole className="h-4 w-4 text-brand" /> : <LockKeyhole className="h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? t("appShell.relock") : sensitiveUnlockLabel}</span>
+                {sensitiveUnlocked ? <UnlockKeyhole className="h-4 w-4 text-brand" /> : <LockKeyhole className="h-4 w-4 text-brand" />} <span className="hidden sm:inline">{sensitiveUnlocked ? t("appShell.relock") : effectiveUnlockLabel}</span>
               </button>
             )}
           </div>
@@ -237,10 +239,10 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
                   className={`inline-flex h-8 min-w-0 items-center justify-center gap-2 rounded-md px-2 text-xs text-olive hover:bg-tag hover:text-ink ${sidebarCollapsed ? "w-8" : "flex-1"}`}
                   aria-label={sensitiveUnlocked ? t("appShell.sensitiveLocked") : t("appShell.sensitiveUnlocked")}
                   aria-pressed={sensitiveUnlocked}
-                  title={sensitiveUnlocked ? t("appShell.relockHint") : sensitiveUnlockTitle}
+                  title={sensitiveUnlocked ? t("appShell.relockHint") : effectiveUnlockTitle}
                 >
                   {sensitiveUnlocked ? <UnlockKeyhole className="h-3.5 w-3.5 shrink-0" /> : <LockKeyhole className="h-3.5 w-3.5 shrink-0" />}
-                  {!sidebarCollapsed && <span className="truncate">{sensitiveUnlocked ? t("appShell.hideAmounts") : sensitiveUnlockLabel}</span>}
+                  {!sidebarCollapsed && <span className="truncate">{sensitiveUnlocked ? t("appShell.hideAmounts") : effectiveUnlockLabel}</span>}
                 </button>
               )}
             </div>

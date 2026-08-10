@@ -285,7 +285,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const record = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(record.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(record.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => sortHistory([record, ...current.filter((item) => item.id !== record.id)]));
       setHistoryError("");
       void generateHistoryTitle(record.id);
@@ -302,7 +302,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(next.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.map((item) => item.id === next.id ? next : item));
     } catch {
       // The fallback title remains usable; the next successful run retries AI naming.
@@ -334,7 +334,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(next.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.map((item) => item.id === next.id ? next : item));
       setEditingHistoryID(null);
       setHistoryError("");
@@ -353,7 +353,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         onSensitiveLocked();
         return;
       }
-      if (!response.ok) throw new Error(`请求失败：${response.status}`);
+      if (!response.ok) throw new Error(i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.filter((item) => item.id !== record.id));
       setEditingHistoryID((current) => current === record.id ? null : current);
       setHistoryError("");

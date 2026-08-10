@@ -264,7 +264,7 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
       <div className="mb-3 h-11 rounded-md border border-line bg-paper px-4 text-center text-2xl leading-10 tracking-[0.32em] text-ink" aria-label={t("auth.quickUnlockNumericPlaceholder")}>{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
       <div className="grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => setSecret(secret + digit)} disabled={unlocking} />)}
-        <KeypadButton label="删" onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
+        <KeypadButton label={t("auth.deleteKey")} deleteKey onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
         <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
         <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? t("auth.unlocking") : t("auth.unlock")}</button>
       </div>
@@ -278,6 +278,6 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
   </div>;
 }
 
-function KeypadButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label === "删" ? <Delete className="h-4 w-4" /> : label}</button>;
+function KeypadButton({ label, onClick, disabled, deleteKey = false }: { label: string; onClick: () => void; disabled?: boolean; deleteKey?: boolean }) {
+  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{deleteKey ? <Delete className="h-4 w-4" /> : label}</button>;
 }

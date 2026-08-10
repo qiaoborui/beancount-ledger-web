@@ -650,7 +650,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (instanceSetup === "required") return <InstanceSetupPage onComplete={() => { setAuthed(false); setInstanceSetup("ready"); }} />;
   if (authed === null && !online && hasKnownLedgerAuthentication()) return <AppSkeleton />;
   if (searchParams.get("prototype") === "onboarding") return <OnboardingPrototype />;
-  if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? "离线冷启动需要先联网验证一次，之后已缓存的数据才能在 PWA 中继续使用。"} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
+  if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? t("auth.offlineColdStart")} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (onboardingState === "checking") return <AppSkeleton />;

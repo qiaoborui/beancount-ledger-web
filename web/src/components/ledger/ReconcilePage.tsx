@@ -65,7 +65,7 @@ export function ReconcilePage({ timeRange, rows, onSubmit, statuses }: { timeRan
     <div className="card p-4">
       <h2 className="font-serif text-2xl">{t("reconcile.title")}</h2>
       <p className="mt-2 text-sm leading-relaxed text-olive">
-        {t("reconcile.rhythm", { a: "5 号", b: "17 号", c: "月末" })}
+        {t("reconcile.rhythm", { a: t("reconcile.day5"), b: t("reconcile.day17"), c: t("reconcile.monthEnd") })}
       </p>
     </div>
     {rows.map((row) => (

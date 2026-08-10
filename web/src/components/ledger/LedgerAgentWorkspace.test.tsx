@@ -82,7 +82,7 @@ describe("LedgerAgentWorkspace", () => {
     const loadGmailStart = importPageSource.indexOf("async function loadGmailAutomation");
     const connectGmailStart = importPageSource.indexOf("async function connectGmail", loadGmailStart);
     expect(importPageSource.slice(loadGmailStart, connectGmailStart)).not.toContain("setPendingImports([]);");
-    expect(importPageSource).toContain("收到一份待处理账单");
+    expect(importPageSource).toContain("importPage.pendingBillReceived");
     const openPendingStart = importPageSource.indexOf("async function openPendingImport");
     const dismissPendingStart = importPageSource.indexOf("async function dismissPendingImport", openPendingStart);
     expect(importPageSource.slice(openPendingStart, dismissPendingStart)).toContain('{ kind: "write" }');

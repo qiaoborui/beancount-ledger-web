@@ -57,7 +57,7 @@ i18n.on("languageChanged", (language) => {
 
 export function changeAppLanguage(language: SupportedLanguage) {
   writeStoredLanguage(language);
-  void i18n.changeLanguage(language);
+  return i18n.changeLanguage(language);
 }
 
 export { readStoredLanguage as readLanguage, writeStoredLanguage as writeLanguage };

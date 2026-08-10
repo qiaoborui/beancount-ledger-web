@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { ApiResponseError, fetchJson } from "@/lib/clientFetch";
+import i18n from "@/i18n";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -43,7 +44,7 @@ import { MobileSheet } from "./MobileSheet";
 
 type Provider = "alipay" | "alipay-small-purse" | "wechat" | "cmb" | "ccb-credit" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
-type ProviderChoice = { value: ProviderOverride; label: string; detail: string; accept: string };
+type ProviderChoice = { value: ProviderOverride; labelKey: string; detailKey: string; acceptKey: string };
 type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string; engine?: string };
 
 type AccountOption = { account: string; alias?: string | null; label: string; group: string; active: boolean };
@@ -106,13 +107,13 @@ type GmailPendingImport = { id: string; importId?: string; messageId: string; se
 const importDraftKey = "ledger_import_review_draft";
 
 const fallbackProviderChoices: ProviderChoice[] = [
-  { value: "auto", label: "自动识别", detail: "按文件头和扩展名检测来源", accept: "CSV / XLSX / PDF / EML / ZIP" },
-  { value: "alipay", label: "支付宝", detail: "CSV 账单，支持基金补差选项", accept: ".csv" },
-  { value: "alipay-small-purse", label: "支付宝小荷包", detail: "小荷包余额收支明细 XLSX，共同资金池消费", accept: ".xlsx" },
-  { value: "wechat", label: "微信支付", detail: "微信支付导出的明细表", accept: ".xlsx / .xls" },
-  { value: "cmb", label: "招商银行信用卡", detail: "信用卡 PDF 或已转换 CSV", accept: ".pdf / .csv" },
-  { value: "ccb-credit", label: "建设银行信用卡", detail: "信用卡邮件 EML、HTML 或标准 CSV", accept: ".eml / .html / .htm / .csv" },
-  { value: "cmb-checking", label: "招商银行储蓄卡", detail: "储蓄卡交易流水 CSV，PDF 可尝试", accept: ".csv / .pdf" },
+  { value: "auto", labelKey: "importPage.autoDetect", detailKey: "importPage.autoDetectDetail", acceptKey: "importPage.autoDetectAccept" },
+  { value: "alipay", labelKey: "importPage.alipay", detailKey: "importPage.alipayDetail", acceptKey: "importPage.alipayAccept" },
+  { value: "alipay-small-purse", labelKey: "importPage.alipaySmallPurse", detailKey: "importPage.alipaySmallPurseDetail", acceptKey: "importPage.alipaySmallPurseAccept" },
+  { value: "wechat", labelKey: "importPage.wechat", detailKey: "importPage.wechatDetail", acceptKey: "importPage.wechatAccept" },
+  { value: "cmb", labelKey: "importPage.cmb", detailKey: "importPage.cmbDetail", acceptKey: "importPage.cmbAccept" },
+  { value: "ccb-credit", labelKey: "importPage.ccbCredit", detailKey: "importPage.ccbCreditDetail", acceptKey: "importPage.ccbCreditAccept" },
+  { value: "cmb-checking", labelKey: "importPage.cmbChecking", detailKey: "importPage.cmbCheckingDetail", acceptKey: "importPage.cmbCheckingAccept" },
 ];
 
 function providerChoicesFromAPI(providers: ImportProviderInfo[]): ProviderChoice[] {
@@ -121,15 +122,32 @@ function providerChoicesFromAPI(providers: ImportProviderInfo[]): ProviderChoice
     fallbackProviderChoices[0],
     ...providers.map((provider) => ({
       value: provider.id,
-      label: provider.label,
-      detail: provider.detail,
-      accept: provider.accept || provider.extensions.join(" / "),
+      labelKey: provider.label,
+      detailKey: provider.detail,
+      acceptKey: provider.accept || provider.extensions.join(" / "),
     })),
   ];
 }
 
+function providerChoiceEntry(provider: Provider, choices: ProviderChoice[]) {
+  return choices.find((choice) => choice.value === provider) ?? fallbackProviderChoices.find((choice) => choice.value === provider);
+}
+
 function providerLabel(provider: Provider, choices: ProviderChoice[]) {
-  return choices.find((choice) => choice.value === provider)?.label ?? fallbackProviderChoices.find((choice) => choice.value === provider)?.label ?? provider;
+  const choice = providerChoiceEntry(provider, choices);
+  return choice ? i18n.t(choice.labelKey) : provider;
+}
+
+function providerChoiceLabel(choice: ProviderChoice) {
+  return i18n.t(choice.labelKey);
+}
+
+function providerChoiceDetail(choice: ProviderChoice) {
+  return i18n.t(choice.detailKey);
+}
+
+function providerChoiceAccept(choice: ProviderChoice) {
+  return i18n.t(choice.acceptKey);
 }
 
 function isProvider(value: string | undefined): value is Provider {
@@ -162,7 +180,7 @@ export function latestImportDocumentsByProvider(documents: ImportDocument[]) {
 }
 
 export function importActionFeedback(error: unknown) {
-  if (error instanceof ApiResponseError && error.status === 423) return "敏感数据已锁定，请先解锁后重试";
+  if (error instanceof ApiResponseError && error.status === 423) return i18n.t("importPage.lockedFeedback");
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -194,9 +212,9 @@ function formatImportTotals(entries: ImportEntry[]) {
 }
 
 function confidenceLabel(confidence: ImportPreview["providerDetection"]["confidence"]) {
-  if (confidence === "high") return "高置信";
-  if (confidence === "medium") return "中置信";
-  return "低置信";
+  if (confidence === "high") return i18n.t("importPage.confidenceHigh");
+  if (confidence === "medium") return i18n.t("importPage.confidenceMedium");
+  return i18n.t("importPage.confidenceLow");
 }
 
 function fileSize(bytes: number) {
@@ -207,7 +225,7 @@ function fileSize(bytes: number) {
 
 function formatDraftSavedAt(savedAt: number | null) {
   if (!savedAt) return "";
-  return new Date(savedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(savedAt).toLocaleString(i18n.language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function readImportDraft(): ImportDraft | null {
@@ -420,7 +438,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
 
   async function generatePreview() {
     if (!file) {
-      showToast("error", "请先选择账单文件");
+      showToast("error", i18n.t("importPage.selectFileFirst"));
       return;
     }
     setLoading(true);
@@ -540,7 +558,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setGmailLoading(true);
     try {
       const data = await fetchJson<{ url?: string }>("/api/integrations/gmail/connect", { method: "POST" }, undefined, { kind: "write" });
-      if (!data.url) throw new Error("无法开始 Gmail 授权");
+      if (!data.url) throw new Error(i18n.t("importPage.gmailAuthFailed"));
       window.location.assign(data.url);
     } catch (err) {
       reportActionError(err);
@@ -552,7 +570,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setGmailLoading(true);
     try {
       await fetchJson<{ ok?: boolean }>("/api/integrations/gmail/sync", { method: "POST" }, undefined, { kind: "write" });
-      if (await loadGmailAutomation(true)) showToast("success", "Gmail 账单同步完成");
+      if (await loadGmailAutomation(true)) showToast("success", i18n.t("importPage.gmailSyncDone"));
     } catch (err) {
       reportActionError(err);
     } finally {
@@ -561,12 +579,12 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   }
 
   async function disconnectGmail() {
-    if (typeof window !== "undefined" && !window.confirm("断开 Gmail 自动账单连接？")) return;
+    if (typeof window !== "undefined" && !window.confirm(i18n.t("importPage.disconnectConfirm"))) return;
     setGmailLoading(true);
     try {
       await fetchJson<{ ok?: boolean }>("/api/integrations/gmail", { method: "DELETE" }, undefined, { kind: "write" });
       setPendingImports([]);
-      if (await loadGmailAutomation(true)) showToast("success", "Gmail 自动账单连接已断开");
+      if (await loadGmailAutomation(true)) showToast("success", i18n.t("importPage.gmailDisconnected"));
     } catch (err) {
       reportActionError(err);
     } finally {
@@ -579,7 +597,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setGmailLoading(true);
     try {
       const data = await fetchJson<{ item?: GmailPendingImport; preview?: ImportPreview }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, undefined, undefined, { kind: "write" });
-      if (!data.preview?.importId) throw new Error("自动账单预览不存在");
+      if (!data.preview?.importId) throw new Error(i18n.t("importPage.previewNotFound"));
       setFile(null);
       setPreview(data.preview);
       setEntries(data.preview.entries);
@@ -600,7 +618,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setGmailLoading(true);
     try {
       await fetchJson<{ ok?: boolean }>(`/api/ledger/imports/pending/${encodeURIComponent(item.id)}`, { method: "DELETE" }, undefined, { kind: "write" });
-      if (await loadGmailAutomation(true)) showToast("success", "已忽略这份自动账单");
+      if (await loadGmailAutomation(true)) showToast("success", i18n.t("importPage.pendingDismissed"));
     } catch (err) {
       reportActionError(err);
     } finally {
@@ -612,7 +630,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setGmailLoading(true);
     try {
       await fetchJson<{ ok?: boolean; item?: GmailPendingImport }>(gmailPendingRetryURL(item.id), { method: "POST" }, undefined, { kind: "write" });
-      if (await loadGmailAutomation(true)) showToast("success", "账单重新解析完成");
+      if (await loadGmailAutomation(true)) showToast("success", i18n.t("importPage.reparseDone"));
     } catch (err) {
       await loadGmailAutomation();
       reportActionError(err);
@@ -631,11 +649,11 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
         <div className="grid gap-2">
           <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
             <CheckCircle className="h-4 w-4" />
-            查看写入结果
+            {i18n.t("importPage.viewResult")}
           </Button>
           <Button className="w-full" variant="outline" onClick={clearImportState}>
             <FileUp className="h-4 w-4" />
-            导入新账单
+            {i18n.t("importPage.importNewBill")}
           </Button>
         </div>
       );
@@ -645,26 +663,26 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
         <div className="grid gap-2">
           <Button className="w-full" size="lg" onClick={() => setReviewOpen(true)}>
             <ShieldCheck className="h-4 w-4" />
-            继续审核
+            {i18n.t("importPage.continueReview")}
           </Button>
           <div className="grid grid-cols-2 gap-2">
             <Button className="min-w-0" variant="outline" onClick={generatePreview} disabled={loading || !file}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-              重新预览
+              {i18n.t("importPage.rePreview")}
             </Button>
             <Button className="min-w-0 border-line text-stone hover:text-destructive" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={loading || committing}>
               <Trash2 className="h-4 w-4" />
-              丢弃草稿
+              {i18n.t("importPage.discardDraft")}
             </Button>
           </div>
-          {!file ? <div className="text-center text-xs leading-5 text-stone">如需重新预览，请先选择原始账单文件。</div> : null}
+          {!file ? <div className="text-center text-xs leading-5 text-stone">{i18n.t("importPage.rePreviewHint")}</div> : null}
         </div>
       );
     }
     return (
       <Button className="w-full" size="lg" onClick={generatePreview} disabled={loading || !file}>
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-        生成预览
+        {i18n.t("importPage.generatePreview")}
       </Button>
     );
   }
@@ -674,24 +692,24 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       <section data-import-automation-strip="true" className="border border-line bg-panel md:border-x-0">
           <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 font-medium text-ink"><Mail className="h-4 w-4 text-brand" />Gmail 自动账单</div>
+              <div className="flex items-center gap-2 font-medium text-ink"><Mail className="h-4 w-4 text-brand" />{i18n.t("importPage.gmailAutoBills")}</div>
               <div className="mt-1 text-sm text-stone">
-                {gmailStatus?.connected ? `${gmailStatus.email} · 监听 ${gmailStatus.label}` : gmailStatus?.configured ? `等待连接 · 监听 ${gmailStatus.label}` : "配置 Gmail API 与 Pub/Sub 后即可连接"}
+                {gmailStatus?.connected ? i18n.t("importPage.gmailConnectedDesc", { email: gmailStatus.email, label: gmailStatus.label }) : gmailStatus?.configured ? i18n.t("importPage.gmailWaitingDesc", { label: gmailStatus.label }) : i18n.t("importPage.gmailNotConfigured")}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {gmailStatus?.connected ? (
                 <>
                   <Button variant="outline" onClick={() => void syncGmail()} disabled={gmailLoading}>
-                    {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}立即同步
+                    {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{i18n.t("importPage.syncNow")}
                   </Button>
                   <Button variant="outline" onClick={() => void disconnectGmail()} disabled={gmailLoading}>
-                    <Trash2 className="h-4 w-4" />断开
+                    <Trash2 className="h-4 w-4" />{i18n.t("importPage.disconnect")}
                   </Button>
                 </>
               ) : (
                 <Button onClick={() => void connectGmail()} disabled={gmailLoading || !gmailStatus?.configured}>
-                  {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}连接 Gmail
+                  {gmailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}{i18n.t("importPage.connectGmail")}
                 </Button>
               )}
             </div>
@@ -707,29 +725,29 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                     <Inbox className="h-5 w-5 shrink-0 text-brand" />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? "待 Review" : "解析失败"}</Badge>
-                        <span className="truncate text-sm font-medium text-ink">{sensitiveDetailsLocked ? "收到一份待处理账单" : item.subject || item.filename}</span>
+                        <Badge variant={item.status === "ready" ? "outline" : "destructive"}>{item.status === "ready" ? i18n.t("importPage.pendingReviewBadge") : i18n.t("importPage.parseFailedBadge")}</Badge>
+                        <span className="truncate text-sm font-medium text-ink">{sensitiveDetailsLocked ? i18n.t("importPage.pendingBillReceived") : item.subject || item.filename}</span>
                       </div>
-                      <div className="mt-1 truncate text-xs text-stone">{sensitiveDetailsLocked ? `解锁后查看邮件与账单明细${item.status === "ready" ? ` · ${item.candidateCount} 条候选` : ""}` : `${item.sender} · ${item.filename}${item.status === "ready" ? ` · ${item.candidateCount} 条` : ""}`}</div>
+                      <div className="mt-1 truncate text-xs text-stone">{sensitiveDetailsLocked ? `${i18n.t("importPage.pendingLockedDetail")}${item.status === "ready" ? i18n.t("importPage.pendingCandidates", { count: item.candidateCount }) : ""}` : `${item.sender} · ${item.filename}${item.status === "ready" ? ` · ${i18n.t("importPage.pendingCandidates", { count: item.candidateCount })}` : ""}`}</div>
                       {item.error ? <div className="mt-1 line-clamp-2 text-xs text-destructive">{item.error}</div> : null}
                     </div>
                     <div className="flex shrink-0 gap-2">
-                      {actions.retry ? <Button variant="outline" size="sm" onClick={() => void retryPendingImport(item)} disabled={gmailLoading}><RefreshCw className="h-4 w-4" />{sensitiveDetailsLocked ? "解锁并重试" : "重试"}</Button> : null}
-                      {actions.dismiss ? <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />忽略</Button> : null}
-                      {actions.review ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>{sensitiveDetailsLocked ? "解锁并 Review" : "Review"}<ArrowRight className="h-4 w-4" /></Button> : null}
+                      {actions.retry ? <Button variant="outline" size="sm" onClick={() => void retryPendingImport(item)} disabled={gmailLoading}><RefreshCw className="h-4 w-4" />{sensitiveDetailsLocked ? i18n.t("importPage.unlockRetry") : i18n.t("importPage.retry")}</Button> : null}
+                      {actions.dismiss ? <Button variant="outline" size="sm" onClick={() => void dismissPendingImport(item)} disabled={gmailLoading}><Trash2 className="h-4 w-4" />{i18n.t("importPage.dismiss")}</Button> : null}
+                      {actions.review ? <Button size="sm" onClick={() => void openPendingImport(item)} disabled={gmailLoading}>{sensitiveDetailsLocked ? i18n.t("importPage.unlockReview") : i18n.t("importPage.review")}<ArrowRight className="h-4 w-4" /></Button> : null}
                     </div>
                   </div>
                 );
               })}
             </div>
-          ) : gmailStatus?.connected ? <div className="border-t border-line px-4 py-3 text-sm text-stone sm:px-5">当前没有待 Review 的 Gmail 账单</div> : null}
+          ) : gmailStatus?.connected ? <div className="border-t border-line px-4 py-3 text-sm text-stone sm:px-5">{i18n.t("importPage.noPendingGmail")}</div> : null}
       </section>
 
       <section data-import-workbench="true" className="grid min-w-0 border-b border-line lg:grid-cols-[minmax(280px,0.82fr)_minmax(0,1.18fr)]">
           <div className="min-w-0 border-x border-line lg:border-x-0 lg:border-r">
             <div className="border-b border-line px-4 py-3 sm:px-5">
-              <div className="text-sm font-semibold text-ink">选择账单文件</div>
-              <div className="mt-1 text-xs leading-5 text-stone">支持支付宝、微信、招商银行、建设银行及自动识别。</div>
+              <div className="text-sm font-semibold text-ink">{i18n.t("importPage.chooseBillFile")}</div>
+              <div className="mt-1 text-xs leading-5 text-stone">{i18n.t("importPage.chooseBillFileDesc")}</div>
             </div>
             <div
               role="button"
@@ -756,9 +774,9 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             >
               <input ref={inputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.pdf,.eml,.html,.htm,.zip" onChange={(event) => resetForFile(event.target.files?.[0] ?? null)} />
               <UploadCloud className="h-9 w-9 text-brand transition group-hover:-translate-y-0.5" />
-              <div className="mt-4 text-base font-medium leading-6 text-ink">拖拽账单到这里，或点击选择文件</div>
-              <div className="mt-1 max-w-full break-words text-sm text-stone">当前模式：{selectedProvider.label} · {selectedProvider.accept}</div>
-              <div className="mt-1 text-xs leading-5 text-stone">支持普通 ZIP 和经典 ZipCrypto 加密压缩包</div>
+              <div className="mt-4 text-base font-medium leading-6 text-ink">{i18n.t("importPage.dropOrClick")}</div>
+              <div className="mt-1 max-w-full break-words text-sm text-stone">{i18n.t("importPage.currentMode", { label: providerChoiceLabel(selectedProvider), accept: providerChoiceAccept(selectedProvider) })}</div>
+              <div className="mt-1 text-xs leading-5 text-stone">{i18n.t("importPage.zipHint")}</div>
               {file ? (
                 <div className="mt-5 flex w-full max-w-md items-center gap-3 border-t border-line pt-3 text-left text-sm">
                   <FileSpreadsheet className="h-5 w-5 shrink-0 text-brand" />
@@ -771,17 +789,17 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             </div>
             {isZipUpload ? (
               <Label className="block w-full border-t border-line px-4 py-4 text-left sm:px-5">
-                <span className="mb-2 block text-sm font-medium text-ink">压缩包密码（可选）</span>
+                <span className="mb-2 block text-sm font-medium text-ink">{i18n.t("importPage.zipPassword")}</span>
                 <Input
                   type="password"
                   value={archivePassword}
                   maxLength={256}
                   autoComplete="off"
-                  placeholder="输入账单压缩包密码"
+                  placeholder={i18n.t("importPage.zipPasswordPlaceholder")}
                   className="h-10 bg-panel"
                   onChange={(event) => setArchivePassword(event.target.value)}
                 />
-                <span className="mt-1 block text-xs leading-5 text-stone">留空时会尝试服务端已配置密码和六位数字密码。</span>
+                <span className="mt-1 block text-xs leading-5 text-stone">{i18n.t("importPage.zipPasswordHint")}</span>
               </Label>
             ) : null}
           </div>
@@ -791,14 +809,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               <div className="min-w-0 max-w-full overflow-hidden border-b border-line xl:border-r">
                 <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setProviderOpen((value) => !value)}>
                   <span className="min-w-0 flex-1 overflow-hidden">
-                    <span className="block truncate font-medium text-ink">{preview ? "预览来源" : "来源设置"}：{preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}</span>
-                    <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? "草稿已恢复，重新预览需要重新选择文件。" : selectedProvider.detail}</span>
+                    <span className="block truncate font-medium text-ink">{preview ? i18n.t("importPage.previewSource") : i18n.t("importPage.sourceSettings")}：{preview ? providerLabel(preview.provider, providerChoices) : providerChoiceLabel(selectedProvider)}</span>
+                    <span className="mt-1 block truncate text-xs text-stone">{isRestoredDraft ? i18n.t("importPage.draftRestoredHint") : providerChoiceDetail(selectedProvider)}</span>
                   </span>
                   {providerOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-stone" /> : <ChevronDown className="h-4 w-4 shrink-0 text-stone" />}
                 </button>
                 {providerOpen && isRestoredDraft ? (
                   <div className="border-t border-line p-3 text-xs leading-5 text-stone">
-                    当前草稿来自 {preview ? providerLabel(preview.provider, providerChoices) : selectedProvider.label}。选择文件后可以重新生成预览并覆盖这份草稿。
+                    {i18n.t("importPage.draftRestoredDetail", { provider: preview ? providerLabel(preview.provider, providerChoices) : providerChoiceLabel(selectedProvider) })}
                   </div>
                 ) : providerOpen ? (
                   <div className="divide-y divide-line border-t border-line">
@@ -816,10 +834,10 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                         }}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{choice.label}</span>
+                          <span className="font-medium">{providerChoiceLabel(choice)}</span>
                           {providerOverride === choice.value ? <Check className="h-4 w-4 text-brand" /> : null}
                         </div>
-                        <div className="mt-1 break-words text-xs leading-5 text-stone">{choice.detail}</div>
+                        <div className="mt-1 break-words text-xs leading-5 text-stone">{providerChoiceDetail(choice)}</div>
                       </button>
                     ))}
                   </div>
@@ -830,15 +848,15 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 <div className="mb-3 flex min-w-0 items-center justify-between gap-3 text-xs text-stone">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-ink">
-                      {importStage === "done" ? "导入已完成" : importStage === "review" ? "预览已生成" : importStage === "ready" ? "文件已就绪" : "等待账单文件"}
+                      {importStage === "done" ? i18n.t("importPage.importDone") : importStage === "review" ? i18n.t("importPage.previewGenerated") : importStage === "ready" ? i18n.t("importPage.fileReady") : i18n.t("importPage.waitingFile")}
                     </div>
                     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                      <span className={cn("rounded-full px-2 py-0.5", Boolean(file) || Boolean(preview) ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>选择</span>
-                      <span className={cn("rounded-full px-2 py-0.5", preview ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>预览</span>
-                      <span className={cn("rounded-full px-2 py-0.5", hasCommitted ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>写入</span>
+                      <span className={cn("rounded-full px-2 py-0.5", Boolean(file) || Boolean(preview) ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>{i18n.t("importPage.selectStep")}</span>
+                      <span className={cn("rounded-full px-2 py-0.5", preview ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>{i18n.t("importPage.previewStep")}</span>
+                      <span className={cn("rounded-full px-2 py-0.5", hasCommitted ? "bg-[var(--selected-bg)] text-brand" : "bg-tag text-stone")}>{i18n.t("importPage.writeStep")}</span>
                     </div>
                   </div>
-                  {draftSavedAt && !hasCommitted ? <span className="shrink-0">草稿 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+                  {draftSavedAt && !hasCommitted ? <span className="shrink-0">{i18n.t("importPage.draftLabel", { time: formatDraftSavedAt(draftSavedAt) })}</span> : null}
                 </div>
                 {renderPrimaryActions()}
               </div>
@@ -854,29 +872,29 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
             <div className="min-w-0 max-w-full overflow-hidden bg-panel">
               <button type="button" className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setAdvancedOpen((value) => !value)}>
                 <span className="min-w-0 flex-1 overflow-hidden">
-                  <span className="block text-sm font-medium text-ink">高级选项</span>
-                  <span className="mt-1 block truncate text-xs text-stone">仅在导入规则需要人工覆盖时使用。</span>
+                  <span className="block text-sm font-medium text-ink">{i18n.t("importPage.advancedOptions")}</span>
+                  <span className="mt-1 block truncate text-xs text-stone">{i18n.t("importPage.advancedOptionsHint")}</span>
                 </span>
                 {advancedOpen ? <ChevronUp className="h-4 w-4 text-stone" /> : <ChevronDown className="h-4 w-4 text-stone" />}
               </button>
               {advancedOpen ? (
                 <div className="space-y-4 border-t border-line px-4 py-4">
                   <Label className="block">
-                    <span className="mb-2 block">账单来源覆盖</span>
+                    <span className="mb-2 block">{i18n.t("importPage.sourceOverride")}</span>
                     <Select value={providerOverride} onValueChange={(value) => setProviderOverride(value as ProviderOverride)}>
                       <SelectTrigger className="h-10 w-full min-w-0 bg-panel text-sm text-ink">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {providerChoices.map((choice) => <SelectItem key={choice.value} value={choice.value}>{choice.label}</SelectItem>)}
+                        {providerChoices.map((choice) => <SelectItem key={choice.value} value={choice.value}>{providerChoiceLabel(choice)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </Label>
                   <div className="flex items-start gap-3 border-t border-line pt-4 text-sm">
                     <Checkbox id="alipay-fund-rounding" className="mt-1" checked={alipayFundRounding} onCheckedChange={(value) => setAlipayFundRounding(value === true)} />
                     <label htmlFor="alipay-fund-rounding" className="cursor-pointer">
-                      <span className="font-medium text-warm">支付宝基金 9.99 → 10.00 补差</span>
-                      <span className="mt-1 block text-xs leading-5 text-stone">仅在确认该基金定投需要补 0.01 时开启。</span>
+                      <span className="font-medium text-warm">{i18n.t("importPage.fundRounding")}</span>
+                      <span className="mt-1 block text-xs leading-5 text-stone">{i18n.t("importPage.fundRoundingHint")}</span>
                     </label>
                   </div>
                 </div>
@@ -889,32 +907,32 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
         <section data-import-preview-summary="true" className="flex min-w-0 flex-col gap-4 border-x border-b border-line bg-panel px-4 py-4 sm:px-5 md:border-x-0 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? "已写入" : "待审核"}</Badge>
-                {activePendingId ? <Badge variant="secondary">Gmail 自动导入</Badge> : isRestoredDraft ? <Badge variant="secondary">已恢复草稿</Badge> : null}
+                <Badge variant="outline" className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>{hasCommitted ? i18n.t("importPage.writtenBadge") : i18n.t("importPage.pendingReviewBadgeShort")}</Badge>
+                {activePendingId ? <Badge variant="secondary">{i18n.t("importPage.gmailAutoBadge")}</Badge> : isRestoredDraft ? <Badge variant="secondary">{i18n.t("importPage.restoredDraftBadge")}</Badge> : null}
                 <Badge variant="secondary">{providerLabel(preview.provider, providerChoices)}</Badge>
-                <span className="text-sm text-stone">{entries.length} 条交易</span>
+                <span className="text-sm text-stone">{i18n.t("importPage.txCount", { count: entries.length })}</span>
               </div>
               <div className="mt-2 line-clamp-2 break-all font-medium text-ink">{preview.originalFilename}</div>
               <div className="mt-1 text-sm text-stone">
-                {preview.dateStart ?? "?"} 到 {preview.dateEnd ?? "?"}
-                {draftSavedAt && !hasCommitted ? <span> · 草稿保存于 {formatDraftSavedAt(draftSavedAt)}</span> : null}
+                {i18n.t("importPage.dateRange", { start: preview.dateStart ?? "?", end: preview.dateEnd ?? "?" })}
+                {draftSavedAt && !hasCommitted ? <span>{i18n.t("importPage.draftSavedAt", { time: formatDraftSavedAt(draftSavedAt) })}</span> : null}
               </div>
             </div>
             <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
               {hasCommitted ? (
                 <Button variant="outline" onClick={clearImportState}>
                   <FileUp className="h-4 w-4" />
-                  导入新账单
+                  {i18n.t("importPage.importNewBill")}
                 </Button>
               ) : (
                 <Button variant="outline" className="border-line text-stone hover:text-destructive" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
                   <Trash2 className="h-4 w-4" />
-                  丢弃草稿
+                  {i18n.t("importPage.discardDraft")}
                 </Button>
               )}
               <Button onClick={() => hasCommitted ? setSuccessDialogOpen(true) : setReviewOpen(true)} variant={hasCommitted ? "secondary" : "default"}>
                 {hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                {hasCommitted ? "查看结果" : "继续审核"}
+                {hasCommitted ? i18n.t("importPage.viewResultShort") : i18n.t("importPage.continueReview")}
               </Button>
             </div>
         </section>
@@ -925,8 +943,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           open={reviewOpen}
           title={(
             <>
-              <span className="sm:hidden">导入审核</span>
-              <span className="hidden sm:inline">{providerLabel(preview.provider, providerChoices)}导入审核</span>
+              <span className="sm:hidden">{i18n.t("importPage.reviewTitle")}</span>
+              <span className="hidden sm:inline">{i18n.t("importPage.reviewTitleWithProvider", { provider: providerLabel(preview.provider, providerChoices) })}</span>
             </>
           )}
           onClose={() => setReviewOpen(false)}
@@ -935,55 +953,55 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           align="center"
           bodyClassName="!p-0 xl:!overflow-hidden"
           panelClassName="!h-[100dvh] !max-h-[100dvh] !rounded-none sm:!h-[92dvh] sm:!max-h-[calc(100dvh-env(safe-area-inset-top)-0.75rem)] sm:!rounded-3xl xl:!h-[96dvh] xl:!max-h-[96dvh] xl:!max-w-[98vw] 2xl:!max-w-[1720px]"
-          closeLabel={committing ? "写入中" : "关闭"}
+          closeLabel={committing ? i18n.t("importPage.writing") : i18n.t("importPage.close")}
           footer={
             <div>
               <div className="grid min-w-0 gap-2 sm:hidden">
                 <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
                   <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
-                    {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `${entries.length} 待写入`}
+                    {hasCommitted ? i18n.t("importPage.writtenCount", { count: commitResult?.count ?? 0 }) : i18n.t("importPage.pendingWriteCount", { count: entries.length })}
                   </Badge>
-                  {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{invalidEntryCount} 条需修正</span> : null}
+                  {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{i18n.t("importPage.needFixCount", { count: invalidEntryCount })}</span> : null}
                   <span className="tabular-nums">{reviewTotalAmount}</span>
                 </div>
                 <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-2">
-                  <Button className="min-w-0" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后"}</Button>
+                  <Button className="min-w-0" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? i18n.t("importPage.close") : i18n.t("importPage.later")}</Button>
                   <Button className="min-w-0" onClick={commitImport} disabled={!canCommit}>
                     {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                    {committing ? "写入中" : hasCommitted ? "已写入" : "确认写入"}
+                    {committing ? i18n.t("importPage.writing") : hasCommitted ? i18n.t("importPage.writtenBadge") : i18n.t("importPage.confirmWrite")}
                   </Button>
                 </div>
                 {!hasCommitted ? (
                   <Button className="h-8 min-w-0 justify-start px-0 text-xs text-stone hover:text-destructive" variant="ghost" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
-                    <Trash2 className="h-3.5 w-3.5" /> 丢弃草稿
+                    <Trash2 className="h-3.5 w-3.5" /> {i18n.t("importPage.discardDraft")}
                   </Button>
                 ) : null}
               </div>
               <div className="hidden min-w-0 flex-col gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-stone">
                 <Badge variant={hasCommitted ? "secondary" : "outline"} className={hasCommitted ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : undefined}>
-                  {hasCommitted ? `已写入 ${commitResult?.count ?? 0}` : `待写入 ${entries.length}`}
+                  {hasCommitted ? i18n.t("importPage.writtenCount", { count: commitResult?.count ?? 0 }) : i18n.t("importPage.pendingWriteCount", { count: entries.length })}
                 </Badge>
-                {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{invalidEntryCount} 条分录需修正</span> : null}
-                <span>{removedEntryCount > 0 ? `已移除 ${removedEntryCount}` : "未移除候选"}</span>
-                <span className="tabular-nums">{reviewTotalAmount} 合计</span>
+                {!hasCommitted && invalidEntryCount > 0 ? <span className="text-[var(--warning)]">{i18n.t("importPage.needFixCount", { count: invalidEntryCount })}</span> : null}
+                <span>{removedEntryCount > 0 ? i18n.t("importPage.removedCount", { count: removedEntryCount }) : i18n.t("importPage.notRemoved")}</span>
+                <span className="tabular-nums">{i18n.t("importPage.totalAmount", { amount: reviewTotalAmount })}</span>
                 </div>
                 <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[auto_auto_auto]">
-                  <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? "关闭" : "稍后处理"}</Button>
+                  <Button className="min-w-0 sm:min-w-28" variant="outline" onClick={() => setReviewOpen(false)} disabled={committing}>{hasCommitted ? i18n.t("importPage.close") : i18n.t("importPage.laterHandle")}</Button>
                   {hasCommitted ? (
                     <Button className="min-w-0 sm:min-w-32" variant="secondary" onClick={clearImportState}>
                       <FileUp className="h-4 w-4" />
-                      导入新账单
+                      {i18n.t("importPage.importNewBill")}
                     </Button>
                   ) : (
                     <Button className="min-w-0 border-line text-stone hover:text-destructive sm:min-w-28" variant="outline" onClick={() => setDiscardDialogOpen(true)} disabled={committing}>
                       <Trash2 className="h-4 w-4" />
-                      丢弃草稿
+                      {i18n.t("importPage.discardDraft")}
                     </Button>
                   )}
                   <Button className="min-w-0 sm:min-w-36" onClick={commitImport} disabled={!canCommit}>
                     {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : hasCommitted ? <CheckCircle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                    {committing ? "正在写入..." : hasCommitted ? "已写入" : "确认写入账本"}
+                    {committing ? i18n.t("importPage.writingEllipsis") : hasCommitted ? i18n.t("importPage.writtenBadge") : i18n.t("importPage.confirmWriteLedger")}
                   </Button>
                 </div>
               </div>
@@ -1003,14 +1021,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </div>
                 <div className="hidden grid-cols-[auto_auto] items-center gap-3 border-l border-line pl-3 text-sm text-stone sm:grid">
                   <span>{preview.dateStart ?? "?"} ~ {preview.dateEnd ?? "?"}</span>
-                  <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{entries.length} 待写入</span>
+                  <span className="rounded-lg bg-[var(--selected-bg)] px-2 py-1 font-medium text-brand">{i18n.t("importPage.pendingWriteChip", { count: entries.length })}</span>
                 </div>
               </div>
               <div className="mt-4 hidden min-w-0 grid-cols-2 gap-px overflow-hidden border border-line bg-line sm:grid sm:grid-cols-4 xl:mt-3">
-                <ReviewMetric label="原始记录" value={preview.rawRowCount || preview.candidateCount} detail={`${preview.filteredRowCount || preview.generatedCount} 条进入预览`} />
-                <ReviewMetric label="去重跳过" value={preview.skippedDuplicateCount} detail="与账本现有记录匹配" />
-                <ReviewMetric label="已移除" value={removedEntryCount} detail="提交时会跳过" tone={removedEntryCount > 0 ? "warn" : "muted"} />
-                <ReviewMetric label="待写入合计" value={reviewTotalAmount} detail={`${entries.length} 条候选交易`} tone="brand" />
+                <ReviewMetric label={i18n.t("importPage.rawRecords")} value={preview.rawRowCount || preview.candidateCount} detail={i18n.t("importPage.rawRecordsDetail", { count: preview.filteredRowCount || preview.generatedCount })} />
+                <ReviewMetric label={i18n.t("importPage.dedupSkipped")} value={preview.skippedDuplicateCount} detail={i18n.t("importPage.dedupSkippedDetail")} />
+                <ReviewMetric label={i18n.t("importPage.removed")} value={removedEntryCount} detail={i18n.t("importPage.removedDetail")} tone={removedEntryCount > 0 ? "warn" : "muted"} />
+                <ReviewMetric label={i18n.t("importPage.pendingTotal")} value={reviewTotalAmount} detail={i18n.t("importPage.pendingTotalDetail", { count: entries.length })} tone="brand" />
               </div>
             </div>
 
@@ -1030,16 +1048,16 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 <section className="hidden min-w-0 overflow-hidden bg-panel xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-ink">候选交易</div>
-                      <div className="mt-0.5 text-xs text-stone">{entries.length === 0 ? "确认后会归档原始账单。" : "逐条核对，移除后只提交剩余交易。"}</div>
+                      <div className="text-sm font-medium text-ink">{i18n.t("importPage.candidateTransactions")}</div>
+                      <div className="mt-0.5 text-xs text-stone">{entries.length === 0 ? i18n.t("importPage.candidateEmptyHint") : i18n.t("importPage.candidateReviewHint")}</div>
                     </div>
                     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-stone">
-                      <span className="rounded-full bg-tag px-2 py-1">{entries.length} 待写入</span>
-                      <span className="rounded-full bg-tag px-2 py-1">{removedEntryCount} 已移除</span>
+                      <span className="rounded-full bg-tag px-2 py-1">{i18n.t("importPage.pendingWriteChip", { count: entries.length })}</span>
+                      <span className="rounded-full bg-tag px-2 py-1">{i18n.t("importPage.removedChip", { count: removedEntryCount })}</span>
                     </div>
                   </div>
                   {entries.length === 0 ? (
-                    <div className="px-4 py-10 text-center text-sm text-stone">没有待写入交易，确认后归档账单文件。</div>
+                    <div className="px-4 py-10 text-center text-sm text-stone">{i18n.t("importPage.noPendingTransactions")}</div>
                   ) : (
                     <div className="divide-y divide-line xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                       {entries.map((entry, index) => {
@@ -1061,10 +1079,10 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                 </div>
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 items-center gap-2">
-                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || "未命名商户"}</span>
+                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || i18n.t("importPage.unnamedMerchant")}</span>
                                     {entry.source ? <span className="shrink-0 rounded-full border border-brand/35 px-1.5 py-0.5 text-[10px] text-brand">{entry.source}</span> : null}
                                   </div>
-                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || "未填写标题"}</div>
+                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || i18n.t("importPage.noTitle")}</div>
                                 </div>
                                 <div className="text-left md:text-right">
                                   <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
@@ -1079,7 +1097,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                               className="mr-1 h-9 w-9 shrink-0 text-stone hover:text-destructive"
                               onClick={() => removeEntry(entry.id)}
                               disabled={committing || hasCommitted}
-                              title="移除这条候选交易"
+                              title={i18n.t("importPage.removeCandidate")}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -1095,14 +1113,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                     <div className="border-b border-line bg-paper px-4 py-3">
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">正在编辑</div>
+                          <div className="text-[11px] uppercase tracking-[0.12em] text-stone">{i18n.t("importPage.editing")}</div>
                           <div className="mt-1 text-lg font-medium leading-7 text-ink">{selectedEntryIndex + 1}/{entries.length}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(-1)} disabled={entries.length <= 1} title="上一条">
+                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(-1)} disabled={entries.length <= 1} title={i18n.t("importPage.previous")}>
                             <ChevronUp className="h-4 w-4" />
                           </Button>
-                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(1)} disabled={entries.length <= 1} title="下一条">
+                          <Button type="button" variant="outline" size="icon-sm" onClick={() => selectEntryOffset(1)} disabled={entries.length <= 1} title={i18n.t("importPage.next")}>
                             <ChevronDown className="h-4 w-4" />
                           </Button>
                         </div>
@@ -1123,15 +1141,15 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                       />
 
                       <details open className="border-t border-line pt-3">
-                        <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />备注 / metadata</summary>
+                        <summary className="cursor-pointer text-xs font-medium text-olive"><Pencil className="mr-1 inline h-3 w-3" />{i18n.t("importPage.noteMetadata")}</summary>
                         <div className="mt-3 grid gap-2">
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">note</span>
-                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder="添加备注" disabled={committing || hasCommitted} />
+                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.note ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "note", event.target.value)} placeholder={i18n.t("importPage.notePlaceholder")} disabled={committing || hasCommitted} />
                           </Label>
                           <Label className="block">
                             <span className="mb-1.5 block text-xs text-stone">purpose</span>
-                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder="例如: travel / work" disabled={committing || hasCommitted} />
+                            <Input className="h-10 border-line bg-panel" value={selectedEntry.metadata.purpose ?? ""} onChange={(event) => updateMetadata(selectedEntry.id, "purpose", event.target.value)} placeholder={i18n.t("importPage.purposePlaceholder")} disabled={committing || hasCommitted} />
                           </Label>
                         </div>
                       </details>
@@ -1144,7 +1162,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                         disabled={committing || hasCommitted}
                       >
                         <Trash2 className="h-4 w-4" />
-                        移除当前候选
+                        {i18n.t("importPage.removeCurrent")}
                       </Button>
                     </div>
                   </aside>
@@ -1153,8 +1171,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 {entries.length > 0 ? (
                   <details className="order-2 min-w-0 overflow-hidden border border-line bg-panel xl:hidden">
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-paper px-3 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
-                      <span>候选交易</span>
-                      <span className="rounded-full bg-tag px-2 py-1 text-xs font-normal text-stone">{entries.length} 待写入</span>
+                      <span>{i18n.t("importPage.candidateTransactions")}</span>
+                      <span className="rounded-full bg-tag px-2 py-1 text-xs font-normal text-stone">{i18n.t("importPage.pendingWriteChip", { count: entries.length })}</span>
                     </summary>
                     <div className="max-h-80 divide-y divide-line overflow-y-auto border-t border-line">
                       {entries.map((entry, index) => {
@@ -1166,14 +1184,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 items-center gap-2">
                                     <span className="font-mono text-[11px] text-stone">{String(index + 1).padStart(2, "0")}</span>
-                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || "未命名商户"}</span>
+                                    <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || i18n.t("importPage.unnamedMerchant")}</span>
                                   </div>
-                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.date} · {entry.narration || "未填写标题"}</div>
+                                  <div className="mt-0.5 truncate text-xs text-stone">{entry.date} · {entry.narration || i18n.t("importPage.noTitle")}</div>
                                 </div>
                                 <div className="shrink-0 text-right font-serif text-sm font-medium text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
                               </div>
                             </button>
-                            <Button type="button" variant="ghost" size="icon-sm" className="mr-1 text-stone hover:text-destructive" onClick={() => removeEntry(entry.id)} disabled={committing || hasCommitted} title="移除这条候选交易">
+                            <Button type="button" variant="ghost" size="icon-sm" className="mr-1 text-stone hover:text-destructive" onClick={() => removeEntry(entry.id)} disabled={committing || hasCommitted} title={i18n.t("importPage.removeCandidate")}>
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </article>
@@ -1187,7 +1205,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
               <div className="shrink-0 overflow-hidden border border-line bg-panel">
                 <Button variant="ghost" className="flex h-11 w-full justify-start rounded-none px-3 text-stone" onClick={() => setRawOpen((value) => !value)}>
                   {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  查看原始输出 / dedup 报告
+                  {i18n.t("importPage.rawOutput")}
                 </Button>
                 {rawOpen ? (
                   <div className="grid gap-3 border-t border-line p-3 lg:grid-cols-2">
@@ -1215,14 +1233,14 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>丢弃这份导入草稿？</AlertDialogTitle>
+            <AlertDialogTitle>{i18n.t("importPage.discardTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              这只会删除浏览器里保存的导入审核状态，不会改动账本，也不会删除原始账单文件。
+              {i18n.t("importPage.discardDesc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>继续审核</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={clearImportState}>确认丢弃</AlertDialogAction>
+            <AlertDialogCancel>{i18n.t("importPage.continueReviewing")}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={clearImportState}>{i18n.t("importPage.confirmDiscard")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1248,10 +1266,10 @@ function LastImportByProviderPanel({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <CalendarClock className="h-4 w-4 shrink-0 text-brand" />
-            <div className="truncate text-sm font-medium text-ink">账单截止日</div>
+            <div className="truncate text-sm font-medium text-ink">{i18n.t("importPage.billDeadline")}</div>
           </div>
         </div>
-        <Button type="button" variant="outline" size="icon-sm" onClick={onRefresh} disabled={loading} title="刷新导入记录">
+        <Button type="button" variant="outline" size="icon-sm" onClick={onRefresh} disabled={loading} title={i18n.t("importPage.refreshImports")}>
           <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
         </Button>
       </div>
@@ -1260,10 +1278,10 @@ function LastImportByProviderPanel({
         {providers.map((provider) => {
           const document = latestByProvider[provider.value];
           return (
-            <div key={provider.value} className="min-w-0 bg-panel px-3 py-2.5" title={document ? `${provider.label}: ${formatImportDocumentRange(document)} · ${document.name}` : `${provider.label}: 暂无记录`}>
-              <div className="truncate text-xs leading-5 text-stone">{provider.label}</div>
+            <div key={provider.value} className="min-w-0 bg-panel px-3 py-2.5" title={document ? `${providerChoiceLabel(provider)}: ${formatImportDocumentRange(document)} · ${document.name}` : `${providerChoiceLabel(provider)}: ${i18n.t("importPage.noRecords")}`}>
+              <div className="truncate text-xs leading-5 text-stone">{providerChoiceLabel(provider)}</div>
               <div className={cn("mt-0.5 truncate text-sm font-medium tabular-nums", document ? "text-brand" : "text-stone")}>
-                {document ? document.dateEnd || document.dateStart || "未知日期" : "暂无记录"}
+                {document ? document.dateEnd || document.dateStart || i18n.t("importPage.unknownDate") : i18n.t("importPage.noRecords")}
               </div>
             </div>
           );
@@ -1293,13 +1311,13 @@ function ImportHistoryPanel({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <FileArchive className="h-4 w-4 shrink-0 text-brand" />
-              <h2 className="truncate text-sm font-medium text-ink">历史导入文件</h2>
+              <h2 className="truncate text-sm font-medium text-ink">{i18n.t("importPage.historyTitle")}</h2>
             </div>
-            <div className="mt-1 text-xs leading-5 text-stone">{documents.length ? `${documents.length} 个归档文件 · ${fileSize(totalSize)}` : "提交导入后，原始账单会显示在这里。"}</div>
+            <div className="mt-1 text-xs leading-5 text-stone">{documents.length ? i18n.t("importPage.historyCount", { count: documents.length, size: fileSize(totalSize) }) : i18n.t("importPage.historyEmpty")}</div>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
-            刷新
+            {i18n.t("importPage.refresh")}
           </Button>
         </div>
 
@@ -1310,7 +1328,7 @@ function ImportHistoryPanel({
           </Alert>
         ) : documents.length === 0 ? (
           <div className="grid min-h-36 place-items-center px-4 py-8 text-center text-sm text-stone">
-            {loading ? "正在读取历史导入文件…" : "还没有归档的原始账单文件。"}
+            {loading ? i18n.t("importPage.loadingHistory") : i18n.t("importPage.noArchived")}
           </div>
         ) : (
           <div className="divide-y divide-line">
@@ -1339,13 +1357,13 @@ function ImportHistoryPanel({
                     <Button asChild variant="outline" size="sm" className="min-w-0">
                       <a href={href} target="_blank" rel="noreferrer">
                         <ExternalLink className="h-4 w-4" />
-                        打开
+                        {i18n.t("importPage.open")}
                       </a>
                     </Button>
                     <Button asChild variant="secondary" size="sm" className="min-w-0">
                       <a href={href} download={document.name}>
                         <Download className="h-4 w-4" />
-                        下载
+                        {i18n.t("importPage.download")}
                       </a>
                     </Button>
                   </div>
@@ -1369,13 +1387,13 @@ function importDocumentTypeLabel(document: ImportDocument) {
 
 function formatImportDocumentRange(document: ImportDocument) {
   if (document.dateStart && document.dateEnd) return `${document.dateStart} ~ ${document.dateEnd}`;
-  return "未知账期";
+  return i18n.t("importPage.unknownPeriod");
 }
 
 function formatImportDocumentTime(value: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "未知时间";
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(date.getTime())) return i18n.t("importPage.unknownTime");
+  return date.toLocaleString(i18n.language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export function importFlowForEntry(entry: ImportEntry) {
@@ -1388,13 +1406,13 @@ export function importFlowForEntry(entry: ImportEntry) {
   const outflow = postings.find((posting) => posting.amount < 0);
   const inflow = postings.find((posting) => posting.amount > 0);
   if (outflow && inflow) {
-    if (category.startsWith("Income:")) return { from: outflow.account, to: inflow.account, kind: "收入流入" };
-    if (category.startsWith("Expenses:")) return { from: outflow.account, to: inflow.account, kind: outflow.account === category ? "退款流入" : "支出流向" };
-    return { from: outflow.account, to: inflow.account, kind: "账户转移" };
+    if (category.startsWith("Income:")) return { from: outflow.account, to: inflow.account, kind: i18n.t("importPage.flowIncome") };
+    if (category.startsWith("Expenses:")) return { from: outflow.account, to: inflow.account, kind: outflow.account === category ? i18n.t("importPage.flowRefund") : i18n.t("importPage.flowExpense") };
+    return { from: outflow.account, to: inflow.account, kind: i18n.t("importPage.flowTransfer") };
   }
-  if (category.startsWith("Income:")) return { from: category, to: funding || category, kind: "收入流入" };
-  if (category.startsWith("Expenses:")) return { from: funding || category, to: category, kind: "支出流向" };
-  return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: "资金流向" };
+  if (category.startsWith("Income:")) return { from: category, to: funding || category, kind: i18n.t("importPage.flowIncome") };
+  if (category.startsWith("Expenses:")) return { from: funding || category, to: category, kind: i18n.t("importPage.flowExpense") };
+  return { from: funding || postings[0]?.account || category, to: category || postings[1]?.account || funding, kind: i18n.t("importPage.flowFunds") };
 }
 
 function isCategoryPosting(account: string) {
@@ -1452,7 +1470,7 @@ export function summarizeImportPostings(postings: ImportPosting[]) {
   let hasInvalidAmount = false;
   for (const posting of postings) {
     const amount = Number(posting.amount);
-    const currency = posting.currency.trim().toUpperCase() || "未指定";
+    const currency = posting.currency.trim().toUpperCase() || i18n.t("importPage.none");
     if (!Number.isFinite(amount)) {
       hasInvalidAmount = true;
       continue;
@@ -1498,8 +1516,8 @@ function ImportEntryEditor({
   const flow = importFlowForEntry(entry);
   const postingSummary = summarizeImportPostings(entry.postings);
   const metaItems = [
-    { label: "方式", value: entry.method || "-" },
-    { label: "订单号", value: entry.orderId || "-" },
+    { label: i18n.t("importPage.methodLabel"), value: entry.method || "-" },
+    { label: i18n.t("importPage.orderIdLabel"), value: entry.orderId || "-" },
   ];
   return (
     <div className="min-w-0 divide-y divide-line border-y border-line">
@@ -1507,49 +1525,49 @@ function ImportEntryEditor({
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-brand">{flow.kind}</div>
-            <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || "未命名商户"}>{entry.payee || "未命名商户"}</div>
+            <div className="mt-1 truncate text-lg font-medium leading-7 text-ink" title={entry.payee || i18n.t("importPage.unnamedMerchant")}>{entry.payee || i18n.t("importPage.unnamedMerchant")}</div>
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
               <Badge variant="secondary" className="bg-panel text-warm">{entry.date}</Badge>
-              <Badge variant="outline" className="border-brand/35 bg-panel text-warm">{entry.postings.length} 个账户</Badge>
+              <Badge variant="outline" className="border-brand/35 bg-panel text-warm">{i18n.t("importPage.accountsOf", { count: entry.postings.length })}</Badge>
               {entry.source ? <Badge variant="outline" className="border-brand/50 bg-panel text-brand">{entry.source}</Badge> : null}
             </div>
           </div>
           <div className="shrink-0 text-left sm:text-right">
             <div className="font-serif text-2xl font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
-            <div className="mt-1 text-xs text-stone">主金额</div>
+            <div className="mt-1 text-xs text-stone">{i18n.t("importPage.mainAmount")}</div>
           </div>
         </div>
         <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-t border-brand/15 pt-3">
-          <FlowEndpoint label="从" account={fromLabel} raw={flow.from} />
+          <FlowEndpoint label={i18n.t("importPage.flowFrom")} account={fromLabel} raw={flow.from} />
           <ArrowRight className="h-4 w-4 text-brand" aria-hidden="true" />
-          <FlowEndpoint label="到" account={toLabel} raw={flow.to} align="right" />
+          <FlowEndpoint label={i18n.t("importPage.flowTo")} account={toLabel} raw={flow.to} align="right" />
         </div>
       </section>
 
       <section className="bg-panel p-3 sm:p-4">
         <div className="mb-3">
-          <div className="text-sm font-medium text-ink">交易信息</div>
-          <div className="mt-0.5 hidden text-xs text-stone sm:block">日期、状态、收付款方和账本标题都可以在审核时修正。</div>
+          <div className="text-sm font-medium text-ink">{i18n.t("importPage.txInfo")}</div>
+          <div className="mt-0.5 hidden text-xs text-stone sm:block">{i18n.t("importPage.txInfoHint")}</div>
         </div>
         <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(9rem,0.7fr)_7rem_minmax(0,1.3fr)]">
           <Label className="block min-w-0">
-            <span className="mb-1.5 block text-xs text-stone">日期</span>
+            <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.dateLabel")}</span>
             <Input type="date" className="h-10 min-w-0 bg-panel" value={entry.date} onChange={(event) => onEntryChange({ date: event.target.value })} disabled={disabled} />
           </Label>
           <Label className="block min-w-0">
-            <span className="mb-1.5 block text-xs text-stone">状态</span>
+            <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.statusLabel")}</span>
             <Select value={entry.flag} onValueChange={(value) => onEntryChange({ flag: value as ImportEntry["flag"] })} disabled={disabled}>
               <SelectTrigger className="h-10 w-full min-w-0 bg-panel"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="*">* 已确认</SelectItem><SelectItem value="!">! 待确认</SelectItem></SelectContent>
+              <SelectContent><SelectItem value="*">{i18n.t("importPage.confirmedFlag")}</SelectItem><SelectItem value="!">{i18n.t("importPage.pendingFlag")}</SelectItem></SelectContent>
             </Select>
           </Label>
           <Label className="block min-w-0">
-            <span className="mb-1.5 block text-xs text-stone">收付款方</span>
+            <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.payeeLabel")}</span>
             <Input className="h-10 min-w-0 bg-panel" value={entry.payee} onChange={(event) => onEntryChange({ payee: event.target.value })} disabled={disabled} />
           </Label>
         </div>
         <Label className="mt-3 block min-w-0">
-          <span className="mb-1.5 block text-xs text-stone">账本标题</span>
+          <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.narrationLabel")}</span>
           <Input className="h-10 min-w-0 bg-panel" value={entry.narration} onChange={(event) => onEntryChange({ narration: event.target.value })} disabled={disabled} />
         </Label>
       </section>
@@ -1557,27 +1575,27 @@ function ImportEntryEditor({
       <section className="bg-paper/55 p-3 sm:p-4">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-ink">分录明细</div>
-            <div className="mt-0.5 hidden text-xs leading-5 text-stone sm:block">每一行都是一条 Beancount posting，可编辑来源账户、目标账户并添加拆分账户。</div>
+            <div className="text-sm font-medium text-ink">{i18n.t("importPage.postingsDetail")}</div>
+            <div className="mt-0.5 hidden text-xs leading-5 text-stone sm:block">{i18n.t("importPage.postingsDetailHint")}</div>
           </div>
           <Button type="button" variant="outline" className="h-9 shrink-0 bg-panel px-3" onClick={onPostingAdd} disabled={disabled}>
             <Plus className="h-4 w-4" />
-            添加账户
+            {i18n.t("importPage.addAccount")}
           </Button>
         </div>
 
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
           {postingSummary.totals.map((total) => {
             const balanced = Math.abs(total.amount) < 0.000001;
-            return <span key={total.currency} className={cn("rounded-full border px-2 py-1 tabular-nums", balanced ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]")}>{total.currency} 小计 {balanced ? "0.00" : total.amount.toFixed(2)}</span>;
+            return <span key={total.currency} className={cn("rounded-full border px-2 py-1 tabular-nums", balanced ? "border-brand/30 bg-[var(--selected-bg)] text-brand" : "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]")}>{i18n.t("importPage.subtotal", { currency: total.currency, amount: balanced ? "0.00" : total.amount.toFixed(2) })}</span>;
           })}
-          {postingSummary.hasInvalidAmount ? <span className="rounded-full bg-destructive/10 px-2 py-1 text-destructive">存在无效金额</span> : null}
-          {entry.postings.some((posting) => posting.priceKind || posting.priceAmount || posting.priceCurrency) ? <span className="text-stone">带价格的多币种分录以写入前校验为准</span> : null}
+          {postingSummary.hasInvalidAmount ? <span className="rounded-full bg-destructive/10 px-2 py-1 text-destructive">{i18n.t("importPage.invalidAmount")}</span> : null}
+          {entry.postings.some((posting) => posting.priceKind || posting.priceAmount || posting.priceCurrency) ? <span className="text-stone">{i18n.t("importPage.pricedPostingsHint")}</span> : null}
         </div>
 
         <div className="mt-3 min-w-0 divide-y divide-line border-y border-line">
           {entry.postings.map((posting, index) => {
-            const role = posting.account === entry.categoryAccount ? "主分类" : posting.account === entry.fundingAccount ? "来源账户" : isCategoryPosting(posting.account) ? "拆分分类" : `账户 ${index + 1}`;
+            const role = posting.account === entry.categoryAccount ? i18n.t("importPage.roleMainCategory") : posting.account === entry.fundingAccount ? i18n.t("importPage.roleFundingAccount") : isCategoryPosting(posting.account) ? i18n.t("importPage.roleSplitCategory") : i18n.t("importPage.roleAccount", { index: index + 1 });
             const hasPrice = Boolean(posting.priceKind || posting.priceAmount || posting.priceCurrency);
             return (
               <div key={`${index}-${posting.account}`} className="min-w-0 bg-panel py-3 first:pt-0 last:pb-0">
@@ -1586,45 +1604,45 @@ function ImportEntryEditor({
                     <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-tag font-mono text-[11px] text-stone">{index + 1}</span>
                     <span className="truncate text-xs font-medium text-olive">{role}</span>
                   </div>
-                  <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 text-stone hover:text-destructive" onClick={() => onPostingRemove(index)} disabled={disabled || entry.postings.length <= 2} title={entry.postings.length <= 2 ? "至少保留 2 条分录" : "删除这条分录"}>
+                  <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 text-stone hover:text-destructive" onClick={() => onPostingRemove(index)} disabled={disabled || entry.postings.length <= 2} title={entry.postings.length <= 2 ? i18n.t("importPage.keepTwoPostings") : i18n.t("importPage.deletePosting")}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
                 <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_5.5rem] gap-2 lg:grid-cols-[minmax(0,1fr)_9rem_6.5rem]">
                   <Label className="col-span-2 block min-w-0 lg:col-span-1">
-                    <span className="mb-1.5 block text-xs text-stone">账户</span>
+                    <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.accountField")}</span>
                     <Select value={posting.account || undefined} onValueChange={(value) => onPostingChange(index, { account: value })} disabled={disabled}>
-                      <SelectTrigger className={cn("h-10 w-full min-w-0 bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder="选择账户" /></SelectTrigger>
+                      <SelectTrigger className={cn("h-10 w-full min-w-0 bg-panel", !posting.account.trim() && "border-destructive")} aria-invalid={!posting.account.trim()}><SelectValue placeholder={i18n.t("importPage.selectAccount")} /></SelectTrigger>
                       <SelectContent className="max-h-80">
                         {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{formatAccountOptionLabel(account.account, account.label, account.alias)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </Label>
                   <Label className="block min-w-0">
-                    <span className="mb-1.5 block text-xs text-stone">金额</span>
+                    <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.amountField")}</span>
                     <Input className="h-10 bg-panel text-right tabular-nums" inputMode="decimal" value={posting.amount} onChange={(event) => onPostingChange(index, { amount: event.target.value })} disabled={disabled} placeholder="0.00" aria-invalid={!posting.amount.trim() || !Number.isFinite(Number(posting.amount))} />
                   </Label>
                   <Label className="block min-w-0">
-                    <span className="mb-1.5 block text-xs text-stone">币种</span>
+                    <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.currencyField")}</span>
                     <Input className="h-10 bg-panel uppercase" value={posting.currency} onChange={(event) => onPostingChange(index, { currency: event.target.value.toUpperCase() })} disabled={disabled} placeholder="CNY" aria-invalid={!posting.currency.trim()} />
                   </Label>
                 </div>
                 <details className="mt-2 border-t border-line pt-2">
-                  <summary className="cursor-pointer text-xs text-stone">价格 / 成本{hasPrice ? "（已设置）" : "（可选）"}</summary>
+                  <summary className="cursor-pointer text-xs text-stone">{i18n.t("importPage.priceCost", { state: hasPrice ? i18n.t("importPage.priceSet") : i18n.t("importPage.priceOptional") })}</summary>
                   <div className="mt-2 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
                     <Label className="block min-w-0">
-                      <span className="mb-1.5 block text-xs text-stone">类型</span>
+                      <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.priceType")}</span>
                       <Select value={posting.priceKind ?? "none"} onValueChange={(value) => onPostingChange(index, value === "none" ? { priceKind: undefined, priceAmount: undefined, priceCurrency: undefined } : { priceKind: value as ImportPosting["priceKind"] })} disabled={disabled}>
                         <SelectTrigger className="h-9 w-full min-w-0 bg-panel"><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="none">无</SelectItem><SelectItem value="unit">单价 @</SelectItem><SelectItem value="total">总价 @@</SelectItem></SelectContent>
+                        <SelectContent><SelectItem value="none">{i18n.t("importPage.none")}</SelectItem><SelectItem value="unit">{i18n.t("importPage.unitPrice")}</SelectItem><SelectItem value="total">{i18n.t("importPage.totalPrice")}</SelectItem></SelectContent>
                       </Select>
                     </Label>
                     <Label className="block min-w-0">
-                      <span className="mb-1.5 block text-xs text-stone">价格</span>
+                      <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.priceValue")}</span>
                       <Input className="h-9 bg-panel text-right tabular-nums" inputMode="decimal" value={posting.priceAmount ?? ""} onChange={(event) => onPostingChange(index, { priceAmount: event.target.value })} disabled={disabled || !posting.priceKind} />
                     </Label>
                     <Label className="block min-w-0">
-                      <span className="mb-1.5 block text-xs text-stone">计价币种</span>
+                      <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.priceCurrency")}</span>
                       <Input className="h-9 bg-panel uppercase" value={posting.priceCurrency ?? ""} onChange={(event) => onPostingChange(index, { priceCurrency: event.target.value.toUpperCase() })} disabled={disabled || !posting.priceKind} />
                     </Label>
                   </div>
@@ -1640,7 +1658,7 @@ function ImportEntryEditor({
           {metaItems.map((item) => (
             <div key={item.label} className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
               <span className="text-olive">{item.label}</span>
-              <span className={cn("min-w-0", item.label === "订单号" ? "break-all" : "break-words")}>{item.value}</span>
+              <span className={cn("min-w-0", item.label === i18n.t("importPage.orderIdLabel") ? "break-all" : "break-words")}>{item.value}</span>
             </div>
           ))}
         </div>
@@ -1690,9 +1708,9 @@ function ImportSuccessDialog({
               <CheckCircle className="h-6 w-6" aria-hidden="true" />
             </div>
             <DialogHeader className="min-w-0 flex-1 text-left">
-              <DialogTitle className="font-serif text-2xl font-medium leading-tight text-ink">导入成功</DialogTitle>
+              <DialogTitle className="font-serif text-2xl font-medium leading-tight text-ink">{i18n.t("importPage.successTitle")}</DialogTitle>
               <DialogDescription className="text-sm leading-6 text-stone">
-                {count > 0 ? `已写入 ${count} 条交易，账单文件也已归档。` : "账单文件已归档，本次没有新增交易。"}
+                {count > 0 ? i18n.t("importPage.successDesc", { count }) : i18n.t("importPage.successNoAdditions")}
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -1700,16 +1718,16 @@ function ImportSuccessDialog({
           <CommitResultDetails result={result} />
 
           <div className="mt-4 rounded-xl bg-paper px-3 py-2.5 text-xs leading-5 text-stone">
-            写入结果已自动提交到账本仓库，读模型会在索引更新后同步最新数据。
+            {i18n.t("importPage.commitNote")}
           </div>
         </div>
         <DialogFooter className="grid grid-cols-2 gap-2 border-t border-line bg-paper px-5 py-4 sm:grid-cols-2 sm:px-6">
           <Button type="button" variant="outline" onClick={onImportAnother}>
             <FileUp className="h-4 w-4" />
-            导入新账单
+            {i18n.t("importPage.importNewBill")}
           </Button>
           <DialogClose asChild>
-            <Button type="button">完成</Button>
+            <Button type="button">{i18n.t("importPage.done")}</Button>
           </DialogClose>
         </DialogFooter>
       </DialogContent>
@@ -1719,16 +1737,16 @@ function ImportSuccessDialog({
 
 export function CommitResultDetails({ result }: { result: CommitResult }) {
   const rows = [
-    result.outputFile ? { label: "导入文件", value: result.outputFile } : null,
-    result.includeFile ? { label: "月份 include", value: result.includeFile } : null,
-    result.documentFile ? { label: "原始账单", value: result.documentFile } : null,
+    result.outputFile ? { label: i18n.t("importPage.importFileLabel"), value: result.outputFile } : null,
+    result.includeFile ? { label: i18n.t("importPage.monthIncludeLabel"), value: result.includeFile } : null,
+    result.documentFile ? { label: i18n.t("importPage.originalBillLabel"), value: result.documentFile } : null,
   ].filter((row): row is { label: string; value: string } => row !== null);
 
   return (
     <dl data-import-success-details="true" className="mt-5 max-h-64 divide-y divide-line overflow-y-auto border-y border-line text-sm">
       <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-3">
-        <dt className="text-stone">写入交易</dt>
-        <dd className="text-right font-medium tabular-nums text-ink">{result.count ?? 0} 条</dd>
+        <dt className="text-stone">{i18n.t("importPage.commitTxLabel")}</dt>
+        <dd className="text-right font-medium tabular-nums text-ink">{i18n.t("importPage.commitCount", { count: result.count ?? 0 })}</dd>
       </div>
       {rows.map((row) => (
         <div key={row.label} className="grid min-w-0 gap-1 py-3 sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-3">

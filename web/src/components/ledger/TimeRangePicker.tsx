@@ -178,7 +178,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
       </div>
 
       {desktopOpen && (
-        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 hidden w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label="选择时间范围">
+        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 hidden w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label={t("timeRange.selectRange")}>
           <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
             <h2 className="text-lg font-semibold tracking-[-0.018em]">{t("timeRange.selectRange")}</h2>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-tag px-2.5 py-1 text-[11px] font-semibold text-brand">
