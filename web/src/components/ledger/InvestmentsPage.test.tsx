@@ -378,7 +378,8 @@ describe("InvestmentsPage", () => {
 
     expect(html).toContain("已实现盈亏");
     expect(html).toContain("-¥70.00");
-    expect(html).toContain("已清仓 <!-- -->1");
+    expect(html).toContain("已清仓");
+    expect(html).toContain("已清仓 1");
     expect(html).toContain("0 / 1");
   });
 
