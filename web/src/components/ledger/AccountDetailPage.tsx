@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ClientNavLink } from "./ClientNavLink";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
@@ -60,12 +61,12 @@ function accountRowKey(row: AccountDetailRow): string {
   return `${row.txn.source.file}:${row.txn.source.line}:${row.txn.source.hash ?? ""}`;
 }
 
-const ACCOUNT_TIME_PRESETS: { key: TimePreset; label: string }[] = [
-  { key: "month", label: "本月" },
-  { key: "quarter", label: "本季" },
-  { key: "year", label: "今年" },
-  { key: "all", label: "全部" },
-  { key: "custom", label: "自定义" },
+const ACCOUNT_TIME_PRESETS: { key: TimePreset; labelKey: string }[] = [
+  { key: "month", labelKey: "accountDetailPage.thisMonth" },
+  { key: "quarter", labelKey: "accountDetailPage.thisQuarter" },
+  { key: "year", labelKey: "accountDetailPage.thisYear" },
+  { key: "all", labelKey: "accountDetailPage.all" },
+  { key: "custom", labelKey: "accountDetailPage.custom" },
 ];
 
 function filterRowsByRange(rows: AccountDetailRow[], range: TimeRange) {
@@ -144,6 +145,7 @@ export function AccountDetailSkeleton() {
 }
 
 export function AccountDetailPage({ account, onSensitiveLocked }: { account: string; onSensitiveLocked?: () => void }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>(() => makeTimeRange("all"));
@@ -167,12 +169,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
   if (error) {
     return (
       <div className="card p-6 text-center">
-        <p className="text-[var(--danger)]">加载失败: {error}</p>
+        <p className="text-[var(--danger)]">{t("accountDetailPage.loadFailed", { message: error })}</p>
         <ClientNavLink
           href="/accounts"
           className="mt-4 inline-block text-sm text-brand underline"
         >
-          ← 返回账户列表
+          {t("accountDetailPage.backToAccounts")}
         </ClientNavLink>
       </div>
     );
@@ -219,7 +221,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
           href="/accounts"
           className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-warm"
         >
-          <ArrowLeft className="h-4 w-4" /> 账户列表
+          <ArrowLeft className="h-4 w-4" /> {t("accountDetailPage.accountList")}
         </ClientNavLink>
         <h1 className="break-words font-serif text-2xl font-medium">{data.label}</h1>
         {data.alias && data.alias !== data.label && (
@@ -228,12 +230,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           <span className="min-w-0 break-all text-xs text-stone">{data.account}</span>
           {!data.active && (
-            <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>
+            <span className="rounded bg-line px-2 py-0.5 text-xs">{t("accountDetailPage.closed")}</span>
           )}
         </div>
         <div className="mt-4">
           <span className="text-xs uppercase tracking-[0.22em] text-stone">
-            当前余额
+            {t("accountDetailPage.currentBalance")}
           </span>
           <div
             className={`mt-1 min-w-0 max-w-full truncate text-2xl font-semibold ${
@@ -251,8 +253,8 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
       <section className="card min-w-0 max-w-full overflow-hidden p-4">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <h2 className="font-serif text-xl">时间范围</h2>
-            <p className="mt-1 text-sm text-olive">{rangeLabel} · {filteredRows.length} / {data.rows.length} 笔变动</p>
+            <h2 className="font-serif text-xl">{t("accountDetailPage.timeRange")}</h2>
+            <p className="mt-1 text-sm text-olive">{t("accountDetailPage.changesSummary", { label: rangeLabel, count: filteredRows.length, total: data.rows.length })}</p>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {canMoveRange && <Button type="button" variant="outline" className="rounded-xl bg-panel px-3 text-brand" onClick={() => moveRange(-1)}>‹</Button>}
@@ -264,7 +266,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                   className={`shrink-0 rounded px-3 py-1.5 ${timeRange.preset === preset.key ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`}
                   onClick={() => setPreset(preset.key)}
                 >
-                  {preset.label}
+                  {t(preset.labelKey)}
                 </button>
               ))}
             </div>
@@ -276,7 +278,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
             <Input type="date" className="min-w-0 rounded-xl bg-panel text-sm" value={customStart} onChange={(event) => setCustomStart(event.target.value)} />
             <span className="hidden text-sm text-stone sm:block">~</span>
             <Input type="date" className="min-w-0 rounded-xl bg-panel text-sm" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
-            <Button type="button" variant="outline" className="rounded-xl bg-panel text-brand" disabled={!customStart || !customEnd || customStart >= customEnd} onClick={applyCustomRange}>确定</Button>
+            <Button type="button" variant="outline" className="rounded-xl bg-panel text-brand" disabled={!customStart || !customEnd || customStart >= customEnd} onClick={applyCustomRange}>{t("accountDetailPage.confirm")}</Button>
           </div>
         )}
       </section>
@@ -285,10 +287,9 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
         <section className="card min-w-0 max-w-full overflow-hidden p-4">
           <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
-              <h2 className="font-serif text-2xl">余额变化</h2>
+              <h2 className="font-serif text-2xl">{t("accountDetailPage.balanceChange")}</h2>
               <p className="mt-1 text-sm text-olive">
-                {filteredRows.length} 笔变动 ·{" "}
-                {chartData[0].date} ~ {chartData.at(-1)!.date}
+                {t("accountDetailPage.changesRange", { count: filteredRows.length, start: chartData[0].date, end: chartData.at(-1)!.date })}
               </p>
             </div>
             <div className={`min-w-0 max-w-full truncate text-sm font-medium tabular-nums sm:shrink-0 ${periodSummary.netChange >= 0 ? "amount-income" : "amount-expense"}`} title={`${periodSummary.netChange >= 0 ? "+" : ""}${formatMoney(periodSummary.netChange / 100, data.currency)}`}>
@@ -309,12 +310,12 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
                   fontSize={10}
                 />
                 <Tooltip
-                  formatter={(value: number) => [formatMoney(value, data.currency), "余额"]}
+                  formatter={(value: number) => [formatMoney(value, data.currency), t("accountDetailPage.balance")]}
                 />
                 <Area
                   type="monotone"
                   dataKey="balance"
-                  name="余额"
+                  name={t("accountDetailPage.balance")}
                   stroke="var(--chart-primary)"
                   fill="var(--chart-fill)"
                   strokeWidth={2}
@@ -324,7 +325,7 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
           </div>
         </section>
       ) : (
-        <section className="card min-w-0 max-w-full overflow-hidden p-4 text-sm text-stone">暂无可绘制的余额变化。</section>
+        <section className="card min-w-0 max-w-full overflow-hidden p-4 text-sm text-stone">{t("accountDetailPage.noBalanceChart")}</section>
       )}
 
       <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-6 xl:min-h-0 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)] xl:items-start">
@@ -339,26 +340,27 @@ export function AccountDetailPage({ account, onSensitiveLocked }: { account: str
 }
 
 export function AccountPeriodSummaryCard({ summary, rows, currency }: { summary: AccountPeriodSummary; rows: AccountDetailRow[]; currency: string }) {
+  const { t } = useTranslation();
   const hasRows = rows.length > 0;
   return (
     <section className="card @container min-w-0 max-w-full overflow-hidden p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-serif text-2xl">期间摘要</h2>
-          <p className="mt-1 text-sm text-olive">{hasRows ? `${rows.length} 笔变动解释当前范围` : "当前范围暂无账户变动"}</p>
+          <h2 className="font-serif text-2xl">{t("accountDetailPage.periodSummary")}</h2>
+          <p className="mt-1 text-sm text-olive">{hasRows ? t("accountDetailPage.periodSummaryHint", { count: rows.length }) : t("accountDetailPage.noPeriodChanges")}</p>
         </div>
       </div>
       <div className="mt-4 grid min-w-0 grid-cols-1 divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel text-center @xs:grid-cols-3 @xs:divide-x @xs:divide-y-0">
-        <SummaryMetric label="流入" value={formatMoney(summary.inflow / 100, currency)} cls="amount-income" />
-        <SummaryMetric label="流出" value={formatMoney(summary.outflow / 100, currency)} cls="amount-expense" />
-        <SummaryMetric label="净变化" value={`${summary.netChange >= 0 ? "+" : ""}${formatMoney(summary.netChange / 100, currency)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
+        <SummaryMetric label={t("accountDetailPage.inflow")} value={formatMoney(summary.inflow / 100, currency)} cls="amount-income" />
+        <SummaryMetric label={t("accountDetailPage.outflow")} value={formatMoney(summary.outflow / 100, currency)} cls="amount-expense" />
+        <SummaryMetric label={t("accountDetailPage.netChange")} value={`${summary.netChange >= 0 ? "+" : ""}${formatMoney(summary.netChange / 100, currency)}`} cls={summary.netChange >= 0 ? "amount-income" : "amount-expense"} />
       </div>
       <div className="mt-3 grid min-w-0 gap-2 @lg:grid-cols-2">
-        <ExtremeRow label="最大流入" row={summary.maxInflow} currency={currency} />
-        <ExtremeRow label="最大流出" row={summary.maxOutflow} currency={currency} />
+        <ExtremeRow label={t("accountDetailPage.maxInflow")} row={summary.maxInflow} currency={currency} />
+        <ExtremeRow label={t("accountDetailPage.maxOutflow")} row={summary.maxOutflow} currency={currency} />
       </div>
       <div className="mt-4">
-        <div className="text-xs uppercase tracking-[0.18em] text-stone">主要对方账户</div>
+        <div className="text-xs uppercase tracking-[0.18em] text-stone">{t("accountDetailPage.mainCounterparties")}</div>
         {summary.counterparties.length ? (
           <div className="mt-2 space-y-2">
             {summary.counterparties.map((item) => (
@@ -370,13 +372,13 @@ export function AccountPeriodSummaryCard({ summary, rows, currency }: { summary:
                 value={<strong className="font-semibold">{formatMoney(item.amount / 100, currency)}</strong>}
                 valueClassName="text-sm text-warm"
                 valueTitle={formatMoney(item.amount / 100, currency)}
-                detail={`${item.count} 笔相关变动`}
+                detail={t("accountDetailPage.relatedChanges", { count: item.count })}
                 detailClassName="text-xs text-stone"
               />
             ))}
           </div>
         ) : (
-          <div className="mt-2 rounded-xl border border-line bg-panel p-3 text-sm text-stone">暂无对方账户信息。</div>
+          <div className="mt-2 rounded-xl border border-line bg-panel p-3 text-sm text-stone">{t("accountDetailPage.noCounterparties")}</div>
         )}
       </div>
     </section>
@@ -388,25 +390,27 @@ function SummaryMetric({ label, value, cls }: { label: string; value: string; cl
 }
 
 function ExtremeRow({ label, row, currency }: { label: string; row: AccountDetailRow | null; currency: string }) {
+  const { t } = useTranslation();
   return (
     <div className="@container min-w-0 overflow-hidden rounded-xl border border-line bg-panel p-3">
       <div className="text-[11px] uppercase tracking-[0.14em] text-stone">{label}</div>
       {row ? (
         <>
           <div className="mt-1 grid min-w-0 grid-cols-1 gap-x-2 gap-y-0.5 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-baseline">
-            <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || "（无对手）"}</span>
+            <span className="min-w-0 truncate text-sm font-medium text-olive">{row.payee || t("accountDetailPage.noCounterparty")}</span>
             <AmountCell amount={row.change} currency={currency} className="text-left @sm:text-right" />
           </div>
-          <div className="mt-0.5 min-w-0 truncate text-xs text-stone">{row.date} · {row.narration || "无说明"}</div>
+          <div className="mt-0.5 min-w-0 truncate text-xs text-stone">{row.date} · {row.narration || t("accountDetailPage.noNarration")}</div>
         </>
       ) : (
-        <div className="mt-2 text-sm text-stone">暂无</div>
+        <div className="mt-2 text-sm text-stone">{t("accountDetailPage.none")}</div>
       )}
     </div>
   );
 }
 
 function AccountTransactionHistory({ account, rows, totalRows, currency }: { account: string; rows: AccountDetailRow[]; totalRows: number; currency: string }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const displayRows = useMemo(() => [...rows].reverse(), [rows]);
@@ -444,9 +448,9 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
     <section className="card min-w-0 max-w-full overflow-hidden p-4">
       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <h2 className="font-serif text-2xl">变动明细</h2>
+          <h2 className="font-serif text-2xl">{t("accountDetailPage.changes")}</h2>
           <p className="mt-1 text-sm text-olive">
-            共 {filteredRows.length} / {displayRows.length} 笔，最新在前{displayRows.length !== totalRows ? ` · 全部 ${totalRows} 笔` : ""}
+            {t("accountDetailPage.changesHint", { count: filteredRows.length, total: displayRows.length })}{displayRows.length !== totalRows ? t("accountDetailPage.allTotal", { total: totalRows }) : ""}
           </p>
         </div>
         <div className="flex min-w-0 gap-2">
@@ -454,14 +458,14 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
             className="min-w-0 flex-1 rounded-xl bg-panel text-sm lg:w-72"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="筛选商户、说明、账户、metadata"
+            placeholder={t("accountDetailPage.filterPlaceholder")}
           />
-          {query.trim() && <Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-stone" onClick={clearFilter}>清空</Button>}
+          {query.trim() && <Button type="button" variant="outline" className="shrink-0 rounded-xl bg-panel text-stone" onClick={clearFilter}>{t("accountDetailPage.clear")}</Button>}
         </div>
       </div>
 
       {filteredRows.length === 0 ? (
-        <p className="mt-4 text-sm text-stone">没有匹配的交易记录。</p>
+        <p className="mt-4 text-sm text-stone">{t("accountDetailPage.noMatches")}</p>
       ) : (
         <div className="mt-4 max-h-none min-w-0 max-w-full space-y-1.5 overflow-hidden xl:max-h-[calc(100dvh-13rem)] xl:overflow-y-auto xl:pr-1">
           {filteredRows.map((row) => {
@@ -486,7 +490,7 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <strong className="truncate text-sm">
-                          {row.payee || "（无对手）"}
+                          {row.payee || t("accountDetailPage.noCounterparty")}
                         </strong>
                         {isExpanded ? (
                           <ChevronUp className="h-4 w-4 shrink-0 text-stone" />
@@ -510,8 +514,8 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                   </div>
                   <ResponsiveValueRow
                     className="mt-1.5"
-                    label={<span title={`余额 ${formatMoney(row.balance / 100, currency)}`}>
-                      余额{" "}
+                    label={<span title={`${t("accountDetailPage.balancePrefix")}${formatMoney(row.balance / 100, currency)}`}>
+                      {t("accountDetailPage.balancePrefix")}{" "}
                       <span className="font-medium tabular-nums text-warm">
                         {formatMoney(row.balance / 100, currency)}
                       </span>
@@ -540,7 +544,7 @@ function AccountTransactionHistory({ account, rows, totalRows, currency }: { acc
                               {p.account}
                               {isSelf && (
                                 <span className="ml-1 text-stone">
-                                  ← 本账户
+                                  {t("accountDetailPage.thisAccount")}
                                 </span>
                               )}
                             </span>}
