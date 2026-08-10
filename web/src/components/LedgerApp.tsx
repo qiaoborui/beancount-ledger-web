@@ -786,7 +786,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     load(true);
   };
 
-  const commandActions: CommandAction[] = useMemo(() => [
+  const commandActions: CommandAction[] = [
     { id: "new-entry", label: t("ledgerApp.newManualEntry"), detail: t("ledgerApp.newManualEntryDetail"), shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
     { id: "ai-entry", label: t("ledgerApp.agent"), detail: t("ledgerApp.agentDetail"), keywords: ["ai", "agent", "chat"], run: () => openAgent() },
     ...(!unlocked ? [{ id: "unlock-sensitive", label: t("ledgerApp.unlockSensitive"), detail: t("ledgerApp.unlockSensitiveDetail"), shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
@@ -796,7 +796,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "next-period", label: t("ledgerApp.nextPeriod"), detail: t("ledgerApp.nextPeriodDetail"), shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
     ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: t("commands.navigateTo", { label: t(item.labelKey) }), detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: t(view.labelKey), detail: t(view.labelDetailKey), keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
-  ], [applyTransactionQuickView, canNavigateNext, canNavigatePrevious, focusTransactionSearch, offlineSensitiveUnlockAvailable, openAgent, openManualEntry, refreshLedger, timeRange, t, unlocked]);
+  ];
 
   return (
     <AppShell
