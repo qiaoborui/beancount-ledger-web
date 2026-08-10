@@ -163,7 +163,7 @@ func fetchIndexerRuntimeConfig(ctx context.Context, endpoint, token string) (app
 		return app.IndexerRuntimeConfig{}, err
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := http.DefaultClient.Do(request)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
 	if err != nil {
 		return app.IndexerRuntimeConfig{}, err
 	}
