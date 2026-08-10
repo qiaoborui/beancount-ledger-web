@@ -61,4 +61,5 @@ export type HomePagePreference = "agent" | "overview";
 export type PrivacySettings = { homePage: HomePagePreference; showHomeSummaryAmounts: boolean; showAccountBalancesByDefault: boolean; showNetWorthByDefault: boolean; showIncomeStatementByDefault: boolean; valuationCurrency: string };
 export type ThemeMode = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
+export type AppLanguage = "zh-CN" | "en-US";
 export type IncomeStatementNode = { account: string; alias?: string | null; label: string; amount: number; children: IncomeStatementNode[]; depth: number; txCount: number };

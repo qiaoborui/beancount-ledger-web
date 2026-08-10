@@ -1,4 +1,5 @@
 import { formatCny, formatCompactCny, formatMoney } from "@/lib/money";
+import i18n from "@/i18n";
 import { ChevronDown, LineChart as LineChartIcon, Search, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -16,11 +17,11 @@ type HoldingView = "open" | "closed";
 const allocationColors = ["var(--chart-palette-1)", "var(--chart-palette-2)", "var(--chart-palette-4)", "var(--chart-palette-5)", "var(--chart-palette-6)"];
 const regionAccountSegments = new Set(["CN", "HK", "US", "JP", "SG", "EU", "UK", "TW"]);
 const commonInstitutionLabels: Record<string, string> = {
-  Broker: "券商",
-  CMB: "招商证券",
-  HSBC: "汇丰",
-  ZABank: "众安银行",
-  ZA: "众安",
+  Broker: "investments.broker",
+  CMB: "investments.cmb",
+  HSBC: "investments.hsbc",
+  ZABank: "investments.zaBank",
+  ZA: "investments.za",
 };
 
 export function InvestmentsPage({ investments }: { investments: InvestmentSummary | null }) {
@@ -90,48 +91,48 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
         <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="font-serif text-xl font-medium text-ink">持仓明细</h2>
-              <span className="ledger-chip rounded-full px-2 py-1 text-xs">{visibleHoldingCount} 只</span>
+              <h2 className="font-serif text-xl font-medium text-ink">{i18n.t("investments.holdingDetail")}</h2>
+              <span className="ledger-chip rounded-full px-2 py-1 text-xs">{i18n.t("investments.holdingCountSuffix", { count: visibleHoldingCount })}</span>
             </div>
-            <p className="mt-1 text-xs text-stone">{holdingView === "closed" ? "已清仓列表展示卖出后的已实现盈亏。" : "按机构账户分组，市值统一折算为 CNY，今日涨跌按最新两条证券价格估算。"}</p>
+            <p className="mt-1 text-xs text-stone">{holdingView === "closed" ? i18n.t("investments.closedDetail") : i18n.t("investments.openDetail")}</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <HoldingViewTabs view={holdingView} openCount={openHoldingCount} closedCount={closedHoldingCount} onChange={setHoldingView} />
             <label className="relative min-w-0 sm:w-56">
-              <span className="sr-only">搜索持仓</span>
+              <span className="sr-only">{i18n.t("investments.searchLabel")}</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
               <input
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索股票或代码"
+                placeholder={i18n.t("investments.searchPlaceholder")}
                 className="h-10 w-full rounded-[10px] border border-line bg-paper pl-9 pr-3 text-sm text-ink outline-none transition-colors placeholder:text-stone focus:border-brand focus:ring-2 focus:ring-[var(--focus-ring)]"
               />
             </label>
             <label className="relative">
-              <span className="sr-only">持仓排序</span>
+              <span className="sr-only">{i18n.t("investments.sortLabel")}</span>
               <SlidersHorizontal className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
               <select
                 value={sortKey}
                 onChange={(event) => setSortKey(event.target.value as SortKey)}
                 className="h-10 w-full appearance-none rounded-[10px] border border-line bg-paper pl-9 pr-8 text-sm text-olive outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-[var(--focus-ring)] sm:w-36"
               >
-                <option value="market">按市值排序</option>
-                <option value="profit">按收益率排序</option>
-                <option value="change">按今日涨跌</option>
+                <option value="market">{i18n.t("investments.sortByMarket")}</option>
+                <option value="profit">{i18n.t("investments.sortByProfit")}</option>
+                <option value="change">{i18n.t("investments.sortByChange")}</option>
               </select>
             </label>
           </div>
         </div>
 
         <div className="ledger-table-head hidden border-b border-line px-5 py-3 md:grid md:grid-cols-[minmax(190px,1.25fr)_0.92fr_0.9fr_0.78fr_0.72fr_0.94fr_92px_36px] md:items-center md:gap-4">
-          <div>股票</div>
-          <div className="text-right">市值 / 仓位</div>
-          <div className="text-right">持有 / 现价</div>
-          <div className="text-right">平均成本</div>
-          <div className="text-right">今日涨跌</div>
-          <div className="text-right">{holdingView === "closed" ? "已实现盈亏" : "未实现盈亏"}</div>
-          <div className="text-right">90 日走势</div>
+          <div>{i18n.t("investments.stock")}</div>
+          <div className="text-right">{i18n.t("investments.marketValuePosition")}</div>
+          <div className="text-right">{i18n.t("investments.heldPrice")}</div>
+          <div className="text-right">{i18n.t("investments.averageCost")}</div>
+          <div className="text-right">{i18n.t("investments.dailyChange")}</div>
+          <div className="text-right">{holdingView === "closed" ? i18n.t("investments.realizedProfit") : i18n.t("investments.unrealizedProfit")}</div>
+          <div className="text-right">{i18n.t("investments.days90Trend")}</div>
           <div />
         </div>
 
@@ -148,7 +149,7 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
               />
             ))}
           </div>
-        ) : <EmptyState text={query ? "没有匹配的持仓" : holdingView === "closed" ? "暂无已清仓证券" : "暂无证券商品"} />}
+        ) : <EmptyState text={query ? i18n.t("investments.noMatchHoldings") : holdingView === "closed" ? i18n.t("investments.noClosed") : i18n.t("investments.noSecurities")} />}
       </section>
     </div>
   );
@@ -157,10 +158,10 @@ export function InvestmentsPage({ investments }: { investments: InvestmentSummar
 function InstitutionTabs({ options, selected, onChange }: { options: InstitutionOption[]; selected: string; onChange: (account: string) => void }) {
   if (options.length <= 1) return null;
   return (
-    <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="持仓机构">
-      <InstitutionTab label="全部机构" detail={`${options.length}`} active={selected === "all"} onClick={() => onChange("all")} />
+    <nav className="flex gap-2 overflow-x-auto pb-1" aria-label={i18n.t("investments.institutionsLabel")}>
+      <InstitutionTab label={i18n.t("investments.allInstitutions")} detail={`${options.length}`} active={selected === "all"} onClick={() => onChange("all")} />
       {options.map((option) => (
-        <InstitutionTab key={option.key} label={option.label} detail={`${option.holdingCount} 只`} active={selected === option.key} onClick={() => onChange(option.key)} />
+        <InstitutionTab key={option.key} label={option.label} detail={i18n.t("investments.holdingCount", { count: option.holdingCount })} active={selected === option.key} onClick={() => onChange(option.key)} />
       ))}
     </nav>
   );
@@ -183,8 +184,8 @@ function InstitutionTab({ label, detail, active, onClick }: { label: string; det
 function HoldingViewTabs({ view, openCount, closedCount, onChange }: { view: HoldingView; openCount: number; closedCount: number; onChange: (view: HoldingView) => void }) {
   return (
     <div className="flex rounded-[10px] border border-line bg-paper p-1 text-xs">
-      <button type="button" onClick={() => onChange("open")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "open" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>当前持仓 {openCount}</button>
-      <button type="button" onClick={() => onChange("closed")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "closed" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>已清仓 {closedCount}</button>
+      <button type="button" onClick={() => onChange("open")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "open" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>{i18n.t("investments.currentHoldings", { count: openCount })}</button>
+      <button type="button" onClick={() => onChange("closed")} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${view === "closed" ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>{i18n.t("investments.closedHoldings", { count: closedCount })}</button>
     </div>
   );
 }
@@ -197,27 +198,27 @@ function PortfolioOverview({ totalMarketValueCny, latestDate, costSummary, profi
       <div className="grid min-w-0 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <div className="min-w-0 px-4 py-5 sm:px-6 sm:py-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="ledger-label">持仓总资产</span>
-            <span className="text-xs text-stone">{latestDate ? `价格更新于 ${latestDate}` : "暂无价格"}</span>
+            <span className="ledger-label">{i18n.t("investments.totalMarketValue")}</span>
+            <span className="text-xs text-stone">{latestDate ? i18n.t("investments.priceUpdatedAt", { date: latestDate }) : i18n.t("investments.noPrice")}</span>
           </div>
           <div className="amount-gold mt-2 font-serif text-3xl font-medium tracking-[-0.012em] sm:text-4xl">{formatCny(totalMarketValueCny / 100)}</div>
           <div className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
-            <OverviewMetric label="今日收益" value={formatProfit(dailySummary)} detail={dailySummary ? `${formatRatio(dailyRatio)} · 按最新两条价格估算` : "价格历史不足"} tone={profitTone(dailySummary)} />
-            <OverviewMetric label="未实现盈亏" value={formatProfit(profitSummary)} detail={holdingCount ? `${formatRatio(profitRatio)} · 当前持仓` : "暂无当前持仓"} tone={profitTone(profitSummary)} />
-            <OverviewMetric label="已实现盈亏" value={formatProfit(realizedSummary)} detail={realizedSummary ? "来自卖出和清仓记录" : "暂无卖出记录"} tone={profitTone(realizedSummary)} />
-            <OverviewMetric label="持仓范围" value={`${holdingCount} / ${closedHoldingCount}`} detail={`${institutionCount} 个机构账户 · 当前 / 已清仓`} tone="text-olive" />
+            <OverviewMetric label={i18n.t("investments.todayProfit")} value={formatProfit(dailySummary)} detail={dailySummary ? i18n.t("investments.estimatedByLatest", { ratio: formatRatio(dailyRatio) }) : i18n.t("investments.insufficientHistory")} tone={profitTone(dailySummary)} />
+            <OverviewMetric label={i18n.t("investments.unrealizedProfit")} value={formatProfit(profitSummary)} detail={holdingCount ? i18n.t("investments.currentHoldingsDetail", { ratio: formatRatio(profitRatio) }) : i18n.t("investments.noCurrentHoldings")} tone={profitTone(profitSummary)} />
+            <OverviewMetric label={i18n.t("investments.realizedProfit")} value={formatProfit(realizedSummary)} detail={realizedSummary ? i18n.t("investments.fromSells") : i18n.t("investments.noSellRecords")} tone={profitTone(realizedSummary)} />
+            <OverviewMetric label={i18n.t("investments.holdingScope")} value={`${holdingCount} / ${closedHoldingCount}`} detail={i18n.t("investments.scopeDetail", { count: institutionCount })} tone="text-olive" />
           </div>
         </div>
         <div className="min-w-0 border-t border-line bg-paper/55 px-4 py-4 sm:px-6 lg:border-l lg:border-t-0">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-ink">近 30 个价格点</div>
-              <div className="mt-1 text-xs text-stone">按当前仓位与证券价格估算，不包含汇率波动</div>
+              <div className="text-sm font-medium text-ink">{i18n.t("investments.last30Points")}</div>
+              <div className="mt-1 text-xs text-stone">{i18n.t("investments.last30Detail")}</div>
             </div>
             <LineChartIcon className="h-5 w-5 text-brand" />
           </div>
           <div className="mt-3 h-40 min-w-0">
-            {series.length >= 2 ? <PortfolioChart rows={series} /> : <EmptyInline text="价格历史不足" />}
+            {series.length >= 2 ? <PortfolioChart rows={series} /> : <EmptyInline text={i18n.t("investments.insufficientHistory")} />}
           </div>
         </div>
       </div>
@@ -249,7 +250,7 @@ function PortfolioChart({ rows }: { rows: PortfolioPoint[] }) {
           <YAxis hide domain={["dataMin", "dataMax"]} />
           <XAxis hide dataKey="date" />
           <Tooltip
-            formatter={(value) => [formatCny(Number(value)), "估算市值"]}
+            formatter={(value) => [formatCny(Number(value)), i18n.t("investments.estimatedMarketValue")]}
             labelFormatter={(label) => String(label)}
             contentStyle={{ borderColor: "var(--line)", background: "var(--ivory)", color: "var(--ink)", borderRadius: 10 }}
           />
@@ -268,13 +269,13 @@ function AllocationBar({ rows, totalMarketValueCny, mode }: { rows: { label: str
   const visibleRows = sortedRows.slice(0, 4);
   const visibleValue = visibleRows.reduce((total, row) => total + row.value, 0);
   const allocationRows = visibleRows.map((row, index) => ({ ...row, color: allocationColors[index] }));
-  if (visibleValue < totalMarketValueCny) allocationRows.push({ label: "其他", value: totalMarketValueCny - visibleValue, color: allocationColors[4] });
+  if (visibleValue < totalMarketValueCny) allocationRows.push({ label: i18n.t("investments.other"), value: totalMarketValueCny - visibleValue, color: allocationColors[4] });
   return (
     <section className="rounded-[14px] border border-line bg-panel px-4 py-4 sm:px-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
         <div className="shrink-0">
-          <div className="text-sm font-medium text-ink">仓位分布</div>
-          <div className="mt-0.5 text-xs text-stone">{mode === "institution" ? "按机构账户" : "按股票"} · 按折算市值</div>
+          <div className="text-sm font-medium text-ink">{i18n.t("investments.allocation")}</div>
+          <div className="mt-0.5 text-xs text-stone">{i18n.t("investments.allocationDetail", { mode: mode === "institution" ? i18n.t("investments.byInstitution") : i18n.t("investments.bySecurity") })}</div>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex h-2.5 overflow-hidden rounded-full bg-paper">
@@ -304,14 +305,14 @@ function InstitutionHoldingsGroup({ group, portfolioValueCny, view, openHolding,
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-ink">{group.label}</h3>
-            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{group.holdingCount} 只股票</span>
-            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{group.positionCount} 个账户</span>
+            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{i18n.t("investments.holdingsOf", { count: group.holdingCount })}</span>
+            <span className="ledger-chip rounded-full px-2 py-0.5 text-[11px]">{i18n.t("investments.accountsOf", { count: group.positionCount })}</span>
           </div>
           <div className="mt-1 truncate text-xs text-stone">{group.key}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-right sm:flex sm:items-end sm:gap-6">
-          <StackedMetric primary={view === "closed" ? formatProfit(realizedSummary) : formatCnyValue(group.totalMarketValueCny)} secondary={view === "closed" ? "已实现盈亏" : "机构市值"} tone={view === "closed" ? profitTone(realizedSummary) : "text-warm"} />
-          <StackedMetric primary={view === "closed" ? `${group.holdingCount} 只` : formatProfit(profitSummary)} secondary={view === "closed" ? "已清仓" : "未实现盈亏"} tone={view === "closed" ? "text-olive" : profitTone(profitSummary)} />
+          <StackedMetric primary={view === "closed" ? formatProfit(realizedSummary) : formatCnyValue(group.totalMarketValueCny)} secondary={view === "closed" ? i18n.t("investments.realizedProfitShort") : i18n.t("investments.institutionValue")} tone={view === "closed" ? profitTone(realizedSummary) : "text-warm"} />
+          <StackedMetric primary={view === "closed" ? i18n.t("investments.holdingCount", { count: group.holdingCount }) : formatProfit(profitSummary)} secondary={view === "closed" ? i18n.t("investments.closed") : i18n.t("investments.unrealizedProfit")} tone={view === "closed" ? "text-olive" : profitTone(profitSummary)} />
         </div>
       </div>
       <div className="divide-y divide-line">
@@ -350,7 +351,7 @@ function HoldingRow({ holding, portfolioValueCny, view, expanded, onToggle }: { 
           <StackedMetric primary={formatCnyValue(holding.totalMarketValueCny)} secondary={formatUnsignedRatio(positionRatio)} tone="text-warm" />
           <StackedMetric primary={formatQuantity(holding.totalQuantity)} secondary={formatPrice(holding.latestPrice)} tone="text-warm" />
           <StackedMetric primary={formatCostPrice(holding.averageCost, holding.costCurrency)} secondary={formatMarketValue(holding.totalCostValue, holding.costCurrency)} tone="text-warm" />
-          <StackedMetric primary={formatPriceChange(dailyChange)} secondary={holding.latestPrice?.date ?? "暂无"} tone={changeTone(dailyChange)} />
+          <StackedMetric primary={formatPriceChange(dailyChange)} secondary={holding.latestPrice?.date ?? i18n.t("investments.noData")} tone={changeTone(dailyChange)} />
           <StackedMetric primary={formatProfit(profit)} secondary={formatRatio(profitRatio)} tone={profitTone(profit)} />
           <div className="h-10 min-w-0"><PriceSparkline points={sparklinePoints} currency={holding.latestPrice?.currency ?? ""} compact /></div>
           <ExpandButton symbol={holding.commodity} expanded={expanded} onClick={onToggle} />
@@ -362,13 +363,13 @@ function HoldingRow({ holding, portfolioValueCny, view, expanded, onToggle }: { 
             <ExpandButton symbol={holding.commodity} expanded={expanded} onClick={onToggle} />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4">
-            <MobileMetric label="市值 / 仓位" value={formatCnyValue(holding.totalMarketValueCny)} detail={formatUnsignedRatio(positionRatio)} />
-            <MobileMetric label={view === "closed" ? "已实现盈亏" : "未实现盈亏"} value={formatProfit(profit)} detail={formatRatio(profitRatio)} tone={profitTone(profit)} />
-            <MobileMetric label="持有 / 现价" value={formatQuantity(holding.totalQuantity)} detail={formatPrice(holding.latestPrice)} />
-            <MobileMetric label="今日涨跌" value={formatPriceChange(dailyChange)} detail={holding.latestPrice?.date ?? "暂无"} tone={changeTone(dailyChange)} />
+            <MobileMetric label={i18n.t("investments.marketValuePosition")} value={formatCnyValue(holding.totalMarketValueCny)} detail={formatUnsignedRatio(positionRatio)} />
+            <MobileMetric label={view === "closed" ? i18n.t("investments.realizedProfit") : i18n.t("investments.unrealizedProfit")} value={formatProfit(profit)} detail={formatRatio(profitRatio)} tone={profitTone(profit)} />
+            <MobileMetric label={i18n.t("investments.heldPrice")} value={formatQuantity(holding.totalQuantity)} detail={formatPrice(holding.latestPrice)} />
+            <MobileMetric label={i18n.t("investments.dailyChange")} value={formatPriceChange(dailyChange)} detail={holding.latestPrice?.date ?? i18n.t("investments.noData")} tone={changeTone(dailyChange)} />
           </div>
           <button type="button" className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-line bg-paper text-sm font-medium text-olive transition-[background-color,transform] active:scale-95 [@media(hover:hover)]:hover:bg-tag" onClick={onToggle} aria-expanded={expanded}>
-            {expanded ? "收起持仓详情" : "查看持仓详情与买入批次"}
+            {expanded ? i18n.t("investments.collapseDetailShort") : i18n.t("investments.expandDetailShort")}
             <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
           </button>
         </div>
@@ -407,25 +408,25 @@ function PricePanel({ holding, points }: { holding: InvestmentHolding; points: P
     <section className="min-w-0 rounded-xl border border-line bg-panel p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-sm font-medium text-ink"><LineChartIcon className="h-4 w-4 text-brand" />价格走势</div>
+          <div className="flex items-center gap-2 text-sm font-medium text-ink"><LineChartIcon className="h-4 w-4 text-brand" />{i18n.t("investments.priceTrend")}</div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-xl font-semibold tabular-nums text-warm">{formatPrice(holding.latestPrice)}</span>
             <span className={`text-sm font-medium tabular-nums ${changeTone(change)}`}>{formatPriceChange(change)}</span>
           </div>
         </div>
         <div className="flex rounded-[10px] border border-line bg-paper p-1 text-xs">
-          {([{ label: "1月", value: 30 }, { label: "3月", value: 90 }, { label: "1年", value: 365 }] as const).map((option) => (
+          {([{ label: i18n.t("investments.month1"), value: 30 }, { label: i18n.t("investments.month3"), value: 90 }, { label: i18n.t("investments.year1"), value: 365 }] as const).map((option) => (
             <button key={option.value} type="button" onClick={() => setRange(option.value)} className={`rounded-md px-2.5 py-1.5 transition-[background-color,color,transform] active:scale-95 ${range === option.value ? "bg-brand text-paper" : "text-stone [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand"}`}>{option.label}</button>
           ))}
         </div>
       </div>
       <div className="mt-4 h-52 min-w-0">
-        {visiblePoints.length >= 2 ? <DetailedPriceChart points={visiblePoints} currency={holding.latestPrice?.currency ?? ""} averageCost={holding.averageCost} /> : <EmptyInline text="暂无足够价格历史" />}
+        {visiblePoints.length >= 2 ? <DetailedPriceChart points={visiblePoints} currency={holding.latestPrice?.currency ?? ""} averageCost={holding.averageCost} /> : <EmptyInline text={i18n.t("investments.priceHistoryInsufficient")} />}
       </div>
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-stone">
-        <span>最新价格 {holding.latestPrice?.date ?? "暂无"}</span>
-        <span>平均成本 {formatCostPrice(holding.averageCost, holding.costCurrency)}</span>
-        <span>原币市值 {formatMarketValue(holding.totalMarketValue, holding.marketCurrency)}</span>
+        <span>{i18n.t("investments.latestPrice", { date: holding.latestPrice?.date ?? i18n.t("investments.noData") })}</span>
+        <span>{i18n.t("investments.averageCostValue", { value: formatCostPrice(holding.averageCost, holding.costCurrency) })}</span>
+        <span>{i18n.t("investments.nativeMarketValue", { value: formatMarketValue(holding.totalMarketValue, holding.marketCurrency) })}</span>
       </div>
     </section>
   );
@@ -440,11 +441,11 @@ function DetailedPriceChart({ points, currency, averageCost }: { points: PricePo
           <XAxis dataKey="date" tick={{ fill: "var(--stone)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={28} tickFormatter={(value) => String(value).slice(5)} />
           <YAxis width={48} domain={["dataMin", "dataMax"]} tick={{ fill: "var(--stone)", fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(Number(value))} />
           <Tooltip
-            formatter={(value) => [formatMoney(Number(value), currency || "CNY"), "价格"]}
+            formatter={(value) => [formatMoney(Number(value), currency || "CNY"), i18n.t("investments.price")]}
             labelFormatter={(label) => String(label)}
             contentStyle={{ borderColor: "var(--line)", background: "var(--ivory)", color: "var(--ink)", borderRadius: 10 }}
           />
-          {averageCost != null && <ReferenceLine y={averageCost} stroke="var(--warning)" strokeDasharray="5 4" label={{ value: "平均成本", position: "insideTopRight", fill: "var(--warning)", fontSize: 10 }} />}
+          {averageCost != null && <ReferenceLine y={averageCost} stroke="var(--warning)" strokeDasharray="5 4" label={{ value: i18n.t("investments.averageCostLabel"), position: "insideTopRight", fill: "var(--warning)", fontSize: 10 }} />}
           <Line type="monotone" dataKey="price" stroke="var(--chart-primary)" strokeWidth={2.4} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
@@ -457,19 +458,19 @@ function AccountDistribution({ positions, holding }: { positions: InvestmentPosi
   return (
     <section className="rounded-xl border border-line bg-panel p-4">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-ink">账户分布</h3>
-        <span className="ledger-label">{positions.length || holding.accountCount} 个账户</span>
+        <h3 className="text-sm font-semibold text-ink">{i18n.t("investments.accountDistribution")}</h3>
+        <span className="ledger-label">{i18n.t("investments.accountsOf", { count: positions.length || holding.accountCount })}</span>
       </div>
       {positions.length ? (
         <div className="mt-3 divide-y divide-line">
           {positions.map((position) => (
             <div key={`${position.account}:${position.commodity}`} className="py-3 first:pt-0 last:pb-0">
               <ResponsiveValueRow label={position.accountLabel} labelClassName="truncate text-sm font-medium text-olive" value={formatCnyValue(position.marketValueCny)} valueClassName="text-sm font-semibold text-warm" valueTitle={formatCnyValue(position.marketValueCny)} detail={position.account} detailClassName="truncate text-xs text-stone" />
-              <ResponsiveValueRow className="mt-2" label={`${formatQuantity(position.quantity)} 股`} labelClassName="text-xs text-stone" value={`成本 ${formatCostPrice(position.averageCost, position.costCurrency)}`} valueClassName="text-xs text-stone" valueTitle={`成本 ${formatCostPrice(position.averageCost, position.costCurrency)}`} detail={totalValue > 0 ? `${(Number(position.marketValueCny ?? 0) / totalValue * 100).toFixed(1)}% 仓位` : "暂无仓位比例"} detailClassName="text-xs text-stone/70" />
+              <ResponsiveValueRow className="mt-2" label={i18n.t("investments.shares", { count: formatQuantity(position.quantity) })} labelClassName="text-xs text-stone" value={i18n.t("investments.costValue", { value: formatCostPrice(position.averageCost, position.costCurrency) })} valueClassName="text-xs text-stone" valueTitle={i18n.t("investments.costValue", { value: formatCostPrice(position.averageCost, position.costCurrency) })} detail={totalValue > 0 ? i18n.t("investments.positionRatio", { ratio: (Number(position.marketValueCny ?? 0) / totalValue * 100).toFixed(1) }) : i18n.t("investments.noPositionRatio")} detailClassName="text-xs text-stone/70" />
             </div>
           ))}
         </div>
-      ) : <div className="mt-3"><EmptyInline text="暂无账户拆分" /></div>}
+      ) : <div className="mt-3"><EmptyInline text={i18n.t("investments.noAccountSplit")} /></div>}
     </section>
   );
 }
@@ -478,19 +479,19 @@ function InvestmentLots({ lots }: { lots: InvestmentLot[] }) {
   return (
     <section>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-ink">买入批次</h3>
-        <span className="ledger-label">{lots.length} 笔</span>
+        <h3 className="text-sm font-semibold text-ink">{i18n.t("investments.buyLots")}</h3>
+        <span className="ledger-label">{i18n.t("investments.lotsCount", { count: lots.length })}</span>
       </div>
       {lots.length ? (
         <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-panel">
           <table className="w-full min-w-[760px] border-separate border-spacing-0 text-sm">
             <thead className="ledger-table-head">
               <tr>
-                <TableHead align="left">买入日期</TableHead>
-                <TableHead align="left">账户</TableHead>
-                <TableHead>股数</TableHead>
-                <TableHead>成本价</TableHead>
-                <TableHead>总成本</TableHead>
+                <TableHead align="left">{i18n.t("investments.buyDate")}</TableHead>
+                <TableHead align="left">{i18n.t("investments.account")}</TableHead>
+                <TableHead>{i18n.t("investments.sharesCount")}</TableHead>
+                <TableHead>{i18n.t("investments.unitCost")}</TableHead>
+                <TableHead>{i18n.t("investments.totalCost")}</TableHead>
               </tr>
             </thead>
             <tbody>
@@ -509,7 +510,7 @@ function InvestmentLots({ lots }: { lots: InvestmentLot[] }) {
             </tbody>
           </table>
         </div>
-      ) : <div className="mt-2"><EmptyInline text="暂无买入批次" /></div>}
+      ) : <div className="mt-2"><EmptyInline text={i18n.t("investments.noBuyLots")} /></div>}
     </section>
   );
 }
@@ -519,19 +520,19 @@ function InvestmentRealizedTrades({ trades }: { trades: InvestmentRealizedTrade[
   return (
     <section>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-ink">卖出记录</h3>
-        <span className="ledger-label">{trades.length} 笔</span>
+        <h3 className="text-sm font-semibold text-ink">{i18n.t("investments.sellRecords")}</h3>
+        <span className="ledger-label">{i18n.t("investments.lotsCount", { count: trades.length })}</span>
       </div>
       <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-panel">
         <table className="w-full min-w-[860px] border-separate border-spacing-0 text-sm">
           <thead className="ledger-table-head">
             <tr>
-              <TableHead align="left">卖出日期</TableHead>
-              <TableHead align="left">账户</TableHead>
-              <TableHead>股数</TableHead>
-              <TableHead>卖出收入</TableHead>
-              <TableHead>结转成本</TableHead>
-              <TableHead>已实现盈亏</TableHead>
+              <TableHead align="left">{i18n.t("investments.sellDate")}</TableHead>
+              <TableHead align="left">{i18n.t("investments.account")}</TableHead>
+              <TableHead>{i18n.t("investments.sharesCount")}</TableHead>
+              <TableHead>{i18n.t("investments.proceeds")}</TableHead>
+              <TableHead>{i18n.t("investments.carriedCost")}</TableHead>
+              <TableHead>{i18n.t("investments.realizedPnl")}</TableHead>
             </tr>
           </thead>
           <tbody>
@@ -557,13 +558,13 @@ function InvestmentRealizedTrades({ trades }: { trades: InvestmentRealizedTrade[
 
 function PriceSparkline({ points, currency, compact = false }: { points: PricePoint[]; currency: string; compact?: boolean }) {
   const change = rangePriceChange(points);
-  if (points.length < 2) return <div className="grid h-full place-items-center text-[10px] text-stone">暂无</div>;
+  if (points.length < 2) return <div className="grid h-full place-items-center text-[10px] text-stone">{i18n.t("investments.noData")}</div>;
   return (
     <div className="ledger-chart h-full min-w-0">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={points} margin={{ left: 2, right: 2, top: compact ? 5 : 8, bottom: compact ? 5 : 8 }}>
           <YAxis hide domain={["dataMin", "dataMax"]} />
-          {!compact && <Tooltip formatter={(value) => [formatMoney(Number(value), currency || "CNY"), "价格"]} labelFormatter={(label) => String(label)} contentStyle={{ borderColor: "var(--line)", background: "var(--ivory)", color: "var(--ink)", borderRadius: 10 }} />}
+          {!compact && <Tooltip formatter={(value) => [formatMoney(Number(value), currency || "CNY"), i18n.t("investments.price")]} labelFormatter={(label) => String(label)} contentStyle={{ borderColor: "var(--line)", background: "var(--ivory)", color: "var(--ink)", borderRadius: 10 }} />}
           <Line type="monotone" dataKey="price" stroke={change != null && change < 0 ? "var(--danger)" : "var(--success)"} strokeWidth={compact ? 1.8 : 2.25} dot={false} activeDot={compact ? false : { r: 4 }} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
@@ -578,7 +579,7 @@ function SecurityName({ symbol, name, accountCount }: { symbol: string; name: st
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <div className="truncate text-base font-semibold leading-tight text-ink">{symbol}</div>
-          {accountCount > 1 && <span className="ledger-chip shrink-0 rounded-full px-1.5 py-0.5 text-[10px]">{accountCount} 户</span>}
+          {accountCount > 1 && <span className="ledger-chip shrink-0 rounded-full px-1.5 py-0.5 text-[10px]">{i18n.t("investments.accountCountShort", { count: accountCount })}</span>}
         </div>
         <div className="mt-1 truncate text-xs text-stone">{name}</div>
       </div>
@@ -596,7 +597,7 @@ function MobileMetric({ label, value, detail, tone = "text-warm" }: { label: str
 
 function ExpandButton({ symbol, expanded, onClick }: { symbol: string; expanded: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-line bg-paper text-stone transition-[background-color,color,transform] active:scale-95 [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand" onClick={onClick} aria-expanded={expanded} aria-label={`${expanded ? "收起" : "展开"} ${symbol} 持仓详情`}>
+    <button type="button" className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-line bg-paper text-stone transition-[background-color,color,transform] active:scale-95 [@media(hover:hover)]:hover:bg-tag [@media(hover:hover)]:hover:text-brand" onClick={onClick} aria-expanded={expanded} aria-label={i18n.t("investments.expandDetail", { action: expanded ? i18n.t("investments.collapse") : i18n.t("investments.expand"), symbol })}>
       <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
     </button>
   );
@@ -712,7 +713,7 @@ function investmentInstitutionGroups(holdings: InvestmentHolding[]): Institution
     const positions = holding.positions ?? [];
     if (!positions.length) {
       const key = "unassigned";
-      const group = groups.get(key) ?? { label: "未分组账户", holdings: [] };
+      const group = groups.get(key) ?? { label: i18n.t("investments.unassigned"), holdings: [] };
       group.holdings.push(holding);
       groups.set(key, group);
       continue;
@@ -769,7 +770,7 @@ function institutionKey(account: string) {
 function institutionLabel(account: string) {
   const parts = institutionKey(account).split(":");
   const segment = parts.at(-1) || account;
-  return commonInstitutionLabels[segment] ?? segment.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return commonInstitutionLabels[segment] ? i18n.t(commonInstitutionLabels[segment]) : segment.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
 function filterHoldings(holdings: InvestmentHolding[], query: string) {
@@ -999,27 +1000,27 @@ function formatQuantity(value: number) {
 }
 
 function formatPrice(price?: CommodityPrice) {
-  if (!price) return "暂无";
+  if (!price) return i18n.t("investments.noData");
   return formatUnitMoney(price.amount, price.currency);
 }
 
 function formatCostPrice(value?: number, currency?: string) {
-  if (value == null || !currency) return "暂无";
+  if (value == null || !currency) return i18n.t("investments.noData");
   return formatUnitMoney(value, currency);
 }
 
 function formatMarketValue(value?: number, currency?: string) {
-  if (value == null || !currency) return "暂无";
+  if (value == null || !currency) return i18n.t("investments.noData");
   return formatMoney(value, currency);
 }
 
 function formatCnyValue(value?: number) {
-  if (value == null) return "暂无";
+  if (value == null) return i18n.t("investments.noData");
   return formatCny(value / 100);
 }
 
 function formatMoneyValue(value: MoneyValue | null) {
-  if (!value) return "暂无";
+  if (!value) return i18n.t("investments.noData");
   return formatMoney(value.value, value.currency);
 }
 
@@ -1032,25 +1033,25 @@ function formatUnitMoney(value: number, currency: string) {
 }
 
 function formatProfit(value: MoneyValue | null) {
-  if (!value) return "暂无";
+  if (!value) return i18n.t("investments.noData");
   const sign = value.value > 0 ? "+" : "";
   return `${sign}${formatMoney(value.value, value.currency)}`;
 }
 
 function formatPriceChange(change: number | null) {
-  if (change == null) return "暂无";
+  if (change == null) return i18n.t("investments.noData");
   const sign = change > 0 ? "+" : "";
   return `${sign}${(change * 100).toFixed(2)}%`;
 }
 
 function formatRatio(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return "暂无比例";
+  if (value == null || !Number.isFinite(value)) return i18n.t("investments.noRatio");
   const sign = value > 0 ? "+" : "";
   return `${sign}${(value * 100).toFixed(2)}%`;
 }
 
 function formatUnsignedRatio(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return "暂无比例";
+  if (value == null || !Number.isFinite(value)) return i18n.t("investments.noRatio");
   return `${(value * 100).toFixed(2)}%`;
 }
 

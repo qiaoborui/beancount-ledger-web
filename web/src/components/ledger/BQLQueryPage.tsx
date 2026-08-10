@@ -7,8 +7,10 @@ import { AlertTriangle, BarChart3, Clock, Database, LineChart as LineChartIcon, 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { apiFetch } from "@/lib/apiEndpoints";
 import { readJson } from "@/lib/clientFetch";
+import i18n from "@/i18n";
 
 type BQLColumn = {
   name: string;
@@ -76,11 +78,11 @@ LIMIT 100`;
 
 const examples = [
   {
-    label: "月度分类支出",
+    labelKey: "bqlQuery.exampleMonthlyCategory",
     query: defaultQuery,
   },
   {
-    label: "商户排行",
+    labelKey: "bqlQuery.exampleMerchants",
     query: `SELECT payee, count(*) AS tx_count, sum(value) AS total
 FROM transactions
 WHERE date >= '2026-01-01' AND type = 'expense'
@@ -89,7 +91,7 @@ ORDER BY total DESC
 LIMIT 50`,
   },
   {
-    label: "收入账户",
+    labelKey: "bqlQuery.exampleIncomeAccounts",
     query: `SELECT month, account, sum(value) AS total
 FROM postings
 WHERE account LIKE 'Income:%'
@@ -98,7 +100,7 @@ ORDER BY month DESC
 LIMIT 100`,
   },
   {
-    label: "复合条件与聚合筛选",
+    labelKey: "bqlQuery.exampleCompound",
     query: `SELECT payee, count(*) AS tx_count, sum(value) AS total
 FROM transactions
 WHERE (payee ~ 'coffee|store' OR 'food' IN tags) AND date BETWEEN '2026-01-01' AND '2026-12-31'
@@ -208,10 +210,10 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
           return;
         }
         const payload = await readJson<{ records: BQLHistoryRecord[]; error?: string }>(response);
-        if (!response.ok) throw new Error(payload.error || `请求失败：${response.status}`);
+        if (!response.ok) throw new Error(payload.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
         if (!cancelled) setHistory(sortHistory(payload.records));
       } catch {
-        if (!cancelled) setHistoryError("查询历史暂时无法加载");
+        if (!cancelled) setHistoryError(i18n.t("bqlQuery.historyLoadFailed"));
       } finally {
         if (!cancelled) setHistoryLoading(false);
       }
@@ -252,11 +254,11 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
             return;
           }
           const payload = await readJson<BQLResult & { error?: string }>(response);
-          if (!response.ok) throw new Error(payload.error || `请求失败：${response.status}`);
+          if (!response.ok) throw new Error(payload.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
           updateRun(run.id, { result: payload });
         } catch (runError) {
           completed = false;
-          updateRun(run.id, { error: runError instanceof Error ? runError.message : "BQL 查询失败" });
+          updateRun(run.id, { error: runError instanceof Error ? runError.message : i18n.t("bqlQuery.queryFailed") });
         }
       }
       if (completed) void rememberSuccessfulQuery(historyText);
@@ -283,12 +285,12 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const record = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(record.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(record.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => sortHistory([record, ...current.filter((item) => item.id !== record.id)]));
       setHistoryError("");
       void generateHistoryTitle(record.id);
     } catch {
-      setHistoryError("查询已完成，历史未同步");
+      setHistoryError(i18n.t("bqlQuery.historyNotSynced"));
     }
   }
 
@@ -300,7 +302,7 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(next.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.map((item) => item.id === next.id ? next : item));
     } catch {
       // The fallback title remains usable; the next successful run retries AI naming.
@@ -332,12 +334,12 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         return;
       }
       const next = await readJson<BQLHistoryRecord & { error?: string }>(response);
-      if (!response.ok) throw new Error(next.error || `请求失败：${response.status}`);
+      if (!response.ok) throw new Error(next.error || i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.map((item) => item.id === next.id ? next : item));
       setEditingHistoryID(null);
       setHistoryError("");
     } catch {
-      setHistoryError("标题保存失败");
+      setHistoryError(i18n.t("bqlQuery.titleSaveFailed"));
     } finally {
       setHistoryMutationID(null);
     }
@@ -351,12 +353,12 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
         onSensitiveLocked();
         return;
       }
-      if (!response.ok) throw new Error(`请求失败：${response.status}`);
+      if (!response.ok) throw new Error(i18n.t("bqlQuery.requestFailed", { status: response.status }));
       setHistory((current) => current.filter((item) => item.id !== record.id));
       setEditingHistoryID((current) => current === record.id ? null : current);
       setHistoryError("");
     } catch {
-      setHistoryError("历史记录删除失败");
+      setHistoryError(i18n.t("bqlQuery.historyDeleteFailed"));
     } finally {
       setHistoryMutationID(null);
     }
@@ -382,22 +384,22 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
               <div className="flex min-w-0 items-center gap-2">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-tag text-brand"><Database className="h-4 w-4" /></span>
                 <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold text-ink">BQL 查询</h2>
+                  <h2 className="truncate text-sm font-semibold text-ink">{i18n.t("bqlQuery.title")}</h2>
                   {preview && <p className="mt-0.5 truncate text-[11px] text-stone">{preview}</p>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {onOpenAgent && <Button type="button" variant="outline" size="sm" className="h-8 rounded-md border-line bg-paper text-ink hover:bg-tag" onClick={() => onOpenAgent(`请根据当前 BQL 编辑器内容生成或优化查询，并先校验语法。当前内容：\n\n${query}`)}>
+                {onOpenAgent && <Button type="button" variant="outline" size="sm" className="h-8 rounded-md border-line bg-paper text-ink hover:bg-tag" onClick={() => onOpenAgent(i18n.t("bqlQuery.aiGeneratePrompt", { query }))}>
                   <Sparkles className="h-3.5 w-3.5" />
-                  AI 生成
+                  {i18n.t("bqlQuery.aiGenerate")}
                 </Button>}
                 <Button type="button" variant="outline" size="sm" className="h-8 rounded-md border-line bg-paper text-ink hover:bg-tag" onClick={() => void runCurrentQuery()} disabled={!canRun}>
                   {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                  当前语句
+                  {i18n.t("bqlQuery.currentStatement")}
                 </Button>
                 <Button type="button" size="sm" className="h-8 rounded-md bg-brand text-paper hover:bg-brand/90" onClick={() => void runAllQueries()} disabled={!canRun}>
                   {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                  全部运行
+                  {i18n.t("bqlQuery.runAll")}
                 </Button>
               </div>
             </div>
@@ -420,9 +422,9 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
               />
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-stone">
-              <span>{statements.length || 0} 条语句</span>
-              <span>Cmd/Ctrl + Enter 运行选中或当前语句</span>
-              <span>支持 AND / OR / NOT、括号、IN、BETWEEN、正则、DISTINCT 与 HAVING</span>
+              <span>{i18n.t("bqlQuery.statementCount", { count: statements.length || 0 })}</span>
+              <span>{i18n.t("bqlQuery.runHint")}</span>
+              <span>{i18n.t("bqlQuery.capabilitiesHint")}</span>
             </div>
             {error && <div className="mt-2 flex items-start gap-2 rounded-md border border-line bg-tag px-3 py-2 text-sm text-warm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 amount-danger" />
@@ -432,13 +434,13 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
           <aside className="min-w-0 border-t border-line pt-3 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">
               <Clock className="h-3 w-3" />
-              {history.length > 0 ? "查询历史" : "示例查询"}
+              {history.length > 0 ? i18n.t("bqlQuery.queryHistory") : i18n.t("bqlQuery.exampleQueries")}
             </div>
             {historyError && <div className="mt-2 text-xs text-warm">{historyError}</div>}
             <div className="mt-2 grid gap-2">
-              {historyLoading && <div className="flex items-center gap-2 px-1 py-2 text-xs text-stone"><RefreshCw className="h-3.5 w-3.5 animate-spin" />加载查询历史</div>}
-              {!historyLoading && history.length === 0 && examples.map((example, index) => <button key={`${example.label}:${example.query}:${index}`} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
-                <span className="block truncate font-medium text-ink">{example.label}</span>
+              {historyLoading && <div className="flex items-center gap-2 px-1 py-2 text-xs text-stone"><RefreshCw className="h-3.5 w-3.5 animate-spin" />{i18n.t("bqlQuery.loadingHistory")}</div>}
+              {!historyLoading && history.length === 0 && examples.map((example, index) => <button key={`${example.labelKey}:${example.query}:${index}`} type="button" className="min-w-0 rounded-md border border-line bg-paper px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => useQuery(example.query)}>
+                <span className="block truncate font-medium text-ink">{i18n.t(example.labelKey)}</span>
                 <span className="mt-1 block truncate font-mono text-[11px] text-stone">{example.query.replace(/\s+/g, " ")}</span>
               </button>)}
               {!historyLoading && history.map((record) => <div key={record.id} className="min-w-0 rounded-md border border-line bg-paper px-3 py-2">
@@ -447,12 +449,12 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
                     if (event.key === "Enter") void saveHistoryTitle(record);
                     if (event.key === "Escape") setEditingHistoryID(null);
                   }} /> : <button type="button" className="min-w-0 flex-1 truncate text-left text-sm font-medium text-ink hover:text-brand" onClick={() => useQuery(record.query)} title={record.title}>{record.title}</button>}
-                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title="重命名" aria-label="重命名" disabled={historyMutationID === record.id} onClick={() => beginRename(record)}><Pencil className="h-3.5 w-3.5" /></button>
-                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title="运行查询" aria-label="运行查询" disabled={loading || historyMutationID === record.id} onClick={() => runHistory(record)}><Play className="h-3.5 w-3.5" /></button>
-                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-warm disabled:opacity-40" title="删除" aria-label="删除" disabled={historyMutationID === record.id} onClick={() => void removeHistory(record)}><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title={i18n.t("bqlQuery.rename")} aria-label={i18n.t("bqlQuery.rename")} disabled={historyMutationID === record.id} onClick={() => beginRename(record)}><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-ink disabled:opacity-40" title={i18n.t("bqlQuery.runQuery")} aria-label={i18n.t("bqlQuery.runQuery")} disabled={loading || historyMutationID === record.id} onClick={() => runHistory(record)}><Play className="h-3.5 w-3.5" /></button>
+                  <button type="button" className="grid h-7 w-7 shrink-0 place-items-center text-stone hover:bg-tag hover:text-warm disabled:opacity-40" title={i18n.t("bqlQuery.delete")} aria-label={i18n.t("bqlQuery.delete")} disabled={historyMutationID === record.id} onClick={() => void removeHistory(record)}><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
                 <span className="mt-1 block truncate font-mono text-[11px] text-stone">{record.query.replace(/\s+/g, " ")}</span>
-                <span className="mt-1 block text-[11px] text-stone">{formatHistoryTime(record.lastRunAt)} · {record.runCount} 次</span>
+                <span className="mt-1 block text-[11px] text-stone">{formatHistoryTime(record.lastRunAt)} · {i18n.t("bqlQuery.runCount", { count: record.runCount })}</span>
               </div>)}
             </div>
           </aside>
@@ -464,8 +466,8 @@ export function BQLQueryPage({ valuationCurrency, onSensitiveLocked, onOpenAgent
 }
 
 function BQLResults({ runs, loading, activeViews, onViewChange }: { runs: BQLRun[]; loading: boolean; activeViews: Record<string, ChartKind>; onViewChange: (id: string, view: ChartKind) => void }) {
-  if (loading && runs.length === 0) return <section className="border-b border-line bg-panel p-5 text-sm text-stone">正在运行查询…</section>;
-  if (runs.length === 0) return <section className="border-b border-line bg-panel p-5 text-sm text-stone">运行 BQL 后会在这里显示表格或图表。</section>;
+  if (loading && runs.length === 0) return <section className="border-b border-line bg-panel p-5 text-sm text-stone">{i18n.t("bqlQuery.running")}</section>;
+  if (runs.length === 0) return <section className="border-b border-line bg-panel p-5 text-sm text-stone">{i18n.t("bqlQuery.emptyHint")}</section>;
   return <div className="min-w-0">
     {runs.map((run, index) => <BQLResultBlock key={run.id} run={run} index={index} loading={loading && !run.result && !run.error} activeView={activeViews[run.id] ?? "table"} onViewChange={(view) => onViewChange(run.id, view)} />)}
   </div>;
@@ -477,15 +479,15 @@ function BQLResultBlock({ run, index, loading, activeView, onViewChange }: { run
   return <section className="min-w-0 border-b border-line bg-panel">
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 md:px-4">
       <div className="min-w-0">
-        <div className="text-sm font-semibold text-ink">结果 {index + 1}</div>
+        <div className="text-sm font-semibold text-ink">{i18n.t("bqlQuery.resultLabel", { index: index + 1 })}</div>
         <div className="mt-0.5 truncate font-mono text-[11px] text-stone" title={run.query}>{run.query.replace(/\s+/g, " ")}</div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {run.result && <div className="text-xs tabular-nums text-stone">{run.result.rowCount} 行 · {run.result.valuationCurrency}</div>}
+        {run.result && <div className="text-xs tabular-nums text-stone">{i18n.t("bqlQuery.resultMeta", { rows: run.result.rowCount, currency: run.result.valuationCurrency })}</div>}
         {run.result && <ChartModeButtons chart={chart} activeView={visibleView} onViewChange={onViewChange} />}
       </div>
     </div>
-    {loading && <div className="p-5 text-sm text-stone">正在运行这条查询…</div>}
+    {loading && <div className="p-5 text-sm text-stone">{i18n.t("bqlQuery.runningQuery")}</div>}
     {run.error && <div className="flex items-start gap-2 px-3 py-3 text-sm text-warm md:px-4">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 amount-danger" />
       <span className="min-w-0 [overflow-wrap:anywhere]">{run.error}</span>
@@ -498,11 +500,11 @@ function BQLResultBlock({ run, index, loading, activeView, onViewChange }: { run
 }
 
 function ChartModeButtons({ chart, activeView, onViewChange }: { chart: ChartModel | null; activeView: ChartKind; onViewChange: (view: ChartKind) => void }) {
-  const modes: Array<{ view: ChartKind; label: string; icon: typeof Table2; disabled?: boolean }> = [
-    { view: "table", label: "表格", icon: Table2 },
-    { view: "bar", label: "柱状", icon: BarChart3, disabled: !supportsChart(chart, "bar") },
-    { view: "pie", label: "饼图", icon: PieChartIcon, disabled: !supportsChart(chart, "pie") },
-    { view: "line", label: "折线", icon: LineChartIcon, disabled: !supportsChart(chart, "line") },
+  const modes: Array<{ view: ChartKind; labelKey: string; icon: typeof Table2; disabled?: boolean }> = [
+    { view: "table", labelKey: "bqlQuery.viewTable", icon: Table2 },
+    { view: "bar", labelKey: "bqlQuery.viewBar", icon: BarChart3, disabled: !supportsChart(chart, "bar") },
+    { view: "pie", labelKey: "bqlQuery.viewPie", icon: PieChartIcon, disabled: !supportsChart(chart, "pie") },
+    { view: "line", labelKey: "bqlQuery.viewLine", icon: LineChartIcon, disabled: !supportsChart(chart, "line") },
   ];
   return <div className="flex overflow-hidden rounded-md border border-line bg-paper">
     {modes.map((mode) => {
@@ -512,8 +514,8 @@ function ChartModeButtons({ chart, activeView, onViewChange }: { chart: ChartMod
         type="button"
         className={`grid h-7 w-8 place-items-center border-l border-line first:border-l-0 ${activeView === mode.view ? "bg-brand text-paper" : "text-stone hover:bg-tag"} disabled:cursor-not-allowed disabled:opacity-40`}
         disabled={mode.disabled}
-        title={mode.label}
-        aria-label={mode.label}
+        title={i18n.t(mode.labelKey)}
+        aria-label={i18n.t(mode.labelKey)}
         aria-pressed={activeView === mode.view}
         onClick={() => onViewChange(mode.view)}
       >
@@ -524,9 +526,9 @@ function ChartModeButtons({ chart, activeView, onViewChange }: { chart: ChartMod
 }
 
 function BQLResultContent({ result, chart, activeView }: { result: BQLResult; chart: ChartModel | null; activeView: ChartKind }) {
-  if (result.rows.length === 0) return <div className="p-5 text-sm text-stone">查询完成，没有返回行。</div>;
+  if (result.rows.length === 0) return <div className="p-5 text-sm text-stone">{i18n.t("bqlQuery.emptyRows")}</div>;
   if (activeView === "table") return <BQLResultTable result={result} />;
-  if (!chart) return <div className="p-5 text-sm text-stone">当前结果没有可绘制的维度和值列。</div>;
+  if (!chart) return <div className="p-5 text-sm text-stone">{i18n.t("bqlQuery.noChartColumns")}</div>;
   return <BQLResultChart chart={chart} kind={activeView} />;
 }
 
@@ -551,7 +553,7 @@ function BQLResultTable({ result }: { result: BQLResult }) {
 
 function BQLResultChart({ chart, kind }: { chart: ChartModel; kind: ChartKind }) {
   const data = kind === "pie" ? chart.data.filter((item) => item.value > 0).slice(0, 12) : chart.data.slice(0, 80);
-  if (data.length === 0) return <div className="p-5 text-sm text-stone">没有可绘制的数据。</div>;
+  if (data.length === 0) return <div className="p-5 text-sm text-stone">{i18n.t("bqlQuery.noChartData")}</div>;
   return <div className="h-[22rem] min-w-0 px-3 py-3 md:px-4">
     <ResponsiveContainer width="100%" height="100%">
       {kind === "pie" ? (
@@ -587,7 +589,7 @@ function summarizeRuns(runs: BQLRun[]) {
   const completed = runs.filter((run) => run.result).length;
   const failed = runs.filter((run) => run.error).length;
   const rows = runs.reduce((total, run) => total + (run.result?.rowCount ?? 0), 0);
-  return `${runs.length} 条查询 · ${completed} 完成 · ${failed} 失败 · ${rows} 行`;
+  return i18n.t("bqlQuery.summaryLabel", { runs: runs.length, completed, failed, rows });
 }
 
 function buildChartModel(result: BQLResult): ChartModel | null {
@@ -601,7 +603,7 @@ function buildChartModel(result: BQLResult): ChartModel | null {
     const rawLabel = row[labelIndex];
     const rawValue = row[valueIndex];
     return {
-      label: rawLabel == null || rawLabel === "" ? `行 ${index + 1}` : String(rawLabel),
+      label: rawLabel == null || rawLabel === "" ? i18n.t("bqlQuery.rowLabel", { index: index + 1 }) : String(rawLabel),
       value: typeof rawValue === "number" ? rawValue : Number(rawValue),
     };
   }).filter((item) => Number.isFinite(item.value));
@@ -710,6 +712,6 @@ function sortHistory(records: BQLHistoryRecord[]) {
 
 function formatHistoryTime(value: string) {
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "刚刚运行";
+  if (!Number.isFinite(date.getTime())) return i18n.t("bqlQuery.justRan");
   return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }

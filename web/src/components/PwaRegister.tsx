@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { haptic } from "./ledger/haptics";
 import { shouldShowServiceWorkerUpdate } from "./pwaUpdate";
 
 export function PwaRegister() {
+  const { t } = useTranslation();
   const [updateReady, setUpdateReady] = useState(false);
   const dismissedWaitingRef = useRef<ServiceWorker | null>(null);
 
@@ -95,7 +97,7 @@ export function PwaRegister() {
   if (!updateReady) return null;
 
   return <div className="fixed inset-x-4 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-[120] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl border border-line bg-panel/95 px-4 py-3 text-sm text-olive shadow-lg backdrop-blur md:bottom-4">
-    <span>有新版本可用</span>
-    <button className="rounded-xl bg-brand px-3 py-1.5 text-paper" onClick={activateUpdate}>刷新更新</button>
+    <span>{t("pwa.updateAvailable")}</span>
+    <button className="rounded-xl bg-brand px-3 py-1.5 text-paper" onClick={activateUpdate}>{t("pwa.refreshUpdate")}</button>
   </div>;
 }

@@ -1,3 +1,5 @@
+import i18n from "@/i18n";
+
 export type TimePreset = "last7" | "last30" | "last90" | "last12months" | "week" | "month" | "quarter" | "year" | "all" | "custom";
 
 export type TimeRange = {
@@ -12,12 +14,21 @@ const rollingDayPresets: Partial<Record<TimePreset, number>> = {
   last90: 90,
 };
 
-const rollingPresetLabels: Partial<Record<TimePreset, string>> = {
-  last7: "过去 7 天",
-  last30: "过去 30 天",
-  last90: "过去 90 天",
-  last12months: "过去 12 个月",
+const rollingPresetLabelKeys: Partial<Record<TimePreset, string>> = {
+  last7: "timeRange.last7",
+  last30: "timeRange.last30",
+  last90: "timeRange.last90",
+  last12months: "timeRange.last12months",
 };
+
+export function isRollingTimePreset(preset: TimePreset): boolean {
+  return preset in rollingPresetLabelKeys;
+}
+
+export function rollingPresetLabel(preset: TimePreset): string {
+  const key = rollingPresetLabelKeys[preset];
+  return key ? i18n.t(key) : "";
+}
 
 function parseDate(value: string): Date {
   const [year, month, day] = value.split("-").map(Number);
@@ -65,10 +76,6 @@ function rollingTwelveMonthRange(referenceDate?: string): { start: string; end: 
   const startDate = new Date(Date.UTC(targetYear, targetMonth, Math.min(endDate.getUTCDate(), lastTargetDay)));
   startDate.setUTCDate(startDate.getUTCDate() + 1);
   return { start: formatDate(startDate), end: shiftDate(inclusiveEnd, 1) };
-}
-
-export function isRollingTimePreset(preset: TimePreset): boolean {
-  return preset in rollingPresetLabels;
 }
 
 export function inclusiveEndDate(range: TimeRange): string {
@@ -271,7 +278,7 @@ export function formatTimeRangeLabel(range: TimeRange): string {
     case "last90":
     case "last12months": {
       const currentRange = makeTimeRange(range.preset);
-      if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabels[range.preset]!;
+      if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabel(range.preset);
       return `${range.start} ~ ${inclusiveEndDate(range)}`;
     }
     case "week": {
@@ -291,9 +298,9 @@ export function formatTimeRangeLabel(range: TimeRange): string {
       return `${y} Q${q}`;
     }
     case "year":
-      return `${range.start.slice(0, 4)} 年`;
+      return i18n.t("timeRange.year", { year: range.start.slice(0, 4) });
     case "all":
-      return "全部时间";
+      return i18n.t("timeRange.all");
     case "custom":
       return `${range.start} ~ ${inclusiveEndDate(range)}`;
   }
@@ -302,25 +309,25 @@ export function formatTimeRangeLabel(range: TimeRange): string {
 export function formatTimeRangePickerLabel(range: TimeRange, referenceDate?: string): string {
   if (isRollingTimePreset(range.preset)) {
     const currentRange = makeTimeRange(range.preset, referenceDate);
-    if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabels[range.preset]!;
-    if (range.preset === "last12months") return "12 个月范围";
+    if (range.start === currentRange.start && range.end === currentRange.end) return rollingPresetLabel(range.preset);
+    if (range.preset === "last12months") return i18n.t("timeRange.monthRange");
     const days = Math.round((parseDate(range.end).getTime() - parseDate(range.start).getTime()) / 86400000);
-    return `${days} 天范围`;
+    return i18n.t("timeRange.dayRange", { days });
   }
 
   const currentRange = makeTimeRange(range.preset, referenceDate);
   if (range.start === currentRange.start && range.end === currentRange.end) {
-    if (range.preset === "week") return "当前周";
-    if (range.preset === "month") return "当前月";
-    if (range.preset === "quarter") return "当前季度";
-    if (range.preset === "year") return "当前年";
+    if (range.preset === "week") return i18n.t("timeRange.currentWeek");
+    if (range.preset === "month") return i18n.t("timeRange.currentMonth");
+    if (range.preset === "quarter") return i18n.t("timeRange.currentQuarter");
+    if (range.preset === "year") return i18n.t("timeRange.currentYear");
   }
   return formatTimeRangeLabel(range);
 }
 
 export function formatTimeRangeDateSpan(range: TimeRange): string {
-  if (range.preset === "all") return "全部账本日期";
-  return `${range.start} 至 ${inclusiveEndDate(range)}`;
+  if (range.preset === "all") return i18n.t("timeRange.allDates");
+  return i18n.t("timeRange.dateRange", { start: range.start, end: inclusiveEndDate(range) });
 }
 
 /** 获取时间范围内的所有月份 */

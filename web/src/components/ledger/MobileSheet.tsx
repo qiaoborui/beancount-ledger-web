@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { haptic } from "./haptics";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 
@@ -20,7 +21,9 @@ type MobileSheetProps = {
   zIndexClassName?: string;
 };
 
-export function MobileSheet({ open, title, children, footer, onClose, shouldClose, size = "lg", align = "right", bodyClassName = "", panelClassName = "", closeLabel = "关闭", zIndexClassName = "z-[100]" }: MobileSheetProps) {
+export function MobileSheet({ open, title, children, footer, onClose, shouldClose, size = "lg", align = "right", bodyClassName = "", panelClassName = "", closeLabel, zIndexClassName = "z-[100]" }: MobileSheetProps) {
+  const { t } = useTranslation();
+  const effectiveCloseLabel = closeLabel ?? t("mobileSheet.close");
   const [mounted, setMounted] = useState(false);
   const [dragY, setDragY] = useState(0);
   const titleId = useId();
@@ -99,7 +102,7 @@ export function MobileSheet({ open, title, children, footer, onClose, shouldClos
           />
           <div className="flex items-center justify-between gap-3">
             <h2 id={titleId} className="min-w-0 truncate font-serif text-[1.65rem] leading-tight sm:text-2xl">{title}</h2>
-            <button ref={closeButtonRef} className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm" onClick={requestClose}>{closeLabel}</button>
+            <button ref={closeButtonRef} className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm" onClick={requestClose}>{effectiveCloseLabel}</button>
           </div>
         </div>
         <div className={`@container min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 ${bodyClassName}`}>{children}</div>

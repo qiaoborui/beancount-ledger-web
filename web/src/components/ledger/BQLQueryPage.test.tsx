@@ -16,14 +16,14 @@ describe("BQLQueryPage", () => {
   it("connects the editor to the global Agent", () => {
     expect(source).toContain("onOpenAgent");
     expect(source).toContain("agentQuery");
-    expect(source).toContain("AI 生成");
+    expect(source).toContain("bqlQuery.aiGenerate");
   });
 
   it("syncs successful queries as named history instead of browser recents", () => {
     expect(source).toContain('"/api/ledger/bql-history"');
     expect(source).toContain("rememberSuccessfulQuery");
     expect(source).toContain("if (completed) void rememberSuccessfulQuery(historyText)");
-    expect(source).toContain("查询历史");
+    expect(source).toContain("bqlQuery.queryHistory");
     expect(source).not.toContain("ledger.bql.recents.v1");
   });
 });

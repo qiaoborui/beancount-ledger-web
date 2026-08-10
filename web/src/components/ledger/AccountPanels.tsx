@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { ClientNavLink } from "./ClientNavLink";
 import { Bot, ChevronDown, Eye, EyeOff, GripVertical, ListChecks, Pencil, X } from "lucide-react";
 import { readJson } from "@/lib/clientFetch";
 import { apiFetch } from "@/lib/apiEndpoints";
 import { formatCompactValuation, formatMoney, formatValuation } from "@/lib/money";
+import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatAccountOptionLabel } from "./accountDisplay";
@@ -23,15 +25,16 @@ type BalancePrefixGroup = {
   statusCounts: Record<AccountStatus["status"], number>;
   issueCount: number;
 };
-const statusFilters: { key: BalanceStatusFilter; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "issue", label: "异常" },
-  { key: "yellow", label: "未断言" },
-  { key: "grey", label: "长期未更新" },
+const statusFilters: { key: BalanceStatusFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "accountPanels.filterAll" },
+  { key: "issue", labelKey: "accountPanels.filterIssue" },
+  { key: "yellow", labelKey: "accountPanels.filterYellow" },
+  { key: "grey", labelKey: "accountPanels.filterGrey" },
 ];
 const accountGroupOrderStorageKey = "ledger-account-prefix-group-order";
 
 export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap = {}, onToggleAll, onToggleAccount, statuses, txns = [] }: { rows: BalanceRow[]; full?: boolean; allVisible?: boolean; visibleAccountMap?: Record<string, boolean>; onToggleAll?: () => void; onToggleAccount?: (account: string) => void; statuses?: AccountStatus[]; txns?: Txn[] }) {
+  const { t } = useTranslation();
   const trendMap = useMemo(() => Object.fromEntries(rows.map((row) => [row.account, accountTrendPoints(row, txns)])), [rows, txns]);
   const statusMap = useMemo(() => new Map((statuses ?? []).map((status) => [status.account, status])), [statuses]);
   const lastActivityMap = useMemo(() => accountLastActivity(rows, txns), [rows, txns]);
@@ -72,8 +75,8 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
   return <section className="relative border-b border-line bg-panel">
     <div className="flex flex-col gap-3 border-b border-line px-4 py-4 lg:flex-row lg:items-start lg:justify-between md:px-6 xl:px-8">
       <div>
-        <h2 className="font-serif text-2xl">账户余额</h2>
-        <p className="mt-1 text-sm text-stone">按账户前缀和机构折叠；拖拽分组可调整常用顺序。</p>
+        <h2 className="font-serif text-2xl">{t("accountPanels.title")}</h2>
+        <p className="mt-1 text-sm text-stone">{t("accountPanels.subtitle")}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border border-line bg-paper p-1">
@@ -83,11 +86,11 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
               className={`h-8 rounded px-2.5 text-xs transition ${statusFilter === filter.key ? "bg-brand text-paper" : "text-olive hover:bg-tag"}`}
               onClick={() => setStatusFilter(filter.key)}
             >
-              {filter.label}
+              {t(filter.labelKey)}
             </button>
           ))}
         </div>
-        {onToggleAll && <button className="inline-flex h-10 items-center gap-1.5 rounded-md border border-line bg-paper px-3 text-sm text-olive hover:bg-tag" onClick={onToggleAll} title={allVisible ? "隐藏所有账户余额" : "显示所有账户余额"}>{allVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{allVisible ? "全部隐藏" : "全部显示"}</span></button>}
+        {onToggleAll && <button className="inline-flex h-10 items-center gap-1.5 rounded-md border border-line bg-paper px-3 text-sm text-olive hover:bg-tag" onClick={onToggleAll} title={allVisible ? t("accountPanels.hideAllBalances") : t("accountPanels.showAllBalances")}>{allVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{allVisible ? t("accountPanels.hideAll") : t("accountPanels.showAll")}</span></button>}
       </div>
     </div>
 
@@ -129,24 +132,24 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-tag text-ink">{institutionInitial(group.label)}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-lg font-semibold text-warm">{group.label}</span>
-                  <span className="mt-0.5 block truncate text-xs text-stone">{group.path} · {group.rows.length} 个账户 · {group.currencies.length > 1 ? `${group.currencies.length} 个币种` : group.currencies[0] ?? "无币种"}</span>
+                  <span className="mt-0.5 block truncate text-xs text-stone">{group.path} · {t("accountPanels.accountCount", { count: group.rows.length })} · {group.currencies.length > 1 ? t("accountPanels.currencyCount", { count: group.currencies.length }) : group.currencies[0] ?? t("accountPanels.noCurrency")}</span>
                 </span>
               </span>
               <span className="flex min-w-0 items-center justify-between gap-3 @sm:shrink-0 @sm:justify-end">
                 <span className="min-w-0 text-left @sm:text-right">
                   <span className={`block truncate font-semibold ${group.total < 0 ? "amount-expense" : "amount-gold"}`} title={formatGroupAmount(group, groupVisible(group))}>{formatGroupAmount(group, groupVisible(group))}</span>
-                  <span className="text-xs text-stone">异常 {group.issueCount}</span>
+                  <span className="text-xs text-stone">{t("accountPanels.issues", { count: group.issueCount })}</span>
                 </span>
                 <ChevronDown className={`h-5 w-5 text-olive transition ${open ? "rotate-180" : ""}`} />
               </span>
             </div>
             {open && <div className="border-t border-line">
               <div className="ledger-table-head hidden grid-cols-[minmax(0,1fr)_84px_minmax(108px,148px)_112px_168px] items-center gap-3 border-b border-line px-4 py-2 xl:grid">
-                <span>账户</span>
-                <span>币种</span>
-                <span className="text-right">余额</span>
-                <span>状态</span>
-                <span className="text-right">操作</span>
+                <span>{t("accountPanels.account")}</span>
+                <span>{t("accountPanels.currency")}</span>
+                <span className="text-right">{t("accountPanels.balance")}</span>
+                <span>{t("accountPanels.status")}</span>
+                <span className="text-right">{t("accountPanels.actions")}</span>
               </div>
               {group.rows.map((row) => {
                 const visible = rowVisible(row);
@@ -167,19 +170,19 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                   >
                     <span className="min-w-0">
                       <span className="flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${status ? statusColor(status.status) : "bg-stone"}`} title={status ? statusTitle(status) : "未检查"} />
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${status ? statusColor(status.status) : "bg-stone"}`} title={status ? statusTitle(status) : t("accountPanels.unchecked")} />
                         <strong className="truncate text-sm text-warm">{row.label}</strong>
-                        {row.active === false && <span className="rounded bg-line px-1.5 py-0.5 text-[10px] text-stone">已关闭</span>}
+                        {row.active === false && <span className="rounded bg-line px-1.5 py-0.5 text-[10px] text-stone">{t("accountPanels.closed")}</span>}
                       </span>
-                      <span className="mt-0.5 block truncate text-xs text-stone">{shortAccountPath(row.account)} · {lastActivityMap.get(row.account) ? `最近活动 ${lastActivityMap.get(row.account)}` : "暂无近期活动"}</span>
+                      <span className="mt-0.5 block truncate text-xs text-stone">{shortAccountPath(row.account)} · {lastActivityMap.get(row.account) ? t("accountPanels.recentActivity", { date: lastActivityMap.get(row.account) }) : t("accountPanels.noRecentActivity")}</span>
                     </span>
-                    <span className="rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive xl:w-fit">{row.currency || "多币种"}</span>
+                    <span className="rounded-lg border border-line bg-paper px-2 py-1 text-xs text-olive xl:w-fit">{row.currency || t("accountPanels.multiCurrency")}</span>
                     <span className={`hidden text-right text-sm font-medium xl:block ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}>{formatRowAmount(row, visible)}</span>
-                    <span className="hidden truncate text-xs text-stone xl:block">{status ? statusTitle(status) : "未检查"}</span>
+                    <span className="hidden truncate text-xs text-stone xl:block">{status ? statusTitle(status) : t("accountPanels.unchecked")}</span>
                     <span className="hidden h-9 items-center justify-end gap-2 xl:flex">
-                      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-paper px-3 text-xs font-medium text-olive hover:bg-tag" onClick={(event) => event.stopPropagation()}>流水</ClientNavLink>
-                      <ClientNavLink href="/reconcile" className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg bg-brand px-3 text-xs font-medium text-paper hover:bg-brand-light" onClick={(event) => event.stopPropagation()}>对账</ClientNavLink>
-                      {onToggleAccount && <button type="button" className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-panel text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+                      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-paper px-3 text-xs font-medium text-olive hover:bg-tag" onClick={(event) => event.stopPropagation()}>{t("accountPanels.transactions")}</ClientNavLink>
+                      <ClientNavLink href="/reconcile" className="inline-flex h-9 min-w-12 items-center justify-center whitespace-nowrap rounded-lg bg-brand px-3 text-xs font-medium text-paper hover:bg-brand-light" onClick={(event) => event.stopPropagation()}>{t("accountPanels.reconcile")}</ClientNavLink>
+                      {onToggleAccount && <button type="button" className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-panel text-olive hover:bg-tag" onClick={(event) => { event.stopPropagation(); onToggleAccount(row.account); }} title={visible ? t("accountPanels.hideAccountBalance") : t("accountPanels.showAccountBalance")}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
                     </span>
                   </div>
                   {expanded && <div className="hidden border-t border-line bg-paper/80 px-4 py-4 xl:block">
@@ -189,9 +192,9 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
                     className="px-4 pb-3 xl:hidden"
                     label={formatRowAmount(row, visible)}
                     labelClassName={`truncate text-sm font-medium ${row.value < 0 || row.account.startsWith("Liabilities") ? "amount-expense" : "amount-gold"}`}
-                    value={status ? statusTitle(status) : "未检查"}
+                    value={status ? statusTitle(status) : t("accountPanels.unchecked")}
                     valueClassName="text-xs text-stone"
-                    valueTitle={status ? statusTitle(status) : "未检查"}
+                    valueTitle={status ? statusTitle(status) : t("accountPanels.unchecked")}
                   />
                 </div>;
               })}
@@ -209,8 +212,8 @@ export function BalanceGrid({ rows, full, allVisible = false, visibleAccountMap 
         onToggleAccount={onToggleAccount}
         onClose={() => setMobileAccount(null)}
       />
-    </> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">当前筛选下没有账户。</p> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">暂无有流水且余额不为 0 的账户。</p>}
-    {!full && <p className="border-t border-line px-4 py-3 text-xs text-stone md:px-6 xl:px-8">完整账户在“账户”页；余额核对和断言集中在“对账”页。</p>}
+    </> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">{t("accountPanels.noAccountsFiltered")}</p> : <p className="px-4 py-8 text-sm text-stone md:px-6 xl:px-8">{t("accountPanels.noActiveAccounts")}</p>}
+    {!full && <p className="border-t border-line px-4 py-3 text-xs text-stone md:px-6 xl:px-8">{t("accountPanels.fullHint")}</p>}
   </section>;
 }
 
@@ -232,7 +235,7 @@ function buildBalancePrefixGroups(rows: BalanceRow[], statusMap: Map<string, Acc
       path: key,
       rows: groupRows,
       total: groupRows.reduce((sum, row) => sum + row.value, 0),
-      currencies: Array.from(new Set(groupRows.map((row) => row.currency || "多币种"))),
+      currencies: Array.from(new Set(groupRows.map((row) => row.currency || i18n.t("accountPanels.multiCurrency")))),
       statusCounts,
       issueCount: statusCounts.red + statusCounts.yellow + statusCounts.grey,
     };
@@ -308,7 +311,7 @@ function formatRowAmount(row: BalanceRow, visible: boolean) {
 
 function formatGroupAmount(group: BalancePrefixGroup, visible: boolean) {
   if (!visible) return "••••••";
-  if (group.currencies.length !== 1 || group.currencies[0] === "多币种") return `${group.currencies.length} 币种`;
+  if (group.currencies.length !== 1 || group.currencies[0] === i18n.t("accountPanels.multiCurrency")) return i18n.t("accountPanels.currencyCountShort", { count: group.currencies.length });
   return formatMoney(group.total / 100, group.currencies[0]);
 }
 
@@ -339,7 +342,7 @@ function commonChinesePrefix(labels: string[]) {
 }
 
 function institutionInitial(label: string) {
-  return Array.from(label.trim())[0] ?? "账";
+  return Array.from(label.trim())[0] ?? i18n.t("accountPanels.defaultInitial");
 }
 
 function shortAccountPath(account: string) {
@@ -351,6 +354,7 @@ function BalanceMetric({ label, value }: { label: string; value: string }) {
 }
 
 function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, onToggleAccount, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; onClose: () => void }) {
+  const { t } = useTranslation();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -373,8 +377,8 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
 
   return createPortal(
     <div className="fixed inset-0 z-[120] xl:hidden">
-      <button className="absolute inset-0 bg-[var(--overlay)]" aria-label="关闭账户详情" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-[var(--float-shadow)]" role="dialog" aria-modal="true" aria-label="账户详情">
+      <button className="absolute inset-0 bg-[var(--overlay)]" aria-label={t("accountPanels.closeAccountDetail")} onClick={onClose} />
+      <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-line bg-panel p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-[var(--float-shadow)]" role="dialog" aria-modal="true" aria-label={t("accountPanels.accountDetail")}>
         <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-line" />
         <AccountDetailPanel row={row} visible={visible} status={status} lastActivity={lastActivity} points={points} onToggleAccount={onToggleAccount} compact onClose={onClose} />
       </div>
@@ -384,8 +388,9 @@ function MobileAccountDetailSheet({ row, visible, status, lastActivity, points, 
 }
 
 function AccountDetailPanel({ row, visible, status, lastActivity, points, onToggleAccount, compact, inline, onClose }: { row: BalanceRow | null; visible: boolean; status?: AccountStatus; lastActivity?: string; points: number[]; onToggleAccount?: (account: string) => void; compact?: boolean; inline?: boolean; onClose?: () => void }) {
+  const { t } = useTranslation();
   if (!row) {
-    return <aside className="border border-line bg-panel p-4 text-sm text-stone">选择一个账户查看详情。</aside>;
+    return <aside className="border border-line bg-panel p-4 text-sm text-stone">{t("accountPanels.selectAccount")}</aside>;
   }
   return <aside className={compact || inline ? "" : "border border-line bg-panel p-4"}>
     <div className="flex items-start justify-between gap-3">
@@ -394,24 +399,24 @@ function AccountDetailPanel({ row, visible, status, lastActivity, points, onTogg
         <p className="mt-1 break-all text-xs text-stone">{row.account}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {onToggleAccount && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? "隐藏该账户余额" : "显示该账户余额"}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
-        {onClose && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title="关闭账户详情"><X className="h-4 w-4" /></button>}
+        {onToggleAccount && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={() => onToggleAccount(row.account)} title={visible ? t("accountPanels.hideAccountBalance") : t("accountPanels.showAccountBalance")}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+        {onClose && <button className="rounded-md border border-line p-2 text-olive hover:bg-tag" onClick={onClose} title={t("accountPanels.closeAccountDetail")}><X className="h-4 w-4" /></button>}
       </div>
     </div>
     <div className={`mt-5 grid overflow-hidden border-y border-line divide-line ${compact || inline ? "grid-cols-3 divide-x" : "grid-cols-1 divide-y 2xl:grid-cols-3 2xl:divide-x 2xl:divide-y-0"}`}>
-      <BalanceMetric label="余额" value={formatRowAmount(row, visible)} />
-      <BalanceMetric label="状态" value={status ? statusTitle(status) : "未检查"} />
-      <BalanceMetric label="币种" value={row.currency || "多币种"} />
+      <BalanceMetric label={t("accountPanels.balance")} value={formatRowAmount(row, visible)} />
+      <BalanceMetric label={t("accountPanels.status")} value={status ? statusTitle(status) : t("accountPanels.unchecked")} />
+      <BalanceMetric label={t("accountPanels.currency")} value={row.currency || t("accountPanels.multiCurrency")} />
     </div>
     <div className="relative min-h-24 overflow-hidden border-b border-line bg-panel p-3">
       <AccountSparkline points={points} liability={row.account.startsWith("Liabilities")} />
-      <div className="relative z-10 text-xs text-stone">最近活动</div>
-      <div className="relative z-10 mt-2 text-sm font-medium text-olive">{lastActivity ?? "暂无近期活动"}</div>
-      <div className="relative z-10 mt-1 text-xs text-stone">{row.active === false ? "账户已关闭" : "账户启用中"}</div>
+      <div className="relative z-10 text-xs text-stone">{t("accountPanels.recentActivityLabel")}</div>
+      <div className="relative z-10 mt-2 text-sm font-medium text-olive">{lastActivity ?? t("accountPanels.noRecentActivity")}</div>
+      <div className="relative z-10 mt-1 text-xs text-stone">{row.active === false ? t("accountPanels.accountClosed") : t("accountPanels.accountActive")}</div>
     </div>
     <div className="mt-4 grid grid-cols-2 gap-3">
-      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-paper text-sm font-medium text-olive hover:bg-tag"><ListChecks className="h-4 w-4" />流水</ClientNavLink>
-      <ClientNavLink href="/reconcile" className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand text-sm font-medium text-paper hover:bg-brand-light"><ListChecks className="h-4 w-4" />对账</ClientNavLink>
+      <ClientNavLink href={`/accounts/${encodeURIComponent(row.account)}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-paper text-sm font-medium text-olive hover:bg-tag"><ListChecks className="h-4 w-4" />{t("accountPanels.transactions")}</ClientNavLink>
+      <ClientNavLink href="/reconcile" className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand text-sm font-medium text-paper hover:bg-brand-light"><ListChecks className="h-4 w-4" />{t("accountPanels.reconcile")}</ClientNavLink>
     </div>
   </aside>;
 }
@@ -455,6 +460,7 @@ function AccountSparkline({ points, liability }: { points: number[]; liability: 
 }
 
 export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAccountMap = {}, visible, summaryVisible, onToggleSummaryVisible, onToggleAccount }: { cards: CreditCardAnalytics[]; statuses: AccountStatus[]; valuationCurrency: string; visibleAccountMap?: Record<string, boolean>; visible: boolean; summaryVisible: boolean; onToggleSummaryVisible: () => void; onToggleAccount?: (account: string) => void }) {
+  const { t } = useTranslation();
   if (!cards.length) return null;
   const totalOutstanding = cards.reduce((sum, card) => sum + card.outstanding, 0);
   const totalSpend = cards.reduce((sum, card) => sum + card.periodSpend, 0);
@@ -465,16 +471,16 @@ export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAcc
   return <section className="mt-px border-b border-line bg-panel">
     <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8">
       <div>
-        <div className="flex items-center gap-3"><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">信用卡视图</h2><button className="shrink-0 rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={onToggleSummaryVisible} title={summaryVisible ? "隐藏信用卡汇总" : "显示信用卡汇总"}>{summaryVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
-        <p className="mt-1 text-sm text-stone">账单周期 {billing.billCycleStart.slice(5)} ~ {billing.billCycleEnd.slice(5)}；{billing.statementDate.slice(5)} 出账，最晚 {billing.dueDate.slice(5)} 还款。</p>
+        <div className="flex items-center gap-3"><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">{t("accountPanels.creditCardView")}</h2><button className="shrink-0 rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={onToggleSummaryVisible} title={summaryVisible ? t("accountPanels.hideCreditSummary") : t("accountPanels.showCreditSummary")}>{summaryVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+        <p className="mt-1 text-sm text-stone">{t("accountPanels.billCycleHint", { start: billing.billCycleStart.slice(5), end: billing.billCycleEnd.slice(5), statement: billing.statementDate.slice(5), due: billing.dueDate.slice(5) })}</p>
       </div>
-      <div className="text-left sm:text-right"><div className="ledger-label">总未还</div><div className="amount-expense mt-1 text-xl font-semibold">{summaryMask(formatValuation(totalOutstanding / 100, valuationCurrency))}</div></div>
+      <div className="text-left sm:text-right"><div className="ledger-label">{t("accountPanels.totalOutstanding")}</div><div className="amount-expense mt-1 text-xl font-semibold">{summaryMask(formatValuation(totalOutstanding / 100, valuationCurrency))}</div></div>
     </div>
     <div className="grid gap-px bg-line sm:grid-cols-4">
-      <CreditSummary label="账单周期消费" value={summaryMask(formatValuation(totalBillCycleSpend / 100, valuationCurrency))} />
-      <CreditSummary label="当前范围刷卡" value={summaryMask(formatValuation(totalSpend / 100, valuationCurrency))} />
-      <CreditSummary label="当前范围还款" value={summaryMask(formatValuation(totalRepayments / 100, valuationCurrency))} />
-      <CreditSummary label="卡片数量" value={`${cards.length}`} />
+      <CreditSummary label={t("accountPanels.billCycleSpend")} value={summaryMask(formatValuation(totalBillCycleSpend / 100, valuationCurrency))} />
+      <CreditSummary label={t("accountPanels.currentRangeSpend")} value={summaryMask(formatValuation(totalSpend / 100, valuationCurrency))} />
+      <CreditSummary label={t("accountPanels.currentRangeRepayments")} value={summaryMask(formatValuation(totalRepayments / 100, valuationCurrency))} />
+      <CreditSummary label={t("accountPanels.cardCount")} value={`${cards.length}`} />
     </div>
     <div className="divide-y divide-line">{cards.map((card) => {
       const cardVisible = visibleAccountMap[card.account] ?? visible;
@@ -483,13 +489,13 @@ export function CreditCardPanel({ cards, statuses, valuationCurrency, visibleAcc
       return <div key={card.account} className="@container">
         <div className="flex items-start justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
           <div className="min-w-0"><div className="flex items-center gap-2 text-sm font-medium text-ink">{st && <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(st.status)}`} title={statusTitle(st)} />}{card.label}</div><div className="mt-1 truncate text-xs text-stone">{card.account}</div></div>
-          <div className="flex shrink-0 items-start gap-3"><div className="text-right"><div className="ledger-label">未还金额</div><div className="amount-expense mt-1 text-lg font-semibold">{cardMask(formatCompactValuation(card.outstanding / 100, valuationCurrency))}</div></div>{onToggleAccount && <button className="rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={() => onToggleAccount(card.account)} title={cardVisible ? "隐藏该信用卡金额" : "显示该信用卡金额"}>{cardVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}</div>
+          <div className="flex shrink-0 items-start gap-3"><div className="text-right"><div className="ledger-label">{t("accountPanels.outstandingAmount")}</div><div className="amount-expense mt-1 text-lg font-semibold">{cardMask(formatCompactValuation(card.outstanding / 100, valuationCurrency))}</div></div>{onToggleAccount && <button className="rounded-md border border-line p-1.5 text-olive hover:bg-tag" onClick={() => onToggleAccount(card.account)} title={cardVisible ? t("accountPanels.hideCardAmount") : t("accountPanels.showCardAmount")}>{cardVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}</div>
         </div>
         <div className="grid gap-px border-t border-line bg-line @sm:grid-cols-4">
-          <CreditSummary label="账单周期消费" value={cardMask(formatValuation(card.billCycleSpend / 100, valuationCurrency))} />
-          <CreditSummary label="当前范围刷卡" value={cardMask(formatValuation(card.periodSpend / 100, valuationCurrency))} />
-          <CreditSummary label="最晚还款" value={card.dueDate.slice(5)} />
-          <CreditSummary label="最近活动" value={card.lastActivityDate?.slice(5) ?? "—"} />
+          <CreditSummary label={t("accountPanels.billCycleSpend")} value={cardMask(formatValuation(card.billCycleSpend / 100, valuationCurrency))} />
+          <CreditSummary label={t("accountPanels.currentRangeSpend")} value={cardMask(formatValuation(card.periodSpend / 100, valuationCurrency))} />
+          <CreditSummary label={t("accountPanels.latestRepayment")} value={card.dueDate.slice(5)} />
+          <CreditSummary label={t("accountPanels.recentActivityShort")} value={card.lastActivityDate?.slice(5) ?? "—"} />
         </div>
       </div>;
     })}</div>
@@ -501,12 +507,13 @@ function CreditSummary({ label, value }: { label: string; value: string }) {
 }
 
 export function AccountManager({ accounts, onAdded, showToast, onOpenAgent }: { accounts: AccountView[]; balances: Record<string, number>; onAdded: () => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; onOpenAgent?: (prompt: string) => void }) {
+  const { t } = useTranslation();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [account, setAccount] = useState("");
   const [alias, setAlias] = useState("");
   const [currency, setCurrency] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const groups: { key: AccountGroup; label: string }[] = [{ key: "cash", label: "现金账户" }, { key: "credit", label: "信用卡" }, { key: "liability", label: "其他负债" }, { key: "wealth", label: "理财账户" }, { key: "receivable", label: "应收应付" }, { key: "expense", label: "支出分类" }, { key: "income", label: "收入分类" }, { key: "equity", label: "权益" }, { key: "other", label: "其他" }];
+  const groups: { key: AccountGroup; label: string }[] = [{ key: "cash", label: t("accountPanels.groupCash") }, { key: "credit", label: t("accountPanels.groupCredit") }, { key: "liability", label: t("accountPanels.groupLiability") }, { key: "wealth", label: t("accountPanels.groupWealth") }, { key: "receivable", label: t("accountPanels.groupReceivable") }, { key: "expense", label: t("accountPanels.groupExpense") }, { key: "income", label: t("accountPanels.groupIncome") }, { key: "equity", label: t("accountPanels.groupEquity") }, { key: "other", label: t("accountPanels.groupOther") }];
   const visibleGroups = groups.map((group) => ({ ...group, rows: accounts.filter((account) => account.group === group.key) })).filter((group) => group.rows.length > 0);
   async function submit() {
     if (submitting) return;
@@ -515,23 +522,23 @@ export function AccountManager({ accounts, onAdded, showToast, onOpenAgent }: { 
       const res = await apiFetch("/api/ledger/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, account, alias, currency: currency.trim().toUpperCase() }) }, { kind: "write" });
       const data = await readJson<{ error?: string }>(res);
       if (!res.ok) {
-        showToast("error", data.error || "新增账户失败");
+        showToast("error", data.error || t("accountPanels.addFailed"));
         return;
       }
-      showToast("success", "账户已新增");
+      showToast("success", t("accountPanels.added"));
       setAccount("");
       setAlias("");
       await onAdded();
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "新增账户失败");
+      showToast("error", error instanceof Error ? error.message : t("accountPanels.addFailed"));
     } finally {
       setSubmitting(false);
     }
   }
   return <section className="border-b border-line bg-panel">
-    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8"><div><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">账户管理</h2><p className="mt-1 text-sm text-stone">管理账户定义和分组；余额集中在账户余额区并默认隐藏。</p></div>{onOpenAgent && <Button type="button" variant="outline" className="shrink-0 rounded-md bg-panel text-olive" onClick={() => onOpenAgent("帮我创建、调整或关闭账户。请先读取现有账户并生成待确认草稿。") }><Bot className="h-4 w-4 text-brand" /><span>AI 编辑</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button>}</div>
-    <div className="grid gap-3 border-b border-line px-4 py-4 sm:grid-cols-[150px_1fr_1fr_110px_auto] md:px-6 xl:px-8"><Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-11 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-11 bg-panel" placeholder="显示名 / alias" value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-11 bg-panel uppercase" placeholder="HKD / 空" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-11 px-4" disabled={submitting} onClick={submit}>{submitting ? "新增中…" : "新增账户"}</Button></div>
-    {visibleGroups.length ? <div className="divide-y divide-line">{visibleGroups.map((group) => <section key={group.key} className="grid gap-3 px-4 py-4 md:grid-cols-[12rem_minmax(0,1fr)] md:px-6 xl:px-8"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="divide-y divide-line border-y border-line">{group.rows.map((a) => <div key={a.account} className="min-w-0 px-3 py-2.5 text-sm"><div className="flex min-w-0 items-center gap-2"><strong className="truncate">{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || "多币种"}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">已关闭</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></section>)}</div> : <p className="px-4 py-5 text-sm text-stone md:px-6 xl:px-8">暂无有流水且余额不为 0 的账户。</p>}
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6 xl:px-8"><div><h2 className="text-base font-semibold tracking-[-0.015em] text-ink">{t("accountPanels.accountManagement")}</h2><p className="mt-1 text-sm text-stone">{t("accountPanels.accountManagementDesc")}</p></div>{onOpenAgent && <Button type="button" variant="outline" className="shrink-0 rounded-md bg-panel text-olive" onClick={() => onOpenAgent(t("accountPanels.aiEditPrompt"))}><Bot className="h-4 w-4 text-brand" /><span>{t("accountPanels.aiEdit")}</span><Pencil className="h-3.5 w-3.5 text-stone" /></Button>}</div>
+    <div className="grid gap-3 border-b border-line px-4 py-4 sm:grid-cols-[150px_1fr_1fr_110px_auto] md:px-6 xl:px-8"><Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input className="h-11 bg-panel" placeholder="Assets:HK:HSBC:HKD" value={account} onChange={(e) => setAccount(e.target.value)} /><Input className="h-11 bg-panel" placeholder={t("accountPanels.aliasPlaceholder")} value={alias} onChange={(e) => setAlias(e.target.value)} /><Input className="h-11 bg-panel uppercase" placeholder={t("accountPanels.currencyPlaceholder")} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /><Button className="h-11 px-4" disabled={submitting} onClick={submit}>{submitting ? t("accountPanels.adding") : t("accountPanels.addAccount")}</Button></div>
+    {visibleGroups.length ? <div className="divide-y divide-line">{visibleGroups.map((group) => <section key={group.key} className="grid gap-3 px-4 py-4 md:grid-cols-[12rem_minmax(0,1fr)] md:px-6 xl:px-8"><h3 className="text-sm font-medium text-stone">{group.label} · {group.rows.length}</h3><div className="divide-y divide-line border-y border-line">{group.rows.map((a) => <div key={a.account} className="min-w-0 px-3 py-2.5 text-sm"><div className="flex min-w-0 items-center gap-2"><strong className="truncate">{a.label}</strong><span className="rounded bg-tag px-1.5 py-0.5 text-[10px] text-stone">{a.currency || t("accountPanels.multiCurrency")}</span>{!a.active && <span className="rounded bg-line px-2 py-0.5 text-xs">{t("accountPanels.closed")}</span>}</div><div className="mt-0.5 truncate text-xs text-stone">{a.account}</div></div>)}</div></section>)}</div> : <p className="px-4 py-5 text-sm text-stone md:px-6 xl:px-8">{t("accountPanels.noActiveAccounts")}</p>}
   </section>;
 }
 
@@ -549,9 +556,9 @@ export function statusColor(status: AccountStatus["status"]): string {
 
 export function statusTitle(st: AccountStatus): string {
   switch (st.status) {
-    case "green": return "断言通过";
-    case "red": return "断言失败";
-    case "yellow": return "未断言";
-    case "grey": return st.lastEntryDate ? `超过60天未更新（最近：${st.lastEntryDate}）` : "无记录";
+    case "green": return i18n.t("accountPanels.statusGreen");
+    case "red": return i18n.t("accountPanels.statusRed");
+    case "yellow": return i18n.t("accountPanels.statusYellow");
+    case "grey": return st.lastEntryDate ? i18n.t("accountPanels.statusGrey", { date: st.lastEntryDate }) : i18n.t("accountPanels.statusGreyNoRecord");
   }
 }

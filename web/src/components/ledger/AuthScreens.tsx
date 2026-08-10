@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Delete, Fingerprint, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ export function AppSkeleton() {
 }
 
 export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyLoading, toastText, onLogin, onPasskeyLogin }: { password: string; setPassword: (value: string) => void; passkeyRegistered: boolean; passkeyLoading?: boolean; toastText?: string; onLogin: () => void; onPasskeyLogin: () => void }) {
+  const { t } = useTranslation();
   const [endpointSettings, setEndpointSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
   const [showEndpointSettings, setShowEndpointSettings] = useState(false);
   const [draftEndpointUrl, setDraftEndpointUrl] = useState("");
@@ -42,17 +44,17 @@ export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyL
   async function selectEndpoint(activeId: string) {
     const endpoint = endpointSettings.endpoints.find((item) => item.id === activeId && item.enabled);
     if (!endpoint || endpoint.id === endpointSettings.activeId) return;
-    setEndpointMessage("正在验证所选后端…");
+    setEndpointMessage(t("auth.verifyingBackend"));
     try {
       const result = await probeApiEndpoint(endpoint);
       const verified = applyApiEndpointProbe(endpointSettings, endpoint.id, result);
       const next = withActiveApiEndpoint(verified, endpoint.id);
-      if (next.activeId !== endpoint.id) throw new Error("所选后端与当前账本不兼容");
-      setEndpointMessage("已切换后端，请重新登录。");
+      if (next.activeId !== endpoint.id) throw new Error(t("auth.incompatibleBackend"));
+      setEndpointMessage(t("auth.switchedBackend"));
       setEndpointSettings(next);
       writeApiEndpointSettings(next);
     } catch (error) {
-      setEndpointMessage(error instanceof Error ? error.message : "切换后端失败");
+      setEndpointMessage(error instanceof Error ? error.message : t("auth.switchBackendFailed"));
     }
   }
 
@@ -69,8 +71,8 @@ export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyL
         const result = await probeApiEndpoint({ ...existing, enabled: true });
         const verified = applyApiEndpointProbe(enabledSettings, existing.id, result);
         const next = withActiveApiEndpoint(verified, existing.id);
-        if (next.activeId !== existing.id) throw new Error("这个后端与当前账本不兼容");
-        setEndpointMessage("这个后端已存在，已验证并切换。");
+        if (next.activeId !== existing.id) throw new Error(t("auth.backendIncompatible"));
+        setEndpointMessage(t("auth.backendExistsSwitched"));
         setEndpointSettings(next);
         writeApiEndpointSettings(next);
         return;
@@ -82,61 +84,62 @@ export function LoginScreen({ password, setPassword, passkeyRegistered, passkeyL
         activeId: id,
         endpoints: [...endpointSettings.endpoints, endpoint],
       };
-      setEndpointMessage("正在验证新后端…");
+      setEndpointMessage(t("auth.verifyingNewBackend"));
       const result = await probeApiEndpoint(endpoint);
       next = applyApiEndpointProbe(next, endpoint.id, result);
       setDraftEndpointUrl("");
-      setEndpointMessage("已添加，正在连接新后端…");
+      setEndpointMessage(t("auth.addedConnecting"));
       setEndpointSettings(next);
       writeApiEndpointSettings(next);
     } catch (error) {
-      setEndpointMessage(error instanceof Error ? error.message : "添加后端失败");
+      setEndpointMessage(error instanceof Error ? error.message : t("auth.addBackendFailed"));
     }
   }
 
   return <div className="grid min-h-dvh place-items-center bg-paper px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
     <div className="card w-full max-w-md p-7">
       <div className="mb-7 h-1 w-12 rounded-full bg-brand" />
-      <h1 className="font-serif text-3xl font-medium">我的账本</h1>
-      <p className="mt-2 text-sm leading-6 text-olive">私人财务札记。输入密码后再读取本地账本数据。</p>
+      <h1 className="font-serif text-3xl font-medium">{t("app.name")}</h1>
+      <p className="mt-2 text-sm leading-6 text-olive">{t("auth.loginSubtitle")}</p>
       <div className="mt-5 rounded-2xl border border-line bg-panel p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs text-stone">当前后端</div>
-            <div className="mt-1 break-all text-sm font-medium text-ink">{activeEndpoint ? displayApiEndpointUrl(activeEndpoint) : "没有可用后端"}</div>
+            <div className="text-xs text-stone">{t("auth.currentBackend")}</div>
+            <div className="mt-1 break-all text-sm font-medium text-ink">{activeEndpoint ? displayApiEndpointUrl(activeEndpoint) : t("auth.noBackendAvailable")}</div>
           </div>
-          <button type="button" className="shrink-0 text-sm font-medium text-brand" onClick={() => setShowEndpointSettings((value) => !value)} aria-expanded={showEndpointSettings}>{showEndpointSettings ? "收起" : "切换后端"}</button>
+          <button type="button" className="shrink-0 text-sm font-medium text-brand" onClick={() => setShowEndpointSettings((value) => !value)} aria-expanded={showEndpointSettings}>{showEndpointSettings ? t("auth.collapse") : t("auth.switchBackend")}</button>
         </div>
         {showEndpointSettings && <div className="mt-3 space-y-3 border-t border-line pt-3">
           <label className="block">
-            <span className="mb-1.5 block text-xs text-stone">使用后端</span>
+            <span className="mb-1.5 block text-xs text-stone">{t("auth.useBackend")}</span>
             <select className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm text-ink" value={activeEndpoint?.id ?? ""} onChange={(event) => void selectEndpoint(event.target.value)}>
-              {enabledEndpoints.map((endpoint) => <option key={endpoint.id} value={endpoint.id}>{isSameOriginApiEndpoint(endpoint) ? `当前站点 · ${displayApiEndpointUrl(endpoint)}` : endpoint.url}</option>)}
+              {enabledEndpoints.map((endpoint) => <option key={endpoint.id} value={endpoint.id}>{isSameOriginApiEndpoint(endpoint) ? `${t("apiEndpoints.currentSite")} · ${displayApiEndpointUrl(endpoint)}` : endpoint.url}</option>)}
             </select>
           </label>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
             <Input value={draftEndpointUrl} onChange={(event) => setDraftEndpointUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void addEndpoint()} placeholder="https://api.example.com" className="h-11 rounded-xl bg-paper" />
-            <Button type="button" variant="outline" className="h-11 rounded-xl bg-paper" onClick={() => void addEndpoint()}>添加并切换</Button>
+            <Button type="button" variant="outline" className="h-11 rounded-xl bg-paper" onClick={() => void addEndpoint()}>{t("auth.addAndSwitch")}</Button>
           </div>
-          <p className="text-xs leading-5 text-stone">自定义后端必须使用 HTTPS，并允许当前站点跨域访问。多个后端应连接同一个账本。</p>
+          <p className="text-xs leading-5 text-stone">{t("auth.backendHint")}</p>
           {endpointMessage && <p className="text-xs text-stone">{endpointMessage}</p>}
         </div>}
       </div>
-      <Input type="password" className="mt-6 h-12 rounded-xl bg-panel" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
-      <Button className="mt-4 h-12 w-full rounded-xl" onClick={onLogin}>密码登录</Button>
-      {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" disabled={passkeyLoading} onClick={onPasskeyLogin}>{passkeyLoading ? "正在唤起 Face ID…" : "使用 Face ID / Passkey 登录"}</Button>}
+      <Input type="password" className="mt-6 h-12 rounded-xl bg-panel" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} placeholder={t("auth.passwordPlaceholder")} />
+      <Button className="mt-4 h-12 w-full rounded-xl" onClick={onLogin}>{t("auth.passwordLogin")}</Button>
+      {passkeyRegistered && <Button variant="outline" className="mt-3 h-12 w-full rounded-xl bg-paper text-warm" disabled={passkeyLoading} onClick={onPasskeyLogin}>{passkeyLoading ? t("auth.invokingFaceId") : t("auth.loginWithFaceId")}</Button>}
       {toastText && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{toastText}</p>}
     </div>
   </div>;
 }
 
 export function UnlockScreen({ message, onUnlock }: { message: string; onUnlock: () => void }) {
-  return <div className="grid min-h-dvh place-items-center bg-brand px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-paper"><div className="kami-float w-full max-w-sm rounded-xl border border-paper/20 bg-paper p-6 text-center text-ink"><h1 className="font-serif text-3xl font-medium">账本已锁定</h1><p className="mt-3 text-sm text-olive">为保护余额和流水隐私，请先解锁敏感数据。</p><Button className="mt-6 h-12 w-full rounded-xl" onClick={onUnlock}>解锁</Button>{message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}<p className="mt-4 text-xs text-stone">短暂切换 App 不会锁定；后台超过 5 分钟或重新打开后会锁定。</p></div></div>;
+  const { t } = useTranslation();
+  return <div className="grid min-h-dvh place-items-center bg-brand px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] text-paper"><div className="kami-float w-full max-w-sm rounded-xl border border-paper/20 bg-paper p-6 text-center text-ink"><h1 className="font-serif text-3xl font-medium">{t("auth.ledgerLocked")}</h1><p className="mt-3 text-sm text-olive">{t("auth.unlockHint")}</p><Button className="mt-6 h-12 w-full rounded-xl" onClick={onUnlock}>{t("auth.unlock")}</Button>{message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}<p className="mt-4 text-xs text-stone">{t("auth.lockNote")}</p></div></div>;
 }
 
 export function SensitiveUnlockPanel({
-  title = "资产信息已隐藏",
-  description = "净资产和账户余额需要确认是你本人后查看。普通记账、流水和损益分析可以直接使用。",
+  title = "",
+  description = "",
   message,
   offline,
   offlineUnlockAvailable,
@@ -171,6 +174,9 @@ export function SensitiveUnlockPanel({
   autoFocusInput?: boolean;
   surface?: "page" | "dialog";
 }) {
+  const { t } = useTranslation();
+  const effectiveTitle = title || t("auth.assetsHidden");
+  const effectiveDescription = description || t("auth.sensitiveDesc");
   const offlineInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (!autoFocusInput || !offline || !offlineUnlockAvailable) return;
@@ -189,33 +195,33 @@ export function SensitiveUnlockPanel({
       <div className="mb-5 grid h-10 w-10 place-items-center rounded-md border border-line bg-paper text-brand">
         <LockKeyhole className="h-5 w-5" />
       </div>
-      <h2 className="font-serif text-2xl font-medium leading-tight text-ink">{title}</h2>
-      <p className="mt-3 max-w-lg text-sm leading-6 text-olive">{description}</p>
+      <h2 className="font-serif text-2xl font-medium leading-tight text-ink">{effectiveTitle}</h2>
+      <p className="mt-3 max-w-lg text-sm leading-6 text-olive">{effectiveDescription}</p>
     </div>
 
     <div className="mx-auto mt-6 w-full max-w-sm">
     {offline && offlineUnlockAvailable ? (
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder="离线解锁码" />
-        <Button className="h-11 px-4" onClick={onOfflineUnlock}><KeyRound className="mr-2 h-4 w-4" />离线解锁</Button>
+        <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder={t("auth.offlineUnlockCode")} />
+        <Button className="h-11 px-4" onClick={onOfflineUnlock}><KeyRound className="mr-2 h-4 w-4" />{t("auth.offlineUnlock")}</Button>
       </div>
     ) : (
       <div className="space-y-3">
-        {canUsePasskey && <Button className="h-11 w-full px-5" disabled={unlocking} onClick={onUnlock}><Fingerprint className="mr-2 h-4 w-4" />{unlocking ? "正在唤起 Face ID…" : "Face ID / Passkey 解锁"}</Button>}
-        {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} />}
-        {!canUsePasskey && !quickUnlockEnabled && <p className="text-sm leading-6 text-stone">当前设备还没有可用的快速解锁方式。</p>}
+        {canUsePasskey && <Button className="h-11 w-full px-5" disabled={unlocking} onClick={onUnlock}><Fingerprint className="mr-2 h-4 w-4" />{unlocking ? t("auth.invokingFaceId") : t("auth.faceIdUnlock")}</Button>}
+        {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} t={t} />}
+        {!canUsePasskey && !quickUnlockEnabled && <p className="text-sm leading-6 text-stone">{t("auth.noQuickUnlockMethod")}</p>}
       </div>
     )}
     </div>
 
-    {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && showPasswordInline} initiallyOpen={Boolean(showPasswordInline)} />}
-    {offline && !offlineUnlockAvailable && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">当前离线；需要先在线解锁并在设置里启用离线解锁码。</p>}
+    {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && showPasswordInline} initiallyOpen={Boolean(showPasswordInline)} t={t} />}
+    {offline && !offlineUnlockAvailable && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">{t("auth.offlineHint")}</p>}
     {message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}
-    <p className="mx-auto mt-5 flex max-w-sm items-center justify-center gap-1.5 text-xs leading-5 text-stone"><ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />后台超过 5 分钟会自动隐藏敏感数据。</p>
+    <p className="mx-auto mt-5 flex max-w-sm items-center justify-center gap-1.5 text-xs leading-5 text-stone"><ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />{t("auth.autoHideNote")}</p>
   </section>;
 }
 
-function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initiallyOpen }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; initiallyOpen: boolean }) {
+function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initiallyOpen, t }: { onUnlock: (password: string) => void; unlocking?: boolean; autoFocusInput?: boolean; initiallyOpen: boolean; t: (key: string) => string }) {
   const [password, setPassword] = useState("");
   const [open, setOpen] = useState(initiallyOpen);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -225,18 +231,19 @@ function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initially
     return () => window.cancelAnimationFrame(id);
   }, [autoFocusInput, open]);
   return <div className="mx-auto mt-4 max-w-sm">
-    {!open ? <button type="button" className="text-sm font-medium text-brand disabled:opacity-50" onClick={() => setOpen(true)} disabled={unlocking}>使用主密码</button> : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-      <Input ref={inputRef} autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder="主密码" disabled={unlocking} />
-      <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? "解锁中…" : "解锁"}</Button>
+    {!open ? <button type="button" className="text-sm font-medium text-brand disabled:opacity-50" onClick={() => setOpen(true)} disabled={unlocking}>{t("auth.usePassword")}</button> : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <Input ref={inputRef} autoFocus={autoFocusInput || open} type="password" autoComplete="current-password" className="h-11 bg-paper text-center sm:text-left" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password && onUnlock(password)} placeholder={t("auth.passwordPlaceholder")} disabled={unlocking} />
+      <Button variant="outline" className="h-11 px-4" disabled={!password || unlocking} onClick={() => onUnlock(password)}>{unlocking ? t("auth.unlocking") : t("auth.unlock")}</Button>
     </div>}
   </div>;
 }
 
 export function PasskeyBanner({ onRegister }: { onRegister: () => void }) {
-  return <section className="card mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-xl font-medium">启用 Face ID / Passkey</h2><p className="mt-1 text-sm text-olive">添加到桌面后，可用系统 Face ID、Touch ID 或设备密码解锁账页。</p></div><Button className="h-12 rounded-xl px-5" onClick={onRegister}>启用</Button></section>;
+  const { t } = useTranslation();
+  return <section className="card mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-xl font-medium">{t("auth.enableFaceId")}</h2><p className="mt-1 text-sm text-olive">{t("auth.enableFaceIdDesc")}</p></div><Button className="h-12 rounded-xl px-5" onClick={onRegister}>{t("auth.enable")}</Button></section>;
 }
 
-function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnlock, unlocking, autoFocusInput }: { mode: QuickUnlockMode; passkeyRegistered?: boolean; onUnlock: (secret: string) => void; onPasskeyUnlock: () => void; unlocking?: boolean; autoFocusInput?: boolean }) {
+function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnlock, unlocking, autoFocusInput, t }: { mode: QuickUnlockMode; passkeyRegistered?: boolean; onUnlock: (secret: string) => void; onPasskeyUnlock: () => void; unlocking?: boolean; autoFocusInput?: boolean; t: (key: string) => string }) {
   const [secret, setSecret] = useState("");
   const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -249,28 +256,28 @@ function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnloc
   if (mode === "numeric") {
     if (!expanded) {
       return <div className="flex flex-col items-center gap-2">
-        <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-brand hover:bg-tag disabled:opacity-50" disabled={unlocking} onClick={() => setExpanded(true)}><KeyRound className="h-4 w-4" />本机码</button>
-        {passkeyRegistered && <button type="button" className="text-xs text-stone hover:text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
+        <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-brand hover:bg-tag disabled:opacity-50" disabled={unlocking} onClick={() => setExpanded(true)}><KeyRound className="h-4 w-4" />{t("auth.deviceCode")}</button>
+        {passkeyRegistered && <button type="button" className="text-xs text-stone hover:text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? t("auth.invokingFaceId") : t("auth.switchToFaceId")}</button>}
       </div>;
     }
     return <div className="mx-auto w-full max-w-xs">
-      <div className="mb-3 h-11 rounded-md border border-line bg-paper px-4 text-center text-2xl leading-10 tracking-[0.32em] text-ink" aria-label="本机数字解锁码">{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
+      <div className="mb-3 h-11 rounded-md border border-line bg-paper px-4 text-center text-2xl leading-10 tracking-[0.32em] text-ink" aria-label={t("auth.quickUnlockNumericPlaceholder")}>{secret ? "•".repeat(Math.min(secret.length, 8)) : ""}</div>
       <div className="grid grid-cols-3 gap-2">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => <KeypadButton key={digit} label={digit} onClick={() => setSecret(secret + digit)} disabled={unlocking} />)}
-        <KeypadButton label="删" onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
+        <KeypadButton label={t("auth.deleteKey")} deleteKey onClick={() => setSecret(secret.slice(0, -1))} disabled={unlocking} />
         <KeypadButton label="0" onClick={() => setSecret(secret + "0")} disabled={unlocking} />
-        <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? "解锁中…" : "解锁"}</button>
+        <button type="button" className="h-12 rounded-md bg-brand text-sm font-medium text-paper disabled:opacity-50" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}>{unlocking ? t("auth.unlocking") : t("auth.unlock")}</button>
       </div>
-      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
+      {passkeyRegistered && <button type="button" className="mt-3 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? t("auth.invokingFaceId") : t("auth.switchToFaceId")}</button>}
     </div>;
   }
   return <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-    <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder="本机快速解锁口令" disabled={unlocking} />
-    <Button className="h-11 px-4" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}><KeyRound className="mr-2 h-4 w-4" />{unlocking ? "解锁中…" : "快速解锁"}</Button>
-    {passkeyRegistered && <button type="button" className="sm:col-span-2 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? "正在唤起 Face ID…" : "改用 Face ID / Passkey"}</button>}
+    <Input ref={inputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={secret} onChange={(event) => setSecret(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onUnlock(secret)} placeholder={t("auth.quickUnlockPlaceholder")} disabled={unlocking} />
+    <Button className="h-11 px-4" disabled={!secret || unlocking} onClick={() => onUnlock(secret)}><KeyRound className="mr-2 h-4 w-4" />{unlocking ? t("auth.unlocking") : t("auth.quickUnlockAction")}</Button>
+    {passkeyRegistered && <button type="button" className="sm:col-span-2 text-sm text-brand disabled:opacity-50" disabled={unlocking} onClick={onPasskeyUnlock}>{unlocking ? t("auth.invokingFaceId") : t("auth.switchToFaceId")}</button>}
   </div>;
 }
 
-function KeypadButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
-  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{label === "删" ? <Delete className="h-4 w-4" /> : label}</button>;
+function KeypadButton({ label, onClick, disabled, deleteKey = false }: { label: string; onClick: () => void; disabled?: boolean; deleteKey?: boolean }) {
+  return <button type="button" className="grid h-12 place-items-center rounded-md border border-line bg-paper text-xl font-medium text-ink active:bg-tag disabled:opacity-50" disabled={disabled} onClick={onClick}>{deleteKey ? <Delete className="h-4 w-4" /> : label}</button>;
 }

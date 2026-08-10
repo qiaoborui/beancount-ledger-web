@@ -7,8 +7,8 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
     const days = summary?.days ?? {};
     return Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")).map((day) => ({
       day: `${Number(day)}日`,
-      收入: (days[day]?.income ?? 0) / 100,
-      支出: (days[day]?.expense ?? 0) / 100,
+      income: (days[day]?.income ?? 0) / 100,
+      expense: (days[day]?.expense ?? 0) / 100,
     }));
   }, [summary]);
 
@@ -45,9 +45,9 @@ export function useLedgerDerivedData({ summary, accounts, balances, accountBalan
     if (page !== "net-worth") return [];
     return netWorthRows.map((row) => ({
       date: row.date.slice(5),
-      资产: row.assets / 100,
-      负债: row.liabilities / 100,
-      净资产: row.netWorth / 100,
+      assets: row.assets / 100,
+      liabilities: row.liabilities / 100,
+      netWorth: row.netWorth / 100,
     }));
   }, [netWorthRows, page]);
 

@@ -1,3 +1,5 @@
+import i18n from "@/i18n";
+
 export type ApiEndpoint = {
   id: string;
   url: string;
@@ -67,7 +69,7 @@ type LedgerWindow = Window & {
   __ledgerOriginalFetch?: typeof fetch;
 };
 
-export const sameOriginApiEndpoint: ApiEndpoint = { id: sameOriginEndpointId, url: "", enabled: true, label: "当前站点" };
+export const sameOriginApiEndpoint: ApiEndpoint = { id: sameOriginEndpointId, url: "", enabled: true };
 export const apiEndpointSettingsChangeEvent = endpointChangeEvent;
 export const apiEndpointHealthChangeEvent = endpointHealthChangeEvent;
 export const apiSensitiveDataLockedEvent = sensitiveDataLockedEvent;
@@ -78,25 +80,25 @@ export function isSameOriginApiEndpoint(endpoint: ApiEndpoint) {
 
 export function displayApiEndpointUrl(endpoint: ApiEndpoint) {
   if (!isSameOriginApiEndpoint(endpoint)) return endpoint.url;
-  if (typeof window === "undefined") return "当前站点";
+  if (typeof window === "undefined") return i18n.t("apiEndpoints.currentSite");
   return window.location.origin;
 }
 
 export function apiEndpointLabel(endpoint: ApiEndpoint) {
-  return endpoint.label?.trim() || (isSameOriginApiEndpoint(endpoint) ? "当前站点" : endpoint.url);
+  return endpoint.label?.trim() || (isSameOriginApiEndpoint(endpoint) ? i18n.t("apiEndpoints.currentSite") : endpoint.url);
 }
 
 export function normalizeApiEndpointUrl(raw: string): string {
   const value = raw.trim();
-  if (!value) throw new Error("请输入后端地址");
+  if (!value) throw new Error(i18n.t("apiEndpoints.enterBackendUrl"));
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("请输入完整的 HTTPS 地址");
+    throw new Error(i18n.t("apiEndpoints.enterFullHttpsUrl"));
   }
-  if (url.protocol !== "https:") throw new Error("自定义后端必须使用 HTTPS");
-  if (url.username || url.password) throw new Error("后端地址不能包含用户名或密码");
+  if (url.protocol !== "https:") throw new Error(i18n.t("apiEndpoints.httpsRequired"));
+  if (url.username || url.password) throw new Error(i18n.t("apiEndpoints.noCredentials"));
   url.hash = "";
   url.search = "";
   url.pathname = url.pathname.replace(/\/+$/, "");
@@ -239,15 +241,15 @@ export function withActiveApiEndpoint(settings: ApiEndpointSettings, activeId: s
 }
 
 export function applyApiEndpointProbe(settings: ApiEndpointSettings, endpointId: string, result: ApiEndpointProbeResult) {
-  if (!result.ok) throw new Error(result.error || "后端不可用");
-  if (result.apiVersion === undefined) throw new Error("后端未提供 API 版本，请先升级后端");
+  if (!result.ok) throw new Error(result.error || i18n.t("apiEndpoints.backendUnavailable"));
+  if (result.apiVersion === undefined) throw new Error(i18n.t("apiEndpoints.apiVersionMissing"));
   if (result.apiVersion !== supportedApiVersion) {
-    throw new Error(`后端 API 版本不兼容：${result.apiVersion}`);
+    throw new Error(i18n.t("apiEndpoints.apiVersionIncompatible", { version: result.apiVersion }));
   }
   const resultClusterId = result.clusterId?.trim();
-  if (!resultClusterId) throw new Error("后端未提供账本标识，请配置 LEDGER_CLUSTER_ID 或升级后端");
+  if (!resultClusterId) throw new Error(i18n.t("apiEndpoints.clusterIdMissing"));
   if (settings.clusterId && settings.clusterId !== resultClusterId) {
-    throw new Error("这个后端连接的是另一个账本，不能加入当前后端组");
+    throw new Error(i18n.t("apiEndpoints.differentLedger"));
   }
   const clusterId = settings.clusterId || resultClusterId;
   const apiVersion = settings.apiVersion || result.apiVersion;
@@ -316,7 +318,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
       const latencyMs = Math.max(1, Math.round(performanceNow() - startedAt));
       if (kind === "read" && endpoint.id !== active.id && (response.status === 401 || response.status === 403)) {
         forgetKnownApiEndpointAuthentication(endpoint.id);
-        lastError = new Error("备用后端登录已失效，请先切换到该后端重新登录");
+        lastError = new Error(i18n.t("apiEndpoints.backupAuthExpired"));
         if (canRetry) continue;
         break;
       }
@@ -338,7 +340,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
       return response;
     } catch (error) {
       lastError = error;
-      recordEndpointFailure(endpoint.id, error instanceof Error ? error.message : "请求失败");
+      recordEndpointFailure(endpoint.id, error instanceof Error ? error.message : i18n.t("apiEndpoints.requestFailed"));
       if (!canRetry || isAbortFromCaller(error, init)) throw error;
     } finally {
       if (attempt.timeoutId !== undefined) window.clearTimeout(attempt.timeoutId);
@@ -346,7 +348,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit, opt
   }
 
   if (lastResponse) return lastResponse;
-  throw lastError instanceof Error ? lastError : new Error("请求失败，请稍后重试");
+  throw lastError instanceof Error ? lastError : new Error(i18n.t("apiEndpoints.requestFailedRetry"));
 }
 
 export function installApiEndpointFetchInterceptor() {
@@ -380,7 +382,7 @@ export async function probeApiEndpoint(endpoint: ApiEndpoint, timeoutMs = 8000):
     if (!response.ok) return { id: endpoint.id, ok: false, latencyMs, error: data.error || `HTTP ${response.status}`, ...healthMetadata(data) };
     return { id: endpoint.id, ok: true, latencyMs, ...healthMetadata(data) };
   } catch (error) {
-    return { id: endpoint.id, ok: false, error: error instanceof Error ? error.message : "测速失败" };
+    return { id: endpoint.id, ok: false, error: error instanceof Error ? error.message : i18n.t("apiEndpoints.speedTestFailed") };
   } finally {
     window.clearTimeout(timeout);
   }

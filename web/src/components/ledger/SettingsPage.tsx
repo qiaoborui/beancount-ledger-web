@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { ArrowDown, ArrowUp, BellRing, Check, Database, Minus, Plus, RotateCcw, Save, Send, Zap } from "lucide-react";
 import { ledgerNavItems } from "../AppShell";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -7,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { fetchJson } from "@/lib/clientFetch";
 import { apiEndpointHealthChangeEvent, apiEndpointLabel, apiEndpointRuntimeStatus, applyApiEndpointProbe, createApiEndpointId, displayApiEndpointUrl, hasKnownApiEndpointAuthentication, isSameOriginApiEndpoint, normalizeApiEndpointUrl, probeApiEndpoint, readApiEndpointSettings, withActiveApiEndpoint, writeApiEndpointSettings, type ApiEndpoint, type ApiEndpointProbeResult, type ApiEndpointSettings } from "@/lib/apiEndpoints";
 import { getWebPushPresentation, useWebPush } from "./hooks/useWebPush";
+import { useAppLanguage } from "./hooks/useAppLanguage";
 import { PasskeySettingsPanel } from "./PasskeySettingsPanel";
 import { AgentAccessTokenSettings } from "./AgentAccessTokenSettings";
 import type { PasskeyCredentialSummary } from "./passkeys";
@@ -15,10 +18,10 @@ import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from ".
 
 type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
 
-const themeOptions: { value: ThemeMode; label: string; description: string }[] = [
-  { value: "system", label: "跟随系统", description: "系统切换时自动同步" },
-  { value: "light", label: "浅色", description: "固定使用纸张浅色" },
-  { value: "dark", label: "深色", description: "固定使用夜间深色" },
+const themeOptions: { value: ThemeMode; labelKey: string; descriptionKey: string }[] = [
+  { value: "system", labelKey: "settings.themeSystem", descriptionKey: "settings.themeSystemDesc" },
+  { value: "light", labelKey: "settings.themeLight", descriptionKey: "settings.themeLightDesc" },
+  { value: "dark", labelKey: "settings.themeDark", descriptionKey: "settings.themeDarkDesc" },
 ];
 
 type LocalAccessState = {
@@ -85,6 +88,8 @@ export function SettingsPage({
   onPasskeyRegisteredChange: (registered: boolean) => void;
   showToast: ToastFn;
 }) {
+  const { t } = useTranslation();
+  const { language, setLanguage } = useAppLanguage();
   function toggleMobileTab(href: LedgerNavHref, checked: boolean) {
     if (checked) onMobileTabHrefsChange(Array.from(new Set([...mobileTabHrefs, href])).slice(0, 5));
     else onMobileTabHrefsChange(mobileTabHrefs.filter((item) => item !== href));
@@ -103,12 +108,12 @@ export function SettingsPage({
 
     <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">valuation</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">汇总估值</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">用于首页、趋势看板、净资产和损益汇总。单个账户余额仍显示账户原币。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.valuation")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.valuationTitle")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.valuationDesc")}</p>
       </div>
       <label className="mt-6 block max-w-xs">
-        <span className="mb-2 block text-sm font-medium text-olive">估值币种</span>
+        <span className="mb-2 block text-sm font-medium text-olive">{t("settings.valuationCurrency")}</span>
         <select className="h-12 w-full rounded-xl border border-line bg-panel px-3 text-ink" value={settings.valuationCurrency} onChange={(event) => onChange("valuationCurrency", event.target.value.toUpperCase())}>
           {currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
         </select>
@@ -117,9 +122,9 @@ export function SettingsPage({
 
     <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">appearance</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">外观设置</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">默认跟随系统深浅色，也可以在这里手动固定。设置只保存在当前浏览器。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.appearance")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.appearanceTitle")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.appearanceDesc")}</p>
       </div>
       <div className="mt-6 rounded-2xl border border-line bg-panel p-2">
         <div className="grid gap-2 md:grid-cols-3">
@@ -132,20 +137,43 @@ export function SettingsPage({
               onClick={() => onThemeModeChange(option.value)}
               aria-pressed={active}
             >
-              <span className="block font-medium">{option.label}</span>
-              <span className={`mt-1 block text-xs leading-5 ${active ? "text-olive" : "text-stone"}`}>{option.description}</span>
+              <span className="block font-medium">{t(option.labelKey)}</span>
+              <span className={`mt-1 block text-xs leading-5 ${active ? "text-olive" : "text-stone"}`}>{t(option.descriptionKey)}</span>
             </button>;
           })}
         </div>
-        <p className="mt-3 px-2 text-xs text-stone">当前实际主题：{resolvedTheme === "dark" ? "深色" : "浅色"}</p>
+        <p className="mt-3 px-2 text-xs text-stone">{t("settings.currentTheme", { theme: t(resolvedTheme === "dark" ? "settings.themeDarkResolved" : "settings.themeLightResolved") })}</p>
       </div>
     </section>
 
     <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">mobile navigation</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">底部 Tab</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">选择移动端底部栏展示哪些页面，最多 5 个。未展示的页面仍可从左上角菜单进入。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.language")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.languageTitle")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.languageDesc")}</p>
+      </div>
+      <div className="mt-6 grid gap-2 rounded-2xl border border-line bg-panel p-2 md:grid-cols-2">
+        {(["zh-CN", "en-US"] as const).map((value) => {
+          const active = language === value;
+          return <button
+            key={value}
+            type="button"
+            className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left ${active ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-paper hover:bg-tag"}`}
+            onClick={() => setLanguage(value)}
+            aria-pressed={active}
+          >
+            <span className="font-medium text-ink">{value === "zh-CN" ? t("settings.languageChinese") : t("settings.languageEnglish")}</span>
+            {active && <Check className="h-4 w-4 shrink-0 text-brand" />}
+          </button>;
+        })}
+      </div>
+    </section>
+
+    <section className="card p-5 md:p-6">
+      <div className="border-b border-line pb-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.mobileNav")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.mobileNavTitle")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.mobileNavDesc")}</p>
       </div>
       <div className="mt-6 grid gap-2 rounded-2xl border border-line bg-panel p-2 md:grid-cols-2">
         {ledgerNavItems.map((item) => {
@@ -156,34 +184,34 @@ export function SettingsPage({
           return <div key={item.href} className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${checked ? "border-brand bg-[var(--selected-bg)]" : "border-line bg-paper"} ${disabled ? "opacity-50" : "hover:bg-tag"}`}>
             <label htmlFor={checkboxId} className={`flex min-w-0 flex-1 items-center gap-3 ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}>
               <Icon className="h-4 w-4 shrink-0 text-brand" />
-              <span className="font-medium text-ink">{item.label}</span>
+              <span className="font-medium text-ink">{t(item.labelKey)}</span>
             </label>
             <Checkbox id={checkboxId} className="size-5" checked={checked} disabled={disabled} onCheckedChange={(value) => toggleMobileTab(item.href, value === true)} />
           </div>;
         })}
       </div>
-      <p className="mt-3 text-xs text-stone">当前展示：{mobileTabHrefs.length ? ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href)).map((item) => item.label).join("、") : "无"}</p>
+      <p className="mt-3 text-xs text-stone">{mobileTabHrefs.length ? t("settings.currentlyShown", { labels: ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href)).map((item) => t(item.labelKey)).join("、") }) : t("settings.currentlyShownNone")}</p>
     </section>
 
     <section className="card p-5 md:p-6">
-      <div className="border-b border-line pb-4"><div className="text-xs uppercase tracking-[0.24em] text-stone">home page</div><h1 className="mt-2 font-serif text-3xl font-medium">主页</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-olive">决定打开根路径 <code className="rounded bg-tag px-1.5 py-0.5 text-xs text-ink">/</code> 时首先进入的工作区。这个设置只保存在当前浏览器。</p></div>
+      <div className="border-b border-line pb-4"><div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.homePage")}</div><h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.homePageTitle")}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.homePageDescPrefix")}<code className="rounded bg-tag px-1.5 py-0.5 text-xs text-ink">/</code>{t("settings.homePageDescSuffix")}</p></div>
       <div className="mt-6 grid gap-2 md:grid-cols-2">
-        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "agent" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "agent")} aria-pressed={settings.homePage === "agent"}><span className="block font-medium text-ink">账本 Agent</span><span className="mt-1 block text-sm leading-6 text-olive">从对话、分析和待确认操作开始。</span></button>
-        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "overview" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "overview")} aria-pressed={settings.homePage === "overview"}><span className="block font-medium text-ink">财务概览</span><span className="mt-1 block text-sm leading-6 text-olive">先查看收入、支出和资产的摘要。</span></button>
+        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "agent" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "agent")} aria-pressed={settings.homePage === "agent"}><span className="block font-medium text-ink">{t("settings.homePageAgent")}</span><span className="mt-1 block text-sm leading-6 text-olive">{t("settings.homePageAgentDesc")}</span></button>
+        <button type="button" className={`rounded-xl border p-4 text-left ${settings.homePage === "overview" ? "border-brand bg-[var(--selected-bg)] ring-1 ring-brand/30" : "border-line bg-panel hover:bg-tag"}`} onClick={() => onChange("homePage", "overview")} aria-pressed={settings.homePage === "overview"}><span className="block font-medium text-ink">{t("settings.homePageOverview")}</span><span className="mt-1 block text-sm leading-6 text-olive">{t("settings.homePageOverviewDesc")}</span></button>
       </div>
     </section>
 
     <section className="card p-5 md:p-6">
       <div className="border-b border-line pb-4">
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">privacy defaults</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">默认显示设置</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">控制打开账本时哪些金额默认可见。设置只保存在当前浏览器，不写入 Beancount 文件。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settings.privacyDefaults")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settings.privacyDefaultsTitle")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settings.privacyDefaultsDesc")}</p>
       </div>
       <div className="mt-6 divide-y divide-line rounded-2xl border border-line bg-panel">
-        <SettingToggle id="show-home-summary-amounts" title="首页月度收入 / 支出 / 结余" description="关闭后首页三个指标默认显示为 ••••••。" checked={settings.showHomeSummaryAmounts} onChange={(checked) => onChange("showHomeSummaryAmounts", checked)} />
-        <SettingToggle id="show-account-balances-by-default" title="账户页余额" description="控制进入账户页时是否默认展开全部账户余额；仍可在页面内临时切换。" checked={settings.showAccountBalancesByDefault} onChange={(checked) => onChange("showAccountBalancesByDefault", checked)} />
-        <SettingToggle id="show-net-worth-by-default" title="净资产页金额与曲线" description="控制进入净资产页时是否默认显示资产、负债、净资产和曲线。" checked={settings.showNetWorthByDefault} onChange={(checked) => onChange("showNetWorthByDefault", checked)} />
-        <SettingToggle id="show-income-statement-by-default" title="损益表金额" description="控制进入损益表时是否默认显示各分类的具体金额。" checked={settings.showIncomeStatementByDefault} onChange={(checked) => onChange("showIncomeStatementByDefault", checked)} />
+        <SettingToggle id="show-home-summary-amounts" title={t("settings.showHomeSummaryAmounts")} description={t("settings.showHomeSummaryAmountsDesc")} checked={settings.showHomeSummaryAmounts} onChange={(checked) => onChange("showHomeSummaryAmounts", checked)} />
+        <SettingToggle id="show-account-balances-by-default" title={t("settings.showAccountBalancesByDefault")} description={t("settings.showAccountBalancesByDefaultDesc")} checked={settings.showAccountBalancesByDefault} onChange={(checked) => onChange("showAccountBalancesByDefault", checked)} />
+        <SettingToggle id="show-net-worth-by-default" title={t("settings.showNetWorthByDefault")} description={t("settings.showNetWorthByDefaultDesc")} checked={settings.showNetWorthByDefault} onChange={(checked) => onChange("showNetWorthByDefault", checked)} />
+        <SettingToggle id="show-income-statement-by-default" title={t("settings.showIncomeStatementByDefault")} description={t("settings.showIncomeStatementByDefaultDesc")} checked={settings.showIncomeStatementByDefault} onChange={(checked) => onChange("showIncomeStatementByDefault", checked)} />
       </div>
     </section>
   </div>;
@@ -209,6 +237,7 @@ type RuntimeConfigView = {
 };
 
 function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocked: boolean; showToast: ToastFn }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<RuntimeConfigView | null | undefined>(undefined);
   const [form, setForm] = useState({
     githubOwner: "", githubRepo: "", githubBranch: "main", githubApiUrl: "",
@@ -260,9 +289,9 @@ function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocke
       }, undefined, { kind: "write" });
       setStatus(next);
       setForm((current) => ({ ...current, githubWriteToken: "", githubIndexToken: "", aiApiKey: "", adminPassword: "" }));
-      showToast("success", "实例运行配置已更新");
+      showToast("success", t("settingsRuntime.saved"));
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "保存实例配置失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsRuntime.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -274,46 +303,46 @@ function RuntimeConfigPanel({ sensitiveUnlocked, showToast }: { sensitiveUnlocke
     <div className="flex items-start gap-3 border-b border-line pb-4">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand"><Database className="h-5 w-5" /></span>
       <div>
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">instance runtime</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">实例运行配置</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">仓库、Agent 和 indexer 设置保存在 Postgres。秘密字段留空表示保留现值，页面永远不会回显明文。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsRuntime.eyebrow")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsRuntime.title")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settingsRuntime.desc")}</p>
       </div>
     </div>
-    {!sensitiveUnlocked ? <p className="mt-5 rounded-xl bg-tag px-4 py-3 text-sm text-stone">解锁敏感数据后才能查看或修改实例配置。</p> :
-      status === undefined ? <p className="mt-5 text-sm text-stone">正在读取实例配置…</p> :
+    {!sensitiveUnlocked ? <p className="mt-5 rounded-xl bg-tag px-4 py-3 text-sm text-stone">{t("settingsRuntime.lockedHint")}</p> :
+      status === undefined ? <p className="mt-5 text-sm text-stone">{t("settingsRuntime.loading")}</p> :
       <div className="mt-6 space-y-6">
         <div className="flex flex-wrap gap-2 text-xs text-stone">
-          <span className="rounded-full bg-tag px-2.5 py-1">来源：{status.configSource}</span>
+          <span className="rounded-full bg-tag px-2.5 py-1">{t("settingsRuntime.source", { source: status.configSource })}</span>
           {status.instanceId && <span className="rounded-full bg-tag px-2.5 py-1 font-mono">{status.instanceId}</span>}
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <RuntimeField label="GitHub 用户或组织"><input required className={inputClass} value={form.githubOwner} onChange={(event) => update("githubOwner", event.target.value)} /></RuntimeField>
-          <RuntimeField label="私有仓库"><input required className={inputClass} value={form.githubRepo} onChange={(event) => update("githubRepo", event.target.value)} /></RuntimeField>
-          <RuntimeField label="分支"><input required className={inputClass} value={form.githubBranch} onChange={(event) => update("githubBranch", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.githubOwner")}><input required className={inputClass} value={form.githubOwner} onChange={(event) => update("githubOwner", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.privateRepo")}><input required className={inputClass} value={form.githubRepo} onChange={(event) => update("githubRepo", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.branch")}><input required className={inputClass} value={form.githubBranch} onChange={(event) => update("githubBranch", event.target.value)} /></RuntimeField>
         </div>
-        <RuntimeField label="GitHub API 地址"><input type="url" className={inputClass} value={form.githubApiUrl} onChange={(event) => update("githubApiUrl", event.target.value)} placeholder="github.com 用户留空" /></RuntimeField>
+        <RuntimeField label={t("settingsRuntime.githubApiUrl")}><input type="url" className={inputClass} value={form.githubApiUrl} onChange={(event) => update("githubApiUrl", event.target.value)} placeholder={t("settingsRuntime.githubApiUrlPlaceholder")} /></RuntimeField>
         <div className="grid gap-3 md:grid-cols-2">
-          <RuntimeField label={`写入 Token${status.githubWriteTokenConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.githubWriteToken} onChange={(event) => update("githubWriteToken", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
-          <RuntimeField label={`Indexer Token${status.githubIndexTokenConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.githubIndexToken} onChange={(event) => update("githubIndexToken", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
+          <RuntimeField label={`${t("settingsRuntime.writeToken")}${status.githubWriteTokenConfigured ? t("settingsRuntime.configuredSuffix") : ""}`}><input type="password" className={inputClass} value={form.githubWriteToken} onChange={(event) => update("githubWriteToken", event.target.value)} placeholder={t("settingsRuntime.keepCurrentPlaceholder")} /></RuntimeField>
+          <RuntimeField label={`${t("settingsRuntime.indexerToken")}${status.githubIndexTokenConfigured ? t("settingsRuntime.configuredSuffix") : ""}`}><input type="password" className={inputClass} value={form.githubIndexToken} onChange={(event) => update("githubIndexToken", event.target.value)} placeholder={t("settingsRuntime.keepCurrentPlaceholder")} /></RuntimeField>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <RuntimeField label="AI Provider"><input required className={inputClass} value={form.aiProvider} onChange={(event) => update("aiProvider", event.target.value)} /></RuntimeField>
-          <RuntimeField label="AI Base URL"><input required type="url" className={inputClass} value={form.aiBaseUrl} onChange={(event) => update("aiBaseUrl", event.target.value)} /></RuntimeField>
-          <RuntimeField label="模型"><input required className={inputClass} value={form.aiModel} onChange={(event) => update("aiModel", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.aiProvider")}><input required className={inputClass} value={form.aiProvider} onChange={(event) => update("aiProvider", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.aiBaseUrl")}><input required type="url" className={inputClass} value={form.aiBaseUrl} onChange={(event) => update("aiBaseUrl", event.target.value)} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.model")}><input required className={inputClass} value={form.aiModel} onChange={(event) => update("aiModel", event.target.value)} /></RuntimeField>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          <RuntimeField label={`AI API Key${status.aiApiKeyConfigured ? "，已配置" : ""}`}><input type="password" className={inputClass} value={form.aiApiKey} onChange={(event) => update("aiApiKey", event.target.value)} placeholder="留空保留当前值" /></RuntimeField>
-          <RuntimeField label="新管理员密码"><input type="password" minLength={12} className={inputClass} value={form.adminPassword} onChange={(event) => update("adminPassword", event.target.value)} placeholder="留空不修改" /></RuntimeField>
+          <RuntimeField label={`${t("settingsRuntime.aiApiKey")}${status.aiApiKeyConfigured ? t("settingsRuntime.configuredSuffix") : ""}`}><input type="password" className={inputClass} value={form.aiApiKey} onChange={(event) => update("aiApiKey", event.target.value)} placeholder={t("settingsRuntime.keepCurrentPlaceholder")} /></RuntimeField>
+          <RuntimeField label={t("settingsRuntime.newAdminPassword")}><input type="password" minLength={12} className={inputClass} value={form.adminPassword} onChange={(event) => update("adminPassword", event.target.value)} placeholder={t("settingsRuntime.keepUnchangedPlaceholder")} /></RuntimeField>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           {([
-            ["轮询秒数", "indexerIntervalSeconds"],
-            ["首次重试秒数", "indexerRetryInitialSeconds"],
-            ["最大重试秒数", "indexerRetryMaximumSeconds"],
+            [t("settingsRuntime.pollSeconds"), "indexerIntervalSeconds"],
+            [t("settingsRuntime.retryInitialSeconds"), "indexerRetryInitialSeconds"],
+            [t("settingsRuntime.retryMaximumSeconds"), "indexerRetryMaximumSeconds"],
           ] as const).map(([label, key]) => <RuntimeField key={key} label={label}><input type="number" min={1} className={inputClass} value={form[key]} onChange={(event) => update(key, Number(event.target.value))} /></RuntimeField>)}
         </div>
         <button type="button" disabled={saving} onClick={() => void save()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-brand px-4 text-sm font-medium text-paper transition-transform active:scale-[0.98] disabled:opacity-50">
-          {saving ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? "保存中…" : "保存实例配置"}
+          {saving ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? t("settingsRuntime.saving") : t("settingsRuntime.save")}
         </button>
       </div>}
   </section>;
@@ -324,6 +353,7 @@ function RuntimeField({ label, children }: { label: string; children: ReactNode 
 }
 
 function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {
+  const { t } = useTranslation();
   const { state, refresh, subscribe, unsubscribe, sendTest } = useWebPush(showToast);
   const presentation = getWebPushPresentation(state);
   const statusClassName = presentation.tone === "success"
@@ -343,16 +373,16 @@ function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {
         <BellRing className="h-5 w-5" aria-hidden="true" />
       </span>
       <div>
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">device notifications</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">设备通知</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">自动账单完成解析或进入失败状态时，通过 Web Push 提醒当前设备。订阅按浏览器分别管理。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsNotifications.eyebrow")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsNotifications.title")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settingsNotifications.desc")}</p>
       </div>
     </div>
 
     <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-line bg-panel p-4">
       <label htmlFor="web-push-enabled" className={`min-w-0 ${presentation.toggleDisabled ? "cursor-default" : "cursor-pointer"}`}>
         <span className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-ink">自动导入通知</span>
+          <span className="font-medium text-ink">{t("settingsNotifications.autoImportToggle")}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs ${statusClassName}`}>{presentation.status}</span>
         </span>
         <span id="web-push-description" className="mt-1 block max-w-2xl text-sm leading-6 text-olive">{presentation.description}</span>
@@ -369,11 +399,11 @@ function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {
     <div className="mt-3 flex min-h-10 flex-wrap items-center gap-3">
       {presentation.testAvailable && <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand px-3.5 text-sm font-medium text-paper disabled:opacity-50" disabled={state.loading} onClick={() => void sendTest()}>
         <Send className="h-4 w-4" aria-hidden="true" />
-        发送测试通知
+        {t("settingsNotifications.sendTest")}
       </button>}
       <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3.5 text-sm font-medium text-brand hover:bg-tag disabled:opacity-50" disabled={state.loading} onClick={() => void refresh()}>
         <RotateCcw className={`h-4 w-4 ${state.loading ? "animate-spin" : ""}`} aria-hidden="true" />
-        {state.loading ? "检查中…" : "重新检查"}
+        {state.loading ? t("settingsNotifications.checking") : t("settingsNotifications.recheck")}
       </button>
       {state.error && <span className="text-sm text-[var(--danger)]">{state.error}</span>}
     </div>
@@ -381,6 +411,7 @@ function NotificationSettingsPanel({ showToast }: { showToast: ToastFn }) {
 }
 
 function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<ApiEndpointSettings>(() => readApiEndpointSettings());
   const [draftUrl, setDraftUrl] = useState("");
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -403,7 +434,7 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
     try {
       const url = normalizeApiEndpointUrl(draftUrl);
       if (settings.endpoints.some((endpoint) => endpoint.url === url)) {
-        showToast("info", "这个后端已经在列表里");
+        showToast("info", t("settingsEndpoints.alreadyAdded"));
         return;
       }
       const endpoint = { id: createApiEndpointId(), url, enabled: true };
@@ -412,24 +443,24 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
         endpoints: [...settings.endpoints, endpoint],
       };
       setDraftUrl("");
-      save(next, "已添加后端；需要时请单独测速或直接切换验证。");
+      save(next, t("settingsEndpoints.addedNotice"));
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "添加后端失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsEndpoints.addFailed"));
     }
   }
 
   async function activateEndpoint(endpoint: ApiEndpoint) {
     if (!endpoint.enabled || endpoint.id === settings.activeId) return;
-    showToast("info", "正在验证所选后端…");
+    showToast("info", t("settingsEndpoints.verifying"));
     try {
       const result = await probeApiEndpoint(endpoint);
       setProbeResults((current) => ({ ...current, [endpoint.id]: result }));
       const verified = applyApiEndpointProbe(settings, endpoint.id, result);
       const next = withActiveApiEndpoint(verified, endpoint.id);
-      if (next.activeId !== endpoint.id) throw new Error("所选后端与当前账本不兼容");
-      save(next, "已切换后端，请重新登录。");
+      if (next.activeId !== endpoint.id) throw new Error(t("settingsEndpoints.incompatible"));
+      save(next, t("settingsEndpoints.switchedNotice"));
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "切换后端失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsEndpoints.switchFailed"));
     }
   }
 
@@ -452,7 +483,7 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
   function removeEndpoint(id: string) {
     const nextEndpoints = settings.endpoints.filter((endpoint) => endpoint.id !== id || isSameOriginApiEndpoint(endpoint));
     const nextActiveId = nextEndpoints.some((endpoint) => endpoint.id === settings.activeId) ? settings.activeId : nextEndpoints[0].id;
-    save({ ...settings, activeId: nextActiveId, endpoints: nextEndpoints }, "已移除后端。");
+    save({ ...settings, activeId: nextActiveId, endpoints: nextEndpoints }, t("settingsEndpoints.removedNotice"));
   }
 
   async function testEndpoint(endpoint: ApiEndpoint) {
@@ -464,13 +495,13 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
       if (result.ok) {
         try {
           const next = applyApiEndpointProbe(settings, endpoint.id, result);
-          save(next, `${endpointLabel(endpoint)} 测速完成：${result.latencyMs}ms。`);
+          save(next, t("settingsEndpoints.testComplete", { label: endpointLabel(endpoint), ms: result.latencyMs }));
         } catch (error) {
-          compatibleResult = { ...result, ok: false, error: error instanceof Error ? error.message : "后端不兼容" };
-          showToast("error", compatibleResult.error ?? "后端不兼容");
+          compatibleResult = { ...result, ok: false, error: error instanceof Error ? error.message : t("settingsEndpoints.incompatibleShort") };
+          showToast("error", compatibleResult.error ?? t("settingsEndpoints.incompatibleShort"));
         }
       } else {
-        showToast("error", result.error ?? "测速失败");
+        showToast("error", result.error ?? t("settingsEndpoints.testFailed"));
       }
       setProbeResults((current) => ({ ...current, [endpoint.id]: compatibleResult }));
     } finally {
@@ -481,16 +512,16 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
   return <section className="card p-5 md:p-6">
     <div className="flex flex-col gap-4 border-b border-line pb-4 md:flex-row md:items-start md:justify-between">
       <div>
-        <div className="text-xs uppercase tracking-[0.24em] text-stone">request endpoints</div>
-        <h1 className="mt-2 font-serif text-3xl font-medium">请求地址管理</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">当前会话由一个后端完整承接读取、鉴权和写入。只有安全读请求可在故障时切到已验证且登录过的后端，写请求不会跨后端重试；所有后端应连接同一个账本。</p>
+        <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsEndpoints.eyebrow")}</div>
+        <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsEndpoints.title")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settingsEndpoints.desc")}</p>
       </div>
     </div>
     <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
         <input className="h-12 min-w-0 rounded-xl border border-line bg-panel px-3 text-ink" value={draftUrl} onChange={(event) => setDraftUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void addEndpoint()} placeholder="https://api.example.com" />
       <button type="button" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-line bg-panel px-4 text-sm font-medium text-brand hover:bg-tag" onClick={() => void addEndpoint()}>
         <Plus className="h-4 w-4" />
-        添加
+        {t("settingsEndpoints.add")}
       </button>
     </div>
     <div className="mt-6 space-y-2">
@@ -505,45 +536,45 @@ function ApiEndpointSettingsPanel({ showToast }: { showToast: ToastFn }) {
               <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${active ? "bg-brand text-paper" : "bg-tag text-brand"}`}>{active ? <Check className="h-4 w-4" /> : <span className="h-2 w-2 rounded-full bg-current" />}</span>
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-ink">{sameOrigin ? "当前站点" : endpoint.label || `备用后端 ${index}`}</span>
-                  {active && <span className="rounded-full bg-brand px-2 py-0.5 text-xs text-paper">默认</span>}
-                  {!active && endpoint.enabled && <span className={`rounded-full px-2 py-0.5 text-xs ${knownAuthentication ? "bg-brand/10 text-brand" : "bg-tag text-stone"}`}>{knownAuthentication ? "可完整接管" : "需切换登录一次"}</span>}
-                  {!endpoint.enabled && <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">已停用</span>}
+                  <span className="font-medium text-ink">{sameOrigin ? t("settingsEndpoints.currentSite") : endpoint.label || t("settingsEndpoints.backupEndpoint", { index })}</span>
+                  {active && <span className="rounded-full bg-brand px-2 py-0.5 text-xs text-paper">{t("settingsEndpoints.default")}</span>}
+                  {!active && endpoint.enabled && <span className={`rounded-full px-2 py-0.5 text-xs ${knownAuthentication ? "bg-brand/10 text-brand" : "bg-tag text-stone"}`}>{knownAuthentication ? t("settingsEndpoints.fullTakeover") : t("settingsEndpoints.needsLogin")}</span>}
+                  {!endpoint.enabled && <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{t("settingsEndpoints.disabled")}</span>}
                 </span>
                 <span className="mt-1 block break-all text-sm leading-6 text-olive">{displayApiEndpointUrl(endpoint)}</span>
               </span>
             </button>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <EndpointProbeBadge result={result} endpointId={endpoint.id} />
+              <EndpointProbeBadge result={result} endpointId={endpoint.id} t={t} />
               <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={!endpoint.enabled || testingId !== null} onClick={() => void testEndpoint(endpoint)}>
                 {testingId === endpoint.id ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                测速
+                {t("settingsEndpoints.speedTest")}
               </button>
-              <IconButton label="上移" disabled={sameOrigin || index <= 1} onClick={() => moveEndpoint(endpoint.id, -1)}><ArrowUp className="h-4 w-4" /></IconButton>
-              <IconButton label="下移" disabled={sameOrigin || index === settings.endpoints.length - 1} onClick={() => moveEndpoint(endpoint.id, 1)}><ArrowDown className="h-4 w-4" /></IconButton>
-              <button type="button" className="h-9 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={sameOrigin || active} onClick={() => updateEndpoint(endpoint.id, { enabled: !endpoint.enabled })}>{endpoint.enabled ? "停用" : "启用"}</button>
-              <IconButton label="移除" disabled={sameOrigin} onClick={() => removeEndpoint(endpoint.id)}><Minus className="h-4 w-4" /></IconButton>
+              <IconButton label={t("settingsEndpoints.moveUp")} disabled={sameOrigin || index <= 1} onClick={() => moveEndpoint(endpoint.id, -1)}><ArrowUp className="h-4 w-4" /></IconButton>
+              <IconButton label={t("settingsEndpoints.moveDown")} disabled={sameOrigin || index === settings.endpoints.length - 1} onClick={() => moveEndpoint(endpoint.id, 1)}><ArrowDown className="h-4 w-4" /></IconButton>
+              <button type="button" className="h-9 rounded-lg border border-line px-3 text-sm text-olive hover:bg-tag disabled:opacity-50" disabled={sameOrigin || active} onClick={() => updateEndpoint(endpoint.id, { enabled: !endpoint.enabled })}>{endpoint.enabled ? t("settingsEndpoints.disabled") : t("settingsEndpoints.enable")}</button>
+              <IconButton label={t("settingsEndpoints.remove")} disabled={sameOrigin} onClick={() => removeEndpoint(endpoint.id)}><Minus className="h-4 w-4" /></IconButton>
             </div>
           </div>
         </div>;
       })}
     </div>
-    <p className="mt-3 text-xs leading-5 text-stone">测速只请求所点的后端，不会批量唤醒其他地址。自定义后端必须是 HTTPS，并需要允许当前前端 Origin 的 CORS；设置只保存在当前浏览器。</p>
+    <p className="mt-3 text-xs leading-5 text-stone">{t("settingsEndpoints.footerHint")}</p>
   </section>;
 }
 
 function endpointLabel(endpoint?: ApiEndpoint) {
-  if (!endpoint) return "未知后端";
+  if (!endpoint) return i18n.t("settingsEndpoints.unknownBackend");
   return apiEndpointLabel(endpoint);
 }
 
-function EndpointProbeBadge({ result, endpointId }: { result?: ApiEndpointProbeResult; endpointId: string }) {
+function EndpointProbeBadge({ result, endpointId, t }: { result?: ApiEndpointProbeResult; endpointId: string; t: (key: string) => string }) {
   const runtime = apiEndpointRuntimeStatus(endpointId);
-  if (runtime.cooldownUntil && runtime.cooldownUntil > Date.now()) return <span className="rounded-full bg-[var(--danger)]/10 px-2 py-1 text-xs text-[var(--danger)]">冷却中</span>;
+  if (runtime.cooldownUntil && runtime.cooldownUntil > Date.now()) return <span className="rounded-full bg-[var(--danger)]/10 px-2 py-1 text-xs text-[var(--danger)]">{t("settingsEndpoints.coolingDown")}</span>;
   if (runtime.reachable && runtime.latencyMs) return <span className="rounded-full bg-brand/10 px-2 py-1 text-xs text-brand">{runtime.latencyMs}ms</span>;
-  if (!result) return <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">未测速</span>;
+  if (!result) return <span className="rounded-full bg-tag px-2 py-1 text-xs text-stone">{t("settingsEndpoints.notTested")}</span>;
   if (result.ok) return <span className="rounded-full bg-brand/10 px-2 py-1 text-xs text-brand">{result.latencyMs}ms</span>;
-  return <span className="max-w-[12rem] truncate rounded-full bg-[var(--danger)]/10 px-2 py-1 text-xs text-[var(--danger)]" title={result.error}>{result.error ?? "不可用"}</span>;
+  return <span className="max-w-[12rem] truncate rounded-full bg-[var(--danger)]/10 px-2 py-1 text-xs text-[var(--danger)]" title={result.error}>{result.error ?? t("settingsEndpoints.unavailable")}</span>;
 }
 
 function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
@@ -551,6 +582,7 @@ function IconButton({ label, disabled, onClick, children }: { label: string; dis
 }
 
 function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, onEnable, onDisable, showToast }: { enabled: boolean; mode: QuickUnlockMode; sensitiveUnlocked: boolean; onEnable: (secret: string, mode: QuickUnlockMode) => void | Promise<void>; onDisable: () => void | Promise<void>; showToast: ToastFn }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<QuickUnlockMode>(initialMode);
   const [secret, setSecret] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -571,15 +603,15 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
   async function submit() {
     if (saving) return;
     if (!sensitiveUnlocked) {
-      showToast("error", "请先解锁敏感数据，再设置本机快速解锁");
+      showToast("error", t("settingsQuickUnlock.unlockFirst"));
       return;
     }
     if (!secret) {
-      showToast("error", mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
+      showToast("error", mode === "numeric" ? t("settingsQuickUnlock.enterCode") : t("settingsQuickUnlock.enterPassphrase"));
       return;
     }
     if (secret !== confirm) {
-      showToast("error", "两次输入不一致");
+      showToast("error", t("settingsQuickUnlock.mismatch"));
       return;
     }
     setSaving(true);
@@ -588,7 +620,7 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
       setSecret("");
       setConfirm("");
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "启用快速解锁失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsQuickUnlock.enableFailed"));
     } finally {
       setSaving(false);
     }
@@ -600,7 +632,7 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
     try {
       await onDisable();
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "关闭快速解锁失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsQuickUnlock.disableFailed"));
     } finally {
       setSaving(false);
     }
@@ -608,9 +640,9 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
 
   return <section className="card p-5 md:p-6">
     <div className="border-b border-line pb-4">
-      <div className="text-xs uppercase tracking-[0.24em] text-stone">quick unlock</div>
-      <h1 className="mt-2 font-serif text-3xl font-medium">本机快速解锁</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "当前浏览器已保存一个加密设备凭证；输入本机码即可快速查看敏感数据。" : "为当前浏览器设置一个独立解锁码。移动端可用纯数字，桌面端可用任意口令。"}</p>
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsQuickUnlock.eyebrow")}</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsQuickUnlock.title")}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? t("settingsQuickUnlock.enabledDesc") : t("settingsQuickUnlock.disabledDesc")}</p>
     </div>
     <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,14rem)_1fr_1fr_auto]">
       <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-line bg-panel p-1">
@@ -625,22 +657,23 @@ function QuickUnlockSettings({ enabled, mode: initialMode, sensitiveUnlocked, on
           }}
           disabled={!sensitiveUnlocked || saving}
         >
-          {item === "numeric" ? "数字" : "文本"}
+          {item === "numeric" ? t("settingsQuickUnlock.numeric") : t("settingsQuickUnlock.text")}
         </button>)}
       </div>
-      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => updateSecret(event.target.value)} placeholder={mode === "numeric" ? "本机数字解锁码" : "本机快速解锁口令"} disabled={!sensitiveUnlocked || saving} />
-      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => updateConfirm(event.target.value)} placeholder="再次输入" disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
-      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? "保存中…" : enabled ? "更新" : "启用"}</button>
+      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => updateSecret(event.target.value)} placeholder={mode === "numeric" ? t("settingsQuickUnlock.numericPlaceholder") : t("settingsQuickUnlock.textPlaceholder")} disabled={!sensitiveUnlocked || saving} />
+      <input type="password" inputMode={mode === "numeric" ? "numeric" : "text"} className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => updateConfirm(event.target.value)} placeholder={t("settingsQuickUnlock.confirmPlaceholder")} disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
+      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? t("settingsRuntime.saving") : enabled ? t("settingsQuickUnlock.update") : t("settingsQuickUnlock.enable")}</button>
     </div>
     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-stone">
-      <span>{mode === "numeric" ? "数字模式不设最小长度，解锁时会显示九宫格。" : "文本模式允许数字、字母、符号或中文。"}</span>
-      {enabled && <button type="button" className="text-brand disabled:opacity-50" disabled={saving} onClick={() => void disable()}>关闭当前设备快速解锁</button>}
+      <span>{mode === "numeric" ? t("settingsQuickUnlock.numericModeHint") : t("settingsQuickUnlock.textModeHint")}</span>
+      {enabled && <button type="button" className="text-brand disabled:opacity-50" disabled={saving} onClick={() => void disable()}>{t("settingsQuickUnlock.disable")}</button>}
     </div>
-    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">本机快速解锁只能在敏感数据已解锁时设置。</p>}
+    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">{t("settingsQuickUnlock.lockedHint")}</p>}
   </section>;
 }
 
 function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast }: { enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void>; showToast: ToastFn }) {
+  const { t } = useTranslation();
   const [secret, setSecret] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
@@ -648,11 +681,11 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast
   async function submit() {
     if (saving) return;
     if (!sensitiveUnlocked) {
-      showToast("error", "请先解锁敏感数据");
+      showToast("error", t("settingsOfflineUnlock.unlockFirst"));
       return;
     }
     if (secret !== confirm) {
-      showToast("error", "两次输入不一致");
+      showToast("error", t("settingsOfflineUnlock.mismatch"));
       return;
     }
     setSaving(true);
@@ -661,7 +694,7 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast
       setSecret("");
       setConfirm("");
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "启用离线解锁失败");
+      showToast("error", error instanceof Error ? error.message : t("settingsOfflineUnlock.enableFailed"));
     } finally {
       setSaving(false);
     }
@@ -669,20 +702,21 @@ function OfflineUnlockSettings({ enabled, sensitiveUnlocked, onEnable, showToast
 
   return <section className="card p-5 md:p-6">
     <div className="border-b border-line pb-4">
-      <div className="text-xs uppercase tracking-[0.24em] text-stone">offline unlock</div>
-      <h1 className="mt-2 font-serif text-3xl font-medium">离线解锁</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? "已为这个浏览器保存加密缓存；断网时可用离线解锁码查看余额和净资产。" : "设置后，完整敏感缓存会加密保存在当前浏览器，用于断网冷启动查看。"}</p>
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsOfflineUnlock.eyebrow")}</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsOfflineUnlock.title")}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? t("settingsOfflineUnlock.enabledDesc") : t("settingsOfflineUnlock.disabledDesc")}</p>
     </div>
     <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="离线解锁码" disabled={!sensitiveUnlocked || saving} />
-      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="再次输入" disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
-      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? "保存中…" : enabled ? "更新" : "启用"}</button>
+      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={t("settingsOfflineUnlock.codePlaceholder")} disabled={!sensitiveUnlocked || saving} />
+      <input type="password" className="h-12 rounded-xl border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder={t("settingsOfflineUnlock.confirmPlaceholder")} disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
+      <button type="button" className="h-12 rounded-xl bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? t("settingsRuntime.saving") : enabled ? t("settingsOfflineUnlock.update") : t("settingsOfflineUnlock.enable")}</button>
     </div>
-    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">离线解锁码只能在敏感数据已解锁时设置。</p>}
+    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">{t("settingsOfflineUnlock.lockedHint")}</p>}
   </section>;
 }
 
 function LocalAccessPanel() {
+  const { t } = useTranslation();
   const [state, setState] = useState<LocalAccessState | null>(() => readLocalAccessState());
 
   useEffect(() => {
@@ -695,32 +729,32 @@ function LocalAccessPanel() {
 
   if (!state) return null;
 
-  const accessLabel = state.localOnly ? "仅本机" : state.privateLan ? "局域网" : "公网 / 隧道";
+  const accessLabel = state.localOnly ? t("settingsLocalAccess.localOnly") : state.privateLan ? t("settingsLocalAccess.lan") : t("settingsLocalAccess.publicTunnel");
   const readiness = state.secure
-    ? "当前 Origin 可用于 PWA 安装与 Passkey。"
-    : "当前不是安全上下文；手机安装、Passkey 和通知建议切到 HTTPS。";
+    ? t("settingsLocalAccess.secureReady")
+    : t("settingsLocalAccess.notSecure");
   const phoneHint = state.localOnly
-    ? "手机无法直接访问 localhost；请使用局域网域名/IP、Tailscale、Cloudflare Tunnel 或 Caddy HTTPS。"
+    ? t("settingsLocalAccess.phoneLocalHint")
     : state.privateLan
-      ? "手机可在同一网络下访问；若要使用 Passkey，请给这个地址配置稳定 HTTPS。"
-      : "适合跨网络访问；请确认这个域名会长期保留，避免 Passkey Origin 变化。";
+      ? t("settingsLocalAccess.phoneLanHint")
+      : t("settingsLocalAccess.phonePublicHint");
 
   return <section className="card p-5 md:p-6">
     <div className="border-b border-line pb-4">
-      <div className="text-xs uppercase tracking-[0.24em] text-stone">local access</div>
-      <h1 className="mt-2 font-serif text-3xl font-medium">本地优先访问</h1>
+      <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("settingsLocalAccess.eyebrow")}</div>
+      <h1 className="mt-2 font-serif text-3xl font-medium">{t("settingsLocalAccess.title")}</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{phoneHint}</p>
     </div>
     <div className="mt-6 grid gap-3 md:grid-cols-3">
-      <StatusTile title="当前 Origin" value={state.origin} />
-      <StatusTile title="访问范围" value={accessLabel} />
-      <StatusTile title="PWA 模式" value={state.standalone ? "已独立打开" : "浏览器标签页"} />
+      <StatusTile title={t("settingsLocalAccess.currentOrigin")} value={state.origin} />
+      <StatusTile title={t("settingsLocalAccess.accessScope")} value={accessLabel} />
+      <StatusTile title={t("settingsLocalAccess.pwaMode")} value={state.standalone ? t("settingsLocalAccess.standalone") : t("settingsLocalAccess.browserTab")} />
     </div>
     <div className={`mt-4 rounded-xl border px-4 py-3 text-sm leading-6 ${state.secure ? "border-brand/30 bg-brand/10 text-brand" : "border-[var(--danger)]/30 bg-[var(--danger)]/10 text-[var(--danger)]"}`}>
       {readiness}
     </div>
     <a className="mt-4 inline-flex rounded-xl border border-line bg-panel px-3 py-2 text-sm text-brand hover:bg-tag" href="https://github.com/qiaoborui/beancount-ledger-web/blob/main/docs/local-first-pwa.md" target="_blank" rel="noreferrer">
-      打开本地优先部署指南
+      {t("settingsLocalAccess.openGuide")}
     </a>
   </section>;
 }

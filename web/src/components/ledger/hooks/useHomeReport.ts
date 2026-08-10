@@ -3,6 +3,7 @@ import { apiEndpointLedgerScope, apiFetch } from "@/lib/apiEndpoints";
 import { readJson } from "@/lib/clientFetch";
 import { timeRangeToParams, type TimeRange } from "@/lib/timeRange";
 import type { HomeReport } from "../types";
+import i18n from "@/i18n";
 
 const reportCache = new Map<string, HomeReport>();
 const reportInFlight = new Map<string, Promise<HomeReport>>();
@@ -41,7 +42,7 @@ export function useHomeReport({ timeRange, valuationCurrency, ledgerRevision, en
           onSensitiveLocked();
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : "财务简报加载失败");
+        setError(loadError instanceof Error ? loadError.message : i18n.t("homeReport.loadFailed"));
       } finally {
         if (active) setLoading(false);
       }
@@ -63,9 +64,9 @@ async function fetchHomeReport(params: string, cacheKey: string) {
 
   const request = (async () => {
     const response = await apiFetch(`/api/ledger/home-report?${params}`, undefined, { kind: "read" });
-    if (response.status === 423 || response.status === 401) throw new HomeReportLockedError("Home report locked");
+    if (response.status === 423 || response.status === 401) throw new HomeReportLockedError(i18n.t("homeReport.locked"));
     const data = await readJson<HomeReport & { error?: string }>(response);
-    if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
+    if (!response.ok) throw new Error(data.error || i18n.t("homeReport.requestFailed", { status: response.status }));
     return data;
   })();
 

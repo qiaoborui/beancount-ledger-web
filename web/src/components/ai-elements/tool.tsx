@@ -10,6 +10,7 @@ import {
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -35,14 +36,14 @@ export type ToolHeaderProps = {
     }
 );
 
-const statusLabels: Record<ToolPart["state"], string> = {
-  "approval-requested": "待确认",
-  "approval-responded": "已响应",
-  "input-available": "运行中",
-  "input-streaming": "等待中",
-  "output-available": "已完成",
-  "output-denied": "已拒绝",
-  "output-error": "失败",
+const statusLabelKeys: Record<ToolPart["state"], string> = {
+  "approval-requested": "aiTool.approvalRequested",
+  "approval-responded": "aiTool.approvalResponded",
+  "input-available": "aiTool.running",
+  "input-streaming": "aiTool.waiting",
+  "output-available": "aiTool.completed",
+  "output-denied": "aiTool.denied",
+  "output-error": "aiTool.failed",
 };
 
 const statusIcons: Record<ToolPart["state"], ReactNode> = {
@@ -55,12 +56,15 @@ const statusIcons: Record<ToolPart["state"], ReactNode> = {
   "output-error": <XCircleIcon className="size-4 text-red-600" />,
 };
 
-export const getStatusBadge = (status: ToolPart["state"]) => (
-  <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
-    {statusIcons[status]}
-    {statusLabels[status]}
-  </Badge>
-);
+export const getStatusBadge = (status: ToolPart["state"]) => {
+  const { t } = useTranslation();
+  return (
+    <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
+      {statusIcons[status]}
+      {t(statusLabelKeys[status])}
+    </Badge>
+  );
+};
 
 export const ToolHeader = ({ className, title, type, state, toolName, ...props }: ToolHeaderProps) => {
   const derivedName = type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
@@ -93,12 +97,15 @@ export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
-    <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">参数</h4>
-    <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs text-foreground">{formatToolValue(input)}</pre>
-  </div>
-);
+export const ToolInput = ({ className, input, ...props }: ToolInputProps) => {
+  const { t } = useTranslation();
+  return (
+    <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
+      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("aiTool.parameters")}</h4>
+      <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 text-xs text-foreground">{formatToolValue(input)}</pre>
+    </div>
+  );
+};
 
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolPart["output"];
@@ -106,6 +113,7 @@ export type ToolOutputProps = ComponentProps<"div"> & {
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
+  const { t } = useTranslation();
   if (!(output || errorText)) {
     return null;
   }
@@ -119,7 +127,7 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
-      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{errorText ? "错误" : "结果"}</h4>
+      <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{errorText ? t("aiTool.error") : t("aiTool.result")}</h4>
       <div className={cn("overflow-x-auto rounded-md p-3 text-xs", errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground")}>
         {errorText && <div>{errorText}</div>}
         {!errorText && Output}

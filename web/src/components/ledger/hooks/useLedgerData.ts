@@ -6,6 +6,7 @@ import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedge
 import { readEncryptedLedgerCache, writeEncryptedLedgerCache } from "../offlineUnlock";
 import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 import { apiEndpointLedgerScope } from "@/lib/apiEndpoints";
+import i18n from "@/i18n";
 
 const freshLedgerCacheKeys = new Set<string>();
 
@@ -344,12 +345,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
           applyCache(cache, unlocked, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency, ledgerScope);
           if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
             offlineNoticeKeyRef.current = noticeKey;
-            showToastRef.current("info", offlineOrNetworkError(error) ? "当前离线，已显示上次缓存的数据" : "当前后端暂时无法验证登录状态，已显示上次缓存的数据");
+            showToastRef.current("info", offlineOrNetworkError(error) ? i18n.t("ledgerData.offlineCached") : i18n.t("ledgerData.backendAuthUnverified"));
           }
         } else {
           if (shouldShowOfflineLedgerNotice(offlineNoticeKeyRef.current, noticeKey)) {
             offlineNoticeKeyRef.current = noticeKey;
-            showToastRef.current("info", offlineOrNetworkError(error) ? "当前离线，已保留登录状态；暂无缓存账本可显示" : "当前后端暂时无法验证登录状态；可前往设置切换后端");
+            showToastRef.current("info", offlineOrNetworkError(error) ? i18n.t("ledgerData.offlineLoggedIn") : i18n.t("ledgerData.backendUnverifiedSwitch"));
           }
         }
         return;
@@ -359,7 +360,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       onSensitiveUnlockChange(false);
       latestContextRef.current = { range: timeRange, unlocked: false, valuationCurrency, ledgerScope };
       clearLedgerData();
-      showToastRef.current("error", "无法连接当前后端，请在登录页切换后端后重试");
+      showToastRef.current("error", i18n.t("ledgerData.cannotConnect"));
       return;
     }
     const hasPasskey = Boolean(passkey.registered);
@@ -412,7 +413,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     const ledgerScope = apiEndpointLedgerScope();
     const cache = await readEncryptedLedgerCache(timeRange, valuationCurrency, secret, ledgerScope);
     if (!cache) {
-      showToast("error", "这个时间范围还没有可解密的离线缓存");
+      showToast("error", i18n.t("ledgerData.noOfflineCache"));
       return false;
     }
     sessionStorage.removeItem("ledger_locked_at");
@@ -420,7 +421,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     sessionStorage.setItem("ledger_unlocked", "1");
     onSensitiveUnlockChange(true);
     applyCache({ ...cache, sensitiveCached: true }, true, timeRange, cache.valuationCurrency ?? valuationCurrency, valuationCurrency, ledgerScope);
-    showToast("success", "已离线解锁缓存数据");
+    showToast("success", i18n.t("ledgerData.offlineUnlocked"));
     return true;
   }, [applyCache, onSensitiveUnlockChange, showToast, timeRange, valuationCurrency]);
 
@@ -429,9 +430,9 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
     setRefreshing(true);
     try {
       await load(true);
-      showToast("success", unlocked ? "已刷新到最新账本" : "已刷新普通账本数据；余额和净资产仍保持隐藏");
+      showToast("success", unlocked ? i18n.t("ledgerData.refreshedLatest") : i18n.t("ledgerData.refreshedHidden"));
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "刷新失败");
+      showToast("error", error instanceof Error ? error.message : i18n.t("ledgerData.refreshFailed"));
     } finally {
       setRefreshing(false);
     }
@@ -443,7 +444,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
 
   useEffect(() => {
     void load().catch((error) => {
-      showToastRef.current("error", error instanceof Error ? error.message : "账本数据加载失败");
+      showToastRef.current("error", error instanceof Error ? error.message : i18n.t("ledgerData.loadFailed"));
     });
   }, [load]);
 

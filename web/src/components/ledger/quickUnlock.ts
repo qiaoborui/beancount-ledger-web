@@ -1,5 +1,6 @@
 import { fetchJson, readJson } from "@/lib/clientFetch";
 import { apiEndpointAuthScope, apiEndpointAuthStorageKey, apiFetch } from "@/lib/apiEndpoints";
+import i18n from "@/i18n";
 
 export type QuickUnlockMode = "numeric" | "text";
 
@@ -108,7 +109,7 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 function requireSubtleCrypto() {
-  if (typeof crypto === "undefined" || !crypto.subtle) throw new Error("当前浏览器不支持本地加密");
+  if (typeof crypto === "undefined" || !crypto.subtle) throw new Error(i18n.t("quickUnlock.noCrypto"));
   return crypto.subtle;
 }
 
@@ -161,11 +162,11 @@ export function quickUnlockSecretIsValid(secret: string, mode: QuickUnlockMode) 
 function defaultDeviceName(mode: QuickUnlockMode) {
   if (typeof navigator === "undefined") return mode === "numeric" ? "Mobile browser" : "Desktop browser";
   const platform = navigator.platform || "Browser";
-  return `${platform} ${mode === "numeric" ? "numeric" : "text"} unlock`;
+  return i18n.t("quickUnlock.deviceName", { platform, mode: mode === "numeric" ? i18n.t("quickUnlock.numericMode") : i18n.t("quickUnlock.textMode") });
 }
 
 export async function enableQuickLedgerUnlock(secret: string, mode: QuickUnlockMode) {
-  if (!quickUnlockSecretIsValid(secret, mode)) throw new Error(mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
+  if (!quickUnlockSecretIsValid(secret, mode)) throw new Error(mode === "numeric" ? i18n.t("quickUnlock.numericRequired") : i18n.t("quickUnlock.passphraseRequired"));
   const endpointId = apiEndpointAuthScope();
   const registered = await fetchJson<QuickUnlockRegisterResponse>("/api/quick-unlock/register", {
     method: "POST",
@@ -180,8 +181,8 @@ export async function enableQuickLedgerUnlock(secret: string, mode: QuickUnlockM
 export async function unlockWithQuickLedgerSecret(secret: string) {
   const endpointId = apiEndpointAuthScope();
   const config = readConfig(endpointId);
-  if (!config) throw new Error("还没有设置本机快速解锁");
-  if (!quickUnlockSecretIsValid(secret, config.mode)) throw new Error(config.mode === "numeric" ? "请输入数字解锁码" : "请输入本机解锁口令");
+  if (!config) throw new Error(i18n.t("quickUnlock.notConfigured"));
+  if (!quickUnlockSecretIsValid(secret, config.mode)) throw new Error(config.mode === "numeric" ? i18n.t("quickUnlock.numericRequired") : i18n.t("quickUnlock.passphraseRequired"));
   const token = await decryptText(config.tokenCiphertext, config.tokenIv, secret, config);
   const verify = await apiFetch("/api/quick-unlock/verify", {
     method: "POST",
@@ -189,7 +190,7 @@ export async function unlockWithQuickLedgerSecret(secret: string) {
     body: JSON.stringify({ deviceId: config.deviceId, token }),
   }, { kind: "auth" });
   const data = await readJson<{ error?: string }>(verify);
-  if (!verify.ok) throw new Error(data.error || "快速解锁失败");
+  if (!verify.ok) throw new Error(data.error || i18n.t("quickUnlock.unlockFailed"));
 }
 
 export async function revokeQuickLedgerUnlock() {
@@ -204,6 +205,6 @@ export async function revokeQuickLedgerUnlock() {
   }, { kind: "auth" });
   if (!res.ok) {
     const data = await readJson<{ error?: string }>(res);
-    throw new Error(data.error || "撤销快速解锁失败");
+    throw new Error(data.error || i18n.t("quickUnlock.revokeFailed"));
   }
 }

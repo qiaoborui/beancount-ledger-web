@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { Archive, ArchiveRestore, Ban, Bot, Check, ChevronDown, ChevronUp, ClipboardPenLine, ExternalLink, History, LineChart as LineChartIcon, ListChecks, LoaderCircle, LockKeyhole, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Send, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiEndpointLedgerScope, apiFetch, apiSensitiveDataLockedEvent } from "@/lib/apiEndpoints";
+import i18n from "@/i18n";
 import { readLedgerAgentStream, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -42,17 +43,17 @@ type TimelinePagination = { loading: boolean; nextBefore: number | null };
 type BQLColumn = { name: string; type: string };
 type BQLResult = { columns: BQLColumn[]; rows: unknown[][]; query: string; warnings?: string[]; valuationCurrency: string; rowCount: number };
 
-type AgentStarter = { label: string; description: string; prompt: string; icon: ReactNode };
+type AgentStarter = { labelKey: string; descriptionKey: string; promptKey: string; icon: ReactNode };
 
 const agentStarters: AgentStarter[] = [
-  { label: "支出分析", description: "分类、趋势与异常", prompt: "分析当前周期的支出，按分类、趋势和异常流水给我一份简洁结论。", icon: <LineChartIcon className="h-4 w-4" /> },
-  { label: "生成记账草稿", description: "先解析，再等待确认", prompt: "帮我整理一笔交易为待确认的 Beancount 记账草稿：", icon: <ClipboardPenLine className="h-4 w-4" /> },
-  { label: "对账检查", description: "定位余额和待处理项", prompt: "检查当前账户范围的待对账项、异常余额和可能重复的流水，给出处理建议。", icon: <ListChecks className="h-4 w-4" /> },
-  { label: "账户维护", description: "创建、调整或关闭账户", prompt: "读取现有账户结构，为我创建、调整或关闭账户生成待确认草稿。", icon: <Wrench className="h-4 w-4" /> },
-  { label: "导入整理", description: "检查重复与分类缺失", prompt: "检查最近导入的流水，找出重复项、分类缺失和需要人工确认的项目。", icon: <Sparkles className="h-4 w-4" /> },
+  { labelKey: "agentWorkspace.starterExpenseAnalysis", descriptionKey: "agentWorkspace.starterExpenseAnalysisDesc", promptKey: "agentWorkspace.starterExpenseAnalysisPrompt", icon: <LineChartIcon className="h-4 w-4" /> },
+  { labelKey: "agentWorkspace.starterDraft", descriptionKey: "agentWorkspace.starterDraftDesc", promptKey: "agentWorkspace.starterDraftPrompt", icon: <ClipboardPenLine className="h-4 w-4" /> },
+  { labelKey: "agentWorkspace.starterReconcile", descriptionKey: "agentWorkspace.starterReconcileDesc", promptKey: "agentWorkspace.starterReconcilePrompt", icon: <ListChecks className="h-4 w-4" /> },
+  { labelKey: "agentWorkspace.starterAccounts", descriptionKey: "agentWorkspace.starterAccountsDesc", promptKey: "agentWorkspace.starterAccountsPrompt", icon: <Wrench className="h-4 w-4" /> },
+  { labelKey: "agentWorkspace.starterImports", descriptionKey: "agentWorkspace.starterImportsDesc", promptKey: "agentWorkspace.starterImportsPrompt", icon: <Sparkles className="h-4 w-4" /> },
 ];
 
-const suggestions = agentStarters.slice(0, 4).map((starter) => starter.prompt);
+const suggestions = agentStarters.slice(0, 4).map((starter) => i18n.t(starter.promptKey));
 
 const chartColors = ["var(--chart-palette-1, var(--chart-primary))", "var(--chart-palette-2, var(--stone))", "var(--chart-palette-3, var(--brand))", "var(--chart-palette-4, var(--warm))"];
 
@@ -78,7 +79,7 @@ function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = `se
 }
 
 function sessionLabel(session: AgentSession) {
-  return session.title || timelineTitle(session.timeline) || "新对话";
+  return session.title || timelineTitle(session.timeline) || i18n.t("agentWorkspace.newChat");
 }
 
 function timelineTitle(timeline: TimelineItem[]) {
@@ -93,7 +94,7 @@ export function activeTurnTools(timeline: TimelineItem[]) {
 }
 
 function sessionTime(session: AgentSession) {
-  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(session.updatedAt);
+  return new Intl.DateTimeFormat(i18n.language, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(session.updatedAt);
 }
 
 export function LedgerAgentWorkspace({
@@ -128,7 +129,7 @@ export function LedgerAgentWorkspace({
   const [mobileSessionListOpen, setMobileSessionListOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("就绪");
+  const [status, setStatus] = useState(i18n.t("agentWorkspace.ready"));
   const [streamingText, setStreamingText] = useState("");
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const desktopViewport = useDesktopViewport();
@@ -176,7 +177,7 @@ export function LedgerAgentWorkspace({
     setInput("");
     setStreamingText("");
     streamingMessageIDRef.current = "";
-    setStatus("就绪");
+    setStatus(i18n.t("agentWorkspace.ready"));
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
@@ -192,7 +193,7 @@ export function LedgerAgentWorkspace({
 
   async function deleteSession(session: AgentSession) {
     if (busy || sessionMutationID) return;
-    if (!window.confirm(`删除“${sessionLabel(session)}”及其 Agent 会话记录？此操作无法恢复。`)) return;
+    if (!window.confirm(i18n.t("agentWorkspace.deleteConfirm", { name: sessionLabel(session) }))) return;
     setSessionMutationID(session.id);
     try {
       await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(session.serverSessionId || `session-${session.id}`)}`, { method: "DELETE" }, { kind: "write" });
@@ -202,9 +203,9 @@ export function LedgerAgentWorkspace({
         if (next) setActiveSessionId(next.id);
         else createSession();
       }
-      showToast("success", "会话已删除");
+      showToast("success", i18n.t("agentWorkspace.sessionDeleted"));
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "删除会话失败");
+      showToast("error", error instanceof Error ? error.message : i18n.t("agentWorkspace.sessionDeleteFailed"));
     } finally {
       setSessionMutationID("");
     }
@@ -218,7 +219,7 @@ export function LedgerAgentWorkspace({
     setInput("");
     setStreamingText("");
     streamingMessageIDRef.current = "";
-    setStatus("就绪");
+    setStatus(i18n.t("agentWorkspace.ready"));
   }
 
   useEffect(() => {
@@ -320,7 +321,7 @@ export function LedgerAgentWorkspace({
     const prompt = text.trim();
     if (!prompt || busy) return;
     if (containsSensitiveAgentInput(prompt)) {
-      showToast("error", "请勿在 Agent 对话中输入密码、验证码、令牌或完整卡号");
+      showToast("error", i18n.t("agentWorkspace.sensitiveInputWarning"));
       return;
     }
     setOpen(true);
@@ -328,7 +329,7 @@ export function LedgerAgentWorkspace({
     setInput("");
     setStreamingText("");
     streamingMessageIDRef.current = nextID();
-    setStatus("正在连接 Agent");
+    setStatus(i18n.t("agentWorkspace.connecting"));
     updateTimeline((current) => [...current, { kind: "message", id: nextID(), role: "user", content: prompt }]);
     try {
       const response = await apiFetch("/api/ai/agent/turn", {
@@ -339,11 +340,11 @@ export function LedgerAgentWorkspace({
       const final = await consumeStream(response);
       finishTurn(final);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Agent 请求失败";
+      const message = error instanceof Error ? error.message : i18n.t("agentWorkspace.agentRequestFailed");
       const messageID = streamingMessageIDRef.current || nextID();
       setStreamingText("");
-      updateTimeline((current) => [...current, { kind: "message", id: messageID, role: "assistant", content: `处理失败：${message}` }]);
-      setStatus("处理失败");
+      updateTimeline((current) => [...current, { kind: "message", id: messageID, role: "assistant", content: i18n.t("agentWorkspace.agentProcessingFailed", { message }) }]);
+      setStatus(i18n.t("agentWorkspace.processingFailed"));
       showToast("error", message);
     } finally {
       setBusy(false);
@@ -365,7 +366,7 @@ export function LedgerAgentWorkspace({
 
   function finishTurn(final: AgentFinal) {
     updateActiveSession((session) => ({ ...session, serverSessionId: final.sessionId, updatedAt: Date.now() }));
-    setStatus(final.status === "cancelled" ? "已取消" : "就绪");
+    setStatus(final.status === "cancelled" ? i18n.t("agentWorkspace.cancelled") : i18n.t("agentWorkspace.ready"));
     const message = final.message.trim();
     if (message) {
       const messageID = streamingMessageIDRef.current || nextID();
@@ -374,7 +375,7 @@ export function LedgerAgentWorkspace({
     }
     void loadTimelinePage(final.sessionId);
     if (final.refreshLedger) {
-      showToast("success", "账本已更新");
+      showToast("success", i18n.t("agentWorkspace.ledgerUpdated"));
       void onChanged();
     }
   }
@@ -394,36 +395,36 @@ export function LedgerAgentWorkspace({
 
   function selectStarter(starter: AgentStarter) {
     if (busy) return;
-    setInput(starter.prompt);
+    setInput(i18n.t(starter.promptKey));
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
   const panel = (className: string, scrollContainerRef: RefObject<HTMLDivElement | null>) => (
     <section className={className}
-      aria-label="全局账本 Agent"
+      aria-label={i18n.t("agentWorkspace.globalAgentLabel")}
     >
       <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand text-paper"><Bot className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-ink">账本 Agent</h2>
+            <h2 className="truncate text-sm font-semibold text-ink">{i18n.t("agentWorkspace.title")}</h2>
             <p className="truncate text-xs text-stone">{status}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8 md:hidden" title="查看会话历史" aria-label="查看会话历史" onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
-          {presentation === "dock" && <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? "退出全屏" : "全屏查看会话"} aria-label={desktopFullscreen ? "退出全屏" : "全屏查看会话"} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>}
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8 md:hidden" title={i18n.t("agentWorkspace.viewSessionHistory")} aria-label={i18n.t("agentWorkspace.viewSessionHistory")} onClick={() => setMobileSessionListOpen(true)}><History className="h-4 w-4" /></button>
+          {presentation === "dock" && <button type="button" className="hidden h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag md:grid" title={desktopFullscreen ? i18n.t("agentWorkspace.exitFullscreen") : i18n.t("agentWorkspace.fullscreenView")} aria-label={desktopFullscreen ? i18n.t("agentWorkspace.exitFullscreen") : i18n.t("agentWorkspace.fullscreenView")} onClick={() => setDesktopFullscreen((current) => !current)}>{desktopFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</button>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45 md:h-8 md:w-8" aria-label="管理当前会话" title="管理当前会话" disabled={busy || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag disabled:opacity-45 md:h-8 md:w-8" aria-label={i18n.t("agentWorkspace.manageSession")} title={i18n.t("agentWorkspace.manageSession")} disabled={busy || Boolean(sessionMutationID)}><MoreHorizontal className="h-4 w-4" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-line bg-paper text-ink">
-              <DropdownMenuItem onSelect={() => archiveSession(activeSession, !activeSession.archived)}>{activeSession.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{activeSession.archived ? "取消归档" : "归档会话"}</DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onSelect={() => void deleteSession(activeSession)}><Trash2 className="h-4 w-4" />删除会话</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => archiveSession(activeSession, !activeSession.archived)}>{activeSession.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}{activeSession.archived ? i18n.t("agentWorkspace.unarchiveSession") : i18n.t("agentWorkspace.archiveSession")}</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={() => void deleteSession(activeSession)}><Trash2 className="h-4 w-4" />{i18n.t("agentWorkspace.deleteSession")}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
-          {presentation === "dock" && <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="关闭" aria-label="关闭" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>}
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8" title={i18n.t("agentWorkspace.newSession")} aria-label={i18n.t("agentWorkspace.newSession")} onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+          {presentation === "dock" && <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title={i18n.t("agentWorkspace.close")} aria-label={i18n.t("agentWorkspace.close")} onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>}
         </div>
       </header>
 
@@ -432,8 +433,8 @@ export function LedgerAgentWorkspace({
           {suggestions.map((suggestion) => <button key={suggestion} type="button" className="min-h-11 rounded-md border border-line bg-panel px-3 py-2 text-left text-sm text-olive hover:bg-tag" onClick={() => void sendMessage(suggestion)} disabled={busy}>{suggestion}</button>)}
         </div>}
         <div className="min-w-0 max-w-full space-y-3">
-          {timelinePagination[sessionId]?.nextBefore != null && <button type="button" className="w-full rounded-md border border-line bg-panel px-3 py-2 text-xs text-olive hover:bg-tag disabled:opacity-50" onClick={() => void loadTimelinePage(sessionId, timelinePagination[sessionId].nextBefore ?? undefined)} disabled={busy || timelinePagination[sessionId]?.loading}>{timelinePagination[sessionId]?.loading ? "正在加载更早记录" : `加载更早记录（每页 ${AGENT_TIMELINE_PAGE_SIZE} 条）`}</button>}
-          {timelinePagination[sessionId]?.loading && timeline.length === 0 && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />正在加载会话记录</div>}
+          {timelinePagination[sessionId]?.nextBefore != null && <button type="button" className="w-full rounded-md border border-line bg-panel px-3 py-2 text-xs text-olive hover:bg-tag disabled:opacity-50" onClick={() => void loadTimelinePage(sessionId, timelinePagination[sessionId].nextBefore ?? undefined)} disabled={busy || timelinePagination[sessionId]?.loading}>{timelinePagination[sessionId]?.loading ? i18n.t("agentWorkspace.loadEarlier") : i18n.t("agentWorkspace.loadEarlierPage", { count: AGENT_TIMELINE_PAGE_SIZE })}</button>}
+          {timelinePagination[sessionId]?.loading && timeline.length === 0 && <div className="flex items-center gap-2 py-2 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin" />{i18n.t("agentWorkspace.loadingTimeline")}</div>}
           {timeline.map((item) => {
             if (item.kind === "message") return <MessageBubble key={item.id} item={item} />;
             if (item.kind === "tool" && liveToolIDs.has(item.id)) return null;
@@ -463,28 +464,28 @@ export function LedgerAgentWorkspace({
                 handleSubmit();
               }
             }}
-            placeholder="询问账本，或从工具开始"
+            placeholder={i18n.t("agentWorkspace.inputPlaceholder")}
             disabled={busy}
           />
           <div className="flex items-center justify-between border-t border-line px-2 py-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy} aria-label="打开 Agent 工具">
-                  <SlidersHorizontal className="h-3.5 w-3.5 text-brand" />工具
+                <button type="button" className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-olive active:scale-95 hover:bg-tag disabled:opacity-45" disabled={busy} aria-label={i18n.t("agentWorkspace.openTools")}>
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-brand" />{i18n.t("agentWorkspace.tools")}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-72 border-line bg-paper text-ink">
-                <DropdownMenuLabel className="text-xs text-stone">选择一个起点</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-xs text-stone">{i18n.t("agentWorkspace.chooseStarter")}</DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-line" />
-                {agentStarters.map((starter) => <DropdownMenuItem key={starter.label} className="items-start gap-2.5 py-2.5 focus:bg-tag focus:text-ink" onSelect={() => selectStarter(starter)}>
+                {agentStarters.map((starter) => <DropdownMenuItem key={starter.labelKey} className="items-start gap-2.5 py-2.5 focus:bg-tag focus:text-ink" onSelect={() => selectStarter(starter)}>
                   <span className="mt-0.5 text-brand">{starter.icon}</span>
-                  <span><span className="block text-sm font-medium">{starter.label}</span><span className="mt-0.5 block text-xs text-stone">{starter.description}</span></span>
+                  <span><span className="block text-sm font-medium">{i18n.t(starter.labelKey)}</span><span className="mt-0.5 block text-xs text-stone">{i18n.t(starter.descriptionKey)}</span></span>
                 </DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="flex items-center gap-1.5">
-              <span className="hidden text-[11px] text-stone sm:inline">Enter 发送</span>
-              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label="发送" title="发送"><Send className="h-4 w-4" /></button>
+              <span className="hidden text-[11px] text-stone sm:inline">{i18n.t("agentWorkspace.enterToSend")}</span>
+              <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand text-paper transition-transform active:scale-95 disabled:opacity-45" onClick={handleSubmit} disabled={busy || !input.trim()} aria-label={i18n.t("agentWorkspace.send")} title={i18n.t("agentWorkspace.send")}><Send className="h-4 w-4" /></button>
             </div>
           </div>
         </div>
@@ -493,19 +494,19 @@ export function LedgerAgentWorkspace({
   );
 
   const mobileSessionList = createPortal(
-    <section className="fixed inset-0 z-[110] flex flex-col overflow-hidden bg-paper md:hidden" aria-label="移动端会话历史">
+    <section className="fixed inset-0 z-[110] flex flex-col overflow-hidden bg-paper md:hidden" aria-label={i18n.t("agentWorkspace.mobileSessionHistory")}>
       <header className="flex shrink-0 items-center justify-between border-b border-line bg-panel px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
-        <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div>
+        <div><h2 className="text-sm font-semibold text-ink">{i18n.t("agentWorkspace.sessionHistory")}</h2><p className="text-xs text-stone">{i18n.t("agentWorkspace.sessionCount", { count: sessions.length - archivedSessionCount })}</p></div>
         <div className="flex items-center gap-1">
-          {archivedSessionCount > 0 && <button type="button" className="h-9 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag" title="返回聊天" aria-label="返回聊天" onClick={() => setMobileSessionListOpen(false)}><X className="h-4 w-4" /></button>
+          {archivedSessionCount > 0 && <button type="button" className="h-9 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? i18n.t("agentWorkspace.hideArchived") : i18n.t("agentWorkspace.archivedCount", { count: archivedSessionCount })}</button>}
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title={i18n.t("agentWorkspace.newSession")} aria-label={i18n.t("agentWorkspace.newSession")} onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag" title={i18n.t("agentWorkspace.backToChat")} aria-label={i18n.t("agentWorkspace.backToChat")} onClick={() => setMobileSessionListOpen(false)}><X className="h-4 w-4" /></button>
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         {[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-2 w-full rounded-md border px-3 py-3 text-left transition ${session.id === activeSession.id ? "border-brand bg-brand text-paper" : "border-line bg-panel text-ink active:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
-          <span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span>
-          <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
+          <span className="block truncate text-sm font-medium">{session.archived && i18n.t("agentWorkspace.archivedPrefix")}{sessionLabel(session)}</span>
+          <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {i18n.t("agentWorkspace.loadedCount", { count: session.timeline.length })}</span>
         </button>)}
       </div>
     </section>,
@@ -513,10 +514,10 @@ export function LedgerAgentWorkspace({
   );
 
   if (presentation === "page") {
-    const pageWorkspace = <section className={`ledger-agent-page flex min-h-0 min-w-0 max-w-full overflow-hidden bg-paper ${desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"}`} aria-label="账本 Agent 工作区">
-    <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-line bg-panel md:flex" aria-label="Agent 会话历史">
-      <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div><div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div></div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span></button>)}</div>
+    const pageWorkspace = <section className={`ledger-agent-page flex min-h-0 min-w-0 max-w-full overflow-hidden bg-paper ${desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"}`} aria-label={i18n.t("agentWorkspace.agentWorkspaceLabel")}>
+    <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-line bg-panel md:flex" aria-label={i18n.t("agentWorkspace.agentSessionHistory")}>
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4"><div><h2 className="text-sm font-semibold text-ink">{i18n.t("agentWorkspace.sessionHistory")}</h2><p className="text-xs text-stone">{i18n.t("agentWorkspace.sessionCount", { count: sessions.length - archivedSessionCount })}</p></div><div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? i18n.t("agentWorkspace.hideArchived") : i18n.t("agentWorkspace.archivedCount", { count: archivedSessionCount })}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title={i18n.t("agentWorkspace.newSession")} aria-label={i18n.t("agentWorkspace.newSession")} onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div></div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">{[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}><span className="block truncate text-sm font-medium">{session.archived && i18n.t("agentWorkspace.archivedPrefix")}{sessionLabel(session)}</span><span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {i18n.t("agentWorkspace.loadedCount", { count: session.timeline.length })}</span></button>)}</div>
     </aside>
     {panel("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-paper", desktopScrollRef)}
     </section>;
@@ -524,20 +525,20 @@ export function LedgerAgentWorkspace({
   }
 
   return <>
-    <aside className={`ledger-agent-dock hidden min-w-0 ${desktopFullscreen ? "" : "md:block"}`} data-open={open && !desktopFullscreen ? "true" : "false"} aria-label="账本 Agent 侧栏">
+    <aside className={`ledger-agent-dock hidden min-w-0 ${desktopFullscreen ? "" : "md:block"}`} data-open={open && !desktopFullscreen ? "true" : "false"} aria-label={i18n.t("agentWorkspace.agentSidebar")}>
       {open && !desktopFullscreen && panel("flex h-full w-full min-w-0 flex-col overflow-hidden bg-paper", desktopScrollRef)}
     </aside>
     {open && desktopFullscreen && createPortal(
-      <section className="fixed inset-0 z-[100] hidden overflow-hidden bg-paper md:flex" aria-label="账本 Agent 全屏工作区">
-        <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel" aria-label="Agent 会话历史">
+      <section className="fixed inset-0 z-[100] hidden overflow-hidden bg-paper md:flex" aria-label={i18n.t("agentWorkspace.agentFullscreen")}>
+        <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel" aria-label={i18n.t("agentWorkspace.agentSessionHistory")}>
           <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4">
-            <div><h2 className="text-sm font-semibold text-ink">会话历史</h2><p className="text-xs text-stone">{sessions.length - archivedSessionCount} 个会话</p></div>
-            <div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? "隐藏归档" : `已归档 ${archivedSessionCount}`}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title="新建会话" aria-label="新建会话" onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div>
+            <div><h2 className="text-sm font-semibold text-ink">{i18n.t("agentWorkspace.sessionHistory")}</h2><p className="text-xs text-stone">{i18n.t("agentWorkspace.sessionCount", { count: sessions.length - archivedSessionCount })}</p></div>
+            <div className="flex items-center gap-1">{archivedSessionCount > 0 && <button type="button" className="h-8 rounded-md px-2 text-xs text-stone hover:bg-tag" onClick={() => setShowArchivedSessions((current) => !current)}>{showArchivedSessions ? i18n.t("agentWorkspace.hideArchived") : i18n.t("agentWorkspace.archivedCount", { count: archivedSessionCount })}</button>}<button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-brand hover:bg-tag disabled:opacity-50" title={i18n.t("agentWorkspace.newSession")} aria-label={i18n.t("agentWorkspace.newSession")} onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button></div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {[...sidebarSessions].sort((left, right) => right.updatedAt - left.updatedAt).map((session) => <button key={session.id} type="button" className={`mb-1 w-full rounded-md px-3 py-2.5 text-left transition ${session.id === activeSession.id ? "bg-brand text-paper" : "text-ink hover:bg-tag"}`} onClick={() => selectSession(session.id)} disabled={busy}>
-              <span className="block truncate text-sm font-medium">{session.archived && "已归档 · "}{sessionLabel(session)}</span>
-              <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · 已载入 {session.timeline.length} 条</span>
+              <span className="block truncate text-sm font-medium">{session.archived && i18n.t("agentWorkspace.archivedPrefix")}{sessionLabel(session)}</span>
+              <span className={`mt-1 block text-[11px] ${session.id === activeSession.id ? "text-paper/75" : "text-stone"}`}>{sessionTime(session)} · {i18n.t("agentWorkspace.loadedCount", { count: session.timeline.length })}</span>
             </button>)}
           </div>
         </aside>
@@ -556,20 +557,20 @@ function MessageBubble({ item }: { item: MessageItem }) {
 
 function AgentWorkStatus({ status, tools, streamingText, expandedTools, onToggleTool }: { status: string; tools: ToolItem[]; streamingText: string; expandedTools: Record<string, boolean>; onToggleTool: (id: string) => void }) {
   const completedTools = tools.filter((item) => item.tool.status === "completed").length;
-  return <section className="min-w-0 overflow-hidden rounded-md border border-line bg-panel" aria-live="polite" aria-label="Agent 当前工作状态">
+  return <section className="min-w-0 overflow-hidden rounded-md border border-line bg-panel" aria-live="polite" aria-label={i18n.t("agentWorkspace.workingStatus")}>
     <div className="flex items-center gap-3 px-3 py-2.5">
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand/10 text-brand"><LoaderCircle className="h-4 w-4 animate-spin" /></span>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-ink">Agent 正在工作</div>
+        <div className="text-sm font-semibold text-ink">{i18n.t("agentWorkspace.agentWorking")}</div>
         <div className="truncate text-xs text-stone">{status}</div>
       </div>
-      <span className="shrink-0 text-[11px] tabular-nums text-stone">{tools.length ? `${completedTools}/${tools.length} 个工具` : "准备中"}</span>
+      <span className="shrink-0 text-[11px] tabular-nums text-stone">{tools.length ? i18n.t("agentWorkspace.toolsProgress", { completed: completedTools, total: tools.length }) : i18n.t("agentWorkspace.preparing")}</span>
     </div>
     {tools.length > 0 && <div className="divide-y divide-line border-t border-line">
       {tools.map((item) => <AgentWorkTool key={item.id} item={item} expanded={Boolean(expandedTools[item.id])} onToggle={() => onToggleTool(item.id)} />)}
     </div>}
     {streamingText && <div className="border-t border-line bg-paper px-3 py-3">
-      <div className="mb-1.5 text-[11px] font-semibold text-stone">实时回复</div>
+      <div className="mb-1.5 text-[11px] font-semibold text-stone">{i18n.t("agentWorkspace.liveReply")}</div>
       <div className="min-w-0 break-words text-sm leading-relaxed text-ink [overflow-wrap:anywhere] [&_a]:break-all [&_code]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-sm [&_pre]:bg-panel [&_pre]:p-2"><MessageResponse>{streamingText}</MessageResponse></div>
     </div>}
   </section>;
@@ -604,7 +605,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: AgentToolEvent; expanded
 
 function AgentUnlockNotice() {
   return <div className="border-t border-line bg-[var(--selected-bg)] px-3 py-3">
-    <div className="flex min-w-0 items-start gap-2 text-sm text-ink"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-brand" /><span>这个工具需要解锁敏感数据，解锁后可在当前 Agent 会话继续。</span></div>
+    <div className="flex min-w-0 items-start gap-2 text-sm text-ink"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-brand" /><span>{i18n.t("agentWorkspace.toolNeedsUnlock")}</span></div>
   </div>;
 }
 
@@ -612,7 +613,7 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
   if (artifact.type === "bql_query") {
     const query = objectString(artifact.data, "query");
     return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2"><span className="text-sm font-semibold text-ink">{artifact.title}</span><button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-2.5 text-xs text-paper" onClick={() => onApplyBQL(query)} disabled={!query}><Play className="h-3.5 w-3.5" />应用</button></div>
+      <div className="flex items-center justify-between border-b border-line px-3 py-2"><span className="text-sm font-semibold text-ink">{artifact.title}</span><button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-2.5 text-xs text-paper" onClick={() => onApplyBQL(query)} disabled={!query}><Play className="h-3.5 w-3.5" />{i18n.t("agentWorkspace.apply")}</button></div>
       <pre className="max-h-56 overflow-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-olive">{query}</pre>
     </div>;
   }
@@ -628,8 +629,8 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
     return <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-panel">
       <h3 className="border-b border-line px-3 py-2 text-sm font-semibold text-ink">{artifact.title}</h3>
       <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">原始 Beancount</div><pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{original}</pre></div>
-        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">{replacement ? "拟议替换" : "拟议操作"}</div>{replacement ? <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{replacement}</pre> : <div className="rounded-md bg-paper p-2.5 text-sm text-ink">删除此交易{reason ? `：${reason}` : ""}</div>}</div>
+        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">{i18n.t("agentWorkspace.originalBeancount")}</div><pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{original}</pre></div>
+        <div className="min-w-0 p-3"><div className="mb-1.5 text-xs font-medium text-stone">{replacement ? i18n.t("agentWorkspace.proposedReplacement") : i18n.t("agentWorkspace.proposedOperation")}</div>{replacement ? <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink">{replacement}</pre> : <div className="rounded-md bg-paper p-2.5 text-sm text-ink">{i18n.t("agentWorkspace.deleteThisTransaction")}{reason ? `：${reason}` : ""}</div>}</div>
       </div>
     </div>;
   }
@@ -656,19 +657,19 @@ function ArtifactCard({ artifact, onApplyBQL, onNavigate }: { artifact: AgentArt
 
 function memoryKindLabel(kind: string) {
   switch (kind) {
-    case "preference": return "偏好";
-    case "category_rule": return "分类规则";
-    case "account_alias": return "账户别名";
-    case "recurring": return "周期习惯";
-    case "response_style": return "回复风格";
-    default: return "记忆";
+    case "preference": return i18n.t("agentWorkspace.memoryPreference");
+    case "category_rule": return i18n.t("agentWorkspace.memoryCategoryRule");
+    case "account_alias": return i18n.t("agentWorkspace.memoryAccountAlias");
+    case "recurring": return i18n.t("agentWorkspace.memoryRecurring");
+    case "response_style": return i18n.t("agentWorkspace.memoryResponseStyle");
+    default: return i18n.t("agentWorkspace.memory");
   }
 }
 
 function BQLTableCard({ title, result }: { title: string; result: BQLResult }) {
   if (!result?.columns || !result?.rows) return null;
   return <div className="overflow-hidden rounded-md border border-line bg-panel">
-    <div className="flex items-center justify-between border-b border-line px-3 py-2"><span className="text-sm font-semibold text-ink">{title}</span><span className="text-xs text-stone">{result.rowCount} 行</span></div>
+    <div className="flex items-center justify-between border-b border-line px-3 py-2"><span className="text-sm font-semibold text-ink">{title}</span><span className="text-xs text-stone">{i18n.t("agentWorkspace.resultRows", { count: result.rowCount })}</span></div>
     <div className="max-h-64 overflow-auto"><table className="min-w-full text-left text-xs"><thead className="sticky top-0 bg-tag text-stone"><tr>{result.columns.map((column) => <th key={column.name} className="whitespace-nowrap border-b border-line px-2.5 py-2 font-medium">{column.name}</th>)}</tr></thead><tbody>{result.rows.slice(0, 12).map((row, rowIndex) => <tr key={rowIndex} className="border-b border-line/70">{result.columns.map((column, columnIndex) => <td key={`${rowIndex}-${column.name}`} className="max-w-40 truncate whitespace-nowrap px-2.5 py-2 text-ink">{formatValue(row[columnIndex], column)}</td>)}</tr>)}</tbody></table></div>
   </div>;
 }
@@ -691,7 +692,7 @@ function buildChartData(result: BQLResult) {
   const data = result.rows.map((row, index) => {
     const numeric = Number(row[valueIndex]);
     return {
-      label: String(row[labelIndex] ?? `行 ${index + 1}`),
+      label: String(row[labelIndex] ?? i18n.t("agentWorkspace.rowLabel", { index: index + 1 })),
       value: normalizeBQLChartValue(numeric, valueColumn),
     };
   }).filter((item) => Number.isFinite(item.value));

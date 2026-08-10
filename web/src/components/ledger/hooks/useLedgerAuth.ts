@@ -5,6 +5,7 @@ import { apiEndpointAuthScope, apiFetch, currentApiEndpoint, readApiEndpointSett
 import { rememberLedgerAuthenticated } from "../authState";
 import type { PasskeyCredentialSummary } from "../passkeys";
 import { unlockWithQuickLedgerSecret } from "../quickUnlock";
+import i18n from "@/i18n";
 
 type LedgerAuthLoad = (forceFresh?: boolean, options?: { sensitiveUnlocked?: boolean }) => void | Promise<void>;
 
@@ -61,10 +62,10 @@ function markSensitiveUnlocked(setUnlocked: (unlocked: boolean) => void, setAuth
 function refreshAfterAuth(load: LedgerAuthLoad, showToast: LedgerAuthArgs["showToast"]) {
   try {
     Promise.resolve(load(true, { sensitiveUnlocked: true })).catch((error) => {
-      showToast("error", error instanceof Error ? `账本数据刷新失败：${error.message}` : "账本数据刷新失败");
+      showToast("error", error instanceof Error ? i18n.t("ledgerAuth.dataRefreshFailed", { message: error.message }) : i18n.t("ledgerAuth.dataRefreshFailedGeneric"));
     });
   } catch (error) {
-    showToast("error", error instanceof Error ? `账本数据刷新失败：${error.message}` : "账本数据刷新失败");
+    showToast("error", error instanceof Error ? i18n.t("ledgerAuth.dataRefreshFailed", { message: error.message }) : i18n.t("ledgerAuth.dataRefreshFailedGeneric"));
   }
 }
 
@@ -77,13 +78,13 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
         const res = await apiFetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: inputPassword }) }, { kind: "auth" });
         if (!res.ok) {
           const data = await readJson<{ error?: string }>(res, {});
-          throw new Error(res.status === 401 ? "密码不对" : data.error || `登录失败：${res.status}`);
+          throw new Error(res.status === 401 ? i18n.t("ledgerAuth.wrongPassword") : data.error || i18n.t("ledgerAuth.loginFailed", { status: res.status }));
         }
         markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
         refreshAfterAuth(load, showToast);
         clearToast();
       } catch (error) {
-        const message = error instanceof Error ? error.message : "登录失败";
+        const message = error instanceof Error ? error.message : i18n.t("ledgerAuth.loginFailedGeneric");
         showToast("error", message);
         throw error;
       }
@@ -147,12 +148,12 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
           await preparePasskeyLogin();
           options = preparedPasskeyOptions(endpointId);
         }
-        if (!options) throw new Error("Face ID 登录准备失败，请重试");
+        if (!options) throw new Error(i18n.t("ledgerAuth.faceIdPrepFailed"));
         inFlight.passkeyOptions = null;
         const response = await startAuthentication({ optionsJSON: options });
         const verify = await apiFetch("/api/passkey/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth" });
         const data = await readJson<{ error?: string }>(verify);
-        if (!verify.ok) throw new Error(data.error || "Face ID 登录失败");
+        if (!verify.ok) throw new Error(data.error || i18n.t("ledgerAuth.faceIdLoginFailed"));
         markSensitiveUnlocked(setUnlocked, setAuthed, endpointId);
         refreshAfterAuth(load, showToast);
         clearToast();
@@ -191,22 +192,22 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
   async function registerPasskey(endpoint: ApiEndpoint = currentApiEndpoint(readApiEndpointSettings())) {
     if (inFlight.passkeyRegistration) return inFlight.passkeyRegistration;
     inFlight.passkeyRegistration = (async () => {
-      showToast("info", "正在添加 Passkey...");
+      showToast("info", i18n.t("ledgerAuth.addingPasskey"));
       try {
         const optionsResponse = await apiFetch("/api/passkey/register/options", { method: "POST" }, { kind: "auth", endpoint });
         const options = await readJson<PublicKeyCredentialCreationOptionsJSON & { error?: string }>(optionsResponse);
-        if (!optionsResponse.ok) throw new Error(options.error || "无法开始添加 Passkey");
+        if (!optionsResponse.ok) throw new Error(options.error || i18n.t("ledgerAuth.cannotStartPasskey"));
         if (options.error) throw new Error(options.error);
         const response = await startRegistration({ optionsJSON: options });
         const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth", endpoint });
         const data = await readJson<{ error?: string; credential?: PasskeyCredentialSummary }>(verify);
-        if (!verify.ok) throw new Error(data.error || "Face ID 启用失败");
+        if (!verify.ok) throw new Error(data.error || i18n.t("ledgerAuth.faceIdEnableFailed"));
         setPasskeyRegistered(true);
-        showToast("success", "Passkey 已添加");
+        showToast("success", i18n.t("ledgerAuth.passkeyAdded"));
         return data.credential ?? null;
       } catch (error) {
         if (error instanceof DOMException && error.name === "NotAllowedError") {
-          showToast("info", "已取消添加 Passkey");
+          showToast("info", i18n.t("ledgerAuth.passkeyCancelled"));
           return null;
         }
         showToast("error", error instanceof Error ? error.message : String(error));
