@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/apiEndpoints";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { Txn } from "../types";
+import i18n from "@/i18n";
 
 function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
@@ -21,53 +22,53 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
   async function appendAssertion() {
     if (offlineOrNetworkError()) {
       enqueuePendingWrites([assertion]);
-      showToast("info", "离线状态，余额断言已保存为待同步");
+      showToast("info", i18n.t("ledgerMutations.offlineAssertionSaved"));
       return;
     }
-    showToast("info", "正在写入余额断言");
+    showToast("info", i18n.t("ledgerMutations.writingAssertion"));
     try {
       const res = await appendEntry(assertion);
       if (!res.ok) return;
       haptic([6, 24, 10]);
-      showToast("success", "余额断言已写入");
+      showToast("success", i18n.t("ledgerMutations.assertionWritten"));
       load(true);
     } catch (error) {
       if (offlineOrNetworkError(error)) {
         enqueuePendingWrites([assertion]);
-        showToast("info", "网络不稳定，余额断言已保存为待同步");
+        showToast("info", i18n.t("ledgerMutations.networkUnstableAssertionSaved"));
         return;
       }
-      showToast("error", error instanceof Error ? error.message : "余额断言写入失败");
+      showToast("error", error instanceof Error ? error.message : i18n.t("ledgerMutations.assertionWriteFailed"));
     }
   }
 
   async function updateTransaction(source: Txn["source"], entry: ParsedTransaction) {
     enqueueTransactionUpdate(source, entry);
     haptic(8);
-    showToast("success", "交易已先保存到本地，稍后同步");
+    showToast("success", i18n.t("ledgerMutations.transactionSavedLocal"));
   }
 
   async function deleteTransaction(source: Txn["source"], reason: string) {
     enqueueTransactionDelete(source, reason);
     haptic(8);
-    showToast("success", "交易已先在本地隐藏，稍后同步删除");
+    showToast("success", i18n.t("ledgerMutations.transactionHiddenLocal"));
   }
 
   async function reverseTransaction(source: Txn["source"], date: string) {
     const res = await apiFetch("/api/ledger/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, date }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) return showToast("error", data.error || "冲销失败");
+    if (!res.ok) return showToast("error", data.error || i18n.t("ledgerMutations.reversalFailed"));
     haptic(8);
-    showToast("success", "冲销交易已写入");
+    showToast("success", i18n.t("ledgerMutations.reversalWritten"));
     load(true);
   }
 
   async function reconcileAccount(input: { account: string; actualAmount: string; balanceDate: string; adjustmentDate: string }) {
     const res = await apiFetch("/api/ledger/reconciliation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, { kind: "write" });
     const data = await readJson<{ error?: string; diff?: number }>(res);
-    if (!res.ok) return showToast("error", data.error || "对账写入失败");
+    if (!res.ok) return showToast("error", data.error || i18n.t("ledgerMutations.reconcileWriteFailed"));
     haptic([6, 24, 10]);
-    showToast("success", data.diff === 0 ? "余额断言已写入" : "调整分录和余额断言已写入");
+    showToast("success", data.diff === 0 ? i18n.t("ledgerMutations.assertionWrittenNoDiff") : i18n.t("ledgerMutations.assertionAndAdjustmentWritten"));
     load(true);
   }
 

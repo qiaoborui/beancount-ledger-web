@@ -12,6 +12,7 @@ import {
 } from "../pendingLedgerOperations";
 import type { LedgerVersion, Txn } from "../types";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointSettingsChangeEvent, apiEndpointStorageKeyForLedgerScope, apiFetch } from "@/lib/apiEndpoints";
+import i18n from "@/i18n";
 
 const pendingOperationsKey = "ledger_pending_operations";
 const indexedPendingOperationsKey = "ledger_pending_operations:v2";
@@ -201,7 +202,7 @@ function deleteOperation(source: Txn["source"], reason: string, baseLedgerVersio
 }
 
 export function isPendingLedgerConflict(message: string) {
-  return message.includes("找不到原交易") || message.includes("交易来源");
+  return message.includes(i18n.t("pendingWrites.conflictOriginalMissing")) || message.includes(i18n.t("pendingWrites.conflictSourceNotUnique"));
 }
 
 export function discardPendingLedgerOperation(operations: PendingLedgerOperation[], id: string) {
@@ -214,25 +215,25 @@ export function hasPendingOperationsToSync(operations: PendingLedgerOperation[])
 
 export async function syncOperation(operation: PendingLedgerOperation) {
   if (operation.ledgerScope && operation.ledgerScope !== apiEndpointLedgerScope()) {
-    throw new Error("待同步操作属于另一个账本，已停止同步");
+    throw new Error(i18n.t("pendingWrites.differentLedger"));
   }
   if (operation.kind === "append") {
     const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) throw new Error(data.error || "同步失败");
+    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.syncFailed"));
     return;
   }
 
   if (operation.kind === "update-transaction") {
     const res = await apiFetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) throw new Error(data.error || "修改同步失败");
+    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.updateSyncFailed"));
     return;
   }
 
   const res = await apiFetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) }, { kind: "write" });
   const data = await readJson<{ error?: string }>(res);
-  if (!res.ok) throw new Error(data.error || "删除同步失败");
+  if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.deleteSyncFailed"));
 }
 
 export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; ledgerVersion?: LedgerVersion | null }) {
@@ -292,12 +293,12 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     const current = await readPendingLedgerOperations();
     if (!current.length || syncingPendingWrites) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      showToast("info", `仍处于离线状态，${current.length} 条待同步操作已保留`);
+      showToast("info", i18n.t("pendingWrites.stillOffline", { count: current.length }));
       return;
     }
 
     setSyncingPendingWrites(true);
-    showToast("info", `正在同步 ${current.length} 条待同步操作`);
+    showToast("info", i18n.t("pendingWrites.syncingCount", { count: current.length }));
     let syncedCount = 0;
     let interruptedMessage = "";
     try {
@@ -313,7 +314,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
           syncedCount += 1;
           persist((await readPendingLedgerOperations()).filter((operation) => operation.id !== item.id));
         } catch (error) {
-          const message = error instanceof Error ? error.message : "同步中断";
+          const message = error instanceof Error ? error.message : i18n.t("pendingWrites.syncInterrupted");
           const remaining = await readPendingLedgerOperations();
           const failedIndex = remaining.findIndex((operation) => operation.id === item.id);
           const status = isPendingLedgerConflict(message) ? "conflict" : "error";
@@ -336,10 +337,10 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
       if (userInitiated) haptic([6, 24, 10]);
       const remaining = await readPendingLedgerOperations();
       if (syncedCount > 0) {
-        showToast("success", remaining.length ? `已同步 ${syncedCount} 条，仍有 ${remaining.length} 条待处理` : `已同步 ${syncedCount} 条待同步操作`);
+        showToast("success", remaining.length ? i18n.t("pendingWrites.syncedPartial", { synced: syncedCount, remaining: remaining.length }) : i18n.t("pendingWrites.syncedAll", { count: syncedCount }));
         await load(true);
       } else {
-        showToast(interruptedMessage ? "error" : "info", interruptedMessage || `仍有 ${remaining.length} 条待处理`);
+        showToast(interruptedMessage ? "error" : "info", interruptedMessage || i18n.t("pendingWrites.remainingPending", { count: remaining.length }));
       }
     } finally {
       setSyncingPendingWrites(false);
@@ -374,12 +375,12 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
   const pendingWriteCount = pendingOperations.length;
   const pendingWriteSummary = useMemo(() => {
     if (!pendingOperations.length) return "";
-    const oldest = new Date(Math.min(...pendingOperations.map((item) => item.createdAt))).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const oldest = new Date(Math.min(...pendingOperations.map((item) => item.createdAt))).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
     const conflictCount = pendingOperations.filter((item) => item.status === "conflict").length;
-    if (conflictCount) return `${conflictCount} 条需确认，${pendingOperations.length} 条待同步`;
+    if (conflictCount) return i18n.t("pendingWrites.conflictSummary", { conflict: conflictCount, total: pendingOperations.length });
     const errorCount = pendingOperations.filter((item) => item.status === "error").length;
-    if (errorCount) return `${errorCount} 条同步失败，${pendingOperations.length} 条待处理`;
-    return `${pendingOperations.length} 条待同步，最早 ${oldest}`;
+    if (errorCount) return i18n.t("pendingWrites.errorSummary", { error: errorCount, total: pendingOperations.length });
+    return i18n.t("pendingWrites.pendingSummary", { count: pendingOperations.length, oldest });
   }, [pendingOperations]);
 
   return {

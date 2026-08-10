@@ -1,4 +1,5 @@
 import { readJson } from "./clientFetch";
+import i18n from "@/i18n";
 
 export type AgentToolState = "running" | "completed" | "error";
 
@@ -47,7 +48,7 @@ export async function readLedgerAgentStream(
 ): Promise<AgentFinal> {
   if (!response.ok || !response.body) {
     const data = await readJson<AgentStreamError>(response, {});
-    throw new Error(data.error || "Agent 请求失败");
+    throw new Error(data.error || i18n.t("ledgerAgentStream.requestFailed"));
   }
 
   const reader = response.body.getReader();
@@ -85,7 +86,7 @@ export async function readLedgerAgentStream(
             final = payload as AgentFinal;
           } else if (event.type === "error") {
             const error = payload as AgentStreamError;
-            throw new Error(error.error || "Agent 请求失败");
+            throw new Error(error.error || i18n.t("ledgerAgentStream.requestFailed"));
           }
         }
         separator = buffer.indexOf("\n\n");
@@ -94,7 +95,7 @@ export async function readLedgerAgentStream(
     if (done) break;
   }
 
-  if (!final) throw new Error("Agent 流式响应未返回最终结果");
+  if (!final) throw new Error(i18n.t("ledgerAgentStream.noFinalResult"));
   return final;
 }
 

@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/apiEndpoints";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { ManualForm } from "../types";
+import i18n from "@/i18n";
 
 const emptyManual = (): ManualForm => ({
   kind: "expense",
@@ -33,7 +34,7 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
     const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) {
-      showToast("error", data.error || "写入失败");
+      showToast("error", data.error || i18n.t("entryActions.writeFailed"));
       return { ok: false };
     }
     return { ok: true };
@@ -42,39 +43,39 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
   async function parseNl() {
     if (!nl.trim()) {
       setParseStatus("error");
-      setParseMessage("请输入要解析的消费记录");
+      setParseMessage(i18n.t("entryActions.enterRecord"));
       return;
     }
     setParseStatus("parsing");
-    setParseMessage("正在解析，请保持弹窗打开…");
+    setParseMessage(i18n.t("entryActions.parsing"));
     try {
       const res = await apiFetch("/api/ai/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: nl }) }, { kind: "write" });
       const data = await readJson<{ error?: string; entries?: ParsedTransaction[]; entry?: ParsedTransaction }>(res);
-      if (!res.ok) throw new Error(data.error || "解析失败");
+      if (!res.ok) throw new Error(data.error || i18n.t("entryActions.parseFailed"));
       const entries = Array.isArray(data.entries) ? data.entries as ParsedTransaction[] : data.entry ? [data.entry as ParsedTransaction] : [];
-      if (!entries.length) throw new Error("AI 没有返回可写入的记录");
+      if (!entries.length) throw new Error(i18n.t("entryActions.noRecords"));
       setPreviews(entries);
       setParseStatus("success");
-      setParseMessage(`已解析 ${entries.length} 条，请确认后写入`);
+      setParseMessage(i18n.t("entryActions.parsedCount", { count: entries.length }));
       haptic(8);
-      showToast("success", `解析成功：${entries.length} 条`);
+      showToast("success", i18n.t("entryActions.parseSuccess", { count: entries.length }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setParseStatus("error");
       setParseMessage(message);
-      showToast("error", message || "解析失败");
+      showToast("error", message || i18n.t("entryActions.parseFailed"));
     }
   }
 
   function buildManualEntry(): ParsedTransaction | null {
     const amount = Number(manual.amount);
     if (!manual.date || !manual.payee.trim() || !Number.isFinite(amount) || amount <= 0) {
-      showToast("error", "请填写日期、商户/对方和大于 0 的金额");
+      showToast("error", i18n.t("entryActions.manualEntryInvalid"));
       return null;
     }
     const value = amount.toFixed(2);
     const negative = (-amount).toFixed(2);
-    const narration = manual.narration.trim() || (manual.kind === "expense" ? "手动支出" : manual.kind === "income" ? "手动收入" : "手动转账");
+    const narration = manual.narration.trim() || (manual.kind === "expense" ? i18n.t("entryActions.manualExpense") : manual.kind === "income" ? i18n.t("entryActions.manualIncome") : i18n.t("entryActions.manualTransfer"));
     if (manual.kind === "expense") {
       return { kind: "transaction", date: manual.date, payee: manual.payee.trim(), narration, metadata: {}, tags: [], confidence: 1, needsReview: false, questions: [], postings: [
         { account: manual.category, amount: value, currency: "CNY" },
@@ -98,16 +99,16 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
     if (!entry) return;
     setPreviews([entry]);
     setParseStatus("success");
-    setParseMessage("已生成 1 条预览，请确认写入");
+    setParseMessage(i18n.t("entryActions.previewReady"));
     haptic(6);
-    showToast("success", "已生成预览，请确认写入");
+    showToast("success", i18n.t("entryActions.previewGenerated"));
   }
 
   function removePreview(index: number) {
     setPreviews((current) => {
       const next = current.filter((_, i) => i !== index);
       setParseStatus(next.length ? "success" : "idle");
-      setParseMessage(next.length ? `剩余 ${next.length} 条待写入` : "");
+      setParseMessage(next.length ? i18n.t("entryActions.remainingCount", { count: next.length }) : "");
       return next;
     });
   }
@@ -127,34 +128,34 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
     if (offlineOrNetworkError()) {
       enqueuePendingWrites(entries);
       resetDraft();
-      showToast("info", `已保存 ${entries.length} 条待同步记录`);
+      showToast("info", i18n.t("entryActions.savedPending", { count: entries.length }));
       return;
     }
 
     setAppendStatus("writing");
-    setParseMessage(`正在写入 ${entries.length} 条…`);
+    setParseMessage(i18n.t("entryActions.writingCount", { count: entries.length }));
     resetDraft();
-    showToast("info", `正在写入 ${entries.length} 条记录`);
+    showToast("info", i18n.t("entryActions.writingToast", { count: entries.length }));
     try {
       const res = await apiFetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries }) }, { kind: "write" });
       const data = await readJson<{ error?: string; count?: number }>(res);
-      if (!res.ok) throw new Error(data.error || "写入失败");
+      if (!res.ok) throw new Error(data.error || i18n.t("entryActions.writeFailed"));
       const count = typeof data.count === "number" ? data.count : entries.length;
       haptic([6, 24, 10]);
-      showToast("success", `已写入 ${count} 条账本记录`);
+      showToast("success", i18n.t("entryActions.writtenCount", { count }));
       load(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (offlineOrNetworkError(error)) {
         enqueuePendingWrites(entries);
-        showToast("info", `网络不稳定，已保存 ${entries.length} 条待同步记录`);
+        showToast("info", i18n.t("entryActions.networkUnstableSaved", { count: entries.length }));
         return;
       }
       setPreviews(entries);
       setEntryOpen(true);
       setParseStatus("error");
       setParseMessage(message);
-      showToast("error", message || "写入失败");
+      showToast("error", message || i18n.t("entryActions.writeFailed"));
     } finally {
       setAppendStatus("idle");
     }

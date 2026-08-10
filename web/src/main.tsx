@@ -5,6 +5,7 @@ import { LedgerApp } from "@/components/LedgerApp";
 import { PwaRegister } from "@/components/PwaRegister";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { installApiEndpointFetchInterceptor } from "@/lib/apiEndpoints";
+import "@/i18n";
 import "@/app/globals.css";
 
 installApiEndpointFetchInterceptor();

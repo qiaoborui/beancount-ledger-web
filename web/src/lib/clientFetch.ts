@@ -1,4 +1,5 @@
 import { apiEndpointForResponse, apiFetch, type ApiRequestKind } from "./apiEndpoints";
+import i18n from "@/i18n";
 
 export class ApiResponseError extends Error {
   status: number;
@@ -18,13 +19,13 @@ export async function readJson<T>(response: Response, fallback?: T): Promise<T> 
   const text = await response.text();
   if (!text.trim()) {
     if (fallback !== undefined) return fallback;
-    throw new Error(response.ok ? "服务端返回了空响应，请稍后重试" : `请求失败：${response.status}`);
+    throw new Error(response.ok ? i18n.t("clientFetch.emptyResponse") : i18n.t("clientFetch.requestFailed", { status: response.status }));
   }
   try {
     return JSON.parse(text) as T;
   } catch {
-    if (!response.ok) throw new Error(text || `请求失败：${response.status}`);
-    throw new Error("服务端返回了无法解析的数据，请稍后重试");
+    if (!response.ok) throw new Error(text || i18n.t("clientFetch.requestFailed", { status: response.status }));
+    throw new Error(i18n.t("clientFetch.unparsableResponse"));
   }
 }
 
@@ -35,10 +36,10 @@ export async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit,
   try {
     data = await readJson<T & { error?: string }>(response, fallback as (T & { error?: string }) | undefined);
   } catch (error) {
-    if (!response.ok) throw new ApiResponseError(error instanceof Error ? error.message : `请求失败：${response.status}`, response, kind);
+    if (!response.ok) throw new ApiResponseError(error instanceof Error ? error.message : i18n.t("clientFetch.requestFailed", { status: response.status }), response, kind);
     throw error;
   }
-  if (!response.ok) throw new ApiResponseError(data?.error || `请求失败：${response.status}`, response, kind);
+  if (!response.ok) throw new ApiResponseError(data?.error || i18n.t("clientFetch.requestFailed", { status: response.status }), response, kind);
   return data as T;
 }
 

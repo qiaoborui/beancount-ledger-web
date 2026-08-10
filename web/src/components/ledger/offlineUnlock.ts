@@ -3,6 +3,7 @@ import { timeRangeCacheKey } from "@/lib/timeRange";
 import type { TimeRange } from "@/lib/timeRange";
 import type { LedgerCache } from "./types";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointStorageKeyForLedgerScope } from "@/lib/apiEndpoints";
+import i18n from "@/i18n";
 
 const configKey = "ledger_offline_unlock_config";
 const encryptedCachePrefix = "ledger_encrypted_cache:";
@@ -111,7 +112,7 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 function requireSubtleCrypto() {
-  if (typeof crypto === "undefined" || !crypto.subtle) throw new Error("当前浏览器不支持本地加密");
+  if (typeof crypto === "undefined" || !crypto.subtle) throw new Error(i18n.t("offlineUnlock.noCrypto"));
   return crypto.subtle;
 }
 
@@ -171,7 +172,7 @@ export function hasOfflineLedgerUnlock() {
 }
 
 export async function enableOfflineLedgerUnlock(secret: string) {
-  if (secret.trim().length < 6) throw new Error("离线解锁码至少 6 位");
+  if (secret.trim().length < 6) throw new Error(i18n.t("offlineUnlock.codeTooShort"));
   const ledgerScope = apiEndpointLedgerScope();
   const configBase = { version: 1 as const, salt: bytesToBase64(randomBytes(16)), iterations };
   const verifier = await encryptText(verifierPayload, secret, configBase);
@@ -181,9 +182,9 @@ export async function enableOfflineLedgerUnlock(secret: string) {
 
 export async function verifyOfflineLedgerUnlock(secret: string, ledgerScope = apiEndpointLedgerScope()) {
   const config = readConfig(ledgerScope);
-  if (!config) throw new Error("还没有设置离线解锁码");
+  if (!config) throw new Error(i18n.t("offlineUnlock.notConfigured"));
   const text = await decryptText(config.verifierCiphertext, config.verifierIv, secret, config);
-  if (text !== verifierPayload) throw new Error("离线解锁码不正确");
+  if (text !== verifierPayload) throw new Error(i18n.t("offlineUnlock.incorrect"));
   sessionSecrets.set(ledgerScope, secret);
 }
 
@@ -199,7 +200,7 @@ export async function writeEncryptedLedgerCache(range: TimeRange, cache: LedgerC
 
 export async function readEncryptedLedgerCache(range: TimeRange, valuationCurrency: string, secret: string, ledgerScope = apiEndpointLedgerScope()): Promise<LedgerCache | null> {
   const config = readConfig(ledgerScope);
-  if (!config) throw new Error("还没有设置离线解锁码");
+  if (!config) throw new Error(i18n.t("offlineUnlock.notConfigured"));
   const scopedKey = encryptedCacheKey(range, valuationCurrency, ledgerScope);
   let record = await readIndexedCache<EncryptedCacheRecord>(scopedKey);
   const previousScope = apiEndpointPreviousLedgerScope();

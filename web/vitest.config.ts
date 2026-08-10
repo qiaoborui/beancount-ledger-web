@@ -10,6 +10,7 @@ export default mergeConfig(
       include: ["src/**/*.test.{ts,tsx}"],
       exclude: ["src/lib/auth.test.ts", "src/lib/rateLimit.test.ts", "node_modules/**", "dist/**"],
       restoreMocks: true,
+      setupFiles: ["src/test/setup.ts"],
     },
   }),
 );
