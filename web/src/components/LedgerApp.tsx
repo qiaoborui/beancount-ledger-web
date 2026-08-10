@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Bot, RefreshCw, WifiOff, X } from "lucide-react";
 import {
@@ -100,25 +100,25 @@ const LazyAccountManager = lazy(() => loadAccountPanels().then((mod) => ({ defau
 const LazyBalanceGrid = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.BalanceGrid })));
 const LazyCreditCardPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.CreditCardPanel })));
 
-function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
+const MemoNetWorthPage = memo(function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备资产负债表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
-}
+});
 
-function InvestmentsPage(props: ComponentProps<typeof LazyInvestmentsPage>) {
+const MemoInvestmentsPage = memo(function InvestmentsPage(props: ComponentProps<typeof LazyInvestmentsPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备股票持仓…</section>}><LazyInvestmentsPage {...props} /></Suspense>;
-}
+});
 
-function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
+const MemoIncomeStatementPage = memo(function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
   return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
-}
+});
 
-function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
+const MemoDashboardPage = memo(function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备收支分析…</section>}><LazyDashboardPage {...props} /></Suspense>;
-}
+});
 
-function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
+const MemoBQLQueryPage = memo(function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备 BQL 查询…</section>}><LazyBQLQueryPage {...props} /></Suspense>;
-}
+});
 
 function AgentPageLoading() {
   const desktopViewport = useDesktopViewport();
@@ -279,6 +279,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     sessionStorage.setItem("ledger_locked_at", String(Date.now()));
     handleServerSensitiveLocked();
   }, [handleServerSensitiveLocked]);
+  const toggleNetWorthVisible = useCallback(() => setNetWorthVisible((value) => !value), []);
+  const toggleIncomeStatementVisible = useCallback(() => setIncomeStatementVisible((value) => !value), []);
+  const openAgentFromQuery = useCallback((prompt: string) => openAgent(prompt, true), []);
 
   const lockSensitive = useCallback(async () => {
     handleSensitiveLocked();
@@ -418,7 +421,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const transactionDslQuery = txnSearchQuery.trim();
   const transactionServerSearchActive = Boolean(transactionDslQuery);
   const transactionListTxns = useMemo(() => applyPendingLedgerOperations(transactionServerSearchActive ? (serverSearchTxns ?? []) : txns, pendingOperations, timeRange), [pendingOperations, serverSearchTxns, timeRange, transactionServerSearchActive, txns]);
-  const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refreshLedger, refreshing || loadingFresh);
   const detailAccount = page === "accounts" ? accountFromPathname(pathname) : null;
   useSwipeBack({ enabled: Boolean(detailAccount), onBack: () => { void pushPreloadedRoute("/accounts"); } });
 
@@ -776,7 +778,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     load(true);
   };
 
-  const commandActions: CommandAction[] = [
+  const commandActions: CommandAction[] = useMemo(() => [
     { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
     { id: "ai-entry", label: "账本 Agent", detail: "查询、生成 BQL 或创建待确认操作", keywords: ["ai", "agent", "chat"], run: () => openAgent() },
     ...(!unlocked ? [{ id: "unlock-sensitive", label: "解锁敏感数据", detail: "打开解锁框并聚焦密码输入", shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
@@ -786,7 +788,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
     ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
     ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
-  ];
+  ], [applyTransactionQuickView, canNavigateNext, canNavigatePrevious, focusTransactionSearch, offlineSensitiveUnlockAvailable, openAgent, openManualEntry, refreshLedger, timeRange, unlocked]);
 
   return (
     <AppShell
@@ -830,17 +832,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         document.body
       )}
       {quickActionsOpen && <Suspense fallback={null}><LazyQuickActionsSheet open={quickActionsOpen} refreshing={refreshing || loadingFresh} pendingWriteCount={pendingWriteCount} syncingPendingWrites={syncingPendingWrites} onClose={() => setQuickActionsOpen(false)} onManualEntry={openManualEntry} onAiEntry={() => openAgent()} onImport={openImportPage} onReconcile={openReconcilePage} onRefresh={refreshLedger} onSyncPendingWrites={() => void syncPendingWrites({ userInitiated: true })} /></Suspense>}
-      <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={refreshing} />
       {passkeyStatusLoaded && !hasPasskey && page !== "settings" && <PasskeyBanner onRegister={registerPasskey} />}
 
-      <div
-        className={`app-page-transition app-pull-surface min-w-0 max-w-full [overflow-x:clip] ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
-        style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
-      >
+      <PullToRefreshSurface refresh={refreshLedger} disabled={refreshing || loadingFresh}>
       <div className="ledger-workspace-frame min-w-0 max-w-full">
       <div className="ledger-workspace-content min-w-0 max-w-full">
       {page !== "agent" && <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2.5 md:px-4 md:py-3 xl:px-6">
@@ -886,11 +880,11 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "agent" && <LedgerAgentWorkspace key={activeApiEndpointIdRef.current} presentation="page" request={agentRequest} open context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }} onApplyBQL={applyAgentBQL} onNavigate={(path) => { void pushPreloadedRoute(path); }} onChanged={() => load(true)} showToast={showToast} />}
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}
 
-      {page === "dashboard" && (unlocked ? <DashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
-      {page === "query" && (unlocked ? <BQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={(prompt) => openAgent(prompt, true)} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
-      {page === "net-worth" && (unlocked ? <NetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={() => setNetWorthVisible((value) => !value)} /> : requireSensitiveUnlock("资产负债已隐藏", "此页会展示资产、负债、账户结构和净资产变化，需要解锁后查看。"))}
-      {page === "investments" && (unlocked ? <InvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
-      {page === "income-statement" && <IncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={() => setIncomeStatementVisible((value) => !value)} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
+      {page === "dashboard" && (unlocked ? <MemoDashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
+      {page === "query" && (unlocked ? <MemoBQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={openAgentFromQuery} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
+      {page === "net-worth" && (unlocked ? <MemoNetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} /> : requireSensitiveUnlock("资产负债已隐藏", "此页会展示资产、负债、账户结构和净资产变化，需要解锁后查看。"))}
+      {page === "investments" && (unlocked ? <MemoInvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
+      {page === "income-statement" && <MemoIncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={toggleIncomeStatementVisible} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
       {page === "currencies" && <Suspense fallback={<RouteFallback label="正在准备货币与汇率…" />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={unlockOnlineSensitive} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
       {page === "accounts" && (() => {
         const detailAccount = accountFromPathname(pathname);
@@ -942,7 +936,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         showToast={showToast}
       />}
       </div>
-      </div>
+      </PullToRefreshSurface>
 
       {entryOpen && <Suspense fallback={null}><LazyEntryModal onClose={() => setEntryOpen(false)}><LazyEntryPanel nl={nl} setNl={setNl} onParse={parseNl} manual={manual} setManual={setManual} onPreviewManual={previewManualEntry} previews={previews} onRemovePreview={removePreview} onAppendPreviews={guardedAppendPreviews} parseStatus={parseStatus} parseMessage={parseMessage} appendStatus={appendStatus} expenseAccounts={expenseAccounts} incomeAccounts={incomeAccounts} paymentAccounts={paymentAccounts} accountLabels={accountLabelMap} /></LazyEntryModal></Suspense>}
       <AlertDialog open={Boolean(pendingConflict)} onOpenChange={(open) => !open && setConflictOperationId(null)}>
@@ -976,6 +970,28 @@ function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" |
   const label = refreshing || state === "refreshing" ? "正在刷新…" : state === "release" ? "松开刷新" : "下拉刷新";
   const top = Math.max(12, Math.min(76, distance));
   return <div className="pointer-events-none fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-olive shadow-sm backdrop-blur" style={{ top: `calc(${top}px + env(safe-area-inset-top))` }}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 text-brand ${refreshing || state === "refreshing" ? "animate-spin" : ""}`} />{label}</div>;
+}
+
+// PullToRefreshSurface owns the pull-gesture state (pullDistance, start Y,
+// refreshingByGesture) so that every touchmove during a pull re-renders only
+// this wrapper and the indicator, never the whole LedgerApp tree or the page
+// content. The children element stays referentially stable across gesture
+// updates, so React does not re-render it while the user is pulling.
+function PullToRefreshSurface({ refresh, disabled, children }: { refresh: () => void | Promise<void>; disabled: boolean; children: ReactNode }) {
+  const { handleTouchStart, handleTouchMove, handleTouchEnd, pullDistance, pullState } = usePullToRefresh(refresh, disabled);
+  return <>
+    <PullRefreshIndicator state={pullState} distance={pullDistance} refreshing={disabled} />
+    <div
+      className={`app-page-transition app-pull-surface min-w-0 max-w-full [overflow-x:clip] ${pullDistance > 0 ? "app-pull-surface-active" : ""}`}
+      style={pullDistance > 0 ? { transform: `translate3d(0, ${Math.min(34, pullDistance * 0.28)}px, 0)` } : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
+      {children}
+    </div>
+  </>;
 }
 
 function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {

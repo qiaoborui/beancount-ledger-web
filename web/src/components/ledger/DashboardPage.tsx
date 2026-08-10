@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -375,9 +375,37 @@ function isDashboardEmpty(data: DashboardSummary) {
     && data.annotations.length === 0;
 }
 
+// useDebouncedScalarFilter keeps a free-text filter input responsive while
+// deferring the URL/fetch update until typing pauses. It stays in sync when the
+// underlying value changes from outside (clear filters, back/forward, URL edit).
+function useDebouncedScalarFilter(value: string, onChange: (value: string) => void, delay = 300): [string, (value: string) => void] {
+  const [draft, setDraft] = useState(value);
+  const lastPropagatedRef = useRef(value);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      if (draft === value) return;
+      lastPropagatedRef.current = draft;
+      onChange(draft);
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [draft, value, onChange, delay]);
+
+  useEffect(() => {
+    if (value === lastPropagatedRef.current) return;
+    lastPropagatedRef.current = value;
+    setDraft(value);
+  }, [value]);
+
+  return [draft, setDraft];
+}
+
 function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { data: DashboardSummary; filters: DashboardFilterState; onChange: (key: DashboardFilterKey, value: string | string[]) => void; onClear: (key: DashboardFilterKey) => void; onClearAll: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [queryRecents, setQueryRecents] = useState<string[]>(() => readDashboardQueryRecents());
+  const [queryDraft, setQueryDraft] = useDebouncedScalarFilter(filters.query, (value) => onChange("query", value));
+  const [minAmountDraft, setMinAmountDraft] = useDebouncedScalarFilter(filters.minAmount, (value) => onChange("minAmount", value));
+  const [maxAmountDraft, setMaxAmountDraft] = useDebouncedScalarFilter(filters.maxAmount, (value) => onChange("maxAmount", value));
   const queryRecentsListId = useMemo(() => `dashboard-query-recents-${apiEndpointLedgerScope().replace(/[^a-zA-Z0-9_-]/g, "-")}`, []);
   const chips = activeFilterChips(data, filters);
   const advancedChips = chips.filter((chip) => chip.key !== "query");
@@ -401,7 +429,7 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
     <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
       <label className="min-w-0 flex-1">
         <span className="mb-1 block text-[11px] text-stone">查询</span>
-        <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="date:2026-05 AND payee:星巴克" value={filters.query} list={queryRecentsListId} onChange={(event) => onChange("query", event.target.value)} />
+        <Input className="h-10 w-full min-w-0 rounded-md bg-panel text-sm text-olive md:h-9" placeholder="date:2026-05 AND payee:星巴克" value={queryDraft} list={queryRecentsListId} onChange={(event) => setQueryDraft(event.target.value)} />
         <datalist id={queryRecentsListId}>
           {queryRecents.map((query) => <option key={query} value={query} />)}
         </datalist>
@@ -426,8 +454,8 @@ function DashboardFilterBar({ data, filters, onChange, onClear, onClearAll }: { 
         <MultiFilterSelect label="账户" value={filters.account} onChange={(value) => onChange("account", value)} options={data.filterOptions.accounts} />
         <MultiFilterSelect label="商户" value={filters.payee} onChange={(value) => onChange("payee", value)} options={data.filterOptions.payees} />
         <MultiFilterSelect label="标签" value={filters.tag} onChange={(value) => onChange("tag", value)} options={data.filterOptions.tags} />
-        <MoneyFilterInput label="最小金额" value={filters.minAmount} onChange={(value) => onChange("minAmount", value)} />
-        <MoneyFilterInput label="最大金额" value={filters.maxAmount} onChange={(value) => onChange("maxAmount", value)} />
+        <MoneyFilterInput label="最小金额" value={minAmountDraft} onChange={setMinAmountDraft} />
+        <MoneyFilterInput label="最大金额" value={maxAmountDraft} onChange={setMaxAmountDraft} />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {chips.length ? chips.map((chip) => <FilterChip key={chip.key} chip={chip} onClear={onClear} />) : <span className="text-xs text-stone">未添加变量筛选</span>}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,9 +22,21 @@ const (
 	agentServiceRequestTimeout = 14 * time.Minute
 )
 
+// agentHTTPClient is the shared outbound client for Agent service and model
+// proxy calls. It carries explicit dial, TLS-handshake, and response-header
+// timeouts so a stuck upstream fails fast, while leaving long-running
+// streaming bodies (SSE model turns) unbound by an overall deadline.
+var agentHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	},
+}
+
 var newAgentServiceHTTPClient = func(ctx context.Context, audience string) (*http.Client, error) {
 	if strings.TrimSpace(audience) == "" {
-		return &http.Client{}, nil
+		return agentHTTPClient, nil
 	}
 	return idtoken.NewClient(ctx, audience)
 }
@@ -192,7 +205,7 @@ func (s *Server) proxyAgentModelRequest(c *gin.Context) {
 	}
 	request.Header.Set("Authorization", "Bearer "+provider.apiKey)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{}).Do(request)
+	response, err := agentHTTPClient.Do(request)
 	if err != nil {
 		errorJSON(c, http.StatusBadGateway, err)
 		return

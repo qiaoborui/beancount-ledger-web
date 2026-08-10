@@ -54,14 +54,18 @@ for the hosted Cloud Run deployment where the public Go API receives Telegram's
 webhook; a LAN self-hosted instance should keep polling.
 
 Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
-safe in Compose and PostgreSQL environment variables. `SELFHOST_IMAGE_TAG`
-defaults to `latest`; pin it to a published commit tag for a repeatable update.
+safe in Compose and PostgreSQL environment variables.
 
 Start every required service with one command:
 
 ```bash
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
+
+The stack is always built from the checked-out source — the `-selfhost-*`
+images are intentionally never pushed to a registry because they bake in your
+`LEDGER_UID`/`LEDGER_GID`, which differs by host. For a repeatable deployment,
+check out a released commit or tag before running this command.
 
 Read the one-time installation code, then open `http://localhost:8080`:
 

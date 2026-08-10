@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import {
@@ -305,11 +305,11 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   );
 }
 
-function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void }) {
+const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void }) {
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const pending = pendingLabel(txn);
   return (
-    <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={onSelect}>
+    <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={() => onSelect(transactionKey(txn), txn)}>
       <ResponsiveValueRow
         label={<div className="min-w-0">
           <strong className="block truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
@@ -335,9 +335,9 @@ function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn:
       )}
     </button>
   );
-}
+});
 
-function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: () => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
+const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
@@ -349,7 +349,7 @@ function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowR
       ref={rowRef}
       type="button"
       className={`transaction-list-card grid w-full grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-4 ${selected ? "bg-[var(--selected-bg)]" : "bg-transparent"}`}
-      onClick={onSelect}
+      onClick={() => onSelect(transactionKey(txn), txn)}
     >
       <div className="text-xs font-medium tabular-nums text-stone">
         <div className="text-olive">{txn.date.slice(5)}</div>
@@ -379,7 +379,7 @@ function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowR
       </div>
     </button>
   );
-}
+});
 
 export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
   const [page, setPage] = useState(1);
@@ -474,10 +474,19 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     return activeTxnKey === key || Boolean(selected && transactionKey(selected) === key);
   };
   const desktopRowId = (txn: Txn) => `transaction-row-${transactionKey(txn).replace(/[^a-z0-9_-]+/gi, "-")}`;
-  const setDesktopRowRef = (key: string) => (node: HTMLButtonElement | null) => {
+  const setDesktopRowRef = useCallback((key: string) => (node: HTMLButtonElement | null) => {
     if (node) desktopRowRefs.current.set(key, node);
     else desktopRowRefs.current.delete(key);
-  };
+  }, []);
+  const handleSelectRow = useCallback((key: string, txn: Txn) => {
+    setActiveTxnKey(key);
+    setSelected(txn);
+  }, []);
+  const handleSelectCard = useCallback((key: string, txn: Txn) => {
+    setActiveTxnKey(key);
+    setSelected(txn);
+    setDrawerTxn(txn);
+  }, []);
   const focusDesktopRow = (key: string) => {
     window.requestAnimationFrame(() => desktopRowRefs.current.get(key)?.focus());
   };
@@ -623,7 +632,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               {pageRows.map((txn) => {
                 const key = transactionKey(txn);
                 return (
-                  <TransactionTableRow
+                  <MemoTransactionTableRow
                     key={key}
                     rowId={desktopRowId(txn)}
                     rowRef={setDesktopRowRef(key)}
@@ -631,10 +640,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
                     accounts={accounts}
                     selected={Boolean(selectedMatches(txn))}
                     viewMode={viewMode}
-                    onSelect={() => {
-                      setActiveTxnKey(key);
-                      setSelected(txn);
-                    }}
+                    onSelect={handleSelectRow}
                   />
                 );
               })}
@@ -643,7 +649,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <div className="lg:hidden">
             {pageRows.map((txn) => {
               const key = transactionKey(txn);
-              return <TransactionCard key={key} txn={txn} accounts={accounts} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={() => { setActiveTxnKey(key); setSelected(txn); setDrawerTxn(txn); }} />;
+              return <MemoTransactionCard key={key} txn={txn} accounts={accounts} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={handleSelectCard} />;
             })}
           </div>
           {pager}
