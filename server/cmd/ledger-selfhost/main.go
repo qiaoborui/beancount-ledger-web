@@ -43,9 +43,29 @@ func run() (err error) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := &http.Server{Addr: addr, Handler: application}
+	server := newHTTPServer(addr, application)
 	log.Printf("self-hosted ledger web listening on %s", addr)
 	return serveHTTP(ctx, server, listener)
+}
+
+// newHTTPServer returns the main HTTP server with explicit timeouts so slow or
+// stalled clients cannot hold connections open indefinitely. WriteTimeout must
+// cover the longest supported response: /api/ai/agent/turn streams an SSE
+// response and /api/integrations/telegram/webhook stays open while the agent
+// replies, both bounded internally by agentServiceRequestTimeout (14 minutes),
+// so 15 minutes keeps streaming responses inside the write deadline. ReadTimeout
+// (30s) comfortably covers multi-MB import uploads on local networks, and
+// IdleTimeout keeps browser keep-alive connections alive between requests.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 }
 
 func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener) error {

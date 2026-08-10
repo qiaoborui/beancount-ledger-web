@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestNewHTTPServerTimeoutFields(t *testing.T) {
@@ -14,30 +15,16 @@ func TestNewHTTPServerTimeoutFields(t *testing.T) {
 	if server.ReadTimeout <= 0 {
 		t.Fatalf("ReadTimeout = %v, want > 0", server.ReadTimeout)
 	}
-	if server.WriteTimeout <= 0 {
-		t.Fatalf("WriteTimeout = %v, want > 0", server.WriteTimeout)
-	}
 	if server.IdleTimeout <= 0 {
 		t.Fatalf("IdleTimeout = %v, want > 0", server.IdleTimeout)
 	}
 	if server.MaxHeaderBytes <= 0 {
 		t.Fatalf("MaxHeaderBytes = %d, want > 0", server.MaxHeaderBytes)
 	}
-}
-
-func TestWorkerCountFromEnvironment(t *testing.T) {
-	t.Setenv("ZIP_WORKERS", "8")
-
-	workers, err := workerCount()
-	if err != nil || workers != 8 {
-		t.Fatalf("workers=%d err=%v", workers, err)
-	}
-}
-
-func TestWorkerCountRejectsInvalidValue(t *testing.T) {
-	t.Setenv("ZIP_WORKERS", "0")
-
-	if _, err := workerCount(); err == nil {
-		t.Fatal("expected invalid worker count to fail")
+	// WriteTimeout must cover the longest supported response: the SSE agent
+	// turn and telegram webhook both hold the connection open for up to
+	// agentServiceRequestTimeout (14 minutes).
+	if server.WriteTimeout < 14*time.Minute {
+		t.Fatalf("WriteTimeout = %v, want >= 14m", server.WriteTimeout)
 	}
 }

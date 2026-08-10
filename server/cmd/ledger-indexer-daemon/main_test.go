@@ -8,6 +8,26 @@ import (
 	"time"
 )
 
+func TestNewHealthServerTimeoutFields(t *testing.T) {
+	server := newHealthServer(":0", http.NotFoundHandler())
+
+	if server.ReadHeaderTimeout <= 0 {
+		t.Fatalf("ReadHeaderTimeout = %v, want > 0", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout <= 0 {
+		t.Fatalf("ReadTimeout = %v, want > 0", server.ReadTimeout)
+	}
+	if server.WriteTimeout <= 0 {
+		t.Fatalf("WriteTimeout = %v, want > 0", server.WriteTimeout)
+	}
+	if server.IdleTimeout <= 0 {
+		t.Fatalf("IdleTimeout = %v, want > 0", server.IdleTimeout)
+	}
+	if server.MaxHeaderBytes <= 0 {
+		t.Fatalf("MaxHeaderBytes = %d, want > 0", server.MaxHeaderBytes)
+	}
+}
+
 func TestIndexerReadyFailsWhenLatestAttemptHasAnError(t *testing.T) {
 	status := &indexerStatus{
 		attempts:    2,
