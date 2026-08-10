@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppShell, ledgerNavItems } from "./AppShell";
 import { useBrowserLocation, useBrowserRouter } from "@/lib/browserRouter";
+import { useTranslation } from "react-i18next";
 import { pageFromPathname } from "./ledger/routes";
 import { queryDateRange } from "@/lib/queryDateRange";
 import { canNavigateTimeRange, makeTimeRange, navigateTimeRange, formatTimeRangeLabel, timeRangeToParams } from "@/lib/timeRange";
@@ -101,31 +102,37 @@ const LazyBalanceGrid = lazy(() => loadAccountPanels().then((mod) => ({ default:
 const LazyCreditCardPanel = lazy(() => loadAccountPanels().then((mod) => ({ default: mod.CreditCardPanel })));
 
 const MemoNetWorthPage = memo(function NetWorthPage(props: ComponentProps<typeof LazyNetWorthPage>) {
-  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备资产负债表…</section>}><LazyNetWorthPage {...props} /></Suspense>;
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">{t("ledgerApp.preparingNetWorth")}</section>}><LazyNetWorthPage {...props} /></Suspense>;
 });
 
 const MemoInvestmentsPage = memo(function InvestmentsPage(props: ComponentProps<typeof LazyInvestmentsPage>) {
-  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备股票持仓…</section>}><LazyInvestmentsPage {...props} /></Suspense>;
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">{t("ledgerApp.preparingInvestments")}</section>}><LazyInvestmentsPage {...props} /></Suspense>;
 });
 
 const MemoIncomeStatementPage = memo(function IncomeStatementPage(props: ComponentProps<typeof LazyIncomeStatementPage>) {
-  return <Suspense fallback={<section className="card p-6 text-sm text-stone">正在准备损益分析…</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="card p-6 text-sm text-stone">{t("ledgerApp.preparingIncomeStatement")}</section>}><LazyIncomeStatementPage {...props} /></Suspense>;
 });
 
 const MemoDashboardPage = memo(function DashboardPage(props: ComponentProps<typeof LazyDashboardPage>) {
-  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备收支分析…</section>}><LazyDashboardPage {...props} /></Suspense>;
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">{t("ledgerApp.preparingDashboard")}</section>}><LazyDashboardPage {...props} /></Suspense>;
 });
 
 const MemoBQLQueryPage = memo(function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
-  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">正在准备 BQL 查询…</section>}><LazyBQLQueryPage {...props} /></Suspense>;
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">{t("ledgerApp.preparingQuery")}</section>}><LazyBQLQueryPage {...props} /></Suspense>;
 });
 
 function AgentPageLoading() {
+  const { t } = useTranslation();
   const desktopViewport = useDesktopViewport();
-  const loading = <section className={`ledger-agent-page flex min-h-0 min-w-0 max-w-full items-center justify-center overflow-hidden bg-paper ${desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"}`} aria-busy="true" aria-label="正在打开账本 Agent">
+  const loading = <section className={`ledger-agent-page flex min-h-0 min-w-0 max-w-full items-center justify-center overflow-hidden bg-paper ${desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"}`} aria-busy="true" aria-label={t("appShell.agentLoadingLabel")}>
       <div className="flex items-center gap-3 text-sm text-stone">
         <Bot className="h-5 w-5 animate-pulse text-brand" />
-        <span>正在打开账本 Agent…</span>
+        <span>{t("appShell.agentLoading")}</span>
       </div>
     </section>;
   return desktopViewport ? loading : createPortal(loading, document.body);
@@ -151,9 +158,9 @@ function accountFromPathname(pathname: string): string | null {
 }
 
 const TRANSACTION_QUICK_VIEWS = [
-  { id: "food", label: "本月餐饮", detail: "Expenses:Food 及子分类", category: "Expenses:Food", mode: "prefix" as const },
-  { id: "unknown", label: "Unknown 待整理", detail: "精确查看 Expenses:Unknown", category: "Expenses:Unknown", mode: "exact" as const },
-  { id: "reimburse", label: "报销相关", detail: "搜索报销线索", search: "报销" },
+  { id: "food", labelKey: "transactions.quickViewFood", labelDetailKey: "transactions.quickViewFoodDetail", category: "Expenses:Food", mode: "prefix" as const },
+  { id: "unknown", labelKey: "transactions.quickViewUnknown", labelDetailKey: "transactions.quickViewUnknownDetail", category: "Expenses:Unknown", mode: "exact" as const },
+  { id: "reimburse", labelKey: "transactions.quickViewReimburse", labelDetailKey: "transactions.quickViewReimburseDetail", search: "报销" },
 ];
 
 function isTypingTarget(target: EventTarget | null) {
@@ -163,6 +170,7 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
+  const { t, i18n } = useTranslation();
   const router = useBrowserRouter();
   const { pathname, search } = useBrowserLocation();
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
@@ -288,7 +296,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     try {
       await apiFetch("/api/auth/lock", { method: "POST" }, { kind: "auth" });
     } catch {
-      showToast("error", "已在本机隐藏敏感数据，但服务端锁定请求失败；请刷新后确认。");
+      showToast("error", t("ledgerApp.lockedLocallyHidden"));
     }
   }, [handleSensitiveLocked, showToast]);
   const {
@@ -356,9 +364,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       setOnboardingGitSHA(result.gitSHA ?? "");
       setOnboardingWaiting(true);
     } catch (error) {
-      setOnboardingError(error instanceof Error ? error.message : "无法创建账本");
+      setOnboardingError(error instanceof Error ? error.message : t("ledgerApp.cannotCreateLedger"));
     } finally { setOnboardingCreating(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!onboardingWaiting) return;
@@ -403,7 +411,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       setPasskeyRegistered(null);
       setAuthed(null);
       void load(true).catch((error) => {
-        showToast("error", error instanceof Error ? error.message : "切换后端失败");
+        showToast("error", error instanceof Error ? error.message : t("ledgerApp.switchBackendFailed"));
       });
     };
     window.addEventListener(apiEndpointSettingsChangeEvent, handleEndpointChange);
@@ -444,7 +452,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       .catch((error) => {
         if (controller.signal.aborted) return;
         setServerSearchTxns([]);
-        setServerSearchError(error instanceof Error ? error.message : "查询失败");
+        setServerSearchError(error instanceof Error ? error.message : t("ledgerApp.queryFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setServerSearchLoading(false);
@@ -480,7 +488,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   async function enableOfflineUnlock(secret: string) {
     await enableOfflineLedgerUnlock(secret);
     setOfflineUnlockEnabled(true);
-    showToast("success", "离线解锁已启用，正在写入加密缓存");
+    showToast("success", t("ledgerApp.offlineUnlockEnabled"));
     await load(true);
   }
 
@@ -488,14 +496,14 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     await enableQuickLedgerUnlock(secret, mode);
     setQuickUnlockEnabled(true);
     setQuickUnlockMode(mode);
-    showToast("success", "本机快速解锁已启用");
+    showToast("success", t("ledgerApp.quickUnlockEnabled"));
   }
 
   async function disableQuickUnlock() {
     await revokeQuickLedgerUnlock();
     setQuickUnlockEnabled(false);
     setQuickUnlockMode(getQuickLedgerUnlockMode());
-    showToast("success", "本机快速解锁已关闭");
+    showToast("success", t("ledgerApp.quickUnlockDisabled"));
   }
 
   const searchKey = searchParams.toString();
@@ -627,7 +635,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         openManualEntry();
       }
       if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-        const currentHeader = pageHeader(page, timeRange);
+        const currentHeader = pageHeader(page, timeRange, t);
         const delta = event.key === "ArrowLeft" ? -1 : 1;
         if (!currentHeader.monthScoped || !canNavigateTimeRange(timeRange, delta)) return;
         event.preventDefault();
@@ -660,7 +668,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       const ok = await unlockOfflineSensitiveCache(offlineUnlockSecret);
       if (ok) setOfflineUnlockSecret("");
     } catch (error) {
-      showToast("error", error instanceof Error ? error.message : "离线解锁失败");
+      showToast("error", error instanceof Error ? error.message : t("ledgerApp.offlineUnlockFailed"));
     }
   };
   const unlockQuickSensitive = async (secret: string) => {
@@ -718,7 +726,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       unlocking={unlocking}
     />
   );
-  const header = pageHeader(page, timeRange);
+  const header = pageHeader(page, timeRange, t);
   const canShowTimeControls = header.monthScoped;
   const canNavigatePrevious = canShowTimeControls && canNavigateTimeRange(timeRange, -1);
   const canNavigateNext = canShowTimeControls && canNavigateTimeRange(timeRange, 1);
@@ -761,7 +769,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     if (!unlocked) unlockOnlineSensitive();
   }
 
-  const offlineWriteMessage = "当前离线，写入操作会失败，请联网后再试。";
+  const offlineWriteMessage = t("ledgerApp.offlineWriteWarning");
   const guardOnline = () => {
     if (online) return true;
     showToast("error", offlineWriteMessage);
@@ -778,17 +786,17 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     load(true);
   };
 
-  const commandActions: CommandAction[] = [
-    { id: "new-entry", label: "新建手动记账", detail: "打开快速记账表单", shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
-    { id: "ai-entry", label: "账本 Agent", detail: "查询、生成 BQL 或创建待确认操作", keywords: ["ai", "agent", "chat"], run: () => openAgent() },
-    ...(!unlocked ? [{ id: "unlock-sensitive", label: "解锁敏感数据", detail: "打开解锁框并聚焦密码输入", shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
-    { id: "search-transactions", label: "搜索流水", detail: "跳到流水页并聚焦搜索框", shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
-    { id: "refresh", label: "刷新账本数据", detail: "重新读取私有账本", keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
-    { id: "previous-period", label: "上一周期", detail: "按当前时间范围向前移动", shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
-    { id: "next-period", label: "下一周期", detail: "按当前时间范围向后移动", shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
-    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: `前往${item.label}`, detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
-    ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: view.label, detail: view.detail, keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
-  ];
+  const commandActions: CommandAction[] = useMemo(() => [
+    { id: "new-entry", label: t("ledgerApp.newManualEntry"), detail: t("ledgerApp.newManualEntryDetail"), shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
+    { id: "ai-entry", label: t("ledgerApp.agent"), detail: t("ledgerApp.agentDetail"), keywords: ["ai", "agent", "chat"], run: () => openAgent() },
+    ...(!unlocked ? [{ id: "unlock-sensitive", label: t("ledgerApp.unlockSensitive"), detail: t("ledgerApp.unlockSensitiveDetail"), shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
+    { id: "search-transactions", label: t("ledgerApp.searchTransactions"), detail: t("ledgerApp.searchTransactionsDetail"), shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
+    { id: "refresh", label: t("ledgerApp.refreshLedger"), detail: t("ledgerApp.refreshLedgerDetail"), keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
+    { id: "previous-period", label: t("ledgerApp.previousPeriod"), detail: t("ledgerApp.previousPeriodDetail"), shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
+    { id: "next-period", label: t("ledgerApp.nextPeriod"), detail: t("ledgerApp.nextPeriodDetail"), shortcut: "Alt →", keywords: ["period", "month"], run: () => canNavigateNext && setTimeRange(navigateTimeRange(timeRange, 1)) },
+    ...ledgerNavItems.map((item) => ({ id: `nav-${item.href}`, label: t("commands.navigateTo", { label: t(item.labelKey) }), detail: item.href, keywords: ["go", "page"], run: () => { void pushPreloadedRoute(item.href); } })),
+    ...TRANSACTION_QUICK_VIEWS.map((view) => ({ id: `view-${view.id}`, label: t(view.labelKey), detail: t(view.labelDetailKey), keywords: ["view", "saved", "transactions"], run: () => applyTransactionQuickView(view) })),
+  ], [applyTransactionQuickView, canNavigateNext, canNavigatePrevious, focusTransactionSearch, offlineSensitiveUnlockAvailable, openAgent, openManualEntry, refreshLedger, timeRange, t, unlocked]);
 
   return (
     <AppShell
@@ -798,8 +806,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       sensitiveUnlockAvailable={headerSensitiveUnlockAvailable}
-      sensitiveUnlockLabel={offlineSensitiveUnlockAvailable ? "离线解锁" : "解锁"}
-      sensitiveUnlockTitle={offlineSensitiveUnlockAvailable ? "使用离线解锁码查看敏感数据" : "解锁敏感数据"}
+      sensitiveUnlockLabel={offlineSensitiveUnlockAvailable ? t("appShell.offlineUnlock") : t("appShell.unlock")}
+      sensitiveUnlockTitle={offlineSensitiveUnlockAvailable ? t("appShell.offlineUnlockTitle") : t("appShell.unlockTitle")}
       onUnlockSensitive={handleHeaderUnlockSensitive}
       onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
@@ -810,12 +818,12 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       <Toast toast={toast} onClose={clearToast} />
       {commandOpen && <Suspense fallback={null}><LazyCommandPalette open={commandOpen} actions={commandActions} onOpenChange={setCommandOpen} /></Suspense>}
       {showUnlockModal && !unlocked && createPortal(
-        <div className="fixed inset-0 z-[120] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="快速解锁" onClick={() => setShowUnlockModal(false)}>
+        <div className="fixed inset-0 z-[120] bg-[rgba(20,20,19,0.72)] p-3 backdrop-blur-sm sm:p-5 flex items-center justify-center" role="dialog" aria-modal="true" aria-label={t("ledgerApp.quickUnlockModalLabel")} onClick={() => setShowUnlockModal(false)}>
           <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="absolute right-5 top-5 z-10 grid h-10 w-10 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag" onClick={() => setShowUnlockModal(false)} aria-label="关闭"><X className="h-5 w-5" /></button>
+            <button type="button" className="absolute right-5 top-5 z-10 grid h-10 w-10 place-items-center rounded-lg border border-line bg-panel text-stone hover:bg-tag" onClick={() => setShowUnlockModal(false)} aria-label={t("ledgerApp.close")}><X className="h-5 w-5" /></button>
             <SensitiveUnlockPanel
-              title="快速解锁"
-              description="使用本机快速解锁、Face ID / Passkey 或主密码查看敏感数据。"
+              title={t("ledgerApp.quickUnlockTitle")}
+              description={t("ledgerApp.quickUnlockDescription")}
               message={sensitiveMessage}
               quickUnlockEnabled={quickUnlockEnabled}
               quickUnlockMode={quickUnlockMode}
@@ -843,16 +851,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
               <strong className="block truncate text-sm font-semibold tracking-[-0.015em] text-ink">{header.title}</strong>
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone">
-              {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> 离线模式</span>}
+              {!online && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-warm"><WifiOff className="h-3 w-3" /> {t("ledgerApp.offlineMode")}</span>}
               {pendingWriteCount > 0 && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand disabled:opacity-60" onClick={() => {
                 const conflict = pendingOperations.find((operation) => operation.status === "conflict");
                 if (conflict) setConflictOperationId(conflict.id);
                 else void syncPendingWrites({ userInitiated: true });
-              }} disabled={syncingPendingWrites}>{syncingPendingWrites ? "待同步写入中…" : pendingWriteSummary}</button>}
-              <span>{lastSyncedAt ? `同步 ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "下拉可刷新"}</span>
-              {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={`索引来源: ${indexInfo.source ?? ""}`}>PG 索引 · {indexInfo.gitSHA.slice(0, 7)}</span>}
-              {(refreshing || loadingFresh) && <span className="text-brand">后台同步中…</span>}
-              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>敏感数据已解锁 · 重新隐藏</button>}
+              }} disabled={syncingPendingWrites}>{syncingPendingWrites ? t("ledgerApp.syncingWrites") : pendingWriteSummary}</button>}
+              <span>{lastSyncedAt ? t("common.syncedAt", { time: new Date(lastSyncedAt).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" }) }) : t("common.pullToRefresh")}</span>
+              {indexInfo?.active && indexInfo.gitSHA && <span className="inline-flex items-center gap-1 rounded-full bg-tag px-2 py-0.5 text-tertiary" title={t("ledgerApp.indexSource", { source: indexInfo.source ?? "" })}>{t("ledgerApp.pgIndex", { sha: indexInfo.gitSHA.slice(0, 7) })}</span>}
+              {(refreshing || loadingFresh) && <span className="text-brand">{t("ledgerApp.refreshingInBackground")}</span>}
+              {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>{t("ledgerApp.sensitiveUnlockedRelock")}</button>}
               </div>
             </div>
             {offlineSensitiveUnlockAvailable && (
@@ -863,16 +871,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
                   className="h-9 min-w-0 rounded-md border border-line bg-panel px-3 text-sm text-ink"
                   value={offlineUnlockSecret}
                   onChange={(event) => setOfflineUnlockSecret(event.target.value)}
-                  placeholder="离线解锁码"
+                  placeholder={t("auth.offlineUnlockCode")}
                   autoComplete="current-password"
                 />
-                <button type="submit" className="h-9 shrink-0 rounded-md bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>离线解锁</button>
+                <button type="submit" className="h-9 shrink-0 rounded-md bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>{t("auth.offlineUnlock")}</button>
               </form>
             )}
           </div>
           <div className="workspace-controls flex w-full min-w-0 items-stretch gap-2 md:w-auto md:shrink-0">
             {canShowTimeControls && <div className="workspace-time-control min-w-0 flex-1 md:flex-none"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
-            <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => openAgent()} aria-label="打开账本 Agent" title="打开账本 Agent"><Bot className="h-5 w-5" /></button>
+            <button type="button" className={`workspace-agent-trigger grid shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand transition active:scale-95 hover:bg-tag ${canShowTimeControls ? "h-14 w-14 md:h-12 md:w-12" : "h-10 w-10"}`} onClick={() => openAgent()} aria-label={t("appShell.agentLoadingLabel")} title={t("appShell.agentLoadingLabel")}><Bot className="h-5 w-5" /></button>
           </div>
         </div>
       </div>}
@@ -880,24 +888,24 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       {page === "agent" && <LedgerAgentWorkspace key={activeApiEndpointIdRef.current} presentation="page" request={agentRequest} open context={{ page, path: pathname, start: timeRange.start, end: timeRange.end, valuationCurrency }} onApplyBQL={applyAgentBQL} onNavigate={(path) => { void pushPreloadedRoute(path); }} onChanged={() => load(true)} showToast={showToast} />}
       {page === "home" && <HomePage summary={summary} timeRange={timeRange} valuationCurrency={dataValuationCurrency} ledgerRevision={ledgerVersion?.version || ledgerVersion?.signature || `${ledgerVersion?.latestMtimeMs ?? 0}:${ledgerVersion?.fileCount ?? 0}`} privacySettings={privacySettings} sensitiveUnlocked={unlocked} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} onPrivacyChange={updatePrivacySetting} onSensitiveLocked={handleServerSensitiveLocked} />}
 
-      {page === "dashboard" && (unlocked ? <MemoDashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock("收支分析已隐藏", "此页会展示筛选后的支出节奏、分类、商户和异常流水，需要解锁后查看。"))}
-      {page === "query" && (unlocked ? <MemoBQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={openAgentFromQuery} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock("BQL 查询已隐藏", "查询页可以读取完整流水、收入和资产相关字段，需要解锁后查看。"))}
-      {page === "net-worth" && (unlocked ? <MemoNetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} /> : requireSensitiveUnlock("资产负债已隐藏", "此页会展示资产、负债、账户结构和净资产变化，需要解锁后查看。"))}
-      {page === "investments" && (unlocked ? <MemoInvestmentsPage investments={investments} /> : requireSensitiveUnlock("股票持仓已隐藏", "此页会展示证券商品、持仓份额、最新价格和折算市值，需要解锁后查看。"))}
+      {page === "dashboard" && (unlocked ? <MemoDashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock(t("ledgerApp.dashboardHidden"), t("ledgerApp.dashboardHiddenDetail")))}
+      {page === "query" && (unlocked ? <MemoBQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={openAgentFromQuery} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock(t("ledgerApp.queryHidden"), t("ledgerApp.queryHiddenDetail")))}
+      {page === "net-worth" && (unlocked ? <MemoNetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} /> : requireSensitiveUnlock(t("ledgerApp.netWorthHidden"), t("ledgerApp.netWorthHiddenDetail")))}
+      {page === "investments" && (unlocked ? <MemoInvestmentsPage investments={investments} /> : requireSensitiveUnlock(t("ledgerApp.investmentsHidden"), t("ledgerApp.investmentsHiddenDetail")))}
       {page === "income-statement" && <MemoIncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={toggleIncomeStatementVisible} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
-      {page === "currencies" && <Suspense fallback={<RouteFallback label="正在准备货币与汇率…" />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={unlockOnlineSensitive} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
+      {page === "currencies" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingCurrency")} />}><LazyCurrencyPage commodities={commodities} prices={prices} accountBalances={accountBalances} accounts={accounts} valuationCurrency={valuationCurrency} sensitiveUnlocked={unlocked} onUnlockSensitive={unlockOnlineSensitive} onValuationCurrencyChange={(currency) => updatePrivacySetting("valuationCurrency", currency)} /></Suspense>}
       {page === "accounts" && (() => {
         const detailAccount = accountFromPathname(pathname);
-        if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label="正在准备账户明细…" />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock("账户明细已隐藏", "单个账户详情包含当前余额和账户级流水，需要解锁后查看。");
-        return <Suspense fallback={<RouteFallback label="正在准备账户面板…" />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock("账户余额已隐藏", "账户定义可以直接管理；当前余额和账户健康需要解锁后查看。")}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} onOpenAgent={(prompt) => openAgent(prompt, true)} /></></Suspense>;
+        if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingAccountDetail")} />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.accountDetailHidden"), t("ledgerApp.accountDetailHiddenDetail"));
+        return <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingAccountPanels")} />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock(t("ledgerApp.accountBalancesHidden"), t("ledgerApp.accountBalancesHiddenDetail"))}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} onOpenAgent={(prompt) => openAgent(prompt, true)} /></></Suspense>;
       })()}
-      {page === "settings" && <Suspense fallback={<RouteFallback label="正在准备设置…" />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} onRegisterPasskey={registerPasskey} onPasskeyRegisteredChange={setPasskeyRegistered} showToast={showToast} /></Suspense>}
-      {page === "imports" && <Suspense fallback={<RouteFallback label="正在准备账单导入…" />}><LazyImportPage onImported={guardedImportRefresh} showToast={showToast} /></Suspense>}
-      {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备账本编辑器…" />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock("账本编辑器已隐藏", "在线编辑会展示完整 Beancount 文件和金额，需要解锁后查看。"))}
-      {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label="正在准备对账…" />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock("对账数据已隐藏", "对账会展示账户余额、余额断言和差额调整，需要解锁后查看。"))}
+      {page === "settings" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingSettings")} />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} onRegisterPasskey={registerPasskey} onPasskeyRegisteredChange={setPasskeyRegistered} showToast={showToast} /></Suspense>}
+      {page === "imports" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingImports")} />}><LazyImportPage onImported={guardedImportRefresh} showToast={showToast} /></Suspense>}
+      {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingEditor")} />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.editorHidden"), t("ledgerApp.editorHiddenDetail")))}
+      {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingReconcile")} />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.reconcileHidden"), t("ledgerApp.reconcileHiddenDetail")))}
       {page === "transactions" && <TransactionQuickViews views={TRANSACTION_QUICK_VIEWS} onSelect={applyTransactionQuickView} />}
       {page === "transactions" && (
-        <Suspense fallback={<RouteFallback label="正在准备流水列表…" />}>
+        <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingTransactions")} />}>
           <LazyTransactionList
             txns={transactionListTxns}
             accounts={accounts}
@@ -942,22 +950,22 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       <AlertDialog open={Boolean(pendingConflict)} onOpenChange={(open) => !open && setConflictOperationId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>这条本地修改需要重新编辑</AlertDialogTitle>
+            <AlertDialogTitle>{t("ledgerApp.conflictTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              账本已更新，浏览器保存的修改不能安全套用。请刷新后重新编辑这笔交易；丢弃只会删除浏览器中的本地修改，不会改动账本。
+              {t("ledgerApp.conflictDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingConflict && <p className="rounded-lg bg-tag px-3 py-2 text-sm text-warm">
-            {pendingConflict.kind === "append" ? "新增本地交易" : pendingConflict.kind === "update-transaction" ? `修改 ${pendingConflict.source.file}:${pendingConflict.source.line}` : `删除 ${pendingConflict.source.file}:${pendingConflict.source.line}`}
+            {pendingConflict.kind === "append" ? t("ledgerApp.conflictAppend") : pendingConflict.kind === "update-transaction" ? t("ledgerApp.conflictUpdate", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` }) : t("ledgerApp.conflictDelete", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` })}
           </p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>保留本地修改</AlertDialogCancel>
+            <AlertDialogCancel>{t("ledgerApp.keepLocalChange")}</AlertDialogCancel>
             <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => {
               if (!pendingConflict) return;
               discardPendingOperation(pendingConflict.id);
               setConflictOperationId(null);
-              showToast("info", "已丢弃这条本地修改，请刷新后重新编辑");
-            }}>丢弃本地修改</AlertDialogAction>
+              showToast("info", t("ledgerApp.discardedLocalChange"));
+            }}>{t("ledgerApp.discardLocalChange")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -966,8 +974,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 }
 
 function PullRefreshIndicator({ state, distance, refreshing }: { state: "idle" | "pull" | "release" | "refreshing"; distance: number; refreshing: boolean }) {
+  const { t } = useTranslation();
   if (state === "idle" && !refreshing) return null;
-  const label = refreshing || state === "refreshing" ? "正在刷新…" : state === "release" ? "松开刷新" : "下拉刷新";
+  const label = refreshing || state === "refreshing" ? t("ledgerApp.refreshingNow") : state === "release" ? t("ledgerApp.releaseToRefresh") : t("ledgerApp.pullToRefresh");
   const top = Math.max(12, Math.min(76, distance));
   return <div className="pointer-events-none fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-3 py-1.5 text-xs text-olive shadow-sm backdrop-blur" style={{ top: `calc(${top}px + env(safe-area-inset-top))` }}><RefreshCw className={`mr-1 inline h-3.5 w-3.5 text-brand ${refreshing || state === "refreshing" ? "animate-spin" : ""}`} />{label}</div>;
 }
@@ -995,16 +1004,17 @@ function PullToRefreshSurface({ refresh, disabled, children }: { refresh: () => 
 }
 
 function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_QUICK_VIEWS; onSelect: (view: (typeof TRANSACTION_QUICK_VIEWS)[number]) => void }) {
+  const { t } = useTranslation();
   return (
     <section className="hidden min-h-12 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 lg:flex md:px-4">
       <div>
-        <div className="text-xs font-medium text-ink">常用流水视图</div>
-        <div className="mt-0.5 text-[10px] text-stone">一键切换常用核对条件</div>
+        <div className="text-xs font-medium text-ink">{t("ledgerApp.commonViews")}</div>
+        <div className="mt-0.5 text-[10px] text-stone">{t("ledgerApp.commonViewsHint")}</div>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
         {views.map((view) => (
-          <button key={view.id} type="button" className="h-7 rounded-md border border-line bg-panel px-2.5 text-xs text-warm hover:bg-tag" onClick={() => onSelect(view)} title={view.detail}>
-            {view.label}
+          <button key={view.id} type="button" className="h-7 rounded-md border border-line bg-panel px-2.5 text-xs text-warm hover:bg-tag" onClick={() => onSelect(view)} title={t(view.labelDetailKey)}>
+            {t(view.labelKey)}
           </button>
         ))}
       </div>
@@ -1012,24 +1022,24 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
   );
 }
 
-function pageHeader(page: LedgerPage, range: TimeRange) {
+function pageHeader(page: LedgerPage, range: TimeRange, t: (key: string, options?: Record<string, unknown>) => string) {
   const label = formatTimeRangeLabel(range);
   const isMonthScoped = page !== "agent" && page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
-    agent: { eyebrow: "ledger agent", title: "账本 Agent" },
-    home: { eyebrow: "financial overview", title: "财务概览" },
-    dashboard: { eyebrow: "income and spending analysis", title: `${label} 收支分析` },
-    query: { eyebrow: "ledger query", title: "BQL 查询" },
-    transactions: { eyebrow: "transactions", title: `${label} 流水` },
-    imports: { eyebrow: "statement import", title: "账单导入" },
-    editor: { eyebrow: "ledger editor", title: "账本编辑器" },
-    reconcile: { eyebrow: "reconcile period", title: `${label} 对账` },
-    accounts: { eyebrow: "account book", title: "账户与余额" },
-    "net-worth": { eyebrow: "balance sheet", title: `${label} 资产负债` },
-    investments: { eyebrow: "securities", title: "股票持仓" },
-    "income-statement": { eyebrow: "income statement", title: `${label} 损益表` },
-    currencies: { eyebrow: "currencies and fx", title: "货币与汇率" },
-    settings: { eyebrow: "preferences", title: "设置" },
+    agent: { eyebrow: "ledger agent", title: t("ledgerApp.pageAgent") },
+    home: { eyebrow: "financial overview", title: t("ledgerApp.pageHome") },
+    dashboard: { eyebrow: "income and spending analysis", title: t("ledgerApp.pageDashboard", { label }) },
+    query: { eyebrow: "ledger query", title: t("ledgerApp.pageQuery") },
+    transactions: { eyebrow: "transactions", title: t("ledgerApp.pageTransactions", { label }) },
+    imports: { eyebrow: "statement import", title: t("ledgerApp.pageImports") },
+    editor: { eyebrow: "ledger editor", title: t("ledgerApp.pageEditor") },
+    reconcile: { eyebrow: "reconcile period", title: t("ledgerApp.pageReconcile", { label }) },
+    accounts: { eyebrow: "account book", title: t("ledgerApp.pageAccounts") },
+    "net-worth": { eyebrow: "balance sheet", title: t("ledgerApp.pageNetWorth", { label }) },
+    investments: { eyebrow: "securities", title: t("ledgerApp.pageInvestments") },
+    "income-statement": { eyebrow: "income statement", title: t("ledgerApp.pageIncomeStatement", { label }) },
+    currencies: { eyebrow: "currencies and fx", title: t("ledgerApp.pageCurrencies") },
+    settings: { eyebrow: "preferences", title: t("ledgerApp.pageSettings") },
   };
   return { ...headers[page], monthScoped: isMonthScoped };
 }

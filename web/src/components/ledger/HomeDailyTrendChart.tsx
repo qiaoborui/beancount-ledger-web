@@ -1,4 +1,5 @@
 import { useMemo, useState, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { formatValuation } from "@/lib/money";
 
 type DayRow = [string, { income: number; expense: number }];
@@ -24,12 +25,13 @@ const plotBottom = margin.top + plotHeight;
 const baselineValue = 0;
 
 export function HomeDailyTrendChart({ rows, valuationCurrency, mode = "daily" }: { rows: DayRow[]; valuationCurrency: string; mode?: ChartMode }) {
+  const { t } = useTranslation();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const model = useMemo(() => buildChartModel(rows, mode), [rows, mode]);
   const activePoint = activeIndex == null ? null : model.points[activeIndex] ?? null;
   const chartCopy = mode === "cumulative"
-    ? { title: "累计收支趋势", desc: "平滑折线表示本期累计收入、累计支出和累计净额。", income: "累计收入", expense: "累计支出", net: "累计净额" }
-    : { title: "日收支节奏", desc: "平滑折线表示每日收入、每日支出和每日净收入。", income: "收入", expense: "支出", net: "净收入" };
+    ? { title: t("home.cumulativeTrend"), desc: t("home.cumulativeTrendDesc"), income: t("home.cumulativeIncomeSeries"), expense: t("home.cumulativeExpenseSeries"), net: t("home.cumulativeNetSeries") }
+    : { title: t("home.dailyRhythm"), desc: t("home.dailyRhythmDesc"), income: t("home.incomeSeries"), expense: t("home.expenseSeries"), net: t("home.netSeries") };
   const titleId = `home-${mode}-chart-title`;
   const descId = `home-${mode}-chart-desc`;
   const fillId = `home-${mode}-chart-income-fill`;
@@ -88,7 +90,7 @@ export function HomeDailyTrendChart({ rows, valuationCurrency, mode = "daily" }:
         className={index === activeIndex ? "home-daily-chart-dot home-daily-chart-dot-active" : "home-daily-chart-dot"}
         vectorEffect="non-scaling-stroke"
       >
-        <title>{`${point.date} 收入 ${formatValuation(point.income, valuationCurrency)}`}</title>
+        <title>{`${point.date} ${chartCopy.income} ${formatValuation(point.income, valuationCurrency)}`}</title>
       </circle> : null)}
 
       {activePoint && <g className="home-daily-chart-cursor">

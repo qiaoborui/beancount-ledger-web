@@ -1,10 +1,12 @@
 import { CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { LedgerToast } from "./hooks/useToast";
 
 export function Toast({ toast, onClose }: { toast: LedgerToast; onClose: () => void }) {
+  const { t } = useTranslation();
   if (!toast || typeof document === "undefined") return null;
   const Icon = toast.kind === "error" ? TriangleAlert : toast.kind === "success" ? CircleCheck : Info;
   const tone = toast.kind === "error" ? "text-[var(--danger)]" : toast.kind === "success" ? "text-[var(--success)]" : "text-brand";
@@ -13,7 +15,7 @@ export function Toast({ toast, onClose }: { toast: LedgerToast; onClose: () => v
       <div key={toast.id} className="ledger-toast kami-float pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-warm" role={toast.kind === "error" ? "alert" : "status"} aria-live={toast.kind === "error" ? "assertive" : "polite"}>
         <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} aria-hidden="true" />
         <span className="min-w-0 flex-1 whitespace-pre-wrap leading-5">{toast.text}</span>
-        <button type="button" className="-my-1.5 -mr-2 grid h-10 w-10 shrink-0 place-items-center rounded-xl text-stone hover:bg-tag hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" onClick={onClose} aria-label="关闭提示">
+        <button type="button" className="-my-1.5 -mr-2 grid h-10 w-10 shrink-0 place-items-center rounded-xl text-stone hover:bg-tag hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" onClick={onClose} aria-label={t("shared.closeToast")}>
           <X className="h-4 w-4" />
         </button>
       </div>

@@ -27,7 +27,7 @@ describe("NetWorthPage information architecture", () => {
   it("renders a balance-sheet workspace without income-statement metrics", () => {
     const html = renderToString(
       <NetWorthPage
-        rows={[{ date: "07-28", 资产: 13000, 负债: 1200, 净资产: 11800 }]}
+        rows={[{ date: "07-28", assets: 13000, liabilities: 1200, netWorth: 11800 }]}
         monthEndRows={[windows.previousMonthEnd!, windows.latest!]}
         windows={windows}
         accountBalances={accountBalances}
@@ -51,7 +51,7 @@ describe("NetWorthPage information architecture", () => {
   it("masks position values, ratios, and trend charts together", () => {
     const html = renderToString(
       <NetWorthPage
-        rows={[{ date: "07-28", 资产: 13000, 负债: 1200, 净资产: 11800 }]}
+        rows={[{ date: "07-28", assets: 13000, liabilities: 1200, netWorth: 11800 }]}
         monthEndRows={[]}
         windows={windows}
         accountBalances={accountBalances}

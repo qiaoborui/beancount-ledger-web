@@ -2,6 +2,7 @@
 
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   canNavigateTimeRange,
   exclusiveEndDate,
@@ -16,19 +17,19 @@ import {
 import { haptic } from "./haptics";
 import { MobileSheet } from "./MobileSheet";
 
-const rollingPresets: { key: TimePreset; label: string; meta: string }[] = [
-  { key: "last7", label: "过去 7 天", meta: "7d" },
-  { key: "last30", label: "过去 30 天", meta: "30d" },
-  { key: "last90", label: "过去 90 天", meta: "90d" },
-  { key: "last12months", label: "过去 12 个月", meta: "12mo" },
+const rollingPresetKeys: { key: TimePreset; labelKey: string; metaKey: string }[] = [
+  { key: "last7", labelKey: "timeRange.last7", metaKey: "timeRange.weekMeta" },
+  { key: "last30", labelKey: "timeRange.last30", metaKey: "timeRange.monthMeta" },
+  { key: "last90", labelKey: "timeRange.last90", metaKey: "timeRange.quarterMeta" },
+  { key: "last12months", labelKey: "timeRange.last12months", metaKey: "timeRange.yearMeta" },
 ];
 
-const calendarPresets: { key: TimePreset; label: string; meta: string }[] = [
-  { key: "week", label: "当前周", meta: "周一开始" },
-  { key: "month", label: "当前月", meta: "自然月" },
-  { key: "quarter", label: "当前季度", meta: "自然季度" },
-  { key: "year", label: "当前年", meta: "自然年" },
-  { key: "all", label: "全部时间", meta: "完整账本" },
+const calendarPresetKeys: { key: TimePreset; labelKey: string; metaKey: string }[] = [
+  { key: "week", labelKey: "timeRange.currentWeek", metaKey: "timeRange.startsMonday" },
+  { key: "month", labelKey: "timeRange.currentMonth", metaKey: "timeRange.naturalMonth" },
+  { key: "quarter", labelKey: "timeRange.currentQuarter", metaKey: "timeRange.naturalQuarter" },
+  { key: "year", labelKey: "timeRange.currentYear", metaKey: "timeRange.naturalYear" },
+  { key: "all", labelKey: "timeRange.all", metaKey: "timeRange.fullLedger" },
 ];
 
 type TimeRangePickerProps = {
@@ -37,6 +38,7 @@ type TimeRangePickerProps = {
 };
 
 export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -133,13 +135,13 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   const pickerBody = (
     <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] md:gap-0">
       <div className="min-w-0 md:border-r md:border-line md:bg-paper md:p-5">
-        <PresetSection label="滚动范围" presets={rollingPresets} selected={draftRange.preset} onSelect={selectPreset} />
-        <PresetSection className="mt-4" label="自然周期" presets={calendarPresets} selected={draftRange.preset} onSelect={selectPreset} />
+        <PresetSection label={t("timeRange.rollingRange")} presets={rollingPresetKeys} selected={draftRange.preset} onSelect={selectPreset} t={t} />
+        <PresetSection className="mt-4" label={t("timeRange.naturalPeriod")} presets={calendarPresetKeys} selected={draftRange.preset} onSelect={selectPreset} t={t} />
       </div>
       <div className="min-w-0 md:p-6">
-        <h3 className="text-lg font-semibold tracking-[-0.018em]">自定义日期</h3>
-        <p className="mt-1 text-xs leading-5 text-stone">选择固定起止日期，结束日期会包含当天。</p>
-        <label className="mt-4 block text-xs font-semibold text-stone" htmlFor="time-range-start">开始日期</label>
+        <h3 className="text-lg font-semibold tracking-[-0.018em]">{t("timeRange.customDate")}</h3>
+        <p className="mt-1 text-xs leading-5 text-stone">{t("timeRange.customDateHint")}</p>
+        <label className="mt-4 block text-xs font-semibold text-stone" htmlFor="time-range-start">{t("timeRange.startDate")}</label>
         <input
           id="time-range-start"
           type="date"
@@ -147,7 +149,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
           value={customStart}
           onChange={(event) => updateCustomStart(event.target.value)}
         />
-        <label className="mt-3 block text-xs font-semibold text-stone" htmlFor="time-range-end">结束日期</label>
+        <label className="mt-3 block text-xs font-semibold text-stone" htmlFor="time-range-end">{t("timeRange.endDate")}</label>
         <input
           id="time-range-end"
           type="date"
@@ -157,7 +159,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
         />
         <div className="mt-4 flex items-start gap-2 rounded-xl bg-tag p-3 text-xs leading-5 text-olive">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-          <span>“过去 30 天”会随今天滚动，“当前月”始终按自然月边界统计。</span>
+          <span>{t("timeRange.rollingHint")}</span>
         </div>
       </div>
     </div>
@@ -166,11 +168,11 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   return (
     <div ref={containerRef} className="relative w-full min-w-0 md:w-auto">
       <div data-time-range-control="segmented" className="flex h-14 w-full min-w-0 overflow-hidden rounded-lg border border-lineSoft bg-panel md:h-12">
-        <button type="button" className="grid h-full w-10 shrink-0 place-items-center border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-9" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label="上一时间段">
+        <button type="button" className="grid h-full w-10 shrink-0 place-items-center border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-9" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label={t("timeRange.previousPeriod")}>
           <ChevronLeft className="h-4 w-4" />
         </button>
         {trigger}
-        <button type="button" className="grid h-full w-10 shrink-0 place-items-center border-l border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-9" onClick={() => move(1)} disabled={!canMoveNext} aria-label="下一时间段">
+        <button type="button" className="grid h-full w-10 shrink-0 place-items-center border-l border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-9" onClick={() => move(1)} disabled={!canMoveNext} aria-label={t("timeRange.nextPeriod")}>
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
@@ -178,24 +180,24 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
       {desktopOpen && (
         <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 hidden w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-lineSoft bg-panel shadow-[var(--float-shadow)] md:block" role="dialog" aria-label="选择时间范围">
           <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
-            <h2 className="text-lg font-semibold tracking-[-0.018em]">选择时间范围</h2>
+            <h2 className="text-lg font-semibold tracking-[-0.018em]">{t("timeRange.selectRange")}</h2>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-tag px-2.5 py-1 text-[11px] font-semibold text-brand">
               <span className="h-1.5 w-1.5 rounded-full bg-brandLight" />{formatTimeRangePickerLabel(draftRange)}
             </span>
           </div>
           {pickerBody}
-          <PickerFooter customValid={customValid || draftRange.preset !== "custom"} onCancel={() => setDesktopOpen(false)} onApply={applyDraft} />
+          <PickerFooter customValid={customValid || draftRange.preset !== "custom"} onCancel={() => setDesktopOpen(false)} onApply={applyDraft} t={t} />
         </div>
       )}
 
       <MobileSheet
         open={mobileOpen}
-        title="时间范围"
+        title={t("timeRange.timeRange")}
         onClose={() => setMobileOpen(false)}
         size="md"
         bodyClassName="pb-5"
         panelClassName="md:hidden"
-        footer={<div className="grid grid-cols-[minmax(0,0.75fr)_minmax(0,1.5fr)] gap-2"><button type="button" className="h-11 rounded-xl border border-line bg-panel text-sm font-semibold text-warm active:scale-95" onClick={() => syncDraft(range)}>重置</button><button type="button" className="h-11 rounded-xl bg-brand text-sm font-semibold text-paper active:scale-95 disabled:opacity-45" onClick={applyDraft} disabled={draftRange.preset === "custom" && !customValid}>应用：{formatTimeRangePickerLabel(draftRange)}</button></div>}
+        footer={<div className="grid grid-cols-[minmax(0,0.75fr)_minmax(0,1.5fr)] gap-2"><button type="button" className="h-11 rounded-xl border border-line bg-panel text-sm font-semibold text-warm active:scale-95" onClick={() => syncDraft(range)}>{t("timeRange.reset")}</button><button type="button" className="h-11 rounded-xl bg-brand text-sm font-semibold text-paper active:scale-95 disabled:opacity-45" onClick={applyDraft} disabled={draftRange.preset === "custom" && !customValid}>{t("timeRange.applyWith", { label: formatTimeRangePickerLabel(draftRange) })}</button></div>}
       >
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand/20 bg-tag p-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel text-brand"><CalendarDays className="h-4 w-4" /></span>
@@ -207,7 +209,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
   );
 }
 
-function PresetSection({ label, presets, selected, onSelect, className = "" }: { label: string; presets: { key: TimePreset; label: string; meta: string }[]; selected: TimePreset; onSelect: (preset: TimePreset) => void; className?: string }) {
+function PresetSection({ label, presets, selected, onSelect, t, className = "" }: { label: string; presets: { key: TimePreset; labelKey: string; metaKey: string }[]; selected: TimePreset; onSelect: (preset: TimePreset) => void; t: (key: string) => string; className?: string }) {
   return (
     <section className={className}>
       <div className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.12em] text-stone">{label}</div>
@@ -222,8 +224,8 @@ function PresetSection({ label, presets, selected, onSelect, className = "" }: {
               onClick={() => onSelect(preset.key)}
               aria-pressed={active}
             >
-              <span className="whitespace-nowrap">{preset.label}</span>
-              {active ? <Check className="h-4 w-4 shrink-0" /> : <span className="hidden shrink-0 text-[10px] text-stone md:inline">{preset.meta}</span>}
+              <span className="whitespace-nowrap">{t(preset.labelKey)}</span>
+              {active ? <Check className="h-4 w-4 shrink-0" /> : <span className="hidden shrink-0 text-[10px] text-stone md:inline">{t(preset.metaKey)}</span>}
             </button>
           );
         })}
@@ -232,13 +234,13 @@ function PresetSection({ label, presets, selected, onSelect, className = "" }: {
   );
 }
 
-function PickerFooter({ customValid, onCancel, onApply }: { customValid: boolean; onCancel: () => void; onApply: () => void }) {
+function PickerFooter({ customValid, onCancel, onApply, t }: { customValid: boolean; onCancel: () => void; onApply: () => void; t: (key: string) => string }) {
   return (
     <div className="flex items-center justify-between gap-3 border-t border-line bg-paper/60 px-4 py-3">
-      <span className="text-[11px] text-stone">快捷范围选择后点击应用</span>
+      <span className="text-[11px] text-stone">{t("timeRange.applyHint")}</span>
       <div className="flex gap-2">
-        <button type="button" className="h-9 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-warm hover:bg-tag active:scale-95" onClick={onCancel}>取消</button>
-        <button type="button" className="h-9 rounded-xl bg-brand px-4 text-sm font-semibold text-paper active:scale-95 disabled:opacity-45" onClick={onApply} disabled={!customValid}>应用范围</button>
+        <button type="button" className="h-9 rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-warm hover:bg-tag active:scale-95" onClick={onCancel}>{t("timeRange.cancel")}</button>
+        <button type="button" className="h-9 rounded-xl bg-brand px-4 text-sm font-semibold text-paper active:scale-95 disabled:opacity-45" onClick={onApply} disabled={!customValid}>{t("timeRange.applyRange")}</button>
       </div>
     </div>
   );
