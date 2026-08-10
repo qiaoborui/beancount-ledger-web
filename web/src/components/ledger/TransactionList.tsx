@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
+import i18n from "@/i18n";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -83,12 +85,12 @@ function hasFilterSnapshot(filters: TransactionFilterSnapshot): boolean {
 
 function filterSnapshotLabel(filters: TransactionFilterSnapshot): string {
   const parts = [
-    filters.searchQuery.trim() && `搜索 ${filters.searchQuery.trim()}`,
-    filters.categoryQuery.trim() && `分类 ${filters.categoryQuery.trim()} ${filters.matchMode === "exact" ? "精确" : "前缀"}`,
-    filters.metadataQuery.trim() && `标签 ${filters.metadataQuery.trim()}`,
-    filters.viewMode === "full" && "完整视图",
+    filters.searchQuery.trim() && i18n.t("transactionList.filterSearchLabel", { query: filters.searchQuery.trim() }),
+    filters.categoryQuery.trim() && i18n.t("transactionList.filterCategoryLabel", { query: filters.categoryQuery.trim(), mode: filters.matchMode === "exact" ? i18n.t("transactionList.exact") : i18n.t("transactionList.prefix") }),
+    filters.metadataQuery.trim() && i18n.t("transactionList.filterMetadataLabel", { query: filters.metadataQuery.trim() }),
+    filters.viewMode === "full" && i18n.t("transactionList.fullViewLabel"),
   ].filter(Boolean);
-  return parts.join(" · ") || "全部流水";
+  return parts.join(" · ") || i18n.t("transactionList.allTransactions");
 }
 
 function loadFilterViews(): StoredFilterViews {
@@ -159,11 +161,11 @@ function MetadataBadges({ txn, limit }: { txn: Txn; limit?: number }) {
 
 function pendingLabel(txn: Txn) {
   if (!txn.pending) return "";
-  return txn.pending.kind === "append" ? "待同步新增" : "待同步修改";
+  return txn.pending.kind === "append" ? i18n.t("transactionList.pendingAppend") : i18n.t("transactionList.pendingUpdate");
 }
 
 function sourceLabel(txn: Txn) {
-  if (txn.pending?.kind === "append") return "本地待同步";
+  if (txn.pending?.kind === "append") return i18n.t("transactionList.localPending");
   return `${txn.source.file}:${txn.source.line}`;
 }
 
@@ -306,6 +308,7 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
 }
 
 const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void }) {
+  const { t } = useTranslation();
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const pending = pendingLabel(txn);
   return (
@@ -338,6 +341,7 @@ const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selec
 });
 
 const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
+  const { t } = useTranslation();
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
   const paymentAccounts = txn.postings.filter((posting) => posting.account.startsWith("Assets:") || posting.account.startsWith("Liabilities:"));
@@ -360,13 +364,13 @@ const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, account
           <strong className="truncate text-[13px] leading-5 text-ink">{txn.payee}</strong>
           {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>
-        <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || "无说明"}</div>
+        <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || t("transactionList.noNarration")}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
       <div className={`text-right text-[13px] font-semibold tabular-nums ${displayAmount ? transactionAmountColor(displayAmount) : "text-stone"}`}>{displayAmount ? fmtTxnAmount(displayAmount) : "—"}</div>
       <div className="min-w-0">
-        <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || "未分类"}</div>
-        <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无付款账户"}</div>
+        <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || t("transactionList.uncategorized")}</div>
+        <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || t("transactionList.noPaymentAccount")}</div>
       </div>
       <div className="min-w-0">
         {meta.length || txn.tags?.length ? (
@@ -382,6 +386,7 @@ const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, account
 });
 
 export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
+  const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Txn | null>(null);
@@ -463,11 +468,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const saveCurrentFilterView = () => {
     if (!hasFilterSnapshot(immediateFilterSnapshot)) return;
     setFilterViews((views) => saveNamedFilterView(views, immediateFilterSnapshot));
-    showToast?.("success", "当前筛选已保存");
+    showToast?.("success", t("transactionList.savedFilterToast"));
   };
   const filterViewOptions = [
-    ...filterViews.saved.map((view) => ({ value: `saved:${view.id}`, label: `已保存 · ${view.name}`, view })),
-    ...filterViews.recent.map((view) => ({ value: `recent:${view.id}`, label: `最近 · ${view.name}`, view })),
+    ...filterViews.saved.map((view) => ({ value: `saved:${view.id}`, label: `${t("transactionList.savedPrefix", { name: view.name })}`, view })),
+    ...filterViews.recent.map((view) => ({ value: `recent:${view.id}`, label: `${t("transactionList.recentPrefix", { name: view.name })}`, view })),
   ];
   const selectedMatches = (txn: Txn) => {
     const key = transactionKey(txn);
@@ -517,14 +522,14 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const renderFilterControls = (idPrefix: string) => (
     <>
       <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(180px,260px)_minmax(180px,260px)]">
-        {setSearchQuery && <Input id={idPrefix === "desktop" ? "transaction-search-input" : `${idPrefix}-transaction-search-input`} className="h-9 rounded-md bg-paper text-sm" placeholder="搜索商户、说明、账户、metadata" value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
+        {setSearchQuery && <Input id={idPrefix === "desktop" ? "transaction-search-input" : `${idPrefix}-transaction-search-input`} className="h-9 rounded-md bg-paper text-sm" placeholder={t("transactionList.filterSearchPlaceholder")} value={searchQuery ?? ""} onChange={(e) => setSearchQuery(e.target.value)} />}
         {setCategoryQuery && (
           <Select value={categories.includes(categoryQuery ?? "") ? categoryQuery : ALL_FILTER_VALUE} onValueChange={(value) => setCategoryQuery(value === ALL_FILTER_VALUE ? "" : value)}>
             <SelectTrigger className="h-9 w-full rounded-md bg-paper text-sm">
-              <SelectValue placeholder="全部分类" />
+              <SelectValue placeholder={t("transactionList.allCategories")} />
             </SelectTrigger>
             <SelectContent className="max-h-80">
-              <SelectItem value={ALL_FILTER_VALUE}>全部分类</SelectItem>
+              <SelectItem value={ALL_FILTER_VALUE}>{t("transactionList.allCategories")}</SelectItem>
               {categories.map((category) => <SelectItem key={category} value={category}>{accountOptionLabel(category)}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -532,10 +537,10 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         {setMetadataQuery && (
           <Select value={metadataOptions.includes(metadataQuery ?? "") ? metadataQuery : ALL_FILTER_VALUE} onValueChange={(value) => setMetadataQuery(value === ALL_FILTER_VALUE ? "" : value)}>
             <SelectTrigger className="h-9 w-full rounded-md bg-paper text-sm">
-              <SelectValue placeholder="全部 metadata" />
+              <SelectValue placeholder={t("transactionList.allMetadata")} />
             </SelectTrigger>
             <SelectContent className="max-h-80">
-              <SelectItem value={ALL_FILTER_VALUE}>全部 metadata</SelectItem>
+              <SelectItem value={ALL_FILTER_VALUE}>{t("transactionList.allMetadata")}</SelectItem>
               {metadataOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -543,12 +548,12 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-stone">
-          <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? "查询中…" : `${rows.length} / ${txns.length} 笔`}</span>
-          {serverFilteredSearch && <span className="rounded-md bg-brand/10 px-2 py-1 text-brand">后端查询</span>}
+          <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? t("transactionList.searching") : t("transactionList.countLabel", { count: rows.length, total: txns.length })}</span>
+          {serverFilteredSearch && <span className="rounded-md bg-brand/10 px-2 py-1 text-brand">{t("transactionList.backendQuery")}</span>}
           {serverSearchError && <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">{serverSearchError}</span>}
-          {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-60" placeholder="手动分类前缀，如 Expenses:Food" value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
+          {setCategoryQuery && <Input list={`${idPrefix}-txn-category-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-60" placeholder={t("transactionList.categoryPrefixPlaceholder")} value={categoryQuery ?? ""} onChange={(e) => setCategoryQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-category-options`}>{categories.map((category) => <option key={category} value={category} label={accountOptionLabel(category)} />)}</datalist>
-          {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-64" placeholder="metadata/tag，如 person:妈妈 #trip" value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
+          {setMetadataQuery && <Input list={`${idPrefix}-txn-metadata-options`} className="h-8 w-full rounded-md bg-paper text-xs sm:w-64" placeholder={t("transactionList.metadataPlaceholder")} value={metadataQuery ?? ""} onChange={(e) => setMetadataQuery(e.target.value)} />}
           <datalist id={`${idPrefix}-txn-metadata-options`}>{metadataOptions.map((item) => <option key={item} value={item} />)}</datalist>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -558,24 +563,24 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
               if (option) restoreFilterView(option.view);
             }}>
               <SelectTrigger className="h-8 w-[180px] rounded-md bg-paper text-xs">
-                <SelectValue placeholder="恢复视图" />
+                <SelectValue placeholder={t("transactionList.restoreView")} />
               </SelectTrigger>
               <SelectContent className="max-h-80">
-                <SelectItem value={ALL_FILTER_VALUE}>恢复视图</SelectItem>
+                <SelectItem value={ALL_FILTER_VALUE}>{t("transactionList.restoreView")}</SelectItem>
                 {filterViewOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
               </SelectContent>
             </Select>
           )}
-          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={saveCurrentFilterView}>保存当前</Button>}
+          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={saveCurrentFilterView}>{t("transactionList.saveCurrent")}</Button>}
           {setViewMode && <div className="flex overflow-hidden rounded-lg border border-line">
-            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>简洁</button>
-            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>完整</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "compact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("compact")}>{t("transactionList.compact")}</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${viewMode === "full" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setViewMode("full")}>{t("transactionList.full")}</button>
           </div>}
           {setCategoryQuery && setMatchMode && categoryQuery && query && <div className="flex overflow-hidden rounded-lg border border-line">
-            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>前缀</button>
-            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>精确</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "prefix" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("prefix")}>{t("transactionList.prefix")}</button>
+            <button type="button" className={`px-2 py-1 text-xs transition-colors ${matchMode === "exact" ? "bg-brand text-paper" : "bg-paper text-warm hover:bg-tag"}`} onClick={() => setMatchMode("exact")}>{t("transactionList.exact")}</button>
           </div>}
-          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={clearFilters}>清空筛选</Button>}
+          {hasFilters && <Button type="button" variant="outline" size="xs" className="rounded-md bg-paper text-stone" onClick={clearFilters}>{t("transactionList.clearFilters")}</Button>}
         </div>
       </div>
     </>
@@ -588,14 +593,14 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <div className="mb-3 flex items-center gap-2 lg:hidden">
             <Button type="button" variant="outline" className="flex-1 rounded-md bg-panel text-warm shadow-sm" onClick={() => setMobileFiltersOpen(true)}>
               <SlidersHorizontal className="h-4 w-4 text-brand" />
-              筛选{activeFilterCount ? ` · ${activeFilterCount}` : ""}
+              {t("transactionList.filter")}{activeFilterCount ? ` · ${activeFilterCount}` : ""}
             </Button>
-            {hasFilters && <Button type="button" variant="outline" className="rounded-md bg-paper text-stone" onClick={clearFilters}>清空</Button>}
+            {hasFilters && <Button type="button" variant="outline" className="rounded-md bg-paper text-stone" onClick={clearFilters}>{t("transactionList.clear")}</Button>}
           </div>
           <div className="mb-3 flex items-center justify-between gap-3 text-xs text-stone lg:hidden">
-            <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? "查询中…" : `${rows.length} / ${txns.length} 笔`}</span>
-            {serverFilteredSearch && <span className="truncate text-right text-brand">后端查询</span>}
-            {serverSearchError ? <span className="truncate text-right amount-danger">{serverSearchError}</span> : hasFilters && <span className="truncate text-right">已应用筛选</span>}
+            <span className="rounded-md bg-tag px-2 py-1">{serverSearchLoading ? t("transactionList.searching") : t("transactionList.countLabel", { count: rows.length, total: txns.length })}</span>
+            {serverFilteredSearch && <span className="truncate text-right text-brand">{t("transactionList.backendQuery")}</span>}
+            {serverSearchError ? <span className="truncate text-right amount-danger">{serverSearchError}</span> : hasFilters && <span className="truncate text-right">{t("transactionList.appliedFilters")}</span>}
           </div>
           <div className="hidden border-b border-line bg-panel px-3 py-3 lg:block md:px-4">
             {renderFilterControls("desktop")}
@@ -604,11 +609,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       )}
 
       {!searchable && rows.length > 0 && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 md:px-4">
-        <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">最近流水</h2><p className="mt-0.5 text-[10px] text-stone">选择任一行进入交易检查台</p></div>
-        <span className="shrink-0 text-[11px] tabular-nums text-stone">{rows.length} 笔</span>
+        <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">{t("transactionList.recentTransactions")}</h2><p className="mt-0.5 text-[10px] text-stone">{t("transactionList.recentHint")}</p></div>
+        <span className="shrink-0 text-[11px] tabular-nums text-stone">{t("transactionList.countShort", { count: rows.length })}</span>
       </div>}
 
-      {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">{serverSearchLoading ? "正在查询匹配流水…" : "没有匹配的流水，换个筛选条件试试。"}</div>}
+      {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">{serverSearchLoading ? t("transactionList.searchingMatches") : t("transactionList.noMatches")}</div>}
 
       {rows.length > 0 && (
         <div className={searchable ? "xl:grid xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start" : ""}>
@@ -617,16 +622,16 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             className="hidden overflow-hidden bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand lg:block"
             tabIndex={0}
             role="grid"
-            aria-label="交易流水"
+            aria-label={t("transactionList.transactionGridLabel")}
             aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
             onKeyDown={handleDesktopListKeyDown}
           >
             <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 border-b border-line bg-tag px-3 py-2 text-[10px] font-semibold text-stone md:px-4">
-              <span>日期</span>
-              <span>交易</span>
-              <span className="text-right">金额</span>
-              <span>分类 / 账户</span>
-              <span>标签</span>
+              <span>{t("transactionList.date")}</span>
+              <span>{t("transactionList.transaction")}</span>
+              <span className="text-right">{t("transactionList.amount")}</span>
+              <span>{t("transactionList.categoryAccount")}</span>
+              <span>{t("transactionList.tags")}</span>
             </div>
             <div className="divide-y divide-line">
               {pageRows.map((txn) => {
@@ -658,14 +663,15 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
         </div>
       )}
     </div>
-    {searchable && <MobileSheet open={mobileFiltersOpen} title="筛选流水" onClose={() => setMobileFiltersOpen(false)} footer={<div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className="h-11 bg-panel" onClick={clearFilters} disabled={!hasFilters}>清空筛选</Button><Button type="button" className="h-11" onClick={() => setMobileFiltersOpen(false)}>完成</Button></div>}>{renderFilterControls("mobile")}</MobileSheet>}
+    {searchable && <MobileSheet open={mobileFiltersOpen} title={t("transactionList.filterSheetTitle")} onClose={() => setMobileFiltersOpen(false)} footer={<div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className="h-11 bg-panel" onClick={clearFilters} disabled={!hasFilters}>{t("transactionList.clearFilters")}</Button><Button type="button" className="h-11" onClick={() => setMobileFiltersOpen(false)}>{t("transactionList.done")}</Button></div>}>{renderFilterControls("mobile")}</MobileSheet>}
     {drawerTxn && <TransactionDrawer key={`${drawerTxn.source.file}:${drawerTxn.source.line}:sheet`} txn={drawerTxn} accounts={accounts} onClose={() => setDrawerTxn(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setDrawerTxn(null); }} onReverse={(source, date) => { onReverse?.(source, date); setDrawerTxn(null); }} />}
   </section>;
 }
 
 function TransactionInspector({ txn, accounts, visibleRows, totalRows, onOpenDetails }: { txn?: Txn | null; accounts: AccountView[]; visibleRows: number; totalRows: number; onOpenDetails: (txn: Txn) => void }) {
+  const { t } = useTranslation();
   if (!txn) return <aside className="transaction-inspector hidden border-l border-line bg-panel xl:block">
-    <div className="sticky top-[3.25rem] p-4 text-sm text-stone">选择一行流水查看检查台。</div>
+    <div className="sticky top-[3.25rem] p-4 text-sm text-stone">{t("transactionList.selectRow")}</div>
   </aside>;
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
@@ -677,32 +683,32 @@ function TransactionInspector({ txn, accounts, visibleRows, totalRows, onOpenDet
       <div className="border-b border-line px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold tracking-[-0.012em] text-ink">交易检查台</h3>
-            <p className="mt-1 text-[11px] tabular-nums text-stone">本页 {visibleRows} / {totalRows} 笔</p>
+            <h3 className="text-sm font-semibold tracking-[-0.012em] text-ink">{t("transactionList.inspectorTitle")}</h3>
+            <p className="mt-1 text-[11px] tabular-nums text-stone">{t("transactionList.thisPageCount", { visible: visibleRows, total: totalRows })}</p>
           </div>
-          <button type="button" className="h-7 shrink-0 rounded-md border border-line bg-paper px-2 text-xs text-olive hover:bg-tag hover:text-ink" onClick={() => onOpenDetails(txn)}>编辑</button>
+          <button type="button" className="h-7 shrink-0 rounded-md border border-line bg-paper px-2 text-xs text-olive hover:bg-tag hover:text-ink" onClick={() => onOpenDetails(txn)}>{t("transactionList.edit")}</button>
         </div>
       </div>
 
       <div className="divide-y divide-line">
         <section className="px-4 py-4">
-          <div className="text-[11px] font-semibold text-stone">交易对象</div>
-          <div className="mt-1 truncate text-lg font-semibold tracking-[-0.018em] text-ink" title={txn.payee}>{txn.payee || "无收付款方"}</div>
-          <div className="mt-1 text-sm leading-5 text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
+          <div className="text-[11px] font-semibold text-stone">{t("transactionList.payee")}</div>
+          <div className="mt-1 truncate text-lg font-semibold tracking-[-0.018em] text-ink" title={txn.payee}>{txn.payee || t("transactionList.noPayee")}</div>
+          <div className="mt-1 text-sm leading-5 text-olive [overflow-wrap:anywhere]">{txn.narration || t("transactionList.noNarrationShort")}</div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {pending && <span className="rounded-md border border-line bg-tag px-2 py-1 text-[11px] text-ink">{pending}</span>}
             <span className="rounded-md border border-line bg-tag px-2 py-1 text-[11px] tabular-nums text-stone">{txn.date}</span>
           </div>
         </section>
 
-        <InspectorMetric label="主金额" value={displayAmount ? fmtTxnAmount(displayAmount) : "—"} tone={displayAmount ? transactionAmountColor(displayAmount) : "text-stone"} detail={displayAmount?.account ?? "没有可识别主 posting"} />
-        <InspectorMetric label="分类" value={categoryRows.map(shortAccount).join(" / ") || "未分类"} tone="text-ink" detail={categoryRows.join(" · ") || "没有 Expenses / Income 分类"} />
-        <InspectorMetric label="支付账户" value={paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || "无"} tone="text-ink" detail={paymentAccounts.map((posting) => posting.account).join(" · ") || "没有资产或负债账户"} />
+        <InspectorMetric label={t("transactionList.mainAmount")} value={displayAmount ? fmtTxnAmount(displayAmount) : "—"} tone={displayAmount ? transactionAmountColor(displayAmount) : "text-stone"} detail={displayAmount?.account ?? t("transactionList.noMainPosting")} />
+        <InspectorMetric label={t("transactionList.category")} value={categoryRows.map(shortAccount).join(" / ") || t("transactionList.uncategorized")} tone="text-ink" detail={categoryRows.join(" · ") || t("transactionList.noCategory")} />
+        <InspectorMetric label={t("transactionList.paymentAccount")} value={paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || t("transactionList.none")} tone="text-ink" detail={paymentAccounts.map((posting) => posting.account).join(" · ") || t("transactionList.noPaymentAccounts")} />
 
         <section className="px-4 py-3.5">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-[11px] font-semibold text-stone">Posting 明细</h4>
-            <span className="text-[11px] tabular-nums text-stone">{txn.postings.length} 条</span>
+            <h4 className="text-[11px] font-semibold text-stone">{t("transactionList.postingDetail")}</h4>
+            <span className="text-[11px] tabular-nums text-stone">{t("transactionList.postingCount", { count: txn.postings.length })}</span>
           </div>
           <div className="divide-y divide-line border-y border-line">
             {txn.postings.map((posting, index) => <div key={`${posting.account}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-2.5">
@@ -714,14 +720,14 @@ function TransactionInspector({ txn, accounts, visibleRows, totalRows, onOpenDet
 
         <section className="px-4 py-3.5">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-[11px] font-semibold text-stone">来源与标签</h4>
-            <span className="text-[11px] tabular-nums text-stone">{meta.length + (txn.tags?.length ?? 0)} 项</span>
+            <h4 className="text-[11px] font-semibold text-stone">{t("transactionList.sourceAndTags")}</h4>
+            <span className="text-[11px] tabular-nums text-stone">{t("transactionList.sourceAndTagsCount", { count: meta.length + (txn.tags?.length ?? 0) })}</span>
           </div>
           <div className="text-xs leading-5 text-stone [overflow-wrap:anywhere]">{sourceLabel(txn)}</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {meta.slice(0, 6).map(([key, value]) => <span key={`${key}:${String(value)}`} className="ledger-chip rounded-md px-2 py-1 text-[11px]">{key}: {String(value)}</span>)}
             {(txn.tags ?? []).slice(0, 4).map((tag) => <span key={tag} className="ledger-chip rounded-md px-2 py-1 text-[11px]">#{tag}</span>)}
-            {!meta.length && !txn.tags?.length && <span className="text-xs text-stone">无 metadata 或 tag</span>}
+            {!meta.length && !txn.tags?.length && <span className="text-xs text-stone">{t("transactionList.noMetadata")}</span>}
           </div>
         </section>
       </div>
@@ -738,22 +744,23 @@ function InspectorMetric({ label, value, tone, detail }: { label: string; value:
 }
 
 function TransactionPager({ safePage, totalPages, rowsLength, pageSize, setPageSize, setPage }: { safePage: number; totalPages: number; rowsLength: number; pageSize: number; setPageSize: (value: number) => void; setPage: React.Dispatch<React.SetStateAction<number>> }) {
+  const { t } = useTranslation();
   return <div className="flex flex-col gap-3 border-t border-line bg-panel px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between md:px-4">
-    <div className="tabular-nums text-stone">第 {safePage} / {totalPages} 页 · {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rowsLength)} / {rowsLength}</div>
+    <div className="tabular-nums text-stone">{t("transactionList.pageRange", { page: safePage, total: totalPages, start: (safePage - 1) * pageSize + 1, end: Math.min(safePage * pageSize, rowsLength), rows: rowsLength })}</div>
     <div className="flex items-center gap-2">
       <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
         <SelectTrigger className="h-8 w-[104px] rounded-md bg-panel text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="10">10 条/页</SelectItem>
-          <SelectItem value="20">20 条/页</SelectItem>
-          <SelectItem value="50">50 条/页</SelectItem>
-          <SelectItem value="100">100 条/页</SelectItem>
+          <SelectItem value="10">{t("transactionList.pageSize", { count: 10 })}</SelectItem>
+          <SelectItem value="20">{t("transactionList.pageSize", { count: 20 })}</SelectItem>
+          <SelectItem value="50">{t("transactionList.pageSize", { count: 50 })}</SelectItem>
+          <SelectItem value="100">{t("transactionList.pageSize", { count: 100 })}</SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</Button>
-      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</Button>
+      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>{t("transactionList.prevPage")}</Button>
+      <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>{t("transactionList.nextPage")}</Button>
     </div>
   </div>;
 }
@@ -782,6 +789,7 @@ function toEditablePostings(postings: Txn["postings"]): EditablePosting[] {
 }
 
 function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onReverse }: TransactionDrawerProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(txn.date);
   const [payee, setPayee] = useState(txn.payee);
@@ -827,24 +835,24 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     try {
       parsedMetadata = metadata.trim() ? JSON.parse(metadata) : {};
     } catch {
-      setFormError("metadata 必须是合法 JSON 对象");
+      setFormError(t("transactionList.metadataInvalid"));
       return;
     }
     if (!parsedMetadata || Array.isArray(parsedMetadata) || typeof parsedMetadata !== "object") {
-      setFormError("metadata 必须是 JSON 对象");
+      setFormError(t("transactionList.metadataObjectRequired"));
       return;
     }
     const cleanedPostings = postings.map((p) => ({ account: p.account.trim(), amount: p.amount.trim(), currency: p.currency.trim().toUpperCase() || "CNY" }));
     if (cleanedPostings.length < 2) {
-      setFormError("资金流向至少需要 2 行");
+      setFormError(t("transactionList.atLeastTwoPostings"));
       return;
     }
     if (cleanedPostings.some((p) => !p.account)) {
-      setFormError("每条资金流向都需要账户");
+      setFormError(t("transactionList.postingsNeedAccount"));
       return;
     }
     if (cleanedPostings.some((p) => !p.amount || Number.isNaN(Number(p.amount)))) {
-      setFormError("每条资金流向都需要有效金额");
+      setFormError(t("transactionList.postingsNeedAmount"));
       return;
     }
     onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: cleanedPostings });
@@ -853,14 +861,14 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   }
 
   const footer = pendingAppend ? <div className="text-sm leading-6 text-olive">
-    这笔交易还在本地待同步，落账后可编辑、删除或冲销。
+    {t("transactionList.pendingAppendHint")}
   </div> : editing ? <div className="grid grid-cols-2 gap-2">
-    <Button variant="outline" className="h-11 bg-panel" onClick={() => { resetForm(); setEditing(false); }}>取消</Button>
-    <Button className="h-11" onClick={save}>保存修改</Button>
+    <Button variant="outline" className="h-11 bg-panel" onClick={() => { resetForm(); setEditing(false); }}>{t("transactionList.cancelEdit")}</Button>
+    <Button className="h-11" onClick={save}>{t("transactionList.saveChanges")}</Button>
   </div> : <div className="grid gap-2 sm:grid-cols-3">
-    <Button variant="outline" className="h-11 bg-panel" onClick={() => setEditing(true)}>编辑</Button>
-    <Button variant="outline" className="h-11 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setPendingAction({ kind: "delete", reason: "记错/重复记账" })}>注释删除</Button>
-    <Button className="h-11" onClick={() => setPendingAction({ kind: "reverse", date: reverseDate })}>冲销</Button>
+    <Button variant="outline" className="h-11 bg-panel" onClick={() => setEditing(true)}>{t("transactionList.edit")}</Button>
+    <Button variant="outline" className="h-11 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setPendingAction({ kind: "delete", reason: t("transactionList.deleteReason") })}>{t("transactionList.annotateDelete")}</Button>
+    <Button className="h-11" onClick={() => setPendingAction({ kind: "reverse", date: reverseDate })}>{t("transactionList.reverse")}</Button>
   </div>;
 
   const body = <>
@@ -872,15 +880,15 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       {formError && <div className="mx-4 mt-4 sm:mx-5"><Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert></div>}
       <section className="grid min-w-0 gap-3 border-b border-line px-4 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:px-5">
         <label className="grid gap-1 text-xs text-stone">
-          <span>日期</span>
+          <span>{t("transactionList.date")}</span>
           <Input className="h-11 bg-panel" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label className="grid min-w-0 gap-1 text-xs text-stone">
-          <span>交易对象</span>
+          <span>{t("transactionList.payee")}</span>
           <Input className="h-11 min-w-0 bg-panel" value={payee} onChange={(e) => setPayee(e.target.value)} />
         </label>
         <label className="grid min-w-0 gap-1 text-xs text-stone sm:col-span-2">
-          <span>摘要</span>
+          <span>{t("transactionList.narrationLabel")}</span>
           <Input className="h-11 min-w-0 bg-panel" value={narration} onChange={(e) => setNarration(e.target.value)} />
         </label>
       </section>
@@ -888,8 +896,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       <section className="@container min-w-0 border-b border-line">
         <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
           <div>
-            <h3 className="font-medium text-warm">资金流向</h3>
-            <p className="mt-0.5 text-xs text-stone">每一行对应一条 Beancount posting，可继续添加参与账户。</p>
+            <h3 className="font-medium text-warm">{t("transactionList.postingsFlow")}</h3>
+            <p className="mt-0.5 text-xs text-stone">{t("transactionList.postingsFlowHint")}</p>
           </div>
           <Button
             type="button"
@@ -898,34 +906,34 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             onClick={() => setPostings((rows) => [...rows, { account: "", amount: "", currency: rows.at(-1)?.currency || "CNY" }])}
           >
             <Plus className="h-4 w-4" />
-            <span>添加</span>
+            <span>{t("transactionList.add")}</span>
           </Button>
         </div>
         <div className="min-w-0 divide-y divide-line border-t border-line">
           {postings.map((p, i) => <div key={i} className="grid min-w-0 gap-2 px-4 py-3 sm:px-5 @lg:grid-cols-[minmax(0,1fr)_minmax(7.5rem,9rem)_5.5rem_2.75rem]">
             <div className="min-w-0">
               <div className="mb-1 flex items-center justify-between gap-2 text-xs text-stone">
-                <span>账户 {i + 1}</span>
-                <span className="shrink-0">{p.account ? shortAccount(p.account) : "未选择"}</span>
+                <span>{t("transactionList.accountLabel", { index: i + 1 })}</span>
+                <span className="shrink-0">{p.account ? shortAccount(p.account) : t("transactionList.notSelected")}</span>
               </div>
               <Select value={accountOptions.some((account) => account.account === p.account) ? p.account : ALL_FILTER_VALUE} onValueChange={(value) => value !== ALL_FILTER_VALUE && setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: value } : row))}>
                 <SelectTrigger className="h-10 w-full min-w-0 bg-panel">
-                  <SelectValue placeholder="选择账户 / 分类" />
+                  <SelectValue placeholder={t("transactionList.selectAccount")} />
                 </SelectTrigger>
                 <SelectContent className="max-h-80">
-                  <SelectItem value={ALL_FILTER_VALUE}>选择账户 / 分类</SelectItem>
+                  <SelectItem value={ALL_FILTER_VALUE}>{t("transactionList.selectAccount")}</SelectItem>
                   {accountOptions.map((account) => <SelectItem key={account.account} value={account.account}>{optionLabel(account)}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Input list={`txn-account-options-${i}`} className="mt-2 h-10 min-w-0 bg-panel text-sm" value={p.account} placeholder="或手动输入账户" onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} />
+              <Input list={`txn-account-options-${i}`} className="mt-2 h-10 min-w-0 bg-panel text-sm" value={p.account} placeholder={t("transactionList.manualAccountPlaceholder")} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, account: e.target.value } : row))} />
               <datalist id={`txn-account-options-${i}`}>{accountOptions.map((account) => <option key={account.account} value={account.account} label={optionLabel(account)} />)}</datalist>
             </div>
             <label className="grid gap-1 text-xs text-stone">
-              <span>金额</span>
+              <span>{t("transactionList.amountLabel")}</span>
               <Input className="h-10 bg-panel text-right tabular-nums" inputMode="decimal" value={p.amount} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, amount: e.target.value } : row))} />
             </label>
             <label className="grid gap-1 text-xs text-stone">
-              <span>币种</span>
+              <span>{t("transactionList.currencyLabel")}</span>
               <Input className="h-10 bg-panel uppercase" value={p.currency} onChange={(e) => setPostings((rows) => rows.map((row, idx) => idx === i ? { ...row, currency: e.target.value.toUpperCase() } : row))} />
             </label>
             <Button
@@ -933,7 +941,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
               variant="outline"
               className="h-10 self-end rounded-md bg-panel px-0 text-stone hover:text-destructive"
               disabled={postings.length <= 2}
-              title={postings.length <= 2 ? "至少保留 2 条资金流向" : "删除这条资金流向"}
+              title={postings.length <= 2 ? t("transactionList.atLeastTwo") : t("transactionList.deletePosting")}
               onClick={() => setPostings((rows) => rows.filter((_, idx) => idx !== i))}
             >
               <Trash2 className="h-4 w-4" />
@@ -944,8 +952,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
 
       <section className="grid min-w-0 gap-3 px-4 py-4 sm:px-5">
         <label className="grid min-w-0 gap-1 text-xs text-stone">
-          <span>标签</span>
-          <Input className="h-11 min-w-0 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tags，用空格分隔，不需要 #" />
+          <span>{t("transactionList.tagsLabel")}</span>
+          <Input className="h-11 min-w-0 bg-panel" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("transactionList.tagsPlaceholder")} />
         </label>
         <label className="grid min-w-0 gap-1 text-xs text-stone">
           <span>Metadata</span>
@@ -957,12 +965,12 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
         <div className="flex min-w-0 flex-col gap-3 @sm:flex-row @sm:items-start @sm:justify-between">
           <div className="min-w-0">
             <div className="text-xs text-stone">{txn.date}</div>
-            <div className="mt-1 text-lg font-medium text-warm [overflow-wrap:anywhere]">{txn.payee || "无收付款方"}</div>
-            <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || "无摘要"}</div>
+            <div className="mt-1 text-lg font-medium text-warm [overflow-wrap:anywhere]">{txn.payee || t("transactionList.noPayee")}</div>
+            <div className="mt-1 text-sm text-olive [overflow-wrap:anywhere]">{txn.narration || t("transactionList.noNarrationShort")}</div>
             <MetadataBadges txn={txn} />
           </div>
           {displayAmount && <div className="min-w-0 border-t border-line pt-3 text-left @sm:shrink-0 @sm:border-l @sm:border-t-0 @sm:pl-4 @sm:pt-0 @sm:text-right">
-            <div className="text-[11px] text-stone">主金额</div>
+            <div className="text-[11px] text-stone">{t("transactionList.mainAmount")}</div>
             <div className={`mt-0.5 truncate text-lg font-semibold ${transactionAmountColor(displayAmount)}`} title={fmtTxnAmount(displayAmount)}>{fmtTxnAmount(displayAmount)}</div>
           </div>}
         </div>
@@ -970,8 +978,8 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
 
       <section className="@container min-w-0">
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
-          <h3 className="font-medium text-warm">资金流向</h3>
-          <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{txn.postings.length} 条</span>
+          <h3 className="font-medium text-warm">{t("transactionList.postingsFlow")}</h3>
+          <span className="rounded-full bg-tag px-2 py-0.5 text-xs text-stone">{t("transactionList.postingCount", { count: txn.postings.length })}</span>
         </div>
         <div className="min-w-0 divide-y divide-line">{txn.postings.map((p, i) => <div key={`${p.account}-${i}`} className="grid min-w-0 gap-2 px-4 py-3 sm:px-5 @sm:grid-cols-[minmax(0,1fr)_auto] @sm:items-center">
           <div className="min-w-0">
@@ -987,7 +995,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   const confirmPendingAction = () => {
     if (!pendingAction) return;
     if (pendingAction.kind === "delete") {
-      onDelete?.(txn.source, pendingAction.reason.trim() || "记错/重复记账");
+      onDelete?.(txn.source, pendingAction.reason.trim() || t("transactionList.deleteReason"));
     } else {
       onReverse?.(txn.source, pendingAction.date || reverseDate);
     }
@@ -995,31 +1003,31 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
   };
 
   return <>
-    <MobileSheet open title={editing ? "编辑流水" : "流水详情"} onClose={onClose} shouldClose={shouldClose} footer={footer} size="xl" panelClassName="sm:max-w-3xl" bodyClassName="overflow-x-hidden !px-0 !py-0">{body}</MobileSheet>
+    <MobileSheet open title={editing ? t("transactionList.editTitle") : t("transactionList.detailTitle")} onClose={onClose} shouldClose={shouldClose} footer={footer} size="xl" panelClassName="sm:max-w-3xl" bodyClassName="overflow-x-hidden !px-0 !py-0">{body}</MobileSheet>
     <AlertDialog open={Boolean(pendingAction)} onOpenChange={(open) => !open && setPendingAction(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{pendingAction?.kind === "delete" ? "注释删除这笔交易？" : "生成冲销交易？"}</AlertDialogTitle>
+          <AlertDialogTitle>{pendingAction?.kind === "delete" ? t("transactionList.deleteTitle") : t("transactionList.reverseTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {pendingAction?.kind === "delete" ? "原交易会保留在账本中并被注释，不会物理删除。" : "将基于当前交易生成一笔反向冲销记录。"}
+            {pendingAction?.kind === "delete" ? t("transactionList.deleteDesc") : t("transactionList.reverseDesc")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {pendingAction?.kind === "delete" && (
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-warm" htmlFor="delete-reason">删除原因</label>
+            <label className="text-sm font-medium text-warm" htmlFor="delete-reason">{t("transactionList.deleteReasonLabel")}</label>
             <Input id="delete-reason" value={pendingAction.reason} onChange={(event) => setPendingAction({ kind: "delete", reason: event.target.value })} />
           </div>
         )}
         {pendingAction?.kind === "reverse" && (
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-warm" htmlFor="reverse-date">冲销日期</label>
+            <label className="text-sm font-medium text-warm" htmlFor="reverse-date">{t("transactionList.reverseDateLabel")}</label>
             <Input id="reverse-date" type="date" value={pendingAction.date} onChange={(event) => setPendingAction({ kind: "reverse", date: event.target.value })} />
           </div>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogCancel>{t("transactionList.cancel")}</AlertDialogCancel>
           <AlertDialogAction className={pendingAction?.kind === "delete" ? "bg-destructive text-white hover:bg-destructive/90" : undefined} onClick={confirmPendingAction}>
-            {pendingAction?.kind === "delete" ? "确认注释删除" : "确认冲销"}
+            {pendingAction?.kind === "delete" ? t("transactionList.confirmDelete") : t("transactionList.confirmReverse")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1027,12 +1035,12 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>放弃未保存修改？</AlertDialogTitle>
-          <AlertDialogDescription>当前编辑内容还没有保存，关闭后会丢失这些改动。</AlertDialogDescription>
+          <AlertDialogTitle>{t("transactionList.discardTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>{t("transactionList.discardDesc")}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>继续编辑</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { setDiscardDialogOpen(false); onClose(); }}>放弃修改</AlertDialogAction>
+          <AlertDialogCancel>{t("transactionList.keepEditing")}</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { setDiscardDialogOpen(false); onClose(); }}>{t("transactionList.discardChanges")}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
