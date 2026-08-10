@@ -5,6 +5,18 @@ import { pageFromPathname } from "./ledger/routes";
 const source = readFileSync(new URL("./LedgerApp.tsx", import.meta.url), "utf8");
 
 describe("LedgerApp routes", () => {
+  it("calls every LedgerApp hook before any authentication or setup early return", () => {
+    const firstEarlyReturn = source.indexOf('if (instanceSetup === "checking")');
+    const componentEnd = source.indexOf("function PullRefreshIndicator", firstEarlyReturn);
+    const postReturnHooks = source
+      .slice(firstEarlyReturn, componentEnd)
+      .match(/\buse(?:Callback|Effect|Memo|Ref|State|Transition)\s*\(/g);
+
+    expect(firstEarlyReturn).toBeGreaterThan(-1);
+    expect(componentEnd).toBeGreaterThan(firstEarlyReturn);
+    expect(postReturnHooks).toBeNull();
+  });
+
   it("uses Agent for the root path and its dedicated route", () => {
     expect(pageFromPathname("/")).toBe("agent");
     expect(pageFromPathname("/agent")).toBe("agent");
