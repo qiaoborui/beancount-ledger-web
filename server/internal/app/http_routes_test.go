@@ -490,8 +490,19 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 	}
 }
 
-func TestAgentTimelineRequiresSensitiveUnlock(t *testing.T) {
+func TestAgentTimelineRequiresAuthenticationButNotSensitiveUnlock(t *testing.T) {
+	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sessions/session-history/timeline" || r.Header.Get("X-Agent-Service-Token") != "agent-secret" {
+			t.Fatalf("unexpected Agent timeline request: path=%s token=%q", r.URL.Path, r.Header.Get("X-Agent-Service-Token"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"kind":"message","id":"message-1","role":"assistant","content":"restored locally"}],"nextBefore":null}`))
+	}))
+	defer fakeAgent.Close()
+
 	cfg := testLedger(t)
+	cfg.AgentServiceURL = fakeAgent.URL
+	cfg.AgentServiceToken = "agent-secret"
 	t.Setenv("APP_PASSWORD", "secret")
 	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
@@ -503,8 +514,46 @@ func TestAgentTimelineRequiresSensitiveUnlock(t *testing.T) {
 	}
 
 	res := requestWithCookies(router, http.MethodGet, "/api/ai/agent/sessions/session-history/timeline", "", lockedCookies)
-	if res.Code != http.StatusLocked {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "restored locally") {
 		t.Fatalf("agent timeline status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	unauthenticated := requestWithCookies(router, http.MethodGet, "/api/ai/agent/sessions/session-history/timeline", "", nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated agent timeline status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+}
+
+func TestAgentSessionDeleteRequiresAuthenticationButNotSensitiveUnlock(t *testing.T) {
+	fakeAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/sessions/session-history" || r.Header.Get("X-Agent-Service-Token") != "agent-secret" {
+			t.Fatalf("unexpected Agent delete request: method=%s path=%s token=%q", r.Method, r.URL.Path, r.Header.Get("X-Agent-Service-Token"))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer fakeAgent.Close()
+
+	cfg := testLedger(t)
+	cfg.AgentServiceURL = fakeAgent.URL
+	cfg.AgentServiceToken = "agent-secret"
+	t.Setenv("APP_PASSWORD", "secret")
+	router := testRouter(t, cfg)
+	cookies := loginCookies(t, router)
+	lockedCookies := make([]*http.Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name != sensitiveCookieName {
+			lockedCookies = append(lockedCookies, cookie)
+		}
+	}
+
+	res := requestWithCookies(router, http.MethodDelete, "/api/ai/agent/sessions/session-history", "", lockedCookies)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("agent session delete status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	unauthenticated := requestWithCookies(router, http.MethodDelete, "/api/ai/agent/sessions/session-history", "", nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated agent session delete status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
 	}
 }
 

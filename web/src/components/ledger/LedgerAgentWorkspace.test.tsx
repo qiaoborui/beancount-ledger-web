@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { activeTurnTools, agentToolNeedsSensitiveUnlock, normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, restoreSessions, restoreTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { activeTurnTools, agentToolNeedsSensitiveUnlock, fetchAgentTimelinePage, normalizeAgentTimelinePage, normalizeBQLChartValue, reconcileAgentTimeline, shouldHydrateAgentTimeline, timelineNeedsServerRefresh } from "./LedgerAgentWorkspace";
+import { restoreSessions, restoreTimeline } from "./ledgerAgentStorage";
 
 const source = readFileSync(new URL("./LedgerAgentWorkspace.tsx", import.meta.url), "utf8");
+const storageSource = readFileSync(new URL("./ledgerAgentStorage.ts", import.meta.url), "utf8");
 const importPageSource = readFileSync(new URL("./ImportPage.tsx", import.meta.url), "utf8");
 
 describe("LedgerAgentWorkspace", () => {
@@ -141,6 +143,42 @@ describe("LedgerAgentWorkspace", () => {
     expect(reconciled[1]).toMatchObject({ kind: "tool", tool: { status: "completed", output: { rowCount: 7 } } });
   });
 
+  it("preserves newer local items when remote recovery arrives", () => {
+    const current = restoreTimeline([
+      { kind: "message", id: "local-user", role: "user", content: "分析上周支出" },
+      { kind: "message", id: "local-new", role: "assistant", content: "本地新增结果" },
+    ]);
+    const server = restoreTimeline([
+      { kind: "message", id: "server-user", role: "user", content: "分析上周支出" },
+    ]);
+
+    expect(reconcileAgentTimeline(server, current).map((item) => item.id)).toEqual(["local-user", "local-new"]);
+  });
+
+  it("keeps older local history before a paged server tail and optimistic items after it", () => {
+    const localPrefix = Array.from({ length: 25 }, (_, index) => ({ kind: "message", id: `older-${index}`, role: "user", content: `旧记录 ${index}` }));
+    const serverTail = Array.from({ length: 80 }, (_, index) => ({ kind: "message", id: `tail-${index}`, role: index % 2 === 0 ? "user" : "assistant", content: `远端记录 ${index}` }));
+    const current = restoreTimeline([...localPrefix, ...serverTail, { kind: "message", id: "optimistic", role: "user", content: "仍在处理的本地请求" }]);
+    const server = restoreTimeline(serverTail);
+
+    const reconciled = reconcileAgentTimeline(server, current);
+
+    expect(reconciled).toHaveLength(106);
+    expect(reconciled.slice(0, 25).map((item) => item.id)).toEqual(localPrefix.map((item) => item.id));
+    expect(reconciled.slice(25, 105).map((item) => item.id)).toEqual(serverTail.map((item) => item.id));
+    expect(reconciled.at(-1)?.id).toBe("optimistic");
+  });
+
+  it("treats locked and offline remote history as an unavailable fallback", async () => {
+    const locked = await fetchAgentTimelinePage(async () => new Response(JSON.stringify({ error: "Sensitive data is locked" }), { status: 423 }));
+    const offline = await fetchAgentTimelinePage(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    expect(locked).toBeNull();
+    expect(offline).toBeNull();
+  });
+
   it("restores independently switchable Agent sessions", () => {
     const sessions = restoreSessions([
       { id: "session-1", serverSessionId: "server-1", createdAt: 1, updatedAt: 2, timeline: [{ kind: "message", id: "message-1", role: "user", content: "第一段对话" }] },
@@ -152,18 +190,26 @@ describe("LedgerAgentWorkspace", () => {
     expect(sessions[1]).toMatchObject({ id: "session-2", serverSessionId: "server-2", timeline: [{ kind: "tool" }] });
   });
 
-  it("retains each session title when the timeline is intentionally omitted from local storage", () => {
+  it("marks legacy metadata-only timelines as missing remote-recovery candidates", () => {
     const sessions = restoreSessions([{ id: "session-title", serverSessionId: "server-title", title: "分析本月支出", createdAt: 1, updatedAt: 2, timeline: [] }]);
-    expect(sessions[0]).toMatchObject({ title: "分析本月支出", timeline: [] });
+    expect(sessions[0]).toMatchObject({ title: "分析本月支出", timelineState: "missing", timeline: [] });
+    expect(shouldHydrateAgentTimeline(sessions[0], false)).toBe(false);
+    expect(shouldHydrateAgentTimeline(sessions[0], true)).toBe(true);
   });
 
-  it("retains archived state while session timelines stay out of local storage", () => {
-    const sessions = restoreSessions([{ id: "session-archived", serverSessionId: "server-archived", title: "归档会话", archived: true, createdAt: 1, updatedAt: 2, timeline: [] }]);
-    expect(sessions[0]).toMatchObject({ title: "归档会话", archived: true, timeline: [] });
+  it("does not hydrate a deliberately empty new local session", () => {
+    const sessions = restoreSessions([{ id: "session-new", serverSessionId: "server-new", title: "", archived: false, createdAt: 1, updatedAt: 2, timelineState: "available", timeline: [] }]);
+    expect(shouldHydrateAgentTimeline(sessions[0], true)).toBe(false);
+  });
+
+  it("does not persist or request remote fallback before IndexedDB hydration finishes", () => {
+    expect(source).toContain("if (!localHydrationReady) return;\n    void writeStoredAgent");
+    expect(source).toContain("if (!shouldHydrateAgentTimeline(activeSession, localHydrationReady)) return;");
+    expect(source.indexOf("void readStoredAgent(ledgerScope)")).toBeLessThan(source.indexOf("if (!localHydrationReady) return;\n    void writeStoredAgent"));
   });
 
   it("never persists the new-session placeholder as a title", () => {
-    expect(source).toContain("title: session.title || timelineTitle(session.timeline)");
-    expect(source).not.toContain("title: sessionLabel(session), archived");
+    expect(storageSource).toContain("title: session.title || timelineTitle(session.timeline)");
+    expect(storageSource).not.toContain("title: sessionLabel(session), archived");
   });
 });

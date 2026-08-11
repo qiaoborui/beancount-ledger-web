@@ -12,6 +12,17 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import type { ParsedTransaction } from "@/lib/schemas";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { useDesktopViewport } from "./hooks/useDesktopViewport";
+import {
+  readStoredAgent,
+  readStoredAgentMetadata,
+  restoreTimeline,
+  timelineTitle,
+  writeStoredAgent,
+  type AgentSession,
+  type MessageItem,
+  type TimelineItem,
+  type ToolItem,
+} from "./ledgerAgentStorage";
 import type { AccountOperation } from "./types";
 
 type AgentContext = {
@@ -29,12 +40,6 @@ export type LedgerAgentRequest = {
   autoSubmit?: boolean;
 };
 
-type MessageItem = { kind: "message"; id: string; role: "user" | "assistant"; content: string };
-type ToolItem = { kind: "tool"; id: string; tool: AgentToolEvent };
-type ArtifactItem = { kind: "artifact"; id: string; artifact: AgentArtifact };
-type TimelineItem = MessageItem | ToolItem | ArtifactItem;
-type AgentSession = { id: string; serverSessionId: string; title: string; archived: boolean; createdAt: number; updatedAt: number; timeline: TimelineItem[] };
-const MAX_STORED_SESSIONS = 30;
 const AGENT_TIMELINE_PAGE_SIZE = 80;
 const AGENT_TIMELINE_REFRESH_MS = 1500;
 type AgentTimelinePage = { items: TimelineItem[]; nextBefore: number | null };
@@ -75,16 +80,11 @@ function requestAgentSensitiveUnlock() {
 
 function createAgentSession(timeline: TimelineItem[] = [], serverSessionId = `session-${nextID()}`): AgentSession {
   const now = Date.now();
-  return { id: nextID(), serverSessionId, title: timelineTitle(timeline), archived: false, createdAt: now, updatedAt: now, timeline };
+  return { id: nextID(), serverSessionId, title: timelineTitle(timeline), archived: false, createdAt: now, updatedAt: now, timelineState: "available", timeline };
 }
 
 function sessionLabel(session: AgentSession) {
   return session.title || timelineTitle(session.timeline) || i18n.t("agentWorkspace.newChat");
-}
-
-function timelineTitle(timeline: TimelineItem[]) {
-  const firstPrompt = timeline.find((item): item is MessageItem => item.kind === "message" && item.role === "user");
-  return firstPrompt?.content.trim() || "";
 }
 
 export function activeTurnTools(timeline: TimelineItem[]) {
@@ -118,10 +118,18 @@ export function LedgerAgentWorkspace({
   onChanged: () => void | Promise<void>;
   showToast: (kind: "info" | "success" | "error", text: string) => void;
 }) {
-  const stored = useMemo(() => readStoredAgent(), []);
+  const ledgerScope = useMemo(() => apiEndpointLedgerScope(), []);
+  const metadata = useMemo(() => readStoredAgentMetadata(ledgerScope), [ledgerScope]);
+  const stored = useMemo(() => {
+    if (metadata?.sessions.length) return metadata;
+    const session = createAgentSession();
+    return { activeSessionId: session.id, sessions: [session], deletedServerSessionIds: [] };
+  }, [metadata]);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [sessions, setSessions] = useState<AgentSession[]>(stored.sessions);
   const [activeSessionId, setActiveSessionId] = useState(stored.activeSessionId);
+  const [deletedServerSessionIds, setDeletedServerSessionIds] = useState(stored.deletedServerSessionIds);
+  const [localHydrationReady, setLocalHydrationReady] = useState(false);
   const [showArchivedSessions, setShowArchivedSessions] = useState(false);
   const [sessionMutationID, setSessionMutationID] = useState("");
   const [timelinePagination, setTimelinePagination] = useState<Record<string, TimelinePagination>>({});
@@ -134,9 +142,7 @@ export function LedgerAgentWorkspace({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const desktopViewport = useDesktopViewport();
   const requestRef = useRef(0);
-  const timelineVersionRef = useRef(0);
   const streamingMessageIDRef = useRef("");
-  const sessionTitleHydrationRef = useRef(new Set<string>());
   const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const desktopScrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -161,17 +167,16 @@ export function LedgerAgentWorkspace({
   }
 
   function updateTimeline(update: (timeline: TimelineItem[]) => TimelineItem[]) {
-    timelineVersionRef.current += 1;
     updateActiveSession((session) => {
       const timeline = update(session.timeline);
-      return { ...session, title: session.title || timelineTitle(timeline), timeline, updatedAt: Date.now() };
+      return { ...session, title: session.title || timelineTitle(timeline), timelineState: "available", timeline, updatedAt: Date.now() };
     });
   }
 
   function createSession() {
-    if (busy) return;
+    if (busy || !localHydrationReady) return;
     const session = createAgentSession();
-    setSessions((current) => [session, ...current].slice(0, MAX_STORED_SESSIONS));
+    setSessions((current) => [session, ...current]);
     setActiveSessionId(session.id);
     setMobileSessionListOpen(false);
     setInput("");
@@ -182,8 +187,8 @@ export function LedgerAgentWorkspace({
   }
 
   function archiveSession(session: AgentSession, archived: boolean) {
-    if (busy || sessionMutationID) return;
-    setSessions((current) => current.map((item) => item.id === session.id ? { ...item, archived } : item));
+    if (busy || sessionMutationID || !localHydrationReady) return;
+    setSessions((current) => current.map((item) => item.id === session.id ? { ...item, archived, updatedAt: Date.now() } : item));
     if (archived && session.id === activeSession.id) {
       const next = sessions.find((item) => item.id !== session.id && !item.archived);
       if (next) setActiveSessionId(next.id);
@@ -191,28 +196,33 @@ export function LedgerAgentWorkspace({
     }
   }
 
-  async function deleteSession(session: AgentSession) {
-    if (busy || sessionMutationID) return;
+  function deleteSession(session: AgentSession) {
+    if (busy || sessionMutationID || !localHydrationReady) return;
     if (!window.confirm(i18n.t("agentWorkspace.deleteConfirm", { name: sessionLabel(session) }))) return;
     setSessionMutationID(session.id);
-    try {
-      await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(session.serverSessionId || `session-${session.id}`)}`, { method: "DELETE" }, { kind: "write" });
-      const next = sessions.find((item) => item.id !== session.id && !item.archived) ?? sessions.find((item) => item.id !== session.id);
-      setSessions((current) => current.filter((item) => item.id !== session.id));
-      if (session.id === activeSession.id) {
-        if (next) setActiveSessionId(next.id);
-        else createSession();
-      }
-      showToast("success", i18n.t("agentWorkspace.sessionDeleted"));
-    } catch (error) {
-      showToast("error", error instanceof Error ? error.message : i18n.t("agentWorkspace.sessionDeleteFailed"));
-    } finally {
-      setSessionMutationID("");
+    const serverSessionId = session.serverSessionId || `session-${session.id}`;
+    const next = sessions.find((item) => item.id !== session.id && !item.archived) ?? sessions.find((item) => item.id !== session.id);
+    const deleted = deletedServerSessionIds.includes(serverSessionId) ? deletedServerSessionIds : [...deletedServerSessionIds, serverSessionId];
+    let remaining = sessions.filter((item) => item.id !== session.id);
+    let nextActiveSessionId = activeSessionId;
+    if (session.id === activeSession.id && next) {
+      nextActiveSessionId = next.id;
+    } else if (session.id === activeSession.id) {
+      const replacement = createAgentSession();
+      remaining = [replacement, ...remaining];
+      nextActiveSessionId = replacement.id;
     }
+    setDeletedServerSessionIds(deleted);
+    setSessions(remaining);
+    setActiveSessionId(nextActiveSessionId);
+    void writeStoredAgent({ activeSessionId: nextActiveSessionId, sessions: remaining, deletedServerSessionIds: deleted }, ledgerScope);
+    setSessionMutationID("");
+    showToast("success", i18n.t("agentWorkspace.sessionDeleted"));
+    void apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(serverSessionId)}`, { method: "DELETE" }, { kind: "write" }).catch(() => undefined);
   }
 
   function selectSession(sessionId: string) {
-    if (busy) return;
+    if (busy || !localHydrationReady) return;
     setMobileSessionListOpen(false);
     if (sessionId === activeSession.id) return;
     setActiveSessionId(sessionId);
@@ -223,32 +233,43 @@ export function LedgerAgentWorkspace({
   }
 
   useEffect(() => {
-    writeStoredAgent({ activeSessionId, sessions });
-  }, [activeSessionId, sessions]);
+    let cancelled = false;
+    void readStoredAgent(ledgerScope).then((local) => {
+      if (cancelled || !local?.sessions.length) return;
+      setSessions(local.sessions);
+      setActiveSessionId(local.activeSessionId);
+      setDeletedServerSessionIds(local.deletedServerSessionIds);
+    }).finally(() => {
+      if (!cancelled) setLocalHydrationReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ledgerScope]);
 
   useEffect(() => {
-    void loadTimelinePage(sessionId);
+    if (!localHydrationReady) return;
+    void writeStoredAgent({ activeSessionId, sessions, deletedServerSessionIds }, ledgerScope);
+  }, [activeSessionId, deletedServerSessionIds, ledgerScope, localHydrationReady, sessions]);
+
+  useEffect(() => {
+    if (!shouldHydrateAgentTimeline(activeSession, localHydrationReady)) return;
+    const hydrateMissingTimeline = () => void loadTimelinePage(sessionId);
+    hydrateMissingTimeline();
+    window.addEventListener("online", hydrateMissingTimeline);
+    return () => window.removeEventListener("online", hydrateMissingTimeline);
   // sessionId changes after a legacy session receives its durable server id.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, sessionId]);
+  }, [activeSessionId, localHydrationReady, sessionId]);
 
   useEffect(() => {
-    for (const session of sessions) {
-      const serverSessionId = session.serverSessionId || `session-${session.id}`;
-      if (session.title || timelineTitle(session.timeline) || sessionTitleHydrationRef.current.has(serverSessionId)) continue;
-      sessionTitleHydrationRef.current.add(serverSessionId);
-      void loadTimelinePage(serverSessionId);
-    }
-  }, [sessions]);
-
-  useEffect(() => {
-    if (!timelineNeedsServerRefresh(timeline)) return;
+    if (!localHydrationReady || !timelineNeedsServerRefresh(timeline)) return;
     const timer = window.setTimeout(() => void loadTimelinePage(sessionId), AGENT_TIMELINE_REFRESH_MS);
     return () => window.clearTimeout(timer);
-  }, [sessionId, timeline]);
+  }, [localHydrationReady, sessionId, timeline]);
 
   useEffect(() => {
-    if (!request || request.id === requestRef.current) return;
+    if (!localHydrationReady || !request || request.id === requestRef.current) return;
     requestRef.current = request.id;
     setOpen(true);
     const prompt = request.prompt?.trim() ?? "";
@@ -262,7 +283,7 @@ export function LedgerAgentWorkspace({
       setInput(prompt);
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [request]);
+  }, [localHydrationReady, request]);
 
   useEffect(() => {
     if (!open) return;
@@ -293,33 +314,28 @@ export function LedgerAgentWorkspace({
 
   async function loadTimelinePage(serverSessionId: string, before?: number) {
     if (!serverSessionId) return;
-    const timelineVersion = timelineVersionRef.current;
     setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: true, nextBefore: current[serverSessionId]?.nextBefore ?? null } }));
-    try {
-      const query = before ? `?before=${before}` : "";
-      const response = await apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(serverSessionId)}/timeline${query}`, undefined, { kind: "read" });
-      const page = normalizeAgentTimelinePage(await response.json());
-      setSessions((current) => current.map((session) => {
-        if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
-        if (!before) {
-          const title = timelineTitle(page.items) || session.title;
-          if (!page.items.length) return title === session.title ? session : { ...session, title };
-          if (timelineVersion === timelineVersionRef.current) return { ...session, title, timeline: reconcileAgentTimeline(page.items, session.timeline) };
-          const known = new Set(page.items.map((item) => item.id));
-          return { ...session, title, timeline: [...page.items, ...session.timeline.filter((item) => !known.has(item.id))] };
-        }
-        const known = new Set(session.timeline.map((item) => item.id));
-        return { ...session, timeline: [...page.items.filter((item) => !known.has(item.id)), ...session.timeline] };
-      }));
-      setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: false, nextBefore: page.nextBefore } }));
-    } catch {
+    const query = before ? `?before=${before}` : "";
+    const page = await fetchAgentTimelinePage(() => apiFetch(`/api/ai/agent/sessions/${encodeURIComponent(serverSessionId)}/timeline${query}`, undefined, { kind: "read" }));
+    if (!page) {
       setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: false, nextBefore: current[serverSessionId]?.nextBefore ?? null } }));
+      return;
     }
+    setSessions((current) => current.map((session) => {
+      if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
+      if (!before) {
+        const title = timelineTitle(page.items) || session.title;
+        return { ...session, title, timelineState: "available", timeline: reconcileAgentTimeline(page.items, session.timeline) };
+      }
+      const known = new Set(session.timeline.map((item) => item.id));
+      return { ...session, timeline: [...page.items.filter((item) => !known.has(item.id)), ...session.timeline] };
+    }));
+    setTimelinePagination((current) => ({ ...current, [serverSessionId]: { loading: false, nextBefore: page.nextBefore } }));
   }
 
   async function sendMessage(text: string) {
     const prompt = text.trim();
-    if (!prompt || busy) return;
+    if (!prompt || busy || !localHydrationReady) return;
     if (containsSensitiveAgentInput(prompt)) {
       showToast("error", i18n.t("agentWorkspace.sensitiveInputWarning"));
       return;
@@ -722,76 +738,29 @@ function objectArray<T>(value: unknown, key: string): T[] {
   return Array.isArray(result) ? result as T[] : [];
 }
 
-function storageKey() {
-  return `ledger.agent.workspace.v2:${apiEndpointLedgerScope()}`;
-}
-
-function readStoredAgent(): { activeSessionId: string; sessions: AgentSession[] } {
-  try {
-    const raw = window.localStorage.getItem(storageKey());
-    if (!raw) {
-      const session = createAgentSession();
-      return { activeSessionId: session.id, sessions: [session] };
-    }
-    const value = JSON.parse(raw) as { activeSessionId?: string; sessions?: unknown; sessionId?: string; timeline?: unknown; messages?: unknown };
-    const sessions = restoreSessions(value.sessions);
-    if (!sessions.length) sessions.push(createAgentSession(restoreTimeline(value.timeline ?? value.messages), typeof value.sessionId === "string" ? value.sessionId : ""));
-    const activeSessionId = typeof value.activeSessionId === "string" && sessions.some((session) => session.id === value.activeSessionId) ? value.activeSessionId : sessions[0].id;
-    return { activeSessionId, sessions };
-  } catch {
-    const session = createAgentSession();
-    return { activeSessionId: session.id, sessions: [session] };
-  }
-}
-
-export function restoreSessions(value: unknown): AgentSession[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const session = item as Record<string, unknown>;
-    if (typeof session.id !== "string") return [];
-    const createdAt = typeof session.createdAt === "number" && Number.isFinite(session.createdAt) ? session.createdAt : Date.now();
-    const updatedAt = typeof session.updatedAt === "number" && Number.isFinite(session.updatedAt) ? session.updatedAt : createdAt;
-    return [{
-      id: session.id,
-      serverSessionId: typeof session.serverSessionId === "string" ? session.serverSessionId : "",
-      title: typeof session.title === "string" ? session.title.trim() : timelineTitle(restoreTimeline(session.timeline)),
-      archived: session.archived === true,
-      createdAt,
-      updatedAt,
-      timeline: restoreTimeline(session.timeline),
-    }];
-  }).slice(0, MAX_STORED_SESSIONS);
-}
-
-export function restoreTimeline(value: unknown): TimelineItem[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is TimelineItem => {
-    if (!item || typeof item !== "object") return false;
-    const candidate = item as Record<string, unknown>;
-    if (typeof candidate.id !== "string") return false;
-    if (candidate.kind === "message") return (candidate.role === "user" || candidate.role === "assistant") && typeof candidate.content === "string";
-    if (candidate.kind === "tool") {
-      const tool = candidate.tool;
-      return Boolean(tool && typeof tool === "object" && typeof (tool as Record<string, unknown>).id === "string" && typeof (tool as Record<string, unknown>).name === "string" && typeof (tool as Record<string, unknown>).title === "string" && ["running", "completed", "error"].includes(String((tool as Record<string, unknown>).status)));
-    }
-    if (candidate.kind === "artifact") {
-      const artifact = candidate.artifact;
-      return Boolean(artifact && typeof artifact === "object" && typeof (artifact as Record<string, unknown>).id === "string" && typeof (artifact as Record<string, unknown>).type === "string" && typeof (artifact as Record<string, unknown>).title === "string" && "data" in (artifact as Record<string, unknown>));
-    }
-    return false;
-  });
-}
-
 export function timelineNeedsServerRefresh(timeline: TimelineItem[]) {
   const last = timeline.at(-1);
   return Boolean(last && !(last.kind === "message" && last.role === "assistant"));
 }
 
+export function shouldHydrateAgentTimeline(session: AgentSession, localHydrationReady: boolean) {
+  return localHydrationReady && session.timelineState === "missing";
+}
+
+export async function fetchAgentTimelinePage(request: () => Promise<Response>): Promise<AgentTimelinePage | null> {
+  try {
+    const response = await request();
+    if (!response.ok) return null;
+    return normalizeAgentTimelinePage(await response.json());
+  } catch {
+    return null;
+  }
+}
+
 export function reconcileAgentTimeline(serverItems: TimelineItem[], currentItems: TimelineItem[]) {
   const currentMessages = currentItems.filter((item): item is MessageItem => item.kind === "message");
   const usedMessageIDs = new Set<string>();
-  return serverItems.map((item) => {
+  const reconciledServer = serverItems.map((item) => {
     if (item.kind !== "message") return item;
     const rendered = currentMessages.find((candidate) =>
       !usedMessageIDs.has(candidate.id) && candidate.role === item.role && candidate.content === item.content
@@ -800,6 +769,14 @@ export function reconcileAgentTimeline(serverItems: TimelineItem[], currentItems
     usedMessageIDs.add(rendered.id);
     return { ...item, id: rendered.id };
   });
+  const serverIDs = new Set(reconciledServer.map((item) => item.id));
+  const overlap = currentItems.flatMap((item, index) => serverIDs.has(item.id) ? [index] : []);
+  if (!overlap.length) return [...reconciledServer, ...currentItems];
+  const firstOverlap = overlap[0];
+  const lastOverlap = overlap.at(-1) ?? firstOverlap;
+  const localPrefix = currentItems.slice(0, firstOverlap).filter((item) => !serverIDs.has(item.id));
+  const optimisticSuffix = currentItems.slice(lastOverlap + 1).filter((item) => !serverIDs.has(item.id));
+  return [...localPrefix, ...reconciledServer, ...optimisticSuffix];
 }
 
 export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {
@@ -808,17 +785,4 @@ export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {
     items: restoreTimeline(page.items),
     nextBefore: typeof page.nextBefore === "number" && Number.isInteger(page.nextBefore) && page.nextBefore > 0 ? page.nextBefore : null,
   };
-}
-
-function writeStoredAgent(value: { activeSessionId: string; sessions: AgentSession[] }) {
-  try {
-    window.localStorage.setItem(storageKey(), JSON.stringify({
-      ...value,
-      // History is loaded from the server in pages. Keep only session metadata
-      // locally, so browser quota can never silently trim a conversation.
-      sessions: value.sessions.slice(0, MAX_STORED_SESSIONS).map((session) => ({ id: session.id, serverSessionId: session.serverSessionId, title: session.title || timelineTitle(session.timeline), archived: session.archived, createdAt: session.createdAt, updatedAt: session.updatedAt, timeline: [] })),
-    }));
-  } catch {
-    // Conversation persistence is optional.
-  }
 }
