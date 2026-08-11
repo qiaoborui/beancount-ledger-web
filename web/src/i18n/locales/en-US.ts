@@ -402,6 +402,17 @@ export const enUS: DeepStringify<TranslationResource> = {
     noData: "No data",
     noChangeRate: "No change rate",
   },
+  comparisons: {
+    monthOverMonth: "MoM",
+    yearOverYear: "YoY",
+    increase: "increase",
+    decrease: "decrease",
+    unchanged: "unchanged",
+    unavailable: "comparison unavailable",
+    rangeTitle: "Current {{currentStart}} to {{currentEnd}}, compared with {{baselineStart}} to {{baselineEnd}}",
+    accessible: "{{label}}, {{ranges}}, {{direction}}, absolute change {{delta}}, percentage {{percentage}}",
+    hiddenAccessible: "{{label}}, {{ranges}}, comparison amounts hidden",
+  },
   home: {
     noExpenseCategory: "No expense categories",
     noExpenseCategoryDetail: "No categories to analyze in this range",

@@ -12,7 +12,7 @@ vi.mock("@/lib/indexedLedgerCache", () => ({
   writeIndexedCache: indexedCache.write,
 }));
 
-import { readLedgerCacheAsync, writeLedgerCache } from "./storage";
+import { maskSensitiveLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "./storage";
 
 const range: TimeRange = { start: "2026-08-01", end: "2026-09-01", preset: "month" };
 
@@ -35,6 +35,20 @@ function sensitiveCache(): LedgerCache {
       net: 80,
       days: { "2026-08-01": { income: 100, expense: 20 } },
       categories: { "Expenses:Food": 20 },
+    },
+    comparisons: {
+      income: {
+        monthOverMonth: comparison(100, 0, 100, null),
+        yearOverYear: comparison(100, 80, 20, 0.25),
+      },
+      expense: {
+        monthOverMonth: comparison(20, 10, 10, 1),
+        yearOverYear: comparison(20, 25, -5, -0.2),
+      },
+      totalAssets: {
+        monthOverMonth: comparison(1_000, 900, 100, 1 / 9),
+        yearOverYear: comparison(1_000, 800, 200, 0.25),
+      },
     },
     balances: { "Assets:Cash": 1_000 },
     accountBalances: [{ account: "Assets:Cash", currency: "CNY", amount: 1_000, valuationCurrency: "CNY", valuation: 1_000 }],
@@ -61,6 +75,7 @@ function legacyCacheWithSensitiveSummaryOnly(): LedgerCache {
   const cache = sensitiveCache();
   return {
     ...cache,
+    comparisons: undefined,
     balances: {},
     accountBalances: [],
     txns: [transaction("Expenses:Food")],
@@ -74,6 +89,17 @@ function legacyCacheWithSensitiveSummaryOnly(): LedgerCache {
     } : null,
     accountStatuses: [],
     sensitiveCached: false,
+  };
+}
+
+function comparison(current: number, baseline: number, delta: number, percentage: number | null) {
+  return {
+    currentRange: { start: "2026-08-01", end: "2026-08-11" },
+    baselineRange: { start: "2026-07-01", end: "2026-07-11" },
+    current,
+    baseline,
+    delta,
+    percentage,
   };
 }
 
@@ -94,6 +120,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 
 describe("ledger cache storage boundary", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
@@ -113,6 +140,9 @@ describe("ledger cache storage boundary", () => {
       days: { "2026-08-01": { income: 0, expense: 20 } },
       categories: { "Expenses:Food": 20 },
     });
+    expect(persisted.comparisons?.income.monthOverMonth).toMatchObject({ current: null, baseline: null, delta: null, percentage: null });
+    expect(persisted.comparisons?.totalAssets?.yearOverYear).toMatchObject({ current: null, baseline: null, delta: null, percentage: null });
+    expect(persisted.comparisons?.expense.monthOverMonth).toMatchObject({ current: 20, baseline: 10, delta: 10, percentage: 1 });
     expect(persisted.balances).toEqual({});
     expect(persisted.accountBalances).toEqual([]);
     expect(persisted.netWorthRows).toEqual([]);
@@ -154,6 +184,40 @@ describe("ledger cache storage boundary", () => {
       },
       sensitiveCached: false,
     }));
+  });
+
+  it("invalidates stale current-month comparisons after local midnight", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 12, 12));
+    memoryStorage();
+    const stale = maskSensitiveLedgerCache(sensitiveCache());
+    stale.comparisonDate = "2026-08-11";
+    indexedCache.read.mockResolvedValueOnce(stale);
+    indexedCache.write.mockResolvedValue(true);
+
+    const restored = await readLedgerCacheAsync(range);
+
+    expect(restored?.comparisons).toBeNull();
+    expect(restored?.comparisonDate).toBe("2026-08-12");
+    expect(indexedCache.write).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      comparisons: null,
+      comparisonDate: "2026-08-12",
+    }));
+  });
+
+  it("invalidates a partial-month cache when the selected month becomes historical", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 1, 12));
+    memoryStorage();
+    const stale = maskSensitiveLedgerCache(sensitiveCache());
+    stale.comparisonDate = "2026-08-31";
+    indexedCache.read.mockResolvedValueOnce(stale);
+    indexedCache.write.mockResolvedValue(true);
+
+    const restored = await readLedgerCacheAsync(range);
+
+    expect(restored?.comparisons).toBeNull();
+    expect(restored?.comparisonDate).toBe("2026-09-01");
   });
 
   it.each([

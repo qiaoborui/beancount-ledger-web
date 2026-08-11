@@ -55,7 +55,10 @@ function shiftDateMonths(value: string, months: number): string {
 
 function currentDate(referenceDate?: string): string {
   if (referenceDate) return referenceDate;
-  const now = new Date();
+  return localToday();
+}
+
+export function localToday(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
@@ -132,6 +135,15 @@ export function monthRange(month: string): { start: string; end: string } {
   const endDate = m === 12 ? new Date(Date.UTC(year + 1, 0, 1)) : new Date(Date.UTC(year, m, 1));
   const end = `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, "0")}-01`;
   return { start, end };
+}
+
+export function isCalendarMonthRange(range: Pick<TimeRange, "start" | "end">): boolean {
+  const month = range.start.slice(0, 7);
+  return range.start === `${month}-01` && monthRange(month).end === range.end;
+}
+
+export function isCurrentCalendarMonthRange(range: Pick<TimeRange, "start" | "end">, today = localToday()): boolean {
+  return isCalendarMonthRange(range) && today >= range.start && today < range.end;
 }
 
 /** 季度范围，1-3月=Q1, 4-6=Q2, 7-9=Q3, 10-12=Q4 */

@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSensitiveIncomeTransaction, maskSensitiveLedgerCache, readLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "../storage";
+import { isSensitiveIncomeTransaction, maskSensitiveLedgerCache, maskSensitivePeriodComparisons, readLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
-import { timeRangeToParams } from "@/lib/timeRange";
+import { isCurrentCalendarMonthRange, localToday, timeRangeToParams } from "@/lib/timeRange";
 import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
-import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
+import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerPeriodComparisons, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 import { apiEndpointLedgerScope } from "@/lib/apiEndpoints";
 import i18n from "@/i18n";
 
 let runtimeLedgerCache: { key: string; cache: LedgerCache } | null = null;
 
-function runtimeCacheKey(range: TimeRange, unlocked: boolean, valuationCurrency: string, ledgerScope = apiEndpointLedgerScope()) {
-  return `${ledgerScope}:${timeRangeToParams(range)}:${unlocked ? "unlocked" : "locked"}:${valuationCurrency}`;
+function comparisonCacheDate(range: TimeRange, comparisonDate: string) {
+  return isCurrentCalendarMonthRange(range, comparisonDate) ? comparisonDate : "complete";
+}
+
+function runtimeCacheKey(range: TimeRange, unlocked: boolean, valuationCurrency: string, ledgerScope = apiEndpointLedgerScope(), comparisonDate = localToday()) {
+  return `${ledgerScope}:${timeRangeToParams(range)}:${unlocked ? "unlocked" : "locked"}:${valuationCurrency}:${comparisonCacheDate(range, comparisonDate)}`;
 }
 
 function readRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
@@ -19,7 +23,7 @@ function readRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCu
 }
 
 function writeRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string, cache: LedgerCache, ledgerScope = apiEndpointLedgerScope()) {
-  runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked, valuationCurrency, ledgerScope), cache };
+  runtimeLedgerCache = { key: runtimeCacheKey(range, unlocked, valuationCurrency, ledgerScope, cache.comparisonDate ?? localToday()), cache };
 }
 
 function readDisplayLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
@@ -30,8 +34,8 @@ function readDisplayLedgerCache(range: TimeRange, unlocked: boolean, valuationCu
   return maskSensitiveLedgerCache(cached);
 }
 
-function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string, ledgerScope = apiEndpointLedgerScope()) {
-  return runtimeCacheKey(range, unlocked, valuationCurrency, ledgerScope);
+function ledgerContextKey(range: TimeRange, unlocked: boolean, valuationCurrency: string, ledgerScope = apiEndpointLedgerScope(), comparisonDate = localToday()) {
+  return runtimeCacheKey(range, unlocked, valuationCurrency, ledgerScope, comparisonDate);
 }
 
 export async function fetchLedgerIndexInfo(): Promise<LedgerIndexInfo | null> {
@@ -52,6 +56,7 @@ async function fetchLedgerVersion(): Promise<LedgerVersion | null> {
 
 export type LedgerBootstrapResponse = {
   summary?: Summary;
+  comparisons?: LedgerPeriodComparisons | null;
   balances?: Record<string, number>;
   accountBalances?: AccountBalance[];
   netWorthHistory?: NetWorthPoint[];
@@ -83,7 +88,7 @@ function offlineOrNetworkError(error: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now()) {
+export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, clientUnlocked: boolean, fallbackValuationCurrency: string, version: LedgerVersion | null, savedAt = Date.now(), comparisonDate = localToday()) {
   const serverSensitiveUnlocked = bootstrapSensitiveUnlockState(data) === true;
   const cacheUnlocked = clientUnlocked && serverSensitiveUnlocked;
   const responseValuationCurrency = data.valuationCurrency ?? fallbackValuationCurrency;
@@ -91,6 +96,8 @@ export function buildLedgerCacheFromBootstrap(data: LedgerBootstrapResponse, cli
   const transactions = data.transactions ?? [];
   const cache: LedgerCache = {
     summary: data.summary ?? null,
+    comparisons: cacheUnlocked ? (data.comparisons ?? null) : maskSensitivePeriodComparisons(data.comparisons),
+    comparisonDate,
     balances: cacheUnlocked ? (data.balances ?? {}) : {},
     accountBalances: cacheUnlocked ? (data.accountBalances ?? []) : [],
     netWorthRows: cacheUnlocked ? (data.netWorthHistory ?? []) : [],
@@ -126,6 +133,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
   const initialCache = initialCacheRef.current;
   const [summary, setSummary] = useState<Summary | null>(() => initialCache?.summary ?? null);
+  const [comparisons, setComparisons] = useState<LedgerPeriodComparisons | null>(() => initialCache?.comparisons ?? null);
   const [balances, setBalances] = useState<Record<string, number>>(() => initialCache?.balances ?? {});
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(() => initialCache?.accountBalances ?? []);
   const [txns, setTxns] = useState<Txn[]>(() => initialCache?.txns ?? []);
@@ -144,6 +152,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => initialCache?.savedAt ?? null);
   const [ledgerVersion, setLedgerVersion] = useState<LedgerVersion | null>(() => initialCache?.ledgerVersion ?? null);
+  const comparisonDateRef = useRef<string | null>(initialCache?.comparisonDate ?? null);
   const freshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const loadSequenceRef = useRef(0);
   const latestContextRef = useRef({ range: timeRange, unlocked, valuationCurrency, ledgerScope: apiEndpointLedgerScope() });
@@ -155,6 +164,8 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
 
   const clearLedgerData = useCallback(() => {
     setSummary(null);
+    setComparisons(null);
+    comparisonDateRef.current = null;
     setBalances({});
     setAccountBalances([]);
     setNetWorthRows([]);
@@ -176,10 +187,12 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const applyCache = useCallback((cache: LedgerCache, cacheUnlocked = unlocked, cacheRange = timeRange, cacheValuationCurrency = valuationCurrency, contextValuationCurrency = cacheValuationCurrency, cacheLedgerScope = apiEndpointLedgerScope()) => {
     writeRuntimeLedgerCache(cacheRange, cacheUnlocked, cacheValuationCurrency, cache, cacheLedgerScope);
     const latest = latestContextRef.current;
-    if (ledgerContextKey(cacheRange, cacheUnlocked, contextValuationCurrency, cacheLedgerScope) !== ledgerContextKey(latest.range, latest.unlocked, latest.valuationCurrency, latest.ledgerScope)) {
+    if (ledgerContextKey(cacheRange, cacheUnlocked, contextValuationCurrency, cacheLedgerScope, cache.comparisonDate ?? localToday()) !== ledgerContextKey(latest.range, latest.unlocked, latest.valuationCurrency, latest.ledgerScope)) {
       return;
     }
+    comparisonDateRef.current = cache.comparisonDate ?? null;
     setSummary(cache.summary);
+    setComparisons(cacheUnlocked ? (cache.comparisons ?? null) : maskSensitivePeriodComparisons(cache.comparisons));
     setBalances(cache.balances);
     setAccountBalances(cache.accountBalances ?? []);
     setNetWorthRows(cache.netWorthRows);
@@ -199,6 +212,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   }, [timeRange, unlocked, valuationCurrency]);
 
   const clearSensitiveData = useCallback(() => {
+    setComparisons((current) => maskSensitivePeriodComparisons(current));
     setBalances({});
     setAccountBalances([]);
     setNetWorthRows([]);
@@ -220,8 +234,10 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   const fetchFreshLedger = useCallback(async (range: TimeRange, options: { background?: boolean; clientUnlocked?: boolean } = {}) => {
     const clientUnlocked = options.clientUnlocked ?? unlocked;
     const ledgerScope = apiEndpointLedgerScope();
+    const comparisonDate = localToday();
     const params = new URLSearchParams(timeRangeToParams(range));
     params.set("valuationCurrency", valuationCurrency);
+    params.set("today", comparisonDate);
     const query = params.toString();
     const inFlightKey = `${ledgerScope}:${query}:${clientUnlocked ? "unlocked" : "locked"}`;
     const existing = freshInFlightRef.current.get(inFlightKey);
@@ -234,6 +250,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         // Phase 1: fast lite bootstrap for immediate UI
         const liteQuery = new URLSearchParams(timeRangeToParams(range));
         liteQuery.set("valuationCurrency", valuationCurrency);
+        liteQuery.set("today", comparisonDate);
         liteQuery.set("lite", "1");
         const liteData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${liteQuery}`, { cache: "no-store" });
         if (apiEndpointLedgerScope() !== ledgerScope) return;
@@ -245,9 +262,9 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         }
         const version = liteData.ledgerVersion ?? await fetchLedgerVersion().catch(() => null);
         if (apiEndpointLedgerScope() !== ledgerScope) return;
-        const { cache: liteCache, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(liteData, clientUnlocked, valuationCurrency, version);
+        const { cache: liteCache, cacheUnlocked, responseValuationCurrency } = buildLedgerCacheFromBootstrap(liteData, clientUnlocked, valuationCurrency, version, Date.now(), comparisonDate);
         applyCache(liteCache, cacheUnlocked, range, responseValuationCurrency, valuationCurrency, ledgerScope);
-        if (cacheUnlocked) {
+        if (cacheUnlocked && comparisonDate === localToday()) {
           writeLedgerCache(range, liteCache, responseValuationCurrency, ledgerScope);
         }
 
@@ -255,6 +272,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         if (shouldFetchFullBootstrap()) {
           const fullQuery = new URLSearchParams(timeRangeToParams(range));
           fullQuery.set("valuationCurrency", valuationCurrency);
+          fullQuery.set("today", comparisonDate);
           const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`, { cache: "no-store" });
           if (apiEndpointLedgerScope() !== ledgerScope) return;
           const fullVersion = fullData.ledgerVersion ?? version;
@@ -262,14 +280,14 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
             cache: fullCache,
             cacheUnlocked: fullCacheUnlocked,
             responseValuationCurrency: fullResponseValuationCurrency,
-          } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion);
+          } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion, Date.now(), comparisonDate);
           if (clientUnlocked && bootstrapSensitiveUnlockState(fullData) === false) {
             latestContextRef.current = { range, unlocked: false, valuationCurrency, ledgerScope };
             sessionStorage.removeItem("ledger_unlocked");
             onSensitiveUnlockChange(false);
           }
           applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency, ledgerScope);
-          if (fullCacheUnlocked) {
+          if (fullCacheUnlocked && comparisonDate === localToday()) {
             writeLedgerCache(range, fullCache, fullResponseValuationCurrency, ledgerScope);
           }
         }
@@ -388,6 +406,33 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
   }, [clearSensitiveData, unlocked]);
 
   useEffect(() => {
+    let cancelled = false;
+    let timeoutId = 0;
+    const schedule = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      timeoutId = window.setTimeout(() => {
+        const today = localToday();
+        const comparisonDate = comparisonDateRef.current;
+        if (comparisonDate && comparisonDate !== today && isCurrentCalendarMonthRange(timeRange, comparisonDate)) {
+          setComparisons(null);
+          comparisonDateRef.current = today;
+        }
+        void load(true).catch((error) => {
+          showToastRef.current("error", error instanceof Error ? error.message : i18n.t("ledgerData.loadFailed"));
+        }).finally(() => {
+          if (!cancelled) schedule();
+        });
+      }, Math.max(1, nextMidnight.getTime() - now.getTime()));
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [load, timeRange]);
+
+  useEffect(() => {
     void load().catch((error) => {
       showToastRef.current("error", error instanceof Error ? error.message : i18n.t("ledgerData.loadFailed"));
     });
@@ -395,6 +440,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
 
   return {
     summary,
+    comparisons,
     balances,
     accountBalances,
     txns,

@@ -218,7 +218,10 @@ func (s *Server) agentTools() map[string]agentTool {
 				}
 				start := firstNonEmpty(input.Start, page.Start, time.Now().Format("2006-01-01"))
 				end := firstNonEmpty(input.End, page.End, time.Now().AddDate(0, 1, 0).Format("2006-01-01"))
-				result, err := s.queryPort.Summary(start, end, true, firstNonEmpty(input.ValuationCurrency, page.ValuationCurrency))
+				result, err := s.queryPort.Summary(start, end, true, LedgerReadOptions{
+					ValuationCurrency: firstNonEmpty(input.ValuationCurrency, page.ValuationCurrency),
+					ComparisonDate:    time.Now().Format("2006-01-02"),
+				})
 				if err != nil {
 					return agentToolExecution{}, err
 				}
