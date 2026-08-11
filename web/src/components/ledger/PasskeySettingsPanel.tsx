@@ -12,7 +12,7 @@ import { deletePasskeyCredential, listPasskeyCredentials, passkeyBackupPresentat
 
 type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
 
-export function PasskeySettingsPanel({ onRegister, onRegisteredChange, showToast }: { onRegister: (endpoint: ApiEndpoint) => Promise<PasskeyCredentialSummary | null>; onRegisteredChange: (registered: boolean) => void; showToast: ToastFn }) {
+export function PasskeySettingsPanel({ headingId, onRegister, onRegisteredChange, showToast }: { headingId?: string; onRegister: (endpoint: ApiEndpoint) => Promise<PasskeyCredentialSummary | null>; onRegisteredChange: (registered: boolean) => void; showToast: ToastFn }) {
   const { t } = useTranslation();
   const [credentials, setCredentials] = useState<PasskeyCredentialSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,11 +155,10 @@ export function PasskeySettingsPanel({ onRegister, onRegisteredChange, showToast
   const deletingLast = deleting != null && credentials.length === 1;
   const empty = !loading && !loadError && !managementUnsupported && credentials.length === 0;
 
-  return <section className="card p-5 md:p-6">
+  return <section className="min-w-0 bg-panel px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7">
     <div className="flex flex-col gap-4 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <div className="text-xs font-semibold text-stone">{t("passkeySettings.eyebrow")}</div>
-        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-ink">{t("passkeySettings.title")}</h1>
+        <h1 id={headingId} className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t("passkeySettings.title")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("passkeySettings.desc", { backend: backendLabel })}</p>
       </div>
       <Button type="button" size="lg" className="h-11 w-full sm:w-auto" disabled={registering || loading || managementUnsupported || !endpoint} onClick={() => void register()}>
@@ -167,19 +166,19 @@ export function PasskeySettingsPanel({ onRegister, onRegisteredChange, showToast
       </Button>
     </div>
 
-    <div className="mt-5 overflow-hidden rounded-xl border border-line bg-panel">
+    <div className="mt-5 overflow-hidden border-y border-line bg-panel">
       {loading && <div className="flex min-h-32 items-center justify-center px-5 py-8 text-sm text-stone" role="status">{t("passkeySettings.loading")}</div>}
       {!loading && loadError && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-8 text-center" role="alert">
         <h2 className="text-sm font-semibold text-ink">{t("passkeySettings.loadErrorTitle")}</h2>
         <p className="mt-2 max-w-md text-sm leading-6 text-stone">{loadError}</p>
-        <Button type="button" variant="outline" className="mt-4" onClick={() => void loadCredentials()}>{t("passkeySettings.retry")}</Button>
+        <Button type="button" variant="outline" className="mt-4 h-10" onClick={() => void loadCredentials()}>{t("passkeySettings.retry")}</Button>
       </div>}
       {!loading && managementUnsupported && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-8 text-center" role="status">
         <h2 className="text-sm font-semibold text-ink">{t("passkeySettings.unsupportedTitle")}</h2>
         <p className="mt-2 max-w-md text-sm leading-6 text-stone">{t("passkeySettings.unsupportedDesc", { backend: backendLabel })}</p>
       </div>}
       {empty && <div className="flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
-        <span className="grid h-11 w-11 place-items-center rounded-lg border border-line bg-paper text-brand"><Fingerprint className="h-5 w-5" /></span>
+        <span className="grid h-11 w-11 place-items-center rounded-md border border-line bg-paper text-brand"><Fingerprint className="h-5 w-5" /></span>
         <h2 className="mt-4 text-base font-semibold text-ink">{t("passkeySettings.emptyTitle")}</h2>
         <p className="mt-2 max-w-md text-sm leading-6 text-stone">{t("passkeySettings.emptyDesc")}</p>
         <Button type="button" className="mt-5 h-10" disabled={registering} onClick={() => void register()}><Plus className="h-4 w-4" />{t("passkeySettings.addFirst")}</Button>
@@ -199,8 +198,8 @@ export function PasskeySettingsPanel({ onRegister, onRegisteredChange, showToast
         </DialogHeader>
         <Input autoFocus maxLength={64} value={editName} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void saveName()} aria-label={t("passkeySettings.nameLabel")} />
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={saving} onClick={() => setEditing(null)}>{t("passkeySettings.later")}</Button>
-          <Button type="button" disabled={saving || !editName.trim()} onClick={() => void saveName()}>{saving ? t("passkeySettings.saving") : t("passkeySettings.saveName")}</Button>
+          <Button type="button" variant="outline" className="h-10" disabled={saving} onClick={() => setEditing(null)}>{t("passkeySettings.later")}</Button>
+          <Button type="button" className="h-10" disabled={saving || !editName.trim()} onClick={() => void saveName()}>{saving ? t("passkeySettings.saving") : t("passkeySettings.saveName")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -219,8 +218,8 @@ export function PasskeySettingsPanel({ onRegister, onRegisteredChange, showToast
           <Input id="delete-passkey-password" autoFocus type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void confirmDelete()} />
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={saving}>{t("passkeySettings.cancel")}</AlertDialogCancel>
-          <Button type="button" variant="destructive" disabled={saving || !password} onClick={() => void confirmDelete()}>{saving ? t("passkeySettings.deleting") : t("passkeySettings.confirmDelete")}</Button>
+          <AlertDialogCancel className="h-10" disabled={saving}>{t("passkeySettings.cancel")}</AlertDialogCancel>
+          <Button type="button" variant="destructive" className="h-10" disabled={saving || !password} onClick={() => void confirmDelete()}>{saving ? t("passkeySettings.deleting") : t("passkeySettings.confirmDelete")}</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -232,7 +231,7 @@ function PasskeyRow({ credential, onRename, onDelete }: { credential: PasskeyCre
   const backup = passkeyBackupPresentation(credential);
   const transport = useMemo(() => passkeyTransportLabel(credential.transports), [credential.transports]);
   return <div className="flex min-w-0 items-start gap-3 px-4 py-4 sm:items-center sm:px-5">
-    <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand sm:mt-0"><KeyRound className="h-4 w-4" /></span>
+    <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-md border border-line bg-paper text-brand sm:mt-0"><KeyRound className="h-4 w-4" /></span>
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="min-w-0 truncate text-sm font-semibold text-ink" title={credential.name}>{credential.name}</h2>
