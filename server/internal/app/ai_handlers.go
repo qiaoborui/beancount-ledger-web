@@ -99,7 +99,7 @@ func (s *Server) aiAgentTimeline(c *gin.Context) {
 }
 
 func (s *Server) aiAgentSessionDelete(c *gin.Context) {
-	if !requireSensitive(c) {
+	if !requireAuth(c) {
 		return
 	}
 	rawSessionID := c.Param("sessionID")

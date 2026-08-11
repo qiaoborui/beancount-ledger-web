@@ -770,7 +770,13 @@ export function reconcileAgentTimeline(serverItems: TimelineItem[], currentItems
     return { ...item, id: rendered.id };
   });
   const serverIDs = new Set(reconciledServer.map((item) => item.id));
-  return [...reconciledServer, ...currentItems.filter((item) => !serverIDs.has(item.id))];
+  const overlap = currentItems.flatMap((item, index) => serverIDs.has(item.id) ? [index] : []);
+  if (!overlap.length) return [...reconciledServer, ...currentItems];
+  const firstOverlap = overlap[0];
+  const lastOverlap = overlap.at(-1) ?? firstOverlap;
+  const localPrefix = currentItems.slice(0, firstOverlap).filter((item) => !serverIDs.has(item.id));
+  const optimisticSuffix = currentItems.slice(lastOverlap + 1).filter((item) => !serverIDs.has(item.id));
+  return [...localPrefix, ...reconciledServer, ...optimisticSuffix];
 }
 
 export function normalizeAgentTimelinePage(value: unknown): AgentTimelinePage {

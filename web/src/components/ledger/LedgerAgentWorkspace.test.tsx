@@ -155,6 +155,20 @@ describe("LedgerAgentWorkspace", () => {
     expect(reconcileAgentTimeline(server, current).map((item) => item.id)).toEqual(["local-user", "local-new"]);
   });
 
+  it("keeps older local history before a paged server tail and optimistic items after it", () => {
+    const localPrefix = Array.from({ length: 25 }, (_, index) => ({ kind: "message", id: `older-${index}`, role: "user", content: `旧记录 ${index}` }));
+    const serverTail = Array.from({ length: 80 }, (_, index) => ({ kind: "message", id: `tail-${index}`, role: index % 2 === 0 ? "user" : "assistant", content: `远端记录 ${index}` }));
+    const current = restoreTimeline([...localPrefix, ...serverTail, { kind: "message", id: "optimistic", role: "user", content: "仍在处理的本地请求" }]);
+    const server = restoreTimeline(serverTail);
+
+    const reconciled = reconcileAgentTimeline(server, current);
+
+    expect(reconciled).toHaveLength(106);
+    expect(reconciled.slice(0, 25).map((item) => item.id)).toEqual(localPrefix.map((item) => item.id));
+    expect(reconciled.slice(25, 105).map((item) => item.id)).toEqual(serverTail.map((item) => item.id));
+    expect(reconciled.at(-1)?.id).toBe("optimistic");
+  });
+
   it("treats locked and offline remote history as an unavailable fallback", async () => {
     const locked = await fetchAgentTimelinePage(async () => new Response(JSON.stringify({ error: "Sensitive data is locked" }), { status: 423 }));
     const offline = await fetchAgentTimelinePage(async () => {
