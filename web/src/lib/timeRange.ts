@@ -146,6 +146,15 @@ export function isCurrentCalendarMonthRange(range: Pick<TimeRange, "start" | "en
   return isCalendarMonthRange(range) && today >= range.start && today < range.end;
 }
 
+export function comparisonCacheIdentity(range: Pick<TimeRange, "start" | "end">, comparisonDate?: string | null): string {
+  if (!comparisonDate) return "unknown";
+  if (formatDate(parseDate(comparisonDate)) !== comparisonDate) return "unknown";
+  if (!isCalendarMonthRange(range)) return "none";
+  if (comparisonDate < range.start) return "future";
+  if (comparisonDate >= range.end) return "complete";
+  return comparisonDate;
+}
+
 /** 季度范围，1-3月=Q1, 4-6=Q2, 7-9=Q3, 10-12=Q4 */
 export function quarterRange(year: number, quarter: number): { start: string; end: string } {
   const startMonth = (quarter - 1) * 3 + 1;

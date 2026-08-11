@@ -1,7 +1,7 @@
 import { readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
 import type { LedgerCache, LedgerNavHref, LedgerPeriodComparisons, MetricPeriodComparisons, PrivacySettings, ThemeMode } from "./types";
 import type { TimeRange } from "@/lib/timeRange";
-import { isCurrentCalendarMonthRange, localToday, timeRangeCacheKey } from "@/lib/timeRange";
+import { comparisonCacheIdentity, localToday, timeRangeCacheKey } from "@/lib/timeRange";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointStorageKeyForLedgerScope } from "@/lib/apiEndpoints";
 
 export const defaultPrivacySettings: PrivacySettings = {
@@ -142,12 +142,8 @@ function ledgerCacheStorageKey(timeRange: TimeRange, valuationCurrency: string, 
 
 function normalizePersistedLedgerCache(timeRange: TimeRange, valuationCurrency: string, ledgerScope: string, cache: LedgerCache, migrate = false, sourceKey?: string) {
   const today = localToday();
-  const comparisonWasGeneratedForSelectedMonth = cache.comparisonDate
-    ? isCurrentCalendarMonthRange(timeRange, cache.comparisonDate)
-    : isCurrentCalendarMonthRange(timeRange, today);
   const staleComparisons = cache.comparisons != null
-    && comparisonWasGeneratedForSelectedMonth
-    && cache.comparisonDate !== today;
+    && comparisonCacheIdentity(timeRange, cache.comparisonDate) !== comparisonCacheIdentity(timeRange, today);
   const current = staleComparisons ? { ...cache, comparisons: null, comparisonDate: today } : cache;
   const masked = maskSensitiveLedgerCache(current);
   const needsRewrite = staleComparisons || persistedLedgerCacheNeedsRewrite(cache);

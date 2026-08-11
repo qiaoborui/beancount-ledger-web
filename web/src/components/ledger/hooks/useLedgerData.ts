@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isSensitiveIncomeTransaction, maskSensitiveLedgerCache, maskSensitivePeriodComparisons, readLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "../storage";
 import { fetchJson } from "@/lib/clientFetch";
-import { isCurrentCalendarMonthRange, localToday, timeRangeToParams } from "@/lib/timeRange";
+import { comparisonCacheIdentity, localToday, timeRangeToParams } from "@/lib/timeRange";
 import { forgetLedgerAuthentication, hasKnownLedgerAuthentication, rememberLedgerAuthenticated } from "../authState";
 import type { AccountBalance, AccountStatus, AccountView, CreditCardAnalytics, IncomeStatementCache, InvestmentSummary, LedgerCache, LedgerIndexInfo, LedgerPeriodComparisons, LedgerVersion, NetWorthPoint, NetWorthWindows, Price, ReconcileRow, Summary, TimeRange, Txn } from "../types";
 import { apiEndpointLedgerScope } from "@/lib/apiEndpoints";
@@ -9,12 +9,8 @@ import i18n from "@/i18n";
 
 let runtimeLedgerCache: { key: string; cache: LedgerCache } | null = null;
 
-function comparisonCacheDate(range: TimeRange, comparisonDate: string) {
-  return isCurrentCalendarMonthRange(range, comparisonDate) ? comparisonDate : "complete";
-}
-
 function runtimeCacheKey(range: TimeRange, unlocked: boolean, valuationCurrency: string, ledgerScope = apiEndpointLedgerScope(), comparisonDate = localToday()) {
-  return `${ledgerScope}:${timeRangeToParams(range)}:${unlocked ? "unlocked" : "locked"}:${valuationCurrency}:${comparisonCacheDate(range, comparisonDate)}`;
+  return `${ledgerScope}:${timeRangeToParams(range)}:${unlocked ? "unlocked" : "locked"}:${valuationCurrency}:${comparisonCacheIdentity(range, comparisonDate)}`;
 }
 
 function readRuntimeLedgerCache(range: TimeRange, unlocked: boolean, valuationCurrency: string) {
@@ -414,7 +410,7 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
       timeoutId = window.setTimeout(() => {
         const today = localToday();
         const comparisonDate = comparisonDateRef.current;
-        if (comparisonDate && comparisonDate !== today && isCurrentCalendarMonthRange(timeRange, comparisonDate)) {
+        if (comparisonCacheIdentity(timeRange, comparisonDate) !== comparisonCacheIdentity(timeRange, today)) {
           setComparisons(null);
           comparisonDateRef.current = today;
         }

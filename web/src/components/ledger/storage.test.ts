@@ -221,6 +221,44 @@ describe("ledger cache storage boundary", () => {
   });
 
   it.each([
+    ["current", new Date(2026, 8, 1, 12), "2026-09-01"],
+    ["historical", new Date(2026, 9, 1, 12), "2026-10-01"],
+  ])("invalidates a future-month cache when that month becomes %s", async (_state, reopenDate, expectedDate) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(reopenDate);
+    memoryStorage();
+    const futureRange: TimeRange = { start: "2026-09-01", end: "2026-10-01", preset: "month" };
+    const stale = maskSensitiveLedgerCache(sensitiveCache());
+    stale.comparisonDate = "2026-08-11";
+    indexedCache.read.mockResolvedValueOnce(stale);
+    indexedCache.write.mockResolvedValue(true);
+
+    const restored = await readLedgerCacheAsync(futureRange);
+
+    expect(restored?.comparisons).toBeNull();
+    expect(restored?.comparisonDate).toBe(expectedDate);
+    expect(indexedCache.write).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      comparisons: null,
+      comparisonDate: expectedDate,
+    }));
+  });
+
+  it("treats comparison caches without an as-of date as stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 12, 12));
+    memoryStorage();
+    const stale = maskSensitiveLedgerCache(sensitiveCache());
+    stale.comparisonDate = undefined;
+    indexedCache.read.mockResolvedValueOnce(stale);
+    indexedCache.write.mockResolvedValue(true);
+
+    const restored = await readLedgerCacheAsync(range);
+
+    expect(restored?.comparisons).toBeNull();
+    expect(restored?.comparisonDate).toBe("2026-08-12");
+  });
+
+  it.each([
     ["total income", 100, 0, 0],
     ["net income", 0, 80, 0],
     ["daily income", 0, 0, 100],
