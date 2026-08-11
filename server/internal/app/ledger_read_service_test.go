@@ -70,7 +70,7 @@ func TestSummaryQueryResultJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"start":"2026-05-01","end":"2026-06-01","summary":{"currency":"CNY","income":0,"expense":0,"net":0,"days":{},"categories":{}},"balances":{},"accountBalances":[],"netWorthHistory":[],"monthEndNetWorth":[],"netWorthWindows":null,"creditCards":[],"commodities":[],"prices":[],"valuationCurrency":"CNY","sensitiveUnlocked":false}`
+	want := `{"start":"2026-05-01","end":"2026-06-01","summary":{"currency":"CNY","income":0,"expense":0,"net":0,"days":{},"categories":{}},"comparisons":null,"balances":{},"accountBalances":[],"netWorthHistory":[],"monthEndNetWorth":[],"netWorthWindows":null,"creditCards":[],"commodities":[],"prices":[],"valuationCurrency":"CNY","sensitiveUnlocked":false}`
 	if string(raw) != want {
 		t.Fatalf("summary query JSON = %s, want %s", raw, want)
 	}
@@ -138,7 +138,7 @@ func TestBootstrapResultJSONContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantFields := []string{
-		"start", "end", "summary", "balances", "accountBalances", "netWorthHistory",
+		"start", "end", "summary", "comparisons", "balances", "accountBalances", "netWorthHistory",
 		"monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
 		"reconciliationRows", "accounts", "commodities", "prices", "valuationCurrency",
 		"incomeStatement", "accountStatuses", "ledgerVersion", "sensitiveUnlocked",
@@ -259,7 +259,7 @@ func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
-	locked, err := service.Summary("2026-05-01", "2026-06-01", false)
+	locked, err := service.Summary("2026-05-01", "2026-06-01", false, LedgerReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 	if locked.Start != "2026-05-01" || locked.End != "2026-06-01" || locked.SensitiveUnlocked || locked.NetWorthWindows != nil {
 		t.Fatalf("locked summary query metadata changed: %#v", locked)
 	}
-	unlockedSummary, err := service.Summary("2026-05-01", "2026-06-01", true)
+	unlockedSummary, err := service.Summary("2026-05-01", "2026-06-01", true, LedgerReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestLedgerReadServiceSummaryAndIncomeStatementPrivacy(t *testing.T) {
 func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
 
-	bootstrap, err := service.Bootstrap("2026-05-01", "2026-06-01", true)
+	bootstrap, err := service.Bootstrap("2026-05-01", "2026-06-01", true, LedgerReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 		t.Fatalf("full unlocked bootstrap fields changed: %#v", bootstrap)
 	}
 
-	lite, err := service.BootstrapLite("2026-05-01", "2026-06-01", true)
+	lite, err := service.BootstrapLite("2026-05-01", "2026-06-01", true, LedgerReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 		t.Fatalf("lite bootstrap should keep expensive derived fields empty: %#v", lite)
 	}
 
-	locked, err := service.Bootstrap("2026-05-01", "2026-06-01", false)
+	locked, err := service.Bootstrap("2026-05-01", "2026-06-01", false, LedgerReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

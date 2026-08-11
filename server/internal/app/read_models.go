@@ -11,26 +11,27 @@ type ReconciliationRow struct {
 }
 
 type BootstrapResult struct {
-	Start              string                `json:"start"`
-	End                string                `json:"end"`
-	Summary            Summary               `json:"summary"`
-	Balances           map[string]int        `json:"balances"`
-	AccountBalances    []AccountBalance      `json:"accountBalances"`
-	NetWorthHistory    []NetWorthPoint       `json:"netWorthHistory"`
-	MonthEndNetWorth   []NetWorthPoint       `json:"monthEndNetWorth"`
-	NetWorthWindows    *NetWorthWindows      `json:"netWorthWindows"`
-	CreditCards        []CreditCardAnalytics `json:"creditCards"`
-	Investments        InvestmentSummary     `json:"investments"`
-	Transactions       []Transaction         `json:"transactions"`
-	ReconciliationRows []ReconciliationRow   `json:"reconciliationRows"`
-	Accounts           []Account             `json:"accounts"`
-	Commodities        []string              `json:"commodities"`
-	Prices             []Price               `json:"prices"`
-	ValuationCurrency  string                `json:"valuationCurrency"`
-	IncomeStatement    IncomeStatementResult `json:"incomeStatement"`
-	AccountStatuses    []AccountStatus       `json:"accountStatuses"`
-	LedgerVersion      LedgerVersion         `json:"ledgerVersion"`
-	SensitiveUnlocked  bool                  `json:"sensitiveUnlocked"`
+	Start              string                   `json:"start"`
+	End                string                   `json:"end"`
+	Summary            Summary                  `json:"summary"`
+	Comparisons        *LedgerPeriodComparisons `json:"comparisons"`
+	Balances           map[string]int           `json:"balances"`
+	AccountBalances    []AccountBalance         `json:"accountBalances"`
+	NetWorthHistory    []NetWorthPoint          `json:"netWorthHistory"`
+	MonthEndNetWorth   []NetWorthPoint          `json:"monthEndNetWorth"`
+	NetWorthWindows    *NetWorthWindows         `json:"netWorthWindows"`
+	CreditCards        []CreditCardAnalytics    `json:"creditCards"`
+	Investments        InvestmentSummary        `json:"investments"`
+	Transactions       []Transaction            `json:"transactions"`
+	ReconciliationRows []ReconciliationRow      `json:"reconciliationRows"`
+	Accounts           []Account                `json:"accounts"`
+	Commodities        []string                 `json:"commodities"`
+	Prices             []Price                  `json:"prices"`
+	ValuationCurrency  string                   `json:"valuationCurrency"`
+	IncomeStatement    IncomeStatementResult    `json:"incomeStatement"`
+	AccountStatuses    []AccountStatus          `json:"accountStatuses"`
+	LedgerVersion      LedgerVersion            `json:"ledgerVersion"`
+	SensitiveUnlocked  bool                     `json:"sensitiveUnlocked"`
 }
 
 type IncomeStatementResult struct {
@@ -53,19 +54,20 @@ type IncomeStatementQueryResult struct {
 }
 
 type SummaryQueryResult struct {
-	Start             string                `json:"start"`
-	End               string                `json:"end"`
-	Summary           Summary               `json:"summary"`
-	Balances          map[string]int        `json:"balances"`
-	AccountBalances   []AccountBalance      `json:"accountBalances"`
-	NetWorthHistory   []NetWorthPoint       `json:"netWorthHistory"`
-	MonthEndNetWorth  []NetWorthPoint       `json:"monthEndNetWorth"`
-	NetWorthWindows   *NetWorthWindows      `json:"netWorthWindows"`
-	CreditCards       []CreditCardAnalytics `json:"creditCards"`
-	Commodities       []string              `json:"commodities"`
-	Prices            []Price               `json:"prices"`
-	ValuationCurrency string                `json:"valuationCurrency"`
-	SensitiveUnlocked bool                  `json:"sensitiveUnlocked"`
+	Start             string                   `json:"start"`
+	End               string                   `json:"end"`
+	Summary           Summary                  `json:"summary"`
+	Comparisons       *LedgerPeriodComparisons `json:"comparisons"`
+	Balances          map[string]int           `json:"balances"`
+	AccountBalances   []AccountBalance         `json:"accountBalances"`
+	NetWorthHistory   []NetWorthPoint          `json:"netWorthHistory"`
+	MonthEndNetWorth  []NetWorthPoint          `json:"monthEndNetWorth"`
+	NetWorthWindows   *NetWorthWindows         `json:"netWorthWindows"`
+	CreditCards       []CreditCardAnalytics    `json:"creditCards"`
+	Commodities       []string                 `json:"commodities"`
+	Prices            []Price                  `json:"prices"`
+	ValuationCurrency string                   `json:"valuationCurrency"`
+	SensitiveUnlocked bool                     `json:"sensitiveUnlocked"`
 }
 
 type TransactionQueryResult struct {

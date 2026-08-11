@@ -4,12 +4,13 @@ import { Eye, EyeOff } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCompactValuation, formatValuation } from "@/lib/money";
 import { formatAccountOptionLabel } from "./accountDisplay";
-import type { AccountBalance, AccountView, NetWorthPoint, NetWorthWindows } from "./types";
+import { PeriodComparisonRows } from "./PeriodComparisonRows";
+import type { AccountBalance, AccountView, MetricPeriodComparisons, NetWorthPoint, NetWorthWindows } from "./types";
 
 type ChartRow = { date: string; assets: number; liabilities: number; netWorth: number };
 type ViewMode = "daily" | "month-end";
 
-export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, accounts, valuationCurrency, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; accountBalances: AccountBalance[]; accounts: AccountView[]; valuationCurrency: string; visible: boolean; onToggleVisible: () => void }) {
+export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, accounts, comparisons = null, valuationCurrency, visible, onToggleVisible }: { rows: ChartRow[]; monthEndRows: NetWorthPoint[]; windows: NetWorthWindows | null; accountBalances: AccountBalance[]; accounts: AccountView[]; comparisons?: MetricPeriodComparisons | null; valuationCurrency: string; visible: boolean; onToggleVisible: () => void }) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const displayCurrency = accountBalances.find((row) => row.valuationCurrency)?.valuationCurrency ?? valuationCurrency;
@@ -35,7 +36,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
         action={<button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-panel px-3 text-sm text-olive hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" onClick={onToggleVisible} aria-label={visible ? t("netWorth.hideAssetAmounts") : t("netWorth.showAssetAmounts")}>{visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}<span>{visible ? t("netWorth.hideAmounts") : t("netWorth.showAmounts")}</span></button>}
       />
       <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-4">
-        <PositionMetric label={t("netWorth.totalAssets")} value={mask(formatValuation(assets / 100, displayCurrency))} detail={t("netWorth.assetAccountsCount", { count: assetAccounts.length })} />
+        <PositionMetric label={t("netWorth.totalAssets")} value={mask(formatValuation(assets / 100, displayCurrency))} detail={<><div>{t("netWorth.assetAccountsCount", { count: assetAccounts.length })}</div>{comparisons && <PeriodComparisonRows comparisons={comparisons} metric="totalAssets" currency={displayCurrency} hidden={!visible} />}</>} />
         <PositionMetric label={t("netWorth.totalLiabilities")} value={mask(formatValuation(liabilities / 100, displayCurrency))} detail={t("netWorth.liabilitiesAbsolute")} />
         <PositionMetric label={t("netWorth.netWorth")} value={mask(formatValuation(currentNetWorth / 100, displayCurrency))} detail={t("netWorth.assetsMinusLiabilities")} alert={visible && currentNetWorth < 0} primary />
         <PositionMetric label={t("netWorth.debtRatio")} value={visible ? debtRatio == null ? t("netWorth.noAssets") : `${(debtRatio * 100).toFixed(1)}%` : "••••••"} detail={t("netWorth.liabilitiesToAssets")} alert={visible && debtRatio != null && debtRatio > 0.5} />
@@ -73,7 +74,7 @@ function AssetSectionIntro({ title, detail, action }: { title: string; detail: s
   return <div className="flex min-h-24 items-start justify-between gap-5 px-4 py-5 md:px-6 xl:px-8"><div className="min-w-0"><h2 className="text-lg font-semibold tracking-[-0.018em] text-ink">{title}</h2><p className="mt-1 text-sm leading-5 text-stone">{detail}</p></div>{action}</div>;
 }
 
-function PositionMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: string; alert?: boolean; primary?: boolean }) {
+function PositionMetric({ label, value, detail, alert = false, primary = false }: { label: string; value: string; detail: ReactNode; alert?: boolean; primary?: boolean }) {
   return <div className={`min-w-0 bg-panel px-4 py-4 md:px-5 xl:px-6 ${primary ? "sm:col-span-2 xl:col-span-1" : ""}`}><div className="text-[11px] font-semibold text-stone">{label}</div><div data-asset-position-value="true" className={`mt-2 max-w-full whitespace-nowrap font-semibold tracking-[-0.03em] tabular-nums ${amountSizeClass(value)} ${alert ? "amount-danger" : "text-ink"}`} title={value}>{value}</div><div className="mt-3 text-xs text-stone">{detail}</div></div>;
 }
 

@@ -1,7 +1,7 @@
 import { readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
-import type { LedgerCache, LedgerNavHref, PrivacySettings, ThemeMode } from "./types";
+import type { LedgerCache, LedgerNavHref, LedgerPeriodComparisons, MetricPeriodComparisons, PrivacySettings, ThemeMode } from "./types";
 import type { TimeRange } from "@/lib/timeRange";
-import { timeRangeCacheKey } from "@/lib/timeRange";
+import { comparisonCacheIdentity, localToday, timeRangeCacheKey } from "@/lib/timeRange";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointStorageKeyForLedgerScope } from "@/lib/apiEndpoints";
 
 export const defaultPrivacySettings: PrivacySettings = {
@@ -54,6 +54,26 @@ export function isSensitiveIncomeTransaction(txn: LedgerCache["txns"][number]) {
   return txn.postings.some((posting) => posting.account.startsWith("Income:"));
 }
 
+function maskMetricPeriodComparisons(comparisons: MetricPeriodComparisons): MetricPeriodComparisons {
+  const mask = (comparison: MetricPeriodComparisons["monthOverMonth"]) => ({
+    ...comparison,
+    current: null,
+    baseline: null,
+    delta: null,
+    percentage: null,
+  });
+  return { monthOverMonth: mask(comparisons.monthOverMonth), yearOverYear: mask(comparisons.yearOverYear) };
+}
+
+export function maskSensitivePeriodComparisons(comparisons: LedgerPeriodComparisons | null | undefined): LedgerPeriodComparisons | null {
+  if (!comparisons) return null;
+  return {
+    ...comparisons,
+    income: maskMetricPeriodComparisons(comparisons.income),
+    totalAssets: comparisons.totalAssets ? maskMetricPeriodComparisons(comparisons.totalAssets) : null,
+  };
+}
+
 export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
   return {
     ...cache,
@@ -66,6 +86,7 @@ export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
         income: 0,
       }])),
     } : null,
+    comparisons: maskSensitivePeriodComparisons(cache.comparisons),
     balances: {},
     accountBalances: [],
     netWorthRows: [],
@@ -91,6 +112,8 @@ function persistedLedgerCacheNeedsRewrite(cache: LedgerCache) {
     || (cache.summary?.income ?? 0) !== 0
     || (cache.summary?.net ?? 0) !== 0
     || Object.values(cache.summary?.days ?? {}).some((day) => (day.income ?? 0) !== 0)
+    || metricComparisonsContainValues(cache.comparisons?.income)
+    || metricComparisonsContainValues(cache.comparisons?.totalAssets)
     || Object.keys(cache.balances).length > 0
     || (cache.accountBalances?.length ?? 0) > 0
     || cache.netWorthRows.length > 0
@@ -106,13 +129,24 @@ function persistedLedgerCacheNeedsRewrite(cache: LedgerCache) {
     || (cache.incomeStatement?.netIncome ?? 0) !== 0;
 }
 
+function metricComparisonsContainValues(comparisons: MetricPeriodComparisons | null | undefined) {
+  if (!comparisons) return false;
+  return [comparisons.monthOverMonth, comparisons.yearOverYear].some((comparison) =>
+    comparison.current != null || comparison.baseline != null || comparison.delta != null || comparison.percentage != null,
+  );
+}
+
 function ledgerCacheStorageKey(timeRange: TimeRange, valuationCurrency: string, ledgerScope: string) {
   return apiEndpointStorageKeyForLedgerScope(timeRangeCacheKey(timeRange, valuationCurrency), ledgerScope);
 }
 
 function normalizePersistedLedgerCache(timeRange: TimeRange, valuationCurrency: string, ledgerScope: string, cache: LedgerCache, migrate = false, sourceKey?: string) {
-  const masked = maskSensitiveLedgerCache(cache);
-  const needsRewrite = persistedLedgerCacheNeedsRewrite(cache);
+  const today = localToday();
+  const staleComparisons = cache.comparisons != null
+    && comparisonCacheIdentity(timeRange, cache.comparisonDate) !== comparisonCacheIdentity(timeRange, today);
+  const current = staleComparisons ? { ...cache, comparisons: null, comparisonDate: today } : cache;
+  const masked = maskSensitiveLedgerCache(current);
+  const needsRewrite = staleComparisons || persistedLedgerCacheNeedsRewrite(cache);
   if (migrate || needsRewrite) writeLedgerCache(timeRange, masked, valuationCurrency, ledgerScope);
   if (needsRewrite && sourceKey && sourceKey !== ledgerCacheStorageKey(timeRange, valuationCurrency, ledgerScope)) {
     writePersistedLedgerCache(sourceKey, masked);

@@ -1988,15 +1988,15 @@ func (s fakeLedgerReadPorts) SnapshotLite(context.Context) (*LedgerSnapshot, err
 	return s.snapshot, nil
 }
 
-func (s fakeLedgerReadPorts) Bootstrap(string, string, bool, ...string) (BootstrapResult, error) {
+func (s fakeLedgerReadPorts) Bootstrap(string, string, bool, LedgerReadOptions) (BootstrapResult, error) {
 	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadPorts) BootstrapLite(string, string, bool, ...string) (BootstrapResult, error) {
+func (s fakeLedgerReadPorts) BootstrapLite(string, string, bool, LedgerReadOptions) (BootstrapResult, error) {
 	return BootstrapResult{}, errors.New("unused fake ledger read service method")
 }
 
-func (s fakeLedgerReadPorts) Summary(string, string, bool, ...string) (SummaryQueryResult, error) {
+func (s fakeLedgerReadPorts) Summary(string, string, bool, LedgerReadOptions) (SummaryQueryResult, error) {
 	return SummaryQueryResult{}, errors.New("unused fake ledger read service method")
 }
 

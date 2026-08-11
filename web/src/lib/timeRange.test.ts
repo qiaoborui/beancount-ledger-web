@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   canNavigateTimeRange,
+  comparisonCacheIdentity,
   exclusiveEndDate,
   formatTimeRangeDateSpan,
   formatTimeRangePickerLabel,
   inclusiveEndDate,
+  isCalendarMonthRange,
+  isCurrentCalendarMonthRange,
   makeTimeRange,
   navigateTimeRange,
   timeRangeCacheKey,
@@ -56,5 +59,21 @@ describe("rolling time ranges", () => {
   it("keeps rolling cache entries scoped to their exact dates", () => {
     const range = makeTimeRange("last7", "2026-07-14");
     expect(timeRangeCacheKey(range)).toContain("last7_2026-07-08_2026-07-15");
+  });
+
+  it("recognizes exact calendar months independently of the selected preset", () => {
+    expect(isCalendarMonthRange({ start: "2026-08-01", end: "2026-09-01" })).toBe(true);
+    expect(isCalendarMonthRange({ start: "2026-08-02", end: "2026-09-02" })).toBe(false);
+    expect(isCurrentCalendarMonthRange({ start: "2026-08-01", end: "2026-09-01" }, "2026-08-12")).toBe(true);
+    expect(isCurrentCalendarMonthRange({ start: "2026-08-01", end: "2026-09-01" }, "2026-09-01")).toBe(false);
+  });
+
+  it("uses one cache identity across future, current, completed, and unknown month states", () => {
+    const september = { start: "2026-09-01", end: "2026-10-01" };
+    expect(comparisonCacheIdentity(september, "2026-08-11")).toBe("future");
+    expect(comparisonCacheIdentity(september, "2026-09-01")).toBe("2026-09-01");
+    expect(comparisonCacheIdentity(september, "2026-10-01")).toBe("complete");
+    expect(comparisonCacheIdentity(september)).toBe("unknown");
+    expect(comparisonCacheIdentity(september, "not-a-date")).toBe("unknown");
   });
 });

@@ -398,6 +398,17 @@ export const zhCN = {
     noData: "暂无数据",
     noChangeRate: "暂无变化率",
   },
+  comparisons: {
+    monthOverMonth: "环比",
+    yearOverYear: "同比",
+    increase: "增加",
+    decrease: "减少",
+    unchanged: "持平",
+    unavailable: "暂无可用比较",
+    rangeTitle: "当前 {{currentStart}} 至 {{currentEnd}}，对比 {{baselineStart}} 至 {{baselineEnd}}",
+    accessible: "{{label}}，{{ranges}}，{{direction}}，绝对变化 {{delta}}，百分比 {{percentage}}",
+    hiddenAccessible: "{{label}}，{{ranges}}，比较金额已隐藏",
+  },
   home: {
     noExpenseCategory: "暂无支出分类",
     noExpenseCategoryDetail: "当前范围没有可分析的分类",

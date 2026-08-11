@@ -55,12 +55,16 @@ func (s *Server) ledgerBootstrap(c *gin.Context) {
 	start, end := parseTimeParams(c)
 	unlocked := isSensitiveUnlocked(c)
 	isLite := c.Query("lite") == "1"
+	options, err := ledgerReadOptions(c)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
 	var payload BootstrapResult
-	var err error
 	if isLite {
-		payload, err = s.queryPort.BootstrapLite(start, end, unlocked, c.Query("valuationCurrency"))
+		payload, err = s.queryPort.BootstrapLite(start, end, unlocked, options)
 	} else {
-		payload, err = s.queryPort.Bootstrap(start, end, unlocked, c.Query("valuationCurrency"))
+		payload, err = s.queryPort.Bootstrap(start, end, unlocked, options)
 	}
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -86,12 +90,27 @@ func (s *Server) summary(c *gin.Context) {
 		return
 	}
 	start, end := parseTimeParams(c)
-	payload, err := s.queryPort.Summary(start, end, isSensitiveUnlocked(c), c.Query("valuationCurrency"))
+	options, err := ledgerReadOptions(c)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	payload, err := s.queryPort.Summary(start, end, isSensitiveUnlocked(c), options)
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, payload)
+}
+
+func ledgerReadOptions(c *gin.Context) (LedgerReadOptions, error) {
+	comparisonDate := c.Query("today")
+	if comparisonDate != "" {
+		if _, err := time.Parse("2006-01-02", comparisonDate); err != nil {
+			return LedgerReadOptions{}, errors.New("invalid today: expected YYYY-MM-DD")
+		}
+	}
+	return LedgerReadOptions{ValuationCurrency: c.Query("valuationCurrency"), ComparisonDate: comparisonDate}, nil
 }
 
 func (s *Server) transactions(c *gin.Context) {

@@ -5,12 +5,14 @@ import { formatValuation } from "@/lib/money";
 import type { TimeRange } from "@/lib/timeRange";
 import { ClientNavLink } from "./ClientNavLink";
 import { formatAccountOptionLabel } from "./accountDisplay";
+import { PeriodComparisonRows } from "./PeriodComparisonRows";
 import { PeriodComparisonChart, type ComparisonMetric } from "./HomeReportCharts";
 import { useHomeReport } from "./hooks/useHomeReport";
-import type { DashboardCategorySeries, ExpenseCategoryAnalytics, HomeReport, HomeReportKPI, PrivacySettings, Summary } from "./types";
+import type { DashboardCategorySeries, ExpenseCategoryAnalytics, HomeReport, HomeReportKPI, LedgerPeriodComparisons, PrivacySettings, Summary } from "./types";
 
 type HomePageProps = {
   summary: Summary | null;
+  comparisons?: LedgerPeriodComparisons | null;
   timeRange: TimeRange;
   valuationCurrency: string;
   ledgerRevision?: string;
@@ -21,11 +23,12 @@ type HomePageProps = {
   onSensitiveLocked: () => void;
 };
 
-export function HomePage({ summary, timeRange, valuationCurrency, ledgerRevision = "", privacySettings, sensitiveUnlocked, expenseAnalytics, onPrivacyChange, onSensitiveLocked }: HomePageProps) {
+export function HomePage({ summary, comparisons, timeRange, valuationCurrency, ledgerRevision = "", privacySettings, sensitiveUnlocked, expenseAnalytics, onPrivacyChange, onSensitiveLocked }: HomePageProps) {
   const { data, loading, error, reload } = useHomeReport({ timeRange, valuationCurrency, ledgerRevision, enabled: sensitiveUnlocked, onSensitiveLocked });
   return <HomeReportWorkspace
     report={data}
     summary={summary}
+    comparisons={comparisons}
     timeRange={timeRange}
     valuationCurrency={valuationCurrency}
     privacySettings={privacySettings}
@@ -38,7 +41,7 @@ export function HomePage({ summary, timeRange, valuationCurrency, ledgerRevision
   />;
 }
 
-export function HomeReportWorkspace({ report, summary, timeRange, valuationCurrency, privacySettings, sensitiveUnlocked, expenseAnalytics, loading = false, error = "", onReload, onPrivacyChange }: Omit<HomePageProps, "onSensitiveLocked"> & { report: HomeReport | null; loading?: boolean; error?: string; onReload?: () => void }) {
+export function HomeReportWorkspace({ report, summary, comparisons, timeRange, valuationCurrency, privacySettings, sensitiveUnlocked, expenseAnalytics, loading = false, error = "", onReload, onPrivacyChange }: Omit<HomePageProps, "onSensitiveLocked"> & { report: HomeReport | null; loading?: boolean; error?: string; onReload?: () => void }) {
   const { t, i18n } = useTranslation();
   const showAmounts = privacySettings.showHomeSummaryAmounts;
   const canShowSensitive = sensitiveUnlocked && showAmounts;
@@ -82,8 +85,8 @@ export function HomeReportWorkspace({ report, summary, timeRange, valuationCurre
 
       <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-4">
         <ReportMetric label={t("home.netIncome", { scope: periodScope })} value={mask(formatValuation(current.net / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.net, previous.net, t)} alert={canShowSensitive && current.net < 0} />
-        <ReportMetric label={t("home.income", { scope: periodScope })} value={mask(formatValuation(current.income / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.income, previous.income, t)} />
-        <ReportMetric label={t("home.expense", { scope: periodScope })} value={mask(formatValuation(current.expense / 100, currency))} detail={comparisonDetail(canShowSensitive, reportReady, current.expense, previous.expense, t)} />
+        <ReportMetric label={t("home.income", { scope: periodScope })} value={mask(formatValuation(current.income / 100, currency))} detail={comparisons ? <PeriodComparisonRows comparisons={comparisons.income} metric="income" currency={currency} hidden={!canShowSensitive} /> : comparisonDetail(canShowSensitive, reportReady, current.income, previous.income, t)} />
+        <ReportMetric label={t("home.expense", { scope: periodScope })} value={mask(formatValuation(current.expense / 100, currency))} detail={comparisons ? <PeriodComparisonRows comparisons={comparisons.expense} metric="expense" currency={currency} hidden={!canShowSensitive} /> : comparisonDetail(canShowSensitive, reportReady, current.expense, previous.expense, t)} />
         <ReportMetric label={t("home.transactionCount")} value={canShowSensitive ? String(current.transactionCount) : "••••••"} detail={!canShowSensitive ? t("home.yoyHidden") : reportReady ? comparisonCountCopy(current.transactionCount, previous.transactionCount, t) : t("home.waitingYoY")} />
       </div>
     </section>
@@ -126,7 +129,7 @@ function ReportSectionIntro({ title, detail, meta, action }: { title: string; de
   </div>;
 }
 
-function ReportMetric({ label, value, detail, alert = false }: { label: string; value: string; detail: string; alert?: boolean }) {
+function ReportMetric({ label, value, detail, alert = false }: { label: string; value: string; detail: ReactNode; alert?: boolean }) {
   return <div className="min-w-0 bg-panel px-4 py-4 md:px-5 xl:px-6"><div className="text-[11px] font-semibold text-stone">{label}</div><div data-home-position-value="true" className={`mt-2 max-w-full whitespace-nowrap font-semibold tracking-[-0.03em] tabular-nums ${amountSizeClass(value)} ${alert ? "amount-danger" : "text-ink"}`} title={value}>{value}</div><div className="mt-3 text-xs text-stone">{detail}</div></div>;
 }
 

@@ -2,7 +2,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { HomePage, HomeReportWorkspace } from "./HomePage";
 import type { TimeRange } from "@/lib/timeRange";
-import type { ExpenseCategoryAnalytics, HomeReport, PrivacySettings, Summary } from "./types";
+import type { ExpenseCategoryAnalytics, HomeReport, LedgerPeriodComparisons, PrivacySettings, Summary } from "./types";
 
 const summary: Summary = {
   currency: "CNY",
@@ -30,6 +30,21 @@ const expenseAnalytics: ExpenseCategoryAnalytics[] = [
 ];
 
 const timeRange: TimeRange = { start: "2026-01-01", end: "2027-01-01", preset: "year" };
+
+const monthComparisons: LedgerPeriodComparisons = {
+  income: {
+    monthOverMonth: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2026-07-01", end: "2026-07-11" }, current: 120000, baseline: 100000, delta: 20000, percentage: 0.2 },
+    yearOverYear: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2025-08-01", end: "2025-08-11" }, current: 120000, baseline: 80000, delta: 40000, percentage: 0.5 },
+  },
+  expense: {
+    monthOverMonth: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2026-07-01", end: "2026-07-11" }, current: 9000, baseline: 10000, delta: -1000, percentage: -0.1 },
+    yearOverYear: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2025-08-01", end: "2025-08-11" }, current: 9000, baseline: 0, delta: 9000, percentage: null },
+  },
+  totalAssets: {
+    monthOverMonth: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2026-07-01", end: "2026-07-11" }, current: 1200000, baseline: 1100000, delta: 100000, percentage: 1 / 11 },
+    yearOverYear: { currentRange: { start: "2026-08-01", end: "2026-08-11" }, baselineRange: { start: "2025-08-01", end: "2025-08-11" }, current: 1200000, baseline: 1000000, delta: 200000, percentage: 0.2 },
+  },
+};
 
 const report: HomeReport = {
   start: "2026-01-01",
@@ -95,6 +110,27 @@ describe("HomePage privacy", () => {
 });
 
 describe("HomePage layout", () => {
+  it("uses the equal-window monthly totals and renders compact MoM and YoY rows", () => {
+    const html = renderToString(
+      <HomeReportWorkspace
+        report={report}
+        summary={summary}
+        comparisons={monthComparisons}
+        timeRange={{ start: "2026-08-01", end: "2026-09-01", preset: "month" }}
+        valuationCurrency="CNY"
+        privacySettings={privacySettings}
+        sensitiveUnlocked
+        expenseAnalytics={expenseAnalytics}
+        onPrivacyChange={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("¥1,234.56");
+    expect(html).toContain("↓ -¥10.00 · -10.0%");
+    expect(html).toContain("↑ +¥90.00 · —");
+    expect(html).toContain("当前 2026-08-01 至 2026-08-11，对比 2026-07-01 至 2026-07-11");
+  });
+
   it("renders a decision brief with explicit handoffs instead of duplicate analysis", () => {
     const html = renderToString(
       <HomeReportWorkspace

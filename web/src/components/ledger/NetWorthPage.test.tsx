@@ -1,7 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { NetWorthPage } from "./NetWorthPage";
-import type { AccountBalance, AccountView, NetWorthWindows } from "./types";
+import type { AccountBalance, AccountView, MetricPeriodComparisons, NetWorthWindows } from "./types";
 
 const accounts: AccountView[] = [
   { account: "Assets:Cash", openDate: "2024-01-01", closeDate: null, currency: "CNY", alias: null, label: "现金", group: "cash", active: true },
@@ -23,7 +23,32 @@ const windows: NetWorthWindows = {
   twelveMonth: { baseline: null, change: 260000, changeRatio: 0.28 },
 };
 
+const comparisons: MetricPeriodComparisons = {
+  monthOverMonth: { currentRange: { start: "2026-07-01", end: "2026-07-31" }, baselineRange: { start: "2026-06-01", end: "2026-06-30" }, current: 1200000, baseline: 1100000, delta: 100000, percentage: 1 / 11 },
+  yearOverYear: { currentRange: { start: "2026-07-01", end: "2026-07-31" }, baselineRange: { start: "2025-07-01", end: "2025-07-31" }, current: 1200000, baseline: 1000000, delta: 200000, percentage: 0.2 },
+};
+
 describe("NetWorthPage information architecture", () => {
+  it("adds selected period-end comparisons under the existing total-assets value", () => {
+    const html = renderToString(
+      <NetWorthPage
+        rows={[]}
+        monthEndRows={[]}
+        windows={windows}
+        accountBalances={accountBalances}
+        accounts={accounts}
+        comparisons={comparisons}
+        valuationCurrency="CNY"
+        visible
+        onToggleVisible={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("¥13,000.00");
+    expect(html).toContain("↑ +¥1,000.00 · +9.1%");
+    expect(html).toContain("当前 2026-07-01 至 2026-07-31，对比 2026-06-01 至 2026-06-30");
+  });
+
   it("renders a balance-sheet workspace without income-statement metrics", () => {
     const html = renderToString(
       <NetWorthPage
