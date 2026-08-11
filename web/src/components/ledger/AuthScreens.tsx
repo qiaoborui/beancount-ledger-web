@@ -142,10 +142,6 @@ export function SensitiveUnlockPanel({
   description = "",
   message,
   offline,
-  offlineUnlockAvailable,
-  offlineSecret,
-  onOfflineSecretChange,
-  onOfflineUnlock,
   quickUnlockEnabled,
   quickUnlockMode,
   passkeyRegistered,
@@ -160,10 +156,6 @@ export function SensitiveUnlockPanel({
   description?: string;
   message?: string;
   offline?: boolean;
-  offlineUnlockAvailable?: boolean;
-  offlineSecret?: string;
-  onOfflineSecretChange?: (value: string) => void;
-  onOfflineUnlock?: () => void;
   quickUnlockEnabled?: boolean;
   quickUnlockMode?: QuickUnlockMode;
   passkeyRegistered?: boolean;
@@ -177,13 +169,6 @@ export function SensitiveUnlockPanel({
   const { t } = useTranslation();
   const effectiveTitle = title || t("auth.assetsHidden");
   const effectiveDescription = description || t("auth.sensitiveDesc");
-  const offlineInputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    if (!autoFocusInput || !offline || !offlineUnlockAvailable) return;
-    const id = window.requestAnimationFrame(() => offlineInputRef.current?.focus());
-    return () => window.cancelAnimationFrame(id);
-  }, [autoFocusInput, offline, offlineUnlockAvailable]);
-
   const canUsePasskey = !offline && passkeyRegistered;
   const showPasswordInline = !offline && Boolean(onPasswordUnlock) && !quickUnlockEnabled && !passkeyRegistered;
   const shellClassName = surface === "dialog"
@@ -200,12 +185,7 @@ export function SensitiveUnlockPanel({
     </div>
 
     <div className="mx-auto mt-6 w-full max-w-sm">
-    {offline && offlineUnlockAvailable ? (
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <Input ref={offlineInputRef} autoFocus={autoFocusInput} type="password" className="h-11 bg-paper text-center sm:text-left" value={offlineSecret ?? ""} onChange={(event) => onOfflineSecretChange?.(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onOfflineUnlock?.()} placeholder={t("auth.offlineUnlockCode")} />
-        <Button className="h-11 px-4" onClick={onOfflineUnlock}><KeyRound className="mr-2 h-4 w-4" />{t("auth.offlineUnlock")}</Button>
-      </div>
-    ) : (
+    {!offline && (
       <div className="space-y-3">
         {canUsePasskey && <Button className="h-11 w-full px-5" disabled={unlocking} onClick={onUnlock}><Fingerprint className="mr-2 h-4 w-4" />{unlocking ? t("auth.invokingFaceId") : t("auth.faceIdUnlock")}</Button>}
         {quickUnlockEnabled && <QuickUnlockControls mode={quickUnlockMode ?? "text"} onUnlock={onQuickUnlock ?? onUnlock} passkeyRegistered={canUsePasskey ? false : passkeyRegistered} onPasskeyUnlock={onUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput} t={t} />}
@@ -215,7 +195,7 @@ export function SensitiveUnlockPanel({
     </div>
 
     {!offline && onPasswordUnlock && <PasswordUnlockControls onUnlock={onPasswordUnlock} unlocking={unlocking} autoFocusInput={autoFocusInput && showPasswordInline} initiallyOpen={Boolean(showPasswordInline)} t={t} />}
-    {offline && !offlineUnlockAvailable && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">{t("auth.offlineHint")}</p>}
+    {offline && <p className="mx-auto mt-3 max-w-xl text-sm text-stone">{t("auth.offlineHint")}</p>}
     {message && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--danger)]">{message}</p>}
     <p className="mx-auto mt-5 flex max-w-sm items-center justify-center gap-1.5 text-xs leading-5 text-stone"><ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" />{t("auth.autoHideNote")}</p>
   </section>;

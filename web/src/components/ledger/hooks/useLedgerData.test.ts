@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { maskSensitiveLedgerCache } from "../storage";
 import type { LedgerVersion, Txn } from "../types";
 
 const version: LedgerVersion = { version: "v1", fileCount: 1, latestMtimeMs: 123 };
@@ -78,7 +79,7 @@ describe("maskSensitiveLedgerCache", () => {
 
     const masked = maskSensitiveLedgerCache(cache);
 
-    expect(masked.summary).toEqual(cache.summary);
+    expect(masked.summary).toEqual({ income: 0, expense: 20, net: 0, days: {}, categories: {} });
     expect(masked.balances).toEqual({});
     expect(masked.accountBalances).toEqual([]);
     expect(masked.netWorthRows).toEqual([]);

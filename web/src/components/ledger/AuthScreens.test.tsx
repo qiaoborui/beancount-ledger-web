@@ -57,6 +57,14 @@ describe("LoginScreen", () => {
     expect(html).toContain("使用主密码");
   });
 
+  it("requires a backend connection instead of offering offline sensitive unlock", () => {
+    const html = renderToStaticMarkup(<SensitiveUnlockPanel offline passkeyRegistered onUnlock={() => {}} onPasswordUnlock={() => {}} />);
+
+    expect(html).toContain("请连接后端后再解锁敏感数据");
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain("Face ID / Passkey 解锁");
+  });
+
   it("focuses the quick-unlock field ahead of the main-password fallback", () => {
     const html = renderToStaticMarkup(<SensitiveUnlockPanel passkeyRegistered quickUnlockEnabled quickUnlockMode="text" autoFocusInput onUnlock={() => {}} onQuickUnlock={() => {}} onPasswordUnlock={() => {}} />);
 

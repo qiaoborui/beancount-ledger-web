@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AgentAccessTokenSettings, AgentTokenOperationGate, agentTokenPresentation, agentTokenScopeLabel, agentTokenUsageLabel } from "./AgentAccessTokenSettings";
+import { AgentAccessTokenSettings, AgentTokenOperationGate, agentTokenPresentation, agentTokenUsageLabel } from "./AgentAccessTokenSettings";
 
 describe("AgentAccessTokenSettings", () => {
   it("keeps management controls locked with sensitive data", () => {
@@ -10,14 +10,11 @@ describe("AgentAccessTokenSettings", () => {
   });
 
   it("distinguishes active, expired and revoked tokens", () => {
-    const base = { id: "token-1", name: "Laptop", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-12-01T00:00:00Z", scopes: ["read"] };
+    const base = { id: "token-1", name: "Laptop", createdAt: "2026-01-01T00:00:00Z", expiresAt: "2026-12-01T00:00:00Z" };
     expect(agentTokenPresentation(base, new Date("2026-08-05T00:00:00Z").getTime())).toEqual({ label: "可用", active: true });
     expect(agentTokenPresentation({ ...base, expiresAt: "2026-01-02T00:00:00Z" }, new Date("2026-08-05T00:00:00Z").getTime())).toEqual({ label: "已过期", active: false });
     expect(agentTokenPresentation({ ...base, revokedAt: "2026-02-01T00:00:00Z" })).toEqual({ label: "已吊销", active: false });
     expect(agentTokenUsageLabel(base)).toBe("尚未使用");
-    expect(agentTokenScopeLabel(base)).toBe("只读");
-    expect(agentTokenScopeLabel({ ...base, scopes: ["read", "write"] })).toBe("读写");
-    expect(agentTokenScopeLabel({ ...base, legacy: true })).toBe("旧版读写");
   });
 
   it.each(["sensitive lock", "API endpoint change"])("discards a create response after %s", async () => {

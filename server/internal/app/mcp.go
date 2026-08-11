@@ -23,9 +23,8 @@ const (
 )
 
 type agentMCPPrincipal struct {
-	Subject  string
-	Page     AgentPageContext
-	CanWrite bool
+	Subject string
+	Page    AgentPageContext
 }
 
 type agentMCPPrincipalContextKey struct{}
@@ -71,9 +70,8 @@ func (s *Server) authenticateMCPRequest(request *http.Request) (agentMCPPrincipa
 	serviceToken := strings.TrimSpace(s.cfg.AgentServiceToken)
 	if serviceToken != "" && len(raw) == len(serviceToken) && subtle.ConstantTimeCompare([]byte(raw), []byte(serviceToken)) == 1 {
 		return agentMCPPrincipal{
-			Subject:  "service:agent",
-			Page:     AgentPageContext{SensitiveUnlocked: true},
-			CanWrite: true,
+			Subject: "service:agent",
+			Page:    AgentPageContext{SensitiveUnlocked: true},
 		}, nil
 	}
 	record, err := s.authenticateAgentAccessTokenValue(request.Context(), raw)
@@ -84,9 +82,8 @@ func (s *Server) authenticateMCPRequest(request *http.Request) (agentMCPPrincipa
 		return agentMCPPrincipal{}, err
 	}
 	return agentMCPPrincipal{
-		Subject:  "token:" + record.ID,
-		Page:     AgentPageContext{SensitiveUnlocked: true},
-		CanWrite: agentAccessTokenCanWrite(record),
+		Subject: "token:" + record.ID,
+		Page:    AgentPageContext{SensitiveUnlocked: true},
 	}, nil
 }
 
@@ -94,15 +91,15 @@ func (s *Server) newMCPServer(principal agentMCPPrincipal) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: agentMCPServerName, Version: agentMCPServerVersion},
 		&mcp.ServerOptions{
-			Instructions: "Personal Beancount ledger tools. Read and validate before mutation. Write tools require an explicitly authorized write token and the user's confirmation of the exact visible draft in a previous turn.",
+			Instructions: "Personal Beancount ledger tools. Read and validate before mutation. Before using a write tool, show the exact visible draft and wait for the user's confirmation in a later turn.",
 			Capabilities: &mcp.ServerCapabilities{},
 			PageSize:     100,
 		},
 	)
 	tools := s.agentTools()
 	names := make([]string, 0, len(tools))
-	for name, tool := range tools {
-		if name == "open_page" || (!principal.CanWrite && !tool.ReadOnly) {
+	for name := range tools {
+		if name == "open_page" {
 			continue
 		}
 		names = append(names, name)
@@ -110,9 +107,9 @@ func (s *Server) newMCPServer(principal agentMCPPrincipal) *mcp.Server {
 	sort.Strings(names)
 	for _, name := range names {
 		tool := tools[name]
-		server.AddTool(s.mcpToolDefinition(tool, tools), s.mcpToolHandler(tool, tools, principal.Page, principal.CanWrite))
+		server.AddTool(s.mcpToolDefinition(tool, tools), s.mcpToolHandler(tool, tools, principal.Page))
 	}
-	server.AddTool(s.mcpContextToolDefinition(), s.mcpContextToolHandler(principal.Page, principal.CanWrite))
+	server.AddTool(s.mcpContextToolDefinition(), s.mcpContextToolHandler(principal.Page))
 	return server
 }
 
@@ -138,11 +135,8 @@ func (s *Server) mcpToolDefinition(tool agentTool, tools map[string]agentTool) *
 	}
 }
 
-func (s *Server) mcpToolHandler(tool agentTool, tools map[string]agentTool, page AgentPageContext, canWrite bool) mcp.ToolHandler {
+func (s *Server) mcpToolHandler(tool agentTool, tools map[string]agentTool, page AgentPageContext) mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if !tool.ReadOnly && !canWrite {
-			return agentMCPToolError(errors.New("MCP credential does not allow write tools")), nil
-		}
 		arguments := request.Params.Arguments
 		if len(arguments) == 0 {
 			arguments = json.RawMessage(`{}`)
@@ -192,7 +186,7 @@ func (s *Server) mcpContextToolDefinition() *mcp.Tool {
 	}
 }
 
-func (s *Server) mcpContextToolHandler(basePage AgentPageContext, canWrite bool) mcp.ToolHandler {
+func (s *Server) mcpContextToolHandler(basePage AgentPageContext) mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var input struct {
 			Channel           string `json:"channel"`
@@ -218,9 +212,6 @@ func (s *Server) mcpContextToolHandler(basePage AgentPageContext, canWrite bool)
 			return agentMCPToolError(err), nil
 		}
 		prompt := s.agentMCPSystemPrompt(page, memories, input.Channel == "telegram")
-		if !canWrite {
-			prompt += "\n\n当前 MCP 凭据是只读权限；不要提议或尝试调用任何写入工具。"
-		}
 		return agentMCPToolResult(agentToolExecution{
 			ModelOutput:  map[string]any{"systemPrompt": prompt},
 			ClientOutput: map[string]any{"systemPrompt": prompt},

@@ -79,7 +79,7 @@ func TestMCPRequiresBearerAuthAndRejectsCrossOriginBrowserPosts(t *testing.T) {
 func TestMCPCrossOriginProtectionRunsBeforeAccessTokenAuthentication(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
-	token := storeMCPTestToken(t, server, "Browser", []string{agentAccessScopeRead})
+	token := storeMCPTestToken(t, server, "Browser")
 	router := newRouter(server.cfg, server)
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`
 
@@ -196,66 +196,32 @@ func TestMCPServiceTokenSupportsCurrentAndLegacyProtocols(t *testing.T) {
 	}
 }
 
-func TestMCPAccessTokenScopesFilterDiscoveryAndInvocation(t *testing.T) {
+func TestMCPAccessTokenProvidesCompleteToolSet(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
-	readToken := storeMCPTestToken(t, server, "Read only", []string{agentAccessScopeRead})
-	writeToken := storeMCPTestToken(t, server, "Read write", []string{agentAccessScopeRead, agentAccessScopeWrite})
-	legacyToken := storeMCPTestToken(t, server, "Legacy", nil)
+	token := storeMCPTestToken(t, server, "Local MCP")
 	httpServer := httptest.NewServer(newRouter(server.cfg, server))
 	t.Cleanup(httpServer.Close)
 
-	readSession := connectMCPTestClient(t, httpServer.URL, readToken)
-	readTools, err := readSession.ListTools(t.Context(), nil)
+	session := connectMCPTestClient(t, httpServer.URL, token)
+	tools, err := session.ListTools(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	readNames := mcpTestToolNames(readTools.Tools)
-	if !containsString(readNames, "ledger_get_accounts") || containsString(readNames, "ledger_append_transactions") {
-		t.Fatalf("unexpected read-only MCP tools: %v", readNames)
+	names := mcpTestToolNames(tools.Tools)
+	if !containsString(names, "ledger_get_accounts") || !containsString(names, "ledger_append_transactions") {
+		t.Fatalf("access token is missing MCP tools: %v", names)
 	}
-	readContext, err := readSession.CallTool(t.Context(), &mcp.CallToolParams{
+	contextResult, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name: agentMCPContextToolName, Arguments: map[string]any{"channel": "external"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	readContextEnvelope := mcpTestEnvelope(t, readContext)
-	readModelOutput, _ := readContextEnvelope["modelOutput"].(map[string]any)
-	if !strings.Contains(readModelOutput["systemPrompt"].(string), "只读权限") {
-		t.Fatalf("read-only context must explain scope: %#v", readModelOutput)
-	}
-	if _, err := readSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "ledger_append_transactions", Arguments: map[string]any{"entries": []any{}}}); err == nil {
-		t.Fatal("read-only token must not invoke undiscoverable write tools")
-	}
-
-	for name, token := range map[string]string{"write": writeToken, "legacy": legacyToken} {
-		t.Run(name, func(t *testing.T) {
-			session := connectMCPTestClient(t, httpServer.URL, token)
-			tools, err := session.ListTools(t.Context(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !containsString(mcpTestToolNames(tools.Tools), "ledger_append_transactions") {
-				t.Fatalf("%s token is missing write tools", name)
-			}
-		})
-	}
-}
-
-func TestMCPWriteHandlerEnforcesScopeAtExecutionBoundary(t *testing.T) {
-	executed := false
-	tool := agentTool{
-		agentToolSpec: agentToolSpec{Name: "write_test", Parameters: objectSchema(nil, nil)},
-		Execute: func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error) {
-			executed = true
-			return agentToolExecution{}, nil
-		},
-	}
-	handler := (&Server{}).mcpToolHandler(tool, map[string]agentTool{tool.Name: tool}, AgentPageContext{}, false)
-	result, err := handler(t.Context(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "ledger_write_test", Arguments: json.RawMessage(`{}`)}})
-	if err != nil || !result.IsError || executed {
-		t.Fatalf("write guard result=%#v err=%v executed=%v", result, err, executed)
+	contextEnvelope := mcpTestEnvelope(t, contextResult)
+	modelOutput, _ := contextEnvelope["modelOutput"].(map[string]any)
+	if strings.Contains(modelOutput["systemPrompt"].(string), "只读权限") {
+		t.Fatalf("removed token scope leaked into MCP context: %#v", modelOutput)
 	}
 }
 
@@ -278,7 +244,7 @@ func connectMCPTestClient(t *testing.T, baseURL, token string) *mcp.ClientSessio
 	return session
 }
 
-func storeMCPTestToken(t *testing.T, server *Server, name string, scopes []string) string {
+func storeMCPTestToken(t *testing.T, server *Server, name string) string {
 	t.Helper()
 	store, err := server.readAgentAccessTokens(t.Context())
 	if err != nil {
@@ -290,7 +256,7 @@ func storeMCPTestToken(t *testing.T, server *Server, name string, scopes []strin
 	}
 	now := time.Now().UTC()
 	store.Tokens = append(store.Tokens, agentAccessTokenRecord{
-		ID: id, Name: name, SecretHash: agentAccessSecretHash(secret), Scopes: scopes,
+		ID: id, Name: name, SecretHash: agentAccessSecretHash(secret),
 		CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	})
 	if err := server.writeAgentAccessTokens(t.Context(), store); err != nil {

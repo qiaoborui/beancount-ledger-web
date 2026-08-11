@@ -37,7 +37,6 @@ import { usePendingLedgerWrites } from "./ledger/hooks/usePendingLedgerWrites";
 import { applyPendingLedgerOperations } from "./ledger/pendingLedgerOperations";
 import { shouldOfferHeaderSensitiveUnlock } from "./ledger/headerUnlock";
 import { hasKnownLedgerAuthentication, readInitialLedgerAuthState } from "./ledger/authState";
-import { enableOfflineLedgerUnlock, hasOfflineLedgerUnlock } from "./ledger/offlineUnlock";
 import { enableQuickLedgerUnlock, getQuickLedgerUnlockMode, hasQuickLedgerUnlock, revokeQuickLedgerUnlock, type QuickUnlockMode } from "./ledger/quickUnlock";
 import { useRouteScrollMemory } from "./ledger/hooks/useRouteScrollMemory";
 import { useSwipeBack } from "./ledger/hooks/useSwipeBack";
@@ -229,9 +228,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [quickUnlockMode, setQuickUnlockMode] = useState<QuickUnlockMode>(() => getQuickLedgerUnlockMode());
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
-  const [offlineUnlockEnabled, setOfflineUnlockEnabled] = useState(() => hasOfflineLedgerUnlock());
-  const [offlineUnlockSecret, setOfflineUnlockSecret] = useState("");
-  const offlineUnlockInputRef = useRef<HTMLInputElement | null>(null);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
   useEffect(() => {
     let cancelled = false;
@@ -320,7 +316,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     lastSyncedAt,
     ledgerVersion,
     load,
-    unlockOfflineSensitiveCache,
     refreshLedger,
   } = useLedgerData({
     timeRange,
@@ -485,13 +480,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     window.dispatchEvent(new Event("ledger-mobile-tabs-change"));
   }
 
-  async function enableOfflineUnlock(secret: string) {
-    await enableOfflineLedgerUnlock(secret);
-    setOfflineUnlockEnabled(true);
-    showToast("success", t("ledgerApp.offlineUnlockEnabled"));
-    await load(true);
-  }
-
   async function enableQuickUnlock(secret: string, mode: QuickUnlockMode) {
     await enableQuickLedgerUnlock(secret, mode);
     setQuickUnlockEnabled(true);
@@ -618,11 +606,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "u") {
         if (!authed || unlocked) return;
         event.preventDefault();
-        if (!online && offlineUnlockEnabled) {
-          offlineUnlockInputRef.current?.focus();
-        } else {
-          setShowUnlockModal(true);
-        }
+        if (online) setShowUnlockModal(true);
         return;
       }
       if (isTypingTarget(event.target)) return;
@@ -644,7 +628,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [authed, offlineUnlockEnabled, online, page, router, timeRange, unlocked]);
+  }, [authed, online, page, router, timeRange, unlocked]);
 
   if (instanceSetup === "checking") return <AppSkeleton />;
   if (instanceSetup === "required") return <InstanceSetupPage onComplete={() => { setAuthed(false); setInstanceSetup("ready"); }} />;
@@ -657,20 +641,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   if (onboardingState === "uninitialized") return <OnboardingPrototype onCreate={initializeOnboarding} creating={onboardingCreating} waiting={onboardingWaiting} error={onboardingError} />;
 
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";
-  const offlineSensitiveUnlockAvailable = !online && offlineUnlockEnabled && !unlocked;
   const headerSensitiveUnlockAvailable = shouldOfferHeaderSensitiveUnlock({
-    offlineSensitiveUnlockAvailable,
     online,
     unlocked,
   });
-  const unlockOfflineSensitive = async () => {
-    try {
-      const ok = await unlockOfflineSensitiveCache(offlineUnlockSecret);
-      if (ok) setOfflineUnlockSecret("");
-    } catch (error) {
-      showToast("error", error instanceof Error ? error.message : t("ledgerApp.offlineUnlockFailed"));
-    }
-  };
   const unlockQuickSensitive = async (secret: string) => {
     setUnlocking(true);
     try {
@@ -697,15 +671,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     setShowUnlockModal(true);
   };
   const handleHeaderUnlockSensitive = () => {
-    if (!offlineSensitiveUnlockAvailable) {
-      unlockOnlineSensitive();
-      return;
-    }
-    if (offlineUnlockSecret.trim()) {
-      void unlockOfflineSensitive();
-      return;
-    }
-    offlineUnlockInputRef.current?.focus();
+    unlockOnlineSensitive();
   };
   const requireSensitiveUnlock = (title?: string, description?: string) => (
     <SensitiveUnlockPanel
@@ -713,10 +679,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       description={description}
       message={sensitiveMessage}
       offline={!online}
-      offlineUnlockAvailable={offlineUnlockEnabled}
-      offlineSecret={offlineUnlockSecret}
-      onOfflineSecretChange={setOfflineUnlockSecret}
-      onOfflineUnlock={() => void unlockOfflineSensitive()}
       quickUnlockEnabled={quickUnlockEnabled}
       quickUnlockMode={quickUnlockMode}
       passkeyRegistered={hasPasskey}
@@ -789,7 +751,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const commandActions: CommandAction[] = [
     { id: "new-entry", label: t("ledgerApp.newManualEntry"), detail: t("ledgerApp.newManualEntryDetail"), shortcut: "N", keywords: ["entry", "transaction"], run: openManualEntry },
     { id: "ai-entry", label: t("ledgerApp.agent"), detail: t("ledgerApp.agentDetail"), keywords: ["ai", "agent", "chat"], run: () => openAgent() },
-    ...(!unlocked ? [{ id: "unlock-sensitive", label: t("ledgerApp.unlockSensitive"), detail: t("ledgerApp.unlockSensitiveDetail"), shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: () => { if (!online && offlineSensitiveUnlockAvailable) offlineUnlockInputRef.current?.focus(); else unlockOnlineSensitive(); } }] : []),
+    ...(!unlocked && online ? [{ id: "unlock-sensitive", label: t("ledgerApp.unlockSensitive"), detail: t("ledgerApp.unlockSensitiveDetail"), shortcut: "⌘/Ctrl ⇧ U", keywords: ["unlock", "password", "privacy"], run: unlockOnlineSensitive }] : []),
     { id: "search-transactions", label: t("ledgerApp.searchTransactions"), detail: t("ledgerApp.searchTransactionsDetail"), shortcut: "/", keywords: ["transactions", "search"], run: focusTransactionSearch },
     { id: "refresh", label: t("ledgerApp.refreshLedger"), detail: t("ledgerApp.refreshLedgerDetail"), keywords: ["sync", "reload"], run: () => { void refreshLedger(); } },
     { id: "previous-period", label: t("ledgerApp.previousPeriod"), detail: t("ledgerApp.previousPeriodDetail"), shortcut: "Alt ←", keywords: ["period", "month"], run: () => canNavigatePrevious && setTimeRange(navigateTimeRange(timeRange, -1)) },
@@ -806,8 +768,8 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
       sensitiveUnlocked={unlocked}
       passkeyEnabled={hasPasskey}
       sensitiveUnlockAvailable={headerSensitiveUnlockAvailable}
-      sensitiveUnlockLabel={offlineSensitiveUnlockAvailable ? t("appShell.offlineUnlock") : t("appShell.unlock")}
-      sensitiveUnlockTitle={offlineSensitiveUnlockAvailable ? t("appShell.offlineUnlockTitle") : t("appShell.unlockTitle")}
+      sensitiveUnlockLabel={t("appShell.unlock")}
+      sensitiveUnlockTitle={t("appShell.unlockTitle")}
       onUnlockSensitive={handleHeaderUnlockSensitive}
       onLockSensitive={() => void lockSensitive()}
       onActiveRouteTap={handleActiveRouteTap}
@@ -863,20 +825,6 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
               {unlocked && <button type="button" className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-brand" onClick={() => void lockSensitive()}>{t("ledgerApp.sensitiveUnlockedRelock")}</button>}
               </div>
             </div>
-            {offlineSensitiveUnlockAvailable && (
-              <form className="mt-2 flex max-w-md flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void unlockOfflineSensitive(); }}>
-                <input
-                  ref={offlineUnlockInputRef}
-                  type="password"
-                  className="h-9 min-w-0 rounded-md border border-line bg-panel px-3 text-sm text-ink"
-                  value={offlineUnlockSecret}
-                  onChange={(event) => setOfflineUnlockSecret(event.target.value)}
-                  placeholder={t("auth.offlineUnlockCode")}
-                  autoComplete="current-password"
-                />
-                <button type="submit" className="h-9 shrink-0 rounded-md bg-brand px-4 text-sm text-paper disabled:opacity-50" disabled={!offlineUnlockSecret.trim()}>{t("auth.offlineUnlock")}</button>
-              </form>
-            )}
           </div>
           <div className="workspace-controls flex w-full min-w-0 items-stretch gap-2 md:w-auto md:shrink-0">
             {canShowTimeControls && <div className="workspace-time-control min-w-0 flex-1 md:flex-none"><TimeRangePicker range={timeRange} onChange={setTimeRange} /></div>}
@@ -899,7 +847,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
         if (detailAccount) return unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingAccountDetail")} />}><LazyAccountDetailPage account={detailAccount} onSensitiveLocked={handleServerSensitiveLocked} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.accountDetailHidden"), t("ledgerApp.accountDetailHiddenDetail"));
         return <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingAccountPanels")} />}><>{unlocked ? <><LazyBalanceGrid rows={visibleBalances} full allVisible={allBalancesVisible} visibleAccountMap={visibleAccountMap} onToggleAll={() => setAllBalancesVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} statuses={accountStatuses} txns={projectedTxns} /><LazyCreditCardPanel cards={creditCards} statuses={accountStatuses} valuationCurrency={dataValuationCurrency} visible={allBalancesVisible} visibleAccountMap={visibleAccountMap} summaryVisible={creditSummaryVisible} onToggleSummaryVisible={() => setCreditSummaryVisible((value) => !value)} onToggleAccount={(account) => setVisibleAccountMap((current) => ({ ...current, [account]: !(current[account] ?? allBalancesVisible) }))} /></> : requireSensitiveUnlock(t("ledgerApp.accountBalancesHidden"), t("ledgerApp.accountBalancesHiddenDetail"))}<LazyAccountManager accounts={unlocked ? accountPageAccounts : accounts} balances={balances} onAdded={() => load(true)} showToast={showToast} onOpenAgent={(prompt) => openAgent(prompt, true)} /></></Suspense>;
       })()}
-      {page === "settings" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingSettings")} />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} offlineUnlockEnabled={offlineUnlockEnabled} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onEnableOfflineUnlock={enableOfflineUnlock} onRegisterPasskey={registerPasskey} onPasskeyRegisteredChange={setPasskeyRegistered} showToast={showToast} /></Suspense>}
+      {page === "settings" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingSettings")} />}><LazySettingsPage settings={privacySettings} commodities={commodities} onChange={updatePrivacySetting} themeMode={themeMode} resolvedTheme={resolvedTheme} onThemeModeChange={setThemeMode} mobileTabHrefs={mobileTabHrefs} onMobileTabHrefsChange={updateMobileTabHrefs} sensitiveUnlocked={unlocked} quickUnlockEnabled={quickUnlockEnabled} quickUnlockMode={quickUnlockMode} onEnableQuickUnlock={enableQuickUnlock} onDisableQuickUnlock={disableQuickUnlock} onRegisterPasskey={registerPasskey} onPasskeyRegisteredChange={setPasskeyRegistered} showToast={showToast} /></Suspense>}
       {page === "imports" && <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingImports")} />}><LazyImportPage onImported={guardedImportRefresh} showToast={showToast} /></Suspense>}
       {page === "editor" && (unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingEditor")} />}><LazyLedgerEditorPage online={online} onSaved={() => { void load(true); }} showToast={showToast} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.editorHidden"), t("ledgerApp.editorHiddenDetail")))}
       {page === "reconcile" && (unlocked ? <Suspense fallback={<RouteFallback label={t("ledgerApp.preparingReconcile")} />}><LazyReconcilePage timeRange={timeRange} rows={reconciliationRows} onSubmit={guardedReconcileAccount} statuses={accountStatuses} /></Suspense> : requireSensitiveUnlock(t("ledgerApp.reconcileHidden"), t("ledgerApp.reconcileHiddenDetail")))}

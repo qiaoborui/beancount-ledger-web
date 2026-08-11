@@ -79,3 +79,27 @@ export async function deleteIndexedCache(key: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function deleteIndexedCachesByPrefixes(prefixes: readonly string[]): Promise<boolean> {
+  if (!hasIndexedDB()) return false;
+  try {
+    const db = await openDb();
+    return await new Promise<boolean>((resolve) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const request = tx.objectStore(STORE_NAME).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const key = cursor.key;
+        if (typeof key === "string" && prefixes.some((prefix) => key.startsWith(prefix))) cursor.delete();
+        cursor.continue();
+      };
+      request.onerror = () => resolve(false);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}

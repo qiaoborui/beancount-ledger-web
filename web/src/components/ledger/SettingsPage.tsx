@@ -20,7 +20,7 @@ import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from ".
 type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
 
 type SettingsCategoryId = "workspace" | "privacy" | "connections" | "instance";
-type SettingsGroupId = "appearance" | "language" | "navigation" | "valuation" | "visibility" | "passkeys" | "quick-unlock" | "offline-unlock" | "local-access" | "notifications" | "endpoints" | "runtime" | "agent-tokens";
+type SettingsGroupId = "appearance" | "language" | "navigation" | "valuation" | "visibility" | "passkeys" | "quick-unlock" | "local-access" | "notifications" | "endpoints" | "runtime" | "agent-tokens";
 
 export type SettingsSelection = { category: SettingsCategoryId; group: SettingsGroupId };
 
@@ -55,7 +55,6 @@ export const settingsCategories: readonly SettingsCategory[] = [
       { id: "visibility", labelKey: "settingsNavigation.visibility" },
       { id: "passkeys", labelKey: "settingsNavigation.passkeys" },
       { id: "quick-unlock", labelKey: "settingsNavigation.quickUnlock" },
-      { id: "offline-unlock", labelKey: "settingsNavigation.offlineUnlock" },
     ],
   },
   {
@@ -165,10 +164,8 @@ export type SettingsPageProps = {
   sensitiveUnlocked: boolean;
   quickUnlockEnabled: boolean;
   quickUnlockMode: QuickUnlockMode;
-  offlineUnlockEnabled: boolean;
   onEnableQuickUnlock: (secret: string, mode: QuickUnlockMode) => void | Promise<void>;
   onDisableQuickUnlock: () => void | Promise<void>;
-  onEnableOfflineUnlock: (secret: string) => void | Promise<void>;
   onRegisterPasskey: (endpoint?: ApiEndpoint) => Promise<PasskeyCredentialSummary | null>;
   onPasskeyRegisteredChange: (registered: boolean) => void;
   showToast: ToastFn;
@@ -278,10 +275,8 @@ export function SettingsGroupContent({
   sensitiveUnlocked,
   quickUnlockEnabled,
   quickUnlockMode,
-  offlineUnlockEnabled,
   onEnableQuickUnlock,
   onDisableQuickUnlock,
-  onEnableOfflineUnlock,
   onRegisterPasskey,
   onPasskeyRegisteredChange,
   showToast,
@@ -302,7 +297,6 @@ export function SettingsGroupContent({
     <div hidden={selection.group !== "notifications"}><NotificationSettingsPanel headingId={settingsPaneHeadingId("notifications")} showToast={showToast} /></div>
     <div hidden={selection.group !== "endpoints"}><ApiEndpointSettingsPanel headingId={settingsPaneHeadingId("endpoints")} showToast={showToast} /></div>
     <div hidden={selection.group !== "quick-unlock"}><QuickUnlockSettings headingId={settingsPaneHeadingId("quick-unlock")} enabled={quickUnlockEnabled} mode={quickUnlockMode} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableQuickUnlock} onDisable={onDisableQuickUnlock} showToast={showToast} /></div>
-    <div hidden={selection.group !== "offline-unlock"}><OfflineUnlockSettings headingId={settingsPaneHeadingId("offline-unlock")} enabled={offlineUnlockEnabled} sensitiveUnlocked={sensitiveUnlocked} onEnable={onEnableOfflineUnlock} showToast={showToast} /></div>
     <section hidden={selection.group !== "valuation"} className={SETTINGS_SECTION_CLASS}>
       <div className="border-b border-line pb-4">
         <h1 id={settingsPaneHeadingId("valuation")} className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t("settings.valuationTitle")}</h1>
@@ -856,48 +850,6 @@ function QuickUnlockSettings({ headingId, enabled, mode: initialMode, sensitiveU
       {enabled && <button type="button" className="text-brand disabled:opacity-50" disabled={saving} onClick={() => void disable()}>{t("settingsQuickUnlock.disable")}</button>}
     </div>
     {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">{t("settingsQuickUnlock.lockedHint")}</p>}
-  </section>;
-}
-
-function OfflineUnlockSettings({ headingId, enabled, sensitiveUnlocked, onEnable, showToast }: { headingId: string; enabled: boolean; sensitiveUnlocked: boolean; onEnable: (secret: string) => void | Promise<void>; showToast: ToastFn }) {
-  const { t } = useTranslation();
-  const [secret, setSecret] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    if (saving) return;
-    if (!sensitiveUnlocked) {
-      showToast("error", t("settingsOfflineUnlock.unlockFirst"));
-      return;
-    }
-    if (secret !== confirm) {
-      showToast("error", t("settingsOfflineUnlock.mismatch"));
-      return;
-    }
-    setSaving(true);
-    try {
-      await onEnable(secret);
-      setSecret("");
-      setConfirm("");
-    } catch (error) {
-      showToast("error", error instanceof Error ? error.message : t("settingsOfflineUnlock.enableFailed"));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return <section className={SETTINGS_SECTION_CLASS}>
-    <div className="border-b border-line pb-4">
-      <h1 id={headingId} className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t("settingsOfflineUnlock.title")}</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{enabled ? t("settingsOfflineUnlock.enabledDesc") : t("settingsOfflineUnlock.disabledDesc")}</p>
-    </div>
-    <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-      <input type="password" className="h-11 rounded-md border border-line bg-panel px-3 text-ink" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={t("settingsOfflineUnlock.codePlaceholder")} disabled={!sensitiveUnlocked || saving} />
-      <input type="password" className="h-11 rounded-md border border-line bg-panel px-3 text-ink" value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder={t("settingsOfflineUnlock.confirmPlaceholder")} disabled={!sensitiveUnlocked || saving} onKeyDown={(event) => event.key === "Enter" && void submit()} />
-      <button type="button" className="h-11 rounded-md bg-brand px-4 text-paper disabled:opacity-50" disabled={!sensitiveUnlocked || saving} onClick={() => void submit()}>{saving ? t("settingsRuntime.saving") : enabled ? t("settingsOfflineUnlock.update") : t("settingsOfflineUnlock.enable")}</button>
-    </div>
-    {!sensitiveUnlocked && <p className="mt-3 text-xs text-stone">{t("settingsOfflineUnlock.lockedHint")}</p>}
   </section>;
 }
 

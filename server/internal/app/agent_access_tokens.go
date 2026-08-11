@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -24,8 +23,6 @@ const (
 	agentAccessTokenPrefix   = "blw_agent_"
 	agentAccessTokenIDBytes  = 9
 	agentAccessTokenKeyBytes = 32
-	agentAccessScopeRead     = "read"
-	agentAccessScopeWrite    = "write"
 )
 
 type agentAccessTokenRecord struct {
@@ -36,7 +33,6 @@ type agentAccessTokenRecord struct {
 	ExpiresAt  time.Time  `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
-	Scopes     []string   `json:"scopes,omitempty"`
 }
 
 type agentAccessTokenStore struct {
@@ -50,8 +46,6 @@ type agentAccessTokenSummary struct {
 	ExpiresAt  time.Time  `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
-	Scopes     []string   `json:"scopes"`
-	Legacy     bool       `json:"legacy,omitempty"`
 }
 
 func (s *Server) agentAccessTokens(c *gin.Context) {
@@ -76,8 +70,7 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Name   string   `json:"name"`
-		Scopes []string `json:"scopes"`
+		Name string `json:"name"`
 	}
 	if !bindJSON(c, &input) {
 		return
@@ -85,11 +78,6 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" || utf8.RuneCountInString(name) > 64 {
 		errorJSON(c, http.StatusBadRequest, errors.New("令牌名称长度必须为 1 到 64 个字符"))
-		return
-	}
-	scopes, err := normalizeAgentAccessScopes(input.Scopes)
-	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	id, secret, rawToken, err := newAgentAccessToken()
@@ -100,7 +88,7 @@ func (s *Server) createAgentAccessToken(c *gin.Context) {
 	now := time.Now().UTC()
 	record := agentAccessTokenRecord{
 		ID: id, Name: name, SecretHash: agentAccessSecretHash(secret),
-		CreatedAt: now, ExpiresAt: now.Add(agentAccessTokenLifetime), Scopes: scopes,
+		CreatedAt: now, ExpiresAt: now.Add(agentAccessTokenLifetime),
 	}
 	err = s.runtime().WithLock(c.Request.Context(), "agent-access-tokens", func(lockCtx context.Context) error {
 		store, readErr := s.readAgentAccessTokens(lockCtx)
@@ -246,52 +234,10 @@ func (s *Server) writeAgentAccessTokens(ctx context.Context, store agentAccessTo
 }
 
 func summarizeAgentAccessToken(record agentAccessTokenRecord) agentAccessTokenSummary {
-	scopes, legacy := agentAccessScopes(record)
 	return agentAccessTokenSummary{
 		ID: record.ID, Name: record.Name, CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt,
-		LastUsedAt: record.LastUsedAt, RevokedAt: record.RevokedAt, Scopes: scopes, Legacy: legacy,
+		LastUsedAt: record.LastUsedAt, RevokedAt: record.RevokedAt,
 	}
-}
-
-func normalizeAgentAccessScopes(scopes []string) ([]string, error) {
-	if len(scopes) == 0 {
-		return []string{agentAccessScopeRead}, nil
-	}
-	seen := map[string]bool{}
-	for _, scope := range scopes {
-		scope = strings.TrimSpace(scope)
-		if scope != agentAccessScopeRead && scope != agentAccessScopeWrite {
-			return nil, fmt.Errorf("unsupported Agent access scope: %s", scope)
-		}
-		seen[scope] = true
-	}
-	seen[agentAccessScopeRead] = true
-	result := []string{agentAccessScopeRead}
-	if seen[agentAccessScopeWrite] {
-		result = append(result, agentAccessScopeWrite)
-	}
-	return result, nil
-}
-
-func agentAccessScopes(record agentAccessTokenRecord) ([]string, bool) {
-	if len(record.Scopes) == 0 {
-		return []string{agentAccessScopeRead, agentAccessScopeWrite}, true
-	}
-	scopes, err := normalizeAgentAccessScopes(record.Scopes)
-	if err != nil {
-		return []string{agentAccessScopeRead}, false
-	}
-	return scopes, false
-}
-
-func agentAccessTokenCanWrite(record agentAccessTokenRecord) bool {
-	scopes, _ := agentAccessScopes(record)
-	for _, scope := range scopes {
-		if scope == agentAccessScopeWrite {
-			return true
-		}
-	}
-	return false
 }
 
 func newAgentAccessToken() (string, string, string, error) {
