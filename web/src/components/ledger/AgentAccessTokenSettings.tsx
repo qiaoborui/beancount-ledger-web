@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Ban, Check, Copy, KeyRound, Plus, ShieldCheck, Terminal } from "lucide-react";
+import { Ban, Check, Copy, KeyRound, Plus, ShieldCheck } from "lucide-react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ export class AgentTokenOperationGate {
   }
 }
 
-export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sensitiveUnlocked: boolean; showToast: ToastFn }) {
+export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToast }: { headingId?: string; sensitiveUnlocked: boolean; showToast: ToastFn }) {
   const { t } = useTranslation();
   const [tokens, setTokens] = useState<AgentAccessTokenSummary[]>([]);
   const [name, setName] = useState("");
@@ -158,22 +158,18 @@ export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sen
     }
   }
 
-  return <section className="card p-5 md:p-6">
+  return <section className="min-w-0 bg-panel px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7">
     <div className="flex flex-col gap-4 border-b border-line pb-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand"><Terminal className="h-5 w-5" /></span>
-        <div>
-          <div className="text-xs uppercase tracking-[0.24em] text-stone">{t("agentTokensSettings.eyebrow")}</div>
-          <h1 className="mt-2 font-serif text-3xl font-medium">{t("agentTokensSettings.title")}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("agentTokensSettings.desc")}</p>
-        </div>
+      <div className="min-w-0">
+        <h1 id={headingId} className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t("agentTokensSettings.title")}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("agentTokensSettings.desc")}</p>
       </div>
       <div className="w-full space-y-2 lg:w-auto lg:min-w-80">
         <div className="flex gap-2">
           <Input aria-label={t("agentTokensSettings.tokenNameLabel")} maxLength={64} value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void create()} placeholder={t("agentTokensSettings.tokenNamePlaceholder")} disabled={!sensitiveUnlocked || creating || unsupported} />
           <Button type="button" className="h-10 shrink-0" disabled={!sensitiveUnlocked || creating || unsupported || !name.trim()} onClick={() => void create()}><Plus className="h-4 w-4" />{creating ? t("agentTokensSettings.creating") : t("agentTokensSettings.create")}</Button>
         </div>
-        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-xs leading-5 text-olive">
+        <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-md bg-paper px-3 py-2 text-xs leading-5 text-olive">
           <input aria-label={t("agentTokensSettings.allowWriteLabel")} type="checkbox" className="mt-1 accent-[var(--brand)]" checked={allowWrite} onChange={(event) => setAllowWrite(event.target.checked)} disabled={!sensitiveUnlocked || creating || unsupported} />
           <span><span className="font-medium text-ink">{t("agentTokensSettings.allowWriteLabel")}</span>{t("agentTokensSettings.allowWriteDesc")}</span>
         </label>
@@ -184,24 +180,24 @@ export function AgentAccessTokenSettings({ sensitiveUnlocked, showToast }: { sen
 
     {sensitiveUnlocked && createdToken && <div className="mt-5 rounded-xl border border-brand/35 bg-[var(--selected-bg)] p-4" role="status">
       <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand text-paper"><KeyRound className="h-4 w-4" /></span>
+        <span className="grid size-10 shrink-0 place-items-center rounded-md bg-brand text-paper"><KeyRound className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold text-ink">{t("agentTokensSettings.saveNow")}</h2>
           <p className="mt-1 text-xs leading-5 text-olive">{t("agentTokensSettings.saveNowDescPrefix")}<code className="rounded bg-paper px-1 py-0.5 text-ink">LEDGER_AGENT_TOKEN</code>{t("agentTokensSettings.saveNowDescSuffix")}</p>
-          <code className="mt-3 block max-h-28 overflow-auto rounded-lg bg-paper px-3 py-2.5 font-mono text-xs leading-5 text-ink selection:bg-brand/20">{createdToken}</code>
+          <code className="mt-3 block max-h-28 overflow-auto rounded-md bg-paper px-3 py-2.5 font-mono text-xs leading-5 text-ink selection:bg-brand/20">{createdToken}</code>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" size="sm" onClick={() => void copyToken()}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? t("agentTokensSettings.copied") : t("agentTokensSettings.copyToken")}</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setCreatedToken("")}>{t("agentTokensSettings.saved")}</Button>
+            <Button type="button" size="sm" className="h-10" onClick={() => void copyToken()}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? t("agentTokensSettings.copied") : t("agentTokensSettings.copyToken")}</Button>
+            <Button type="button" size="sm" variant="outline" className="h-10" onClick={() => setCreatedToken("")}>{t("agentTokensSettings.saved")}</Button>
           </div>
         </div>
       </div>
     </div>}
 
-    <div className="mt-5 overflow-hidden rounded-xl border border-line bg-panel">
+    <div className="mt-5 overflow-hidden border-y border-line bg-panel">
       {loading && <div className="flex min-h-28 items-center justify-center px-5 py-8 text-sm text-stone" role="status">{t("agentTokensSettings.loading")}</div>}
       {!loading && unsupported && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="status"><h2 className="text-sm font-semibold text-ink">{t("agentTokensSettings.unsupportedTitle")}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{t("agentTokensSettings.unsupportedDesc")}</p></div>}
-      {!loading && loadError && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="alert"><h2 className="text-sm font-semibold text-ink">{t("agentTokensSettings.loadErrorTitle")}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{loadError}</p><Button type="button" variant="outline" className="mt-4" onClick={() => void load()}>{t("agentTokensSettings.retry")}</Button></div>}
-      {!loading && sensitiveUnlocked && !unsupported && !loadError && tokens.length === 0 && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-9 text-center"><span className="grid size-11 place-items-center rounded-lg border border-line bg-paper text-brand"><KeyRound className="h-5 w-5" /></span><h2 className="mt-4 text-sm font-semibold text-ink">{t("agentTokensSettings.emptyTitle")}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{t("agentTokensSettings.emptyDesc")}</p></div>}
+      {!loading && loadError && <div className="flex min-h-36 flex-col items-center justify-center px-6 py-8 text-center" role="alert"><h2 className="text-sm font-semibold text-ink">{t("agentTokensSettings.loadErrorTitle")}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{loadError}</p><Button type="button" variant="outline" className="mt-4 h-10" onClick={() => void load()}>{t("agentTokensSettings.retry")}</Button></div>}
+      {!loading && sensitiveUnlocked && !unsupported && !loadError && tokens.length === 0 && <div className="flex min-h-40 flex-col items-center justify-center px-6 py-9 text-center"><span className="grid size-11 place-items-center rounded-md border border-line bg-paper text-brand"><KeyRound className="h-5 w-5" /></span><h2 className="mt-4 text-sm font-semibold text-ink">{t("agentTokensSettings.emptyTitle")}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone">{t("agentTokensSettings.emptyDesc")}</p></div>}
       {!loading && tokens.length > 0 && <div className="divide-y divide-line">{tokens.map((token) => <AgentTokenRow key={token.id} token={token} onRevoke={() => setRevoking(token)} />)}</div>}
     </div>
 
@@ -220,7 +216,7 @@ function AgentTokenRow({ token, onRevoke }: { token: AgentAccessTokenSummary; on
   const { t } = useTranslation();
   const presentation = agentTokenPresentation(token);
   return <div className="flex min-w-0 items-start gap-3 px-4 py-4 sm:items-center sm:px-5">
-    <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg border border-line bg-paper text-brand sm:mt-0"><KeyRound className="h-4 w-4" /></span>
+    <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-md border border-line bg-paper text-brand sm:mt-0"><KeyRound className="h-4 w-4" /></span>
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2"><h2 className="min-w-0 truncate text-sm font-semibold text-ink" title={token.name}>{token.name}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${presentation.active ? "bg-tag text-olive" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>{presentation.label}</span><span className="rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand">{agentTokenScopeLabel(token)}</span></div>
       <p className="mt-1 text-xs leading-5 text-stone tabular-nums">{agentTokenUsageLabel(token)} · {t("agentTokensSettings.createdOn", { date: formatAgentTokenDate(token.createdAt) })} · {t("agentTokensSettings.expiresOn", { date: formatAgentTokenDate(token.expiresAt) })}</p>
