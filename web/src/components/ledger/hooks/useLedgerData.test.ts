@@ -79,7 +79,7 @@ describe("maskSensitiveLedgerCache", () => {
 
     const masked = maskSensitiveLedgerCache(cache);
 
-    expect(masked.summary).toEqual(cache.summary);
+    expect(masked.summary).toEqual({ income: 0, expense: 20, net: 0, days: {}, categories: {} });
     expect(masked.balances).toEqual({});
     expect(masked.accountBalances).toEqual([]);
     expect(masked.netWorthRows).toEqual([]);
