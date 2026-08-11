@@ -50,32 +50,73 @@ function readLocalLedgerCache(key: string): LedgerCache | null {
   }
 }
 
+export function isSensitiveIncomeTransaction(txn: LedgerCache["txns"][number]) {
+  return txn.postings.some((posting) => posting.account.startsWith("Income:"));
+}
+
+export function maskSensitiveLedgerCache(cache: LedgerCache): LedgerCache {
+  return {
+    ...cache,
+    balances: {},
+    accountBalances: [],
+    netWorthRows: [],
+    monthEndNetWorthRows: [],
+    netWorthWindows: null,
+    creditCards: [],
+    investments: null,
+    txns: cache.txns.filter((txn) => !isSensitiveIncomeTransaction(txn)),
+    reconciliationRows: [],
+    accountStatuses: [],
+    incomeStatement: cache.incomeStatement ? {
+      ...cache.incomeStatement,
+      income: [],
+      totalIncome: 0,
+      netIncome: 0,
+    } : null,
+    sensitiveCached: false,
+  };
+}
+
+function persistedLedgerCacheNeedsRewrite(cache: LedgerCache) {
+  return cache.sensitiveCached !== false
+    || Object.keys(cache.balances).length > 0
+    || (cache.accountBalances?.length ?? 0) > 0
+    || cache.netWorthRows.length > 0
+    || (cache.monthEndNetWorthRows?.length ?? 0) > 0
+    || cache.netWorthWindows != null
+    || (cache.creditCards?.length ?? 0) > 0
+    || cache.investments != null
+    || cache.txns.some(isSensitiveIncomeTransaction)
+    || (cache.reconciliationRows?.length ?? 0) > 0
+    || (cache.accountStatuses?.length ?? 0) > 0
+    || (cache.incomeStatement?.income.length ?? 0) > 0
+    || (cache.incomeStatement?.totalIncome ?? 0) !== 0
+    || (cache.incomeStatement?.netIncome ?? 0) !== 0;
+}
+
+function normalizePersistedLedgerCache(timeRange: TimeRange, valuationCurrency: string, ledgerScope: string, cache: LedgerCache, migrate = false) {
+  const masked = maskSensitiveLedgerCache(cache);
+  if (migrate || persistedLedgerCacheNeedsRewrite(cache)) writeLedgerCache(timeRange, masked, valuationCurrency, ledgerScope);
+  return masked;
+}
+
 export function readLedgerCache(timeRange: TimeRange, valuationCurrency = "CNY"): LedgerCache | null {
   const legacyKey = timeRangeCacheKey(timeRange, valuationCurrency);
   const ledgerScope = apiEndpointLedgerScope();
   const key = apiEndpointStorageKeyForLedgerScope(legacyKey, ledgerScope);
   const scoped = readLocalLedgerCache(key);
-  if (scoped) return scoped;
+  if (scoped) return normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, scoped);
   const previousScope = apiEndpointPreviousLedgerScope();
   const previous = previousScope ? readLocalLedgerCache(apiEndpointStorageKeyForLedgerScope(legacyKey, previousScope)) : null;
   if (previous) {
-    try {
-      localStorage.setItem(key, JSON.stringify(previous));
-    } catch {
-      // Keep reading the previous same-origin scope until migration succeeds.
-    }
-    return previous;
+    return normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, previous, true);
   }
   if (!legacyCacheBelongsToScope(ledgerScope)) return null;
   const legacy = readLocalLedgerCache(legacyKey);
   if (legacy) {
-    try {
-      localStorage.setItem(key, JSON.stringify(legacy));
-    } catch {
-      // Keep reading the claimed legacy cache until scoped storage is writable.
-    }
+    return normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, legacy, true);
   }
-  return legacy;
+  return null;
 }
 
 export async function readLedgerCacheAsync(timeRange: TimeRange, valuationCurrency = "CNY"): Promise<LedgerCache | null> {
@@ -83,20 +124,18 @@ export async function readLedgerCacheAsync(timeRange: TimeRange, valuationCurren
   const ledgerScope = apiEndpointLedgerScope();
   const key = apiEndpointStorageKeyForLedgerScope(legacyKey, ledgerScope);
   const scoped = await readIndexedCache<LedgerCache>(key) ?? readLocalLedgerCache(key);
-  if (scoped) return scoped;
+  if (scoped) return normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, scoped);
   const previousScope = apiEndpointPreviousLedgerScope();
   if (previousScope) {
     const previousKey = apiEndpointStorageKeyForLedgerScope(legacyKey, previousScope);
     const previous = await readIndexedCache<LedgerCache>(previousKey) ?? readLocalLedgerCache(previousKey);
     if (previous) {
-      void writeIndexedCache(key, previous);
-      return previous;
+      return normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, previous, true);
     }
   }
   if (!legacyCacheBelongsToScope(ledgerScope)) return null;
   const legacy = await readIndexedCache<LedgerCache>(legacyKey) ?? readLocalLedgerCache(legacyKey);
-  if (legacy) void writeIndexedCache(key, legacy);
-  return legacy;
+  return legacy ? normalizePersistedLedgerCache(timeRange, valuationCurrency, ledgerScope, legacy, true) : null;
 }
 
 function runWhenIdle(task: () => void) {
@@ -112,10 +151,11 @@ function runWhenIdle(task: () => void) {
 export function writeLedgerCache(timeRange: TimeRange, cache: LedgerCache, valuationCurrency = "CNY", ledgerScope = apiEndpointLedgerScope()) {
   if (typeof window === "undefined") return;
   const key = apiEndpointStorageKeyForLedgerScope(timeRangeCacheKey(timeRange, valuationCurrency), ledgerScope);
-  void writeIndexedCache(key, cache);
+  const masked = maskSensitiveLedgerCache(cache);
+  void writeIndexedCache(key, masked);
   runWhenIdle(() => {
     try {
-      localStorage.setItem(key, JSON.stringify(cache));
+      localStorage.setItem(key, JSON.stringify(masked));
     } catch {
       // Ignore storage quota/private mode failures. Fresh in-memory data is still shown.
     }

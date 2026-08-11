@@ -69,27 +69,46 @@ func TestAgentAccessTokenNameLimitCountsCharacters(t *testing.T) {
 	}
 }
 
-func TestAgentAccessTokenScopesDefaultReadOnlyAndPreserveLegacyAccess(t *testing.T) {
-	readScopes, err := normalizeAgentAccessScopes(nil)
-	if err != nil || len(readScopes) != 1 || readScopes[0] != agentAccessScopeRead {
-		t.Fatalf("default scopes = %v err=%v", readScopes, err)
+func TestAgentAccessTokenIgnoresAndMigratesPersistedScopes(t *testing.T) {
+	t.Setenv("LEDGER_AUTH_DISABLED", "true")
+	server := testAgentServer(t)
+	id, secret, raw, err := newAgentAccessToken()
+	if err != nil {
+		t.Fatal(err)
 	}
-	writeScopes, err := normalizeAgentAccessScopes([]string{agentAccessScopeWrite})
-	if err != nil || len(writeScopes) != 2 || !agentAccessTokenCanWrite(agentAccessTokenRecord{Scopes: writeScopes}) {
-		t.Fatalf("write scopes = %v err=%v", writeScopes, err)
+	now := time.Now().UTC()
+	legacyStore := map[string]any{"tokens": []map[string]any{{
+		"id": id, "name": "Legacy scoped token", "secretHash": agentAccessSecretHash(secret),
+		"createdAt": now, "expiresAt": now.Add(time.Hour), "scopes": []string{"read"},
+	}}}
+	if err := server.runtime().PutJSON(t.Context(), agentAccessTokenScope, agentAccessTokenStoreKey, legacyStore); err != nil {
+		t.Fatal(err)
 	}
-	if agentAccessTokenCanWrite(agentAccessTokenRecord{Scopes: readScopes}) {
-		t.Fatal("read-only token must not allow writes")
+
+	store, err := server.readAgentAccessTokens(t.Context())
+	if err != nil || len(store.Tokens) != 1 {
+		t.Fatalf("read legacy store=%#v err=%v", store, err)
 	}
-	if !agentAccessTokenCanWrite(agentAccessTokenRecord{}) {
-		t.Fatal("legacy token without scopes must retain write access")
+	if _, err := server.authenticateAgentAccessTokenValue(t.Context(), raw); err != nil {
+		t.Fatalf("legacy scoped token no longer authenticates: %v", err)
 	}
-	if _, err := normalizeAgentAccessScopes([]string{"admin"}); err == nil {
-		t.Fatal("unknown scopes must be rejected")
+	if err := server.writeAgentAccessTokens(t.Context(), store); err != nil {
+		t.Fatal(err)
+	}
+	var migrated map[string]any
+	if ok, err := server.runtime().GetJSON(t.Context(), agentAccessTokenScope, agentAccessTokenStoreKey, &migrated); err != nil || !ok {
+		t.Fatalf("read migrated store ok=%v err=%v", ok, err)
+	}
+	encoded, err := json.Marshal(migrated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "scopes") {
+		t.Fatalf("legacy scopes survived store rewrite: %s", encoded)
 	}
 }
 
-func TestAgentAccessTokenAPIStoresScopesWithoutLeakingSecret(t *testing.T) {
+func TestAgentAccessTokenAPIPreservesLifecycleWithoutLeakingSecret(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
 	router := newRouter(server.cfg, server)
@@ -104,7 +123,7 @@ func TestAgentAccessTokenAPIStoresScopesWithoutLeakingSecret(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(body.Token, agentAccessTokenPrefix) || strings.Join(body.Credential.Scopes, ",") != "read,write" {
+	if !strings.HasPrefix(body.Token, agentAccessTokenPrefix) || strings.Contains(created.Body.String(), "scopes") {
 		t.Fatalf("unexpected create response: %s", created.Body.String())
 	}
 	listed := requestWithCookies(router, http.MethodGet, "/api/agent/access-tokens", "", nil)
@@ -117,45 +136,37 @@ func TestAgentAccessTokenAPIStoresScopesWithoutLeakingSecret(t *testing.T) {
 	}
 }
 
-func TestLegacyBootstrapBridgeHonorsTokenScopes(t *testing.T) {
+func TestLegacyBootstrapBridgeExposesCompleteTokenToolSet(t *testing.T) {
 	t.Setenv("LEDGER_AUTH_DISABLED", "true")
 	server := testAgentServer(t)
 	server.cfg.AgentServiceToken = "agent-service-secret"
 	router := newRouter(server.cfg, server)
 
-	for _, testCase := range []struct {
-		name      string
-		scopes    []string
-		wantWrite bool
-	}{{"read", []string{agentAccessScopeRead}, false}, {"write", []string{agentAccessScopeRead, agentAccessScopeWrite}, true}} {
-		t.Run(testCase.name, func(t *testing.T) {
-			token := storeMCPTestToken(t, server, testCase.name, testCase.scopes)
-			request := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Authorization", "Bearer "+token)
-			response := httptest.NewRecorder()
-			router.ServeHTTP(response, request)
-			if response.Code != http.StatusOK {
-				t.Fatalf("bootstrap status=%d body=%s", response.Code, response.Body.String())
-			}
-			var body struct {
-				CapabilityToken string `json:"capabilityToken"`
-				Deprecated      bool   `json:"deprecated"`
-				Tools           []struct {
-					Name string `json:"name"`
-				} `json:"tools"`
-			}
-			if json.Unmarshal(response.Body.Bytes(), &body) != nil || body.CapabilityToken == "" || !body.Deprecated {
-				t.Fatalf("invalid legacy bootstrap: %s", response.Body.String())
-			}
-			foundWrite := false
-			for _, tool := range body.Tools {
-				foundWrite = foundWrite || tool.Name == "append_transactions"
-			}
-			if foundWrite != testCase.wantWrite {
-				t.Fatalf("write tool visibility=%v want=%v tools=%#v", foundWrite, testCase.wantWrite, body.Tools)
-			}
-		})
+	token := storeMCPTestToken(t, server, "Legacy bridge")
+	request := httptest.NewRequest(http.MethodPost, "/api/agent/bootstrap", strings.NewReader(`{"sessionId":"cli:local","channel":"cli","context":{}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("bootstrap status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		CapabilityToken string `json:"capabilityToken"`
+		Deprecated      bool   `json:"deprecated"`
+		Tools           []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &body) != nil || body.CapabilityToken == "" || !body.Deprecated {
+		t.Fatalf("invalid legacy bootstrap: %s", response.Body.String())
+	}
+	foundWrite := false
+	for _, tool := range body.Tools {
+		foundWrite = foundWrite || tool.Name == "append_transactions"
+	}
+	if !foundWrite {
+		t.Fatalf("token is missing write tools: %#v", body.Tools)
 	}
 }
 

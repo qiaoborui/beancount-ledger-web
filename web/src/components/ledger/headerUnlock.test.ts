@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { shouldOfferHeaderSensitiveUnlock } from "./headerUnlock";
 
 const baseState = {
-  offlineSensitiveUnlockAvailable: false,
   online: true,
   unlocked: false,
 };

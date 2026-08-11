@@ -5,10 +5,12 @@ import { LedgerApp } from "@/components/LedgerApp";
 import { PwaRegister } from "@/components/PwaRegister";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { installApiEndpointFetchInterceptor } from "@/lib/apiEndpoints";
+import { purgeLegacySensitiveCacheStorage } from "@/lib/legacySensitiveCacheCleanup";
 import "@/i18n";
 import "@/app/globals.css";
 
 installApiEndpointFetchInterceptor();
+void purgeLegacySensitiveCacheStorage();
 
 const speedInsightsEnabled = import.meta.env.VITE_ENABLE_SPEED_INSIGHTS !== "false";
 

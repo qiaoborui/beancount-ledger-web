@@ -25,7 +25,9 @@ or mounted ledger copy.
 
 - The PWA app shell, manifest, icons, and visited static assets are cached by the
   service worker.
-- Ledger snapshots are stored in IndexedDB after a successful unlocked load.
+- Privacy-masked ledger snapshots are stored in IndexedDB after a successful
+  load. Balances, net worth, income, and other sensitive fields are not stored
+  offline.
 - New manual entries and balance assertions can be saved while offline.
 - Transaction edits and deletes are queued locally and projected into the cached
   transaction list.
@@ -89,9 +91,9 @@ IP or from one domain to another creates a separate browser app state.
 
 1. Start `ledger-web` with `DATABASE_URL` and GitHub repository credentials.
 2. Open the app once while online and sign in.
-3. Unlock sensitive data if you want cached balance and net-worth views.
+3. Confirm that locking sensitive data hides balances and net-worth views.
 4. Install the PWA from the browser.
-5. Go offline and confirm the app shell and cached ledger load.
+5. Go offline and confirm the app shell and privacy-masked cached ledger load.
 6. Create a manual entry offline and confirm the pending sync badge appears.
 7. Reconnect and confirm the entry syncs through the server.
 8. For edits/deletes, change the ledger from another device before reconnecting

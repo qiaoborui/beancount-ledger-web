@@ -9,8 +9,6 @@ export type AgentAccessTokenSummary = {
   expiresAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
-  scopes: string[];
-  legacy?: boolean;
 };
 
 export type CreatedAgentAccessToken = {
@@ -36,11 +34,11 @@ export async function listAgentAccessTokens(): Promise<AgentAccessTokenSummary[]
   return Array.isArray(data.tokens) ? data.tokens : [];
 }
 
-export async function createAgentAccessToken(name: string, scopes: string[] = ["read"]): Promise<CreatedAgentAccessToken> {
+export async function createAgentAccessToken(name: string): Promise<CreatedAgentAccessToken> {
   const response = await apiFetch("/api/agent/access-tokens", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, scopes }),
+    body: JSON.stringify({ name }),
   }, { kind: "auth" });
   const data = await readJson<CreatedAgentAccessToken & { error?: string }>(response);
   if (!response.ok) throw new Error(data.error || i18n.t("agentTokens.createFailed", { status: response.status }));

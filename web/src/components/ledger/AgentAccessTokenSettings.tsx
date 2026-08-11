@@ -30,7 +30,6 @@ export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToa
   const { t } = useTranslation();
   const [tokens, setTokens] = useState<AgentAccessTokenSummary[]>([]);
   const [name, setName] = useState("");
-  const [allowWrite, setAllowWrite] = useState(false);
   const [createdToken, setCreatedToken] = useState("");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -71,7 +70,6 @@ export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToa
       operationGate.current.invalidate();
       setTokens([]);
       setCreatedToken("");
-      setAllowWrite(false);
       setLoading(false);
       setCreating(false);
       setSaving(false);
@@ -84,7 +82,6 @@ export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToa
       operationGate.current.invalidate();
       setTokens([]);
       setCreatedToken("");
-      setAllowWrite(false);
       setCreating(false);
       setSaving(false);
       setRevoking(null);
@@ -111,13 +108,12 @@ export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToa
     setCreating(true);
     setCreatedToken("");
     try {
-      const result = await createAgentAccessToken(trimmed, allowWrite ? ["read", "write"] : ["read"]);
+      const result = await createAgentAccessToken(trimmed);
       if (!operationGate.current.isCurrent(current)) return;
       setTokens((current) => [result.credential, ...current]);
       setCreatedToken(result.token);
       setCopied(false);
       setName("");
-      setAllowWrite(false);
       showToast("success", t("agentTokensSettings.created"));
     } catch (error) {
       if (!operationGate.current.isCurrent(current)) return;
@@ -169,10 +165,6 @@ export function AgentAccessTokenSettings({ headingId, sensitiveUnlocked, showToa
           <Input aria-label={t("agentTokensSettings.tokenNameLabel")} maxLength={64} value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void create()} placeholder={t("agentTokensSettings.tokenNamePlaceholder")} disabled={!sensitiveUnlocked || creating || unsupported} />
           <Button type="button" className="h-10 shrink-0" disabled={!sensitiveUnlocked || creating || unsupported || !name.trim()} onClick={() => void create()}><Plus className="h-4 w-4" />{creating ? t("agentTokensSettings.creating") : t("agentTokensSettings.create")}</Button>
         </div>
-        <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-md bg-paper px-3 py-2 text-xs leading-5 text-olive">
-          <input aria-label={t("agentTokensSettings.allowWriteLabel")} type="checkbox" className="mt-1 accent-[var(--brand)]" checked={allowWrite} onChange={(event) => setAllowWrite(event.target.checked)} disabled={!sensitiveUnlocked || creating || unsupported} />
-          <span><span className="font-medium text-ink">{t("agentTokensSettings.allowWriteLabel")}</span>{t("agentTokensSettings.allowWriteDesc")}</span>
-        </label>
       </div>
     </div>
 
@@ -218,7 +210,7 @@ function AgentTokenRow({ token, onRevoke }: { token: AgentAccessTokenSummary; on
   return <div className="flex min-w-0 items-start gap-3 px-4 py-4 sm:items-center sm:px-5">
     <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-md border border-line bg-paper text-brand sm:mt-0"><KeyRound className="h-4 w-4" /></span>
     <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-center gap-2"><h2 className="min-w-0 truncate text-sm font-semibold text-ink" title={token.name}>{token.name}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${presentation.active ? "bg-tag text-olive" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>{presentation.label}</span><span className="rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand">{agentTokenScopeLabel(token)}</span></div>
+      <div className="flex flex-wrap items-center gap-2"><h2 className="min-w-0 truncate text-sm font-semibold text-ink" title={token.name}>{token.name}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${presentation.active ? "bg-tag text-olive" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>{presentation.label}</span></div>
       <p className="mt-1 text-xs leading-5 text-stone tabular-nums">{agentTokenUsageLabel(token)} · {t("agentTokensSettings.createdOn", { date: formatAgentTokenDate(token.createdAt) })} · {t("agentTokensSettings.expiresOn", { date: formatAgentTokenDate(token.expiresAt) })}</p>
     </div>
     <Button type="button" variant="outline" size="sm" className="h-10 shrink-0" disabled={!presentation.active} onClick={onRevoke}><Ban className="h-4 w-4" />{presentation.active ? t("agentTokensSettings.revoke") : t("agentTokensSettings.deactivated")}</Button>
@@ -234,11 +226,6 @@ export function agentTokenPresentation(token: AgentAccessTokenSummary, now = Dat
 
 export function agentTokenUsageLabel(token: AgentAccessTokenSummary) {
   return token.lastUsedAt ? i18n.t("agentTokensSettings.usedOn", { date: formatAgentTokenDate(token.lastUsedAt, true) }) : i18n.t("agentTokensSettings.neverUsed");
-}
-
-export function agentTokenScopeLabel(token: AgentAccessTokenSummary) {
-  if (token.legacy) return i18n.t("agentTokensSettings.scopeLegacy");
-  return token.scopes.includes("write") ? i18n.t("agentTokensSettings.scopeReadWrite") : i18n.t("agentTokensSettings.scopeRead");
 }
 
 function formatAgentTokenDate(value: string, includeTime = false) {

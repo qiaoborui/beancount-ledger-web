@@ -57,10 +57,9 @@ Every request authenticates independently with one of these Bearer credentials:
 
 - `AGENT_SERVICE_TOKEN` for the private hosted gateway. It can discover all
   ledger tools; Channel-specific `allowed_tools` remains the model boundary.
-- A revocable `blw_agent_...` Token for external MCP clients. New Tokens are
-  read-only by default. A Token created with write scope can also discover and
-  invoke write tools. Existing pre-scope Tokens retain their former read/write
-  access until revoked or expired.
+- A revocable `blw_agent_...` Token for external MCP clients. Every active
+  Token can discover the complete remote ledger tool catalog. Previously stored
+  scope values are ignored and disappear when the token store is rewritten.
 
 Remote tool names use the `ledger_` prefix. Through `bub-mcp`, the model-visible
 names use `mcp.ledger_`. Browser-only `open_page` remains a local Bub tool and is
@@ -101,8 +100,8 @@ startup cycle while keeping upgrades available through the deprecated bridge.
   recorded, Telegram may still retry the update once, so the reply can
   theoretically be sent twice; this window cannot be fully eliminated.
 - Local `bub chat` uses Bub's native CLI Channel and the installed `bub-mcp`
-  plugin. The server filters discovery from the Token's scope on every request,
-  so revoking or expiring the Token takes effect immediately.
+  plugin. The server authenticates the Token on every request, so revoking or
+  expiring the Token takes effect immediately.
 
 The hosted gateway uses `AGENT_SERVICE_TOKEN` and can receive the complete MCP
 tool catalog. A locked Web turn exposes only local `open_page`; an unlocked Web
@@ -194,7 +193,7 @@ proxy, not a second provider configuration.
 
 ### Local write access
 
-Write tools appear only for a Token created with **允许写入工具**. They include
+Agent access Tokens expose the complete MCP tool catalog, including
 `ledger_append_transactions`, `ledger_update_transaction`,
 `ledger_delete_transaction`, `ledger_reverse_transaction`,
 `ledger_apply_account_operations`, and `ledger_upsert_memory`. There is no

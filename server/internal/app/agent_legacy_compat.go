@@ -181,7 +181,7 @@ func (s *Server) externalAgentBootstrap(c *gin.Context) {
 	channel := firstNonEmpty(strings.TrimSpace(input.Channel), "external")
 	rawSessionID := firstNonEmpty(strings.TrimSpace(input.SessionID), channel+":default")
 	input.Context.SensitiveUnlocked = true
-	s.writeAgentBootstrap(c, agentCapabilitySessionID("token:"+record.ID, rawSessionID), "token:"+record.ID, input.Context, s.agentToolNames(!agentAccessTokenCanWrite(record)), channel == "telegram")
+	s.writeAgentBootstrap(c, agentCapabilitySessionID("token:"+record.ID, rawSessionID), "token:"+record.ID, input.Context, s.agentToolNames(false), channel == "telegram")
 }
 
 func (s *Server) internalAgentBootstrap(c *gin.Context) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, maskSensitiveLedgerCache, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { maskSensitiveLedgerCache } from "../storage";
 import type { LedgerVersion, Txn } from "../types";
 
 const version: LedgerVersion = { version: "v1", fileCount: 1, latestMtimeMs: 123 };

@@ -64,8 +64,7 @@ type agentTool struct {
 	agentToolSpec
 	Title           string
 	ExecutionStatus string
-	// ReadOnly remains an authorization boundary for capability scopes. It does
-	// not change how Bub invokes the tool.
+	// ReadOnly describes the tool to MCP clients and the legacy bridge.
 	ReadOnly bool
 	Execute  func(context.Context, json.RawMessage, AgentPageContext) (agentToolExecution, error)
 }
