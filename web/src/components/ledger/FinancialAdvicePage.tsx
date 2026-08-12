@@ -20,7 +20,88 @@ type AdviceState =
   | { phase: "offline" }
   | { phase: "error"; code: string; title: string; body: string; response?: FinancialAdviceResponse };
 
+type AdvicePayloadResult =
+  | { ok: true; response: FinancialAdviceResponse }
+  | { ok: false; code: string; response?: FinancialAdviceResponse };
+
 const adviceModes: FinancialAdviceMode[] = ["recent", "yearToDate"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value == null || typeof value === "string";
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value == null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isAdviceNarrativePart(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.title === "string"
+    && typeof value.body === "string"
+    && Array.isArray(value.evidenceIds)
+    && value.evidenceIds.every((id) => typeof id === "string");
+}
+
+function isAdviceSection(value: unknown): boolean {
+  return isAdviceNarrativePart(value) && isRecord(value) && typeof value.topic === "string";
+}
+
+function isAdviceEvidence(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && ["income", "expense", "category", "cashflow", "savings", "assets", "anomaly", "coverage"].includes(String(value.kind))
+    && typeof value.label === "string"
+    && ["up", "down", "flat", "mixed"].includes(String(value.direction))
+    && typeof value.currency === "string"
+    && isOptionalString(value.detail)
+    && isOptionalString(value.date)
+    && isOptionalString(value.link)
+    && [value.current, value.baseline, value.delta, value.ratio, value.baselineRatio, value.share, value.count, value.amount, value.median].every(isOptionalNumber);
+}
+
+export function isFinancialAdviceResponse(value: unknown): value is FinancialAdviceResponse {
+  if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.coverage) || !isRecord(value.ranges)) return false;
+  const ranges = value.ranges;
+  return isRecord(ranges.current)
+    && typeof ranges.current.start === "string"
+    && typeof ranges.current.end === "string"
+    && isRecord(ranges.baseline)
+    && typeof ranges.baseline.start === "string"
+    && typeof ranges.baseline.end === "string"
+    && Array.isArray(value.evidence)
+    && value.evidence.every(isAdviceEvidence)
+    && (value.opening == null || isAdviceNarrativePart(value.opening))
+    && (value.observations == null || (Array.isArray(value.observations) && value.observations.every(isAdviceSection)))
+    && (value.recommendations == null || (Array.isArray(value.recommendations) && value.recommendations.every(isAdviceSection)))
+    && typeof value.metadata.asOf === "string"
+    && typeof value.metadata.generatedAt === "string"
+    && typeof value.metadata.ledgerRevision === "string"
+    && typeof value.metadata.valuationCurrency === "string"
+    && ["recent", "yearToDate"].includes(String(value.metadata.mode))
+    && typeof value.metadata.locale === "string"
+    && typeof value.metadata.modelGenerated === "boolean"
+    && isOptionalString(value.metadata.provider)
+    && isOptionalString(value.metadata.model)
+    && ["full", "sparse", "empty"].includes(String(value.coverage.level))
+    && typeof value.coverage.currentTxCount === "number"
+    && typeof value.coverage.baselineTxCount === "number"
+    && typeof value.coverage.activeExpenseDays === "number"
+    && typeof value.coverage.unknownCategories === "number"
+    && typeof value.coverage.missingValuation === "boolean"
+    && (value.error == null || (isRecord(value.error) && typeof value.error.code === "string" && typeof value.error.message === "string"));
+}
+
+export function classifyFinancialAdvicePayload(status: number, payload: unknown): AdvicePayloadResult {
+  if (isFinancialAdviceResponse(payload)) {
+    if (status >= 200 && status < 300) return { ok: true, response: payload };
+    return { ok: false, code: payload.error?.code ?? "provider_error", response: payload };
+  }
+  return { ok: false, code: status === 429 ? "rate_limited" : "request_failed" };
+}
 
 function adviceDirectionArrow(direction: FinancialAdviceDisplayEvidence["direction"]): string {
   switch (direction) {
@@ -330,15 +411,15 @@ export function FinancialAdvicePage({ valuationCurrency, onSensitiveLocked }: { 
         onSensitiveLocked();
         return;
       }
-      const payload = await readJson<FinancialAdviceResponse>(response);
+      const payload = await readJson<unknown>(response);
       if (sequenceRef.current !== sequence) return;
-      if (!response.ok) {
-        const code = payload.error?.code ?? "provider_error";
-        const message = payload.error?.message ?? t("advice.errorRequestFailedBody");
-        setState({ phase: "error", code, title: adviceErrorTitle(code, t), body: message, response: payload });
+      const result = classifyFinancialAdvicePayload(response.status, payload);
+      if (!result.ok) {
+        const message = result.response?.error?.message ?? adviceErrorBody(result.code, t);
+        setState({ phase: "error", code: result.code, title: adviceErrorTitle(result.code, t), body: message, response: result.response });
         return;
       }
-      setState({ phase: "success", response: payload });
+      setState({ phase: "success", response: result.response });
     } catch {
       if (sequenceRef.current !== sequence || controller.signal.aborted) return;
       if (!window.navigator.onLine) {
@@ -488,7 +569,15 @@ function adviceErrorTitle(code: string, t: (key: string) => string): string {
       return t("advice.errorModelOutputInvalidTitle");
     case "offline":
       return t("advice.errorOfflineTitle");
+    case "rate_limited":
+      return t("advice.errorRateLimitedTitle");
+    case "request_failed":
+      return t("advice.errorRequestFailedTitle");
     default:
       return t("advice.errorProviderErrorTitle");
   }
+}
+
+function adviceErrorBody(code: string, t: (key: string) => string): string {
+  return code === "rate_limited" ? t("advice.errorRateLimitedBody") : t("advice.errorRequestFailedBody");
 }

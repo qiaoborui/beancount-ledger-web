@@ -850,87 +850,71 @@ func adviceBodyFor(topic, locale string, recommendation bool) string {
 }
 
 func adviceTitleFor(topic, claim, locale string, recommendation bool) string {
-	zh := func(values ...string) string {
+	localized := func(zh, en string) string {
 		if locale == "en-US" {
-			return ""
+			return en
 		}
-		for _, value := range values {
-			if value != "" {
-				return value
-			}
-		}
-		return ""
-	}
-	en := func(values ...string) string {
-		if locale != "en-US" {
-			return ""
-		}
-		for _, value := range values {
-			if value != "" {
-				return value
-			}
-		}
-		return ""
+		return zh
 	}
 	if topic == "opening" {
 		switch claim {
 		case "increased":
-			return zh("本期整体呈上升态势", "A period of growth")
+			return localized("本期整体呈上升态势", "A period of growth")
 		case "decreased":
-			return zh("本期整体有所回落", "A period of decline")
+			return localized("本期整体有所回落", "A period of decline")
 		case "stable":
-			return zh("本期整体保持平稳", "A steady period")
+			return localized("本期整体保持平稳", "A steady period")
 		case "improved":
-			return zh("本期整体有所改善", "An improved period")
+			return localized("本期整体有所改善", "An improved period")
 		case "declined":
-			return zh("本期整体有所回落", "A softer period")
+			return localized("本期整体有所回落", "A softer period")
 		case "present":
-			return zh("本期有大额支出候选", "Unusual expenses this period")
+			return localized("本期有大额支出候选", "Unusual expenses this period")
 		case "limited":
-			return zh("本期证据有限", "Limited evidence this period")
+			return localized("本期证据有限", "Limited evidence this period")
 		}
-		return zh("本期财务回顾", "Financial review")
+		return localized("本期财务回顾", "Financial review")
 	}
 	if recommendation {
 		switch topic {
 		case "income_change":
-			return zh(mapClaim(claim, "规划收入用途", "关注收入节奏", "保持收入节奏"), en(mapClaim(claim, "Plan how to use income", "Watch income pacing", "Keep the income pace")))
+			return localized(mapClaim(claim, "规划收入用途", "关注收入节奏", "保持收入节奏"), mapClaim(claim, "Plan how to use income", "Watch income pacing", "Keep the income pace"))
 		case "expense_change":
-			return zh(mapClaim(claim, "复核支出构成", "保持当前支出水平", "维持支出节奏"), en(mapClaim(claim, "Review spending composition", "Keep current spending", "Maintain spending pace")))
+			return localized(mapClaim(claim, "复核支出构成", "保持当前支出水平", "维持支出节奏"), mapClaim(claim, "Review spending composition", "Keep current spending", "Maintain spending pace"))
 		case "category_change":
-			return zh(mapClaim(claim, "复核该分类支出", "维持该分类水平", "保持该分类节奏"), en(mapClaim(claim, "Review this category's spending", "Maintain this category's level", "Keep this category steady")))
+			return localized(mapClaim(claim, "复核该分类支出", "维持该分类水平", "保持该分类节奏"), mapClaim(claim, "Review this category's spending", "Maintain this category's level", "Keep this category steady"))
 		case "cashflow":
-			return zh(mapCashflowClaim(claim, "延续现金流改善方向", "检查现金流压力点", "维持现金流节奏"), en(mapCashflowClaim(claim, "Preserve the cash-flow improvement", "Check cash-flow pressure points", "Maintain cash-flow pacing")))
+			return localized(mapCashflowClaim(claim, "延续现金流改善方向", "检查现金流压力点", "维持现金流节奏"), mapCashflowClaim(claim, "Preserve the cash-flow improvement", "Check cash-flow pressure points", "Maintain cash-flow pacing"))
 		case "savings_behavior":
-			return zh(mapClaim(claim, "延续储蓄节奏", "检视储蓄节奏", "保持储蓄节奏"), en(mapClaim(claim, "Continue the savings pace", "Review the savings pace", "Keep the savings pace")))
+			return localized(mapClaim(claim, "延续储蓄节奏", "检视储蓄节奏", "保持储蓄节奏"), mapClaim(claim, "Continue the savings pace", "Review the savings pace", "Keep the savings pace"))
 		case "asset_change":
-			return zh(mapClaim(claim, "延续资产积累", "关注资产变化", "维持资产水平"), en(mapClaim(claim, "Continue asset growth", "Watch asset changes", "Maintain asset level")))
+			return localized(mapClaim(claim, "延续资产积累", "关注资产变化", "维持资产水平"), mapClaim(claim, "Continue asset growth", "Watch asset changes", "Maintain asset level"))
 		case "unusual_expense":
-			return zh("核对大额支出候选", "Check unusual-expense candidates")
+			return localized("核对大额支出候选", "Check unusual-expense candidates")
 		case "data_quality":
-			return zh("补充数据后再次回顾", "Add data, then review again")
+			return localized("补充数据后再次回顾", "Add data, then review again")
 		}
-		return zh("保持账本节奏", "Keep the ledger rhythm")
+		return localized("保持账本节奏", "Keep the ledger rhythm")
 	}
 	switch topic {
 	case "income_change":
-		return zh(mapClaim(claim, "收入上升", "收入下降", "收入平稳"), en(mapClaim(claim, "Income increased", "Income decreased", "Income steady")))
+		return localized(mapClaim(claim, "收入上升", "收入下降", "收入平稳"), mapClaim(claim, "Income increased", "Income decreased", "Income steady"))
 	case "expense_change":
-		return zh(mapClaim(claim, "支出上升", "支出下降", "支出平稳"), en(mapClaim(claim, "Spending increased", "Spending decreased", "Spending steady")))
+		return localized(mapClaim(claim, "支出上升", "支出下降", "支出平稳"), mapClaim(claim, "Spending increased", "Spending decreased", "Spending steady"))
 	case "category_change":
-		return zh(mapClaim(claim, "该分类支出上升", "该分类支出下降", "该分类支出平稳"), en(mapClaim(claim, "Category spending increased", "Category spending decreased", "Category spending steady")))
+		return localized(mapClaim(claim, "该分类支出上升", "该分类支出下降", "该分类支出平稳"), mapClaim(claim, "Category spending increased", "Category spending decreased", "Category spending steady"))
 	case "cashflow":
-		return zh(mapCashflowClaim(claim, "现金流改善", "现金流下降", "现金流平稳"), en(mapCashflowClaim(claim, "Cash flow improved", "Cash flow declined", "Cash flow steady")))
+		return localized(mapCashflowClaim(claim, "现金流改善", "现金流下降", "现金流平稳"), mapCashflowClaim(claim, "Cash flow improved", "Cash flow declined", "Cash flow steady"))
 	case "savings_behavior":
-		return zh(mapClaim(claim, "储蓄率上升", "储蓄率下降", "储蓄率平稳"), en(mapClaim(claim, "Savings rate improved", "Savings rate declined", "Savings rate steady")))
+		return localized(mapClaim(claim, "储蓄率上升", "储蓄率下降", "储蓄率平稳"), mapClaim(claim, "Savings rate improved", "Savings rate declined", "Savings rate steady"))
 	case "asset_change":
-		return zh(mapClaim(claim, "总资产上升", "总资产下降", "总资产平稳"), en(mapClaim(claim, "Total assets increased", "Total assets decreased", "Total assets steady")))
+		return localized(mapClaim(claim, "总资产上升", "总资产下降", "总资产平稳"), mapClaim(claim, "Total assets increased", "Total assets decreased", "Total assets steady"))
 	case "unusual_expense":
-		return zh("出现大额支出候选", "Unusual expense candidates")
+		return localized("出现大额支出候选", "Unusual expense candidates")
 	case "data_quality":
-		return zh("证据覆盖有限", "Limited evidence coverage")
+		return localized("证据覆盖有限", "Limited evidence coverage")
 	}
-	return zh("观察", "Observation")
+	return localized("观察", "Observation")
 }
 
 func mapClaim(claim, up, down, flat string) string {

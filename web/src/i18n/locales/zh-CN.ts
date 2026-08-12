@@ -122,6 +122,8 @@ export const zhCN = {
     errorModelOutputInvalidBody: "输出未通过安全校验，未展示任何模型文字。下方仍可查看账本证据。",
     errorRequestFailedTitle: "生成失败",
     errorRequestFailedBody: "请稍后重试。",
+    errorRateLimitedTitle: "请稍后再试",
+    errorRateLimitedBody: "短时间内生成次数较多，请等待几分钟后再试。",
     evidenceOnlyNote: "本次仅展示账本证据。",
     liveStatusIdle: "尚未生成",
     liveStatusGenerating: "正在生成财务回顾…",

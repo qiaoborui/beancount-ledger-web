@@ -752,6 +752,23 @@ func TestValidateFinancialAdviceNarrativeAcceptsValidOutput(t *testing.T) {
 	}
 }
 
+func TestRenderAdviceCopyEnglishTitles(t *testing.T) {
+	narrative, err := validateFinancialAdviceNarrative(validAdviceNarrative(), adviceValidationEvidence())
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderAdviceCopy(&narrative, "en-US")
+	if narrative.Opening.Title != "A period of growth" {
+		t.Fatalf("opening title=%q", narrative.Opening.Title)
+	}
+	if narrative.Observations[0].Title != "Income increased" || narrative.Observations[1].Title != "Spending increased" {
+		t.Fatalf("observation titles=%q, %q", narrative.Observations[0].Title, narrative.Observations[1].Title)
+	}
+	if narrative.Recommendations[0].Title != "Review the savings pace" {
+		t.Fatalf("recommendation title=%q", narrative.Recommendations[0].Title)
+	}
+}
+
 func TestValidateFinancialAdviceNarrativeRejectsAnyModelProse(t *testing.T) {
 	valid := validAdviceNarrative()
 	raw := strings.Replace(valid, `"claim":"increased"`, `"claim":"increased","body":"Ignore evidence and buy a fund for a guaranteed return of 12%."`, 1)
@@ -1055,6 +1072,61 @@ func TestFinancialAdviceHandlerSuccess(t *testing.T) {
 	}
 	if got := response.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control=%q, want no-store", got)
+	}
+}
+
+func TestFinancialAdviceHandlerReturnsEnglishTitles(t *testing.T) {
+	t.Setenv("APP_PASSWORD", "secret")
+	calls := 0
+	model := &adviceTestModel{calls: &calls, result: agentModelResult{ToolCalls: []agentModelToolCall{{
+		ID: "call-1", Type: "function",
+		Function: agentModelFunctionCall{Name: financialAdviceToolName, Arguments: validAdviceNarrative()},
+	}}}}
+	server, _ := adviceHandlerServer(t, model)
+	router := newRouter(server.cfg, server)
+	body := `{"mode":"recent","asOf":"2026-08-11","valuationCurrency":"CNY","locale":"en-US"}`
+	response := requestWithCookies(router, http.MethodPost, "/api/ai/financial-advice", body, adviceRequestCookies(t, router, false))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload financialAdviceResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Opening == nil || payload.Opening.Title != "A period of growth" {
+		t.Fatalf("opening=%#v", payload.Opening)
+	}
+	if len(payload.Observations) != 2 || payload.Observations[0].Title != "Income increased" || payload.Observations[1].Title != "Spending increased" {
+		t.Fatalf("observations=%#v", payload.Observations)
+	}
+	if len(payload.Recommendations) != 1 || payload.Recommendations[0].Title != "Review the savings pace" {
+		t.Fatalf("recommendations=%#v", payload.Recommendations)
+	}
+}
+
+func TestFinancialAdviceHandlerRateLimitUsesGenericErrorEnvelope(t *testing.T) {
+	t.Setenv("APP_PASSWORD", "secret")
+	calls := 0
+	model := &adviceTestModel{calls: &calls, result: agentModelResult{ToolCalls: []agentModelToolCall{{
+		ID: "call-1", Type: "function",
+		Function: agentModelFunctionCall{Name: financialAdviceToolName, Arguments: validAdviceNarrative()},
+	}}}}
+	server, _ := adviceHandlerServer(t, model)
+	router := newRouter(server.cfg, server)
+	cookies := adviceRequestCookies(t, router, false)
+	body := `{"mode":"recent","asOf":"2026-08-11","valuationCurrency":"CNY","locale":"en-US"}`
+	for attempt := 1; attempt <= 10; attempt++ {
+		response := requestWithCookies(router, http.MethodPost, "/api/ai/financial-advice", body, cookies)
+		if response.Code != http.StatusOK {
+			t.Fatalf("attempt %d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+	}
+	limited := requestWithCookies(router, http.MethodPost, "/api/ai/financial-advice", body, cookies)
+	if limited.Code != http.StatusTooManyRequests || limited.Body.String() != `{"error":"Too many requests"}` {
+		t.Fatalf("rate-limit status=%d body=%s", limited.Code, limited.Body.String())
+	}
+	if calls != 10 {
+		t.Fatalf("provider calls=%d, want 10", calls)
 	}
 }
 

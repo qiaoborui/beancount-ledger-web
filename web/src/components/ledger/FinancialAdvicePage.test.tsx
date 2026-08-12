@@ -9,6 +9,7 @@ import {
   FinancialAdviceLetter,
   FinancialAdvicePage,
   adviceEvidenceLabel,
+  classifyFinancialAdvicePayload,
 } from "./FinancialAdvicePage";
 import type { FinancialAdviceDisplayEvidence, FinancialAdviceResponse } from "./types";
 
@@ -151,11 +152,49 @@ describe("FinancialAdvice state panels", () => {
   });
 });
 
+describe("FinancialAdvice response boundary", () => {
+  it("classifies the real generic 429 envelope without retaining it as renderable advice", () => {
+    const result = classifyFinancialAdvicePayload(429, { error: "Too many requests" });
+    expect(result).toEqual({ ok: false, code: "rate_limited" });
+    expect("response" in result).toBe(false);
+  });
+
+  it.each([
+    [400, { error: "invalid request body" }],
+    [500, { error: "internal error" }],
+    [502, "upstream gateway failed"],
+    [200, { metadata: {} }],
+  ])("classifies status %i non-envelope payloads as safe request errors", (status, payload) => {
+    const result = classifyFinancialAdvicePayload(status, payload);
+    expect(result).toEqual({ ok: false, code: "request_failed" });
+    expect("response" in result).toBe(false);
+  });
+
+  it("retains validated evidence-only provider errors", () => {
+    const providerError: FinancialAdviceResponse = { ...response, opening: undefined, observations: undefined, recommendations: undefined, error: { code: "provider_timeout", message: "safe" } };
+    const result = classifyFinancialAdvicePayload(504, providerError);
+    expect(result).toEqual({ ok: false, code: "provider_timeout", response: providerError });
+  });
+
+  it("accepts the real empty-state shape with omitted narrative fields", () => {
+    const empty: FinancialAdviceResponse = {
+      ...response,
+      metadata: { ...response.metadata, modelGenerated: false },
+      coverage: { ...response.coverage, level: "empty" },
+      opening: undefined,
+      observations: undefined,
+      recommendations: undefined,
+      evidence: [],
+    };
+    expect(classifyFinancialAdvicePayload(200, empty)).toEqual({ ok: true, response: empty });
+  });
+});
+
 describe("FinancialAdvicePage privacy and accessibility contract", () => {
   it("requests with no-store and never writes advice to browser storage", () => {
     expect(pageSource).toContain('"/api/ai/financial-advice"');
     expect(pageSource).toContain("cache: \"no-store\"");
-    expect(pageSource).toContain("readJson<FinancialAdviceResponse>");
+    expect(pageSource).toContain("readJson<unknown>");
     expect(pageSource).not.toContain("localStorage");
     expect(pageSource).not.toContain("indexedDB");
     expect(pageSource).not.toContain("LedgerCache");
@@ -189,7 +228,7 @@ describe("FinancialAdvicePage privacy and accessibility contract", () => {
   it("keeps all required state copy in both locales", () => {
     const zh = readFileSync(new URL("../../i18n/locales/zh-CN.ts", import.meta.url), "utf8");
     const en = readFileSync(new URL("../../i18n/locales/en-US.ts", import.meta.url), "utf8");
-    for (const key of ["generate", "regenerate", "generating", "updating", "recent90Days", "yearToDate", "sparseNote", "emptyTitle", "errorOfflineTitle", "errorProviderTimeoutTitle", "errorModelOutputInvalidTitle", "evidenceOnlyNote", "liveStatusIdle", "liveStatusGenerating", "liveStatusReady", "liveStatusError", "liveStatusOffline"]) {
+    for (const key of ["generate", "regenerate", "generating", "updating", "recent90Days", "yearToDate", "sparseNote", "emptyTitle", "errorOfflineTitle", "errorProviderTimeoutTitle", "errorModelOutputInvalidTitle", "errorRateLimitedTitle", "errorRateLimitedBody", "evidenceOnlyNote", "liveStatusIdle", "liveStatusGenerating", "liveStatusReady", "liveStatusError", "liveStatusOffline"]) {
       expect(zh).toContain(`${key}:`);
       expect(en).toContain(`${key}:`);
     }

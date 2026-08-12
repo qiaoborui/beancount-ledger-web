@@ -126,6 +126,8 @@ export const enUS: DeepStringify<TranslationResource> = {
     errorModelOutputInvalidBody: "Output failed validation and was not shown. Ledger evidence is still available below.",
     errorRequestFailedTitle: "Generation failed",
     errorRequestFailedBody: "Please try again.",
+    errorRateLimitedTitle: "Please wait before trying again",
+    errorRateLimitedBody: "Too many reviews were requested in a short period. Try again in a few minutes.",
     evidenceOnlyNote: "Showing ledger evidence only.",
     liveStatusIdle: "Not generated yet",
     liveStatusGenerating: "Generating financial review…",
