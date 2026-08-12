@@ -171,9 +171,38 @@ describe("FinancialAdvice response boundary", () => {
   });
 
   it("retains validated evidence-only provider errors", () => {
-    const providerError: FinancialAdviceResponse = { ...response, opening: undefined, observations: undefined, recommendations: undefined, error: { code: "provider_timeout", message: "safe" } };
+    const providerError: FinancialAdviceResponse = { ...response, metadata: { ...response.metadata, modelGenerated: false }, opening: undefined, observations: undefined, recommendations: undefined, error: { code: "provider_timeout", message: "safe" } };
     const result = classifyFinancialAdvicePayload(504, providerError);
     expect(result).toEqual({ ok: false, code: "provider_timeout", response: providerError });
+  });
+
+  it.each(["full", "sparse"] as const)("rejects a 200 %s envelope without generated narrative", (level) => {
+    const partial: FinancialAdviceResponse = {
+      ...response,
+      coverage: { ...response.coverage, level },
+      opening: undefined,
+      observations: undefined,
+      recommendations: undefined,
+    };
+    const result = classifyFinancialAdvicePayload(200, partial);
+    expect(result).toEqual({ ok: false, code: "request_failed" });
+    expect("response" in result).toBe(false);
+  });
+
+  it.each([
+    ["not model generated", { metadata: { ...response.metadata, modelGenerated: false } }],
+    ["empty opening", { opening: { ...response.opening!, title: "" } }],
+    ["too few observations", { observations: response.observations!.slice(0, 1) }],
+    ["no recommendations", { recommendations: [] }],
+  ])("rejects a 200 generated response with %s", (_name, override) => {
+    const partial = { ...response, ...override } as FinancialAdviceResponse;
+    const result = classifyFinancialAdvicePayload(200, partial);
+    expect(result).toEqual({ ok: false, code: "request_failed" });
+    expect("response" in result).toBe(false);
+  });
+
+  it("accepts a complete generated full response", () => {
+    expect(classifyFinancialAdvicePayload(200, response)).toEqual({ ok: true, response });
   });
 
   it("accepts the real empty-state shape with omitted narrative fields", () => {
@@ -187,6 +216,20 @@ describe("FinancialAdvice response boundary", () => {
       evidence: [],
     };
     expect(classifyFinancialAdvicePayload(200, empty)).toEqual({ ok: true, response: empty });
+  });
+
+  it("rejects structured failures on 2xx and evidence-only envelopes on empty coverage", () => {
+    const structuredOnSuccess: FinancialAdviceResponse = {
+      ...response,
+      metadata: { ...response.metadata, modelGenerated: false },
+      opening: undefined,
+      observations: undefined,
+      recommendations: undefined,
+      error: { code: "provider_error", message: "safe" },
+    };
+    const emptyFailure: FinancialAdviceResponse = { ...structuredOnSuccess, coverage: { ...response.coverage, level: "empty" } };
+    expect(classifyFinancialAdvicePayload(200, structuredOnSuccess)).toEqual({ ok: false, code: "request_failed" });
+    expect(classifyFinancialAdvicePayload(502, emptyFailure)).toEqual({ ok: false, code: "request_failed" });
   });
 });
 

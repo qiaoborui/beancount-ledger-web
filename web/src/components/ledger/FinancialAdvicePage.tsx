@@ -10,7 +10,7 @@ import { localToday } from "@/lib/timeRange";
 import i18n, { type SupportedLanguage } from "@/i18n";
 import { ClientNavLink } from "./ClientNavLink";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
-import type { FinancialAdviceDisplayEvidence, FinancialAdviceMode, FinancialAdviceResponse } from "./types";
+import type { FinancialAdviceDisplayEvidence, FinancialAdviceMode, FinancialAdviceOpening, FinancialAdviceResponse, FinancialAdviceSection } from "./types";
 
 type AdviceState =
   | { phase: "idle" }
@@ -38,7 +38,7 @@ function isOptionalNumber(value: unknown): boolean {
   return value == null || (typeof value === "number" && Number.isFinite(value));
 }
 
-function isAdviceNarrativePart(value: unknown): boolean {
+function isAdviceNarrativePart(value: unknown): value is FinancialAdviceOpening {
   return isRecord(value)
     && typeof value.title === "string"
     && typeof value.body === "string"
@@ -46,8 +46,44 @@ function isAdviceNarrativePart(value: unknown): boolean {
     && value.evidenceIds.every((id) => typeof id === "string");
 }
 
-function isAdviceSection(value: unknown): boolean {
-  return isAdviceNarrativePart(value) && isRecord(value) && typeof value.topic === "string";
+function isAdviceSection(value: unknown): value is FinancialAdviceSection {
+  return isRecord(value) && typeof value.topic === "string" && isAdviceNarrativePart(value);
+}
+
+function isCompleteNarrativePart(value: unknown): value is FinancialAdviceOpening {
+  return isAdviceNarrativePart(value)
+    && isRecord(value)
+    && value.title.trim().length > 0
+    && value.body.trim().length > 0
+    && value.evidenceIds.length > 0
+    && value.evidenceIds.every((id) => id.trim().length > 0);
+}
+
+function isCompleteAdviceSection(value: unknown): value is FinancialAdviceSection {
+  return isRecord(value)
+    && typeof value.topic === "string"
+    && value.topic.trim().length > 0
+    && isCompleteNarrativePart(value);
+}
+
+function hasNoNarrative(response: FinancialAdviceResponse): boolean {
+  return response.opening == null && response.observations == null && response.recommendations == null;
+}
+
+function hasCompleteNarrative(response: FinancialAdviceResponse): boolean {
+  return isCompleteNarrativePart(response.opening)
+    && Array.isArray(response.observations)
+    && response.observations.length >= 2
+    && response.observations.length <= 5
+    && response.observations.every(isCompleteAdviceSection)
+    && Array.isArray(response.recommendations)
+    && response.recommendations.length >= 1
+    && response.recommendations.length <= 3
+    && response.recommendations.every(isCompleteAdviceSection);
+}
+
+function hasStructuredError(response: FinancialAdviceResponse): response is FinancialAdviceResponse & { error: { code: string; message: string } } {
+  return response.error != null && response.error.code.trim().length > 0 && response.error.message.trim().length > 0;
 }
 
 function isAdviceEvidence(value: unknown): boolean {
@@ -96,10 +132,28 @@ export function isFinancialAdviceResponse(value: unknown): value is FinancialAdv
 }
 
 export function classifyFinancialAdvicePayload(status: number, payload: unknown): AdvicePayloadResult {
-  if (isFinancialAdviceResponse(payload)) {
-    if (status >= 200 && status < 300) return { ok: true, response: payload };
-    return { ok: false, code: payload.error?.code ?? "provider_error", response: payload };
+  if (!isFinancialAdviceResponse(payload)) {
+    return { ok: false, code: status === 429 ? "rate_limited" : "request_failed" };
   }
+  if (status >= 200 && status < 300) {
+    const emptySuccess = payload.coverage.level === "empty"
+      && !payload.metadata.modelGenerated
+      && payload.error == null
+      && hasNoNarrative(payload);
+    const generatedSuccess = payload.coverage.level !== "empty"
+      && payload.metadata.modelGenerated
+      && payload.error == null
+      && payload.evidence.length > 0
+      && hasCompleteNarrative(payload);
+    if (emptySuccess || generatedSuccess) return { ok: true, response: payload };
+    return { ok: false, code: "request_failed" };
+  }
+  const evidenceOnlyFailure = payload.coverage.level !== "empty"
+    && !payload.metadata.modelGenerated
+    && payload.evidence.length > 0
+    && hasStructuredError(payload)
+    && hasNoNarrative(payload);
+  if (evidenceOnlyFailure) return { ok: false, code: payload.error.code, response: payload };
   return { ok: false, code: status === 429 ? "rate_limited" : "request_failed" };
 }
 
