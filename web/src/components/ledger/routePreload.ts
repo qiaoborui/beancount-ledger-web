@@ -4,7 +4,6 @@ import { pageFromPathname } from "./routes";
 
 export const loadDashboardPage = () => import("./DashboardPage");
 export const loadBQLQueryPage = () => import("./BQLQueryPage");
-export const loadFinancialAdvicePage = () => import("./FinancialAdvicePage");
 export const loadNetWorthPage = () => import("./NetWorthPage");
 export const loadInvestmentsPage = () => import("./InvestmentsPage");
 export const loadIncomeStatementPage = () => import("./IncomeStatementPage");
@@ -25,7 +24,6 @@ const routeLoaders: Partial<Record<LedgerPage, () => Promise<unknown>>> = {
   agent: loadLedgerAgentWorkspace,
   dashboard: loadDashboardPage,
   query: loadBQLQueryPage,
-  advice: loadFinancialAdvicePage,
   "net-worth": loadNetWorthPage,
   investments: loadInvestmentsPage,
   transactions: loadTransactionList,

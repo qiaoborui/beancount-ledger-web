@@ -443,7 +443,6 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"PUT /api/ledger/editor/file":              true,
 		"POST /api/ai/parse":                       true,
 		"POST /api/ai/agent/turn":                  true,
-		"POST /api/ai/financial-advice":            true,
 		"GET /api/agent/access-tokens":             true,
 		"POST /api/agent/access-tokens":            true,
 		"DELETE /api/agent/access-tokens/:tokenID": true,

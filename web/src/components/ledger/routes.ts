@@ -6,7 +6,6 @@ export function pageFromPathname(pathname: string, homePage: HomePagePreference 
   if (pathname.startsWith("/home")) return "home";
   if (pathname.startsWith("/dashboard")) return "dashboard";
   if (pathname.startsWith("/query")) return "query";
-  if (pathname.startsWith("/advice")) return "advice";
   if (pathname.startsWith("/net-worth")) return "net-worth";
   if (pathname.startsWith("/investments")) return "investments";
   if (pathname.startsWith("/transactions")) return "transactions";

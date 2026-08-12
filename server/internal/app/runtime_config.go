@@ -664,17 +664,6 @@ func (s *RuntimeConfigStore) AIProviderConfig(ctx context.Context) (aiProviderCo
 	return aiProviderConfig{apiKey: apiKey, baseURL: settings.AIBaseURL, model: settings.AIModel}, nil
 }
 
-// AIProviderDisclosure returns only the safe provider label and model name for
-// user-facing disclosure. It never exposes base URLs, API keys, or other
-// credentials.
-func (s *RuntimeConfigStore) AIProviderDisclosure(ctx context.Context) (provider, model string, ok bool) {
-	settings, found, err := readRuntimeConfigSettings(ctx, s.db)
-	if err != nil || !found || settings.AIProvider == "" {
-		return "", "", false
-	}
-	return settings.AIProvider, settings.AIModel, true
-}
-
 func (s *RuntimeConfigStore) IndexerConfig(ctx context.Context) (IndexerRuntimeConfig, error) {
 	settings, found, err := readRuntimeConfigSettings(ctx, s.db)
 	if err != nil {

@@ -59,49 +59,8 @@ export type HomeReport = { start: string; end: string; previousStart: string; pr
 export type LedgerCache = { summary: Summary | null; comparisons?: LedgerPeriodComparisons | null; comparisonDate?: string; balances: Record<string, number>; accountBalances?: AccountBalance[]; txns: Txn[]; netWorthRows: NetWorthPoint[]; monthEndNetWorthRows?: NetWorthPoint[]; netWorthWindows?: NetWorthWindows | null; creditCards?: CreditCardAnalytics[]; investments?: InvestmentSummary | null; reconciliationRows: ReconcileRow[]; accounts: AccountView[]; commodities?: string[]; prices?: Price[]; valuationCurrency?: string; notifications?: LedgerNotification[]; incomeStatement: IncomeStatementCache; accountStatuses: AccountStatus[]; ledgerVersion?: LedgerVersion; savedAt: number; sensitiveCached?: boolean };
 export type ManualKind = "expense" | "income" | "transfer";
 export type ManualForm = { kind: ManualKind; date: string; payee: string; narration: string; amount: string; fromAccount: string; toAccount: string; category: string };
-export type LedgerPage = "agent" | "home" | "dashboard" | "query" | "advice" | "net-worth" | "investments" | "transactions" | "accounts" | "imports" | "editor" | "reconcile" | "settings" | "income-statement" | "currencies";
-export type LedgerNavHref = "/" | "/agent" | "/home" | "/dashboard" | "/query" | "/advice" | "/transactions" | "/accounts" | "/imports" | "/editor" | "/net-worth" | "/investments" | "/income-statement" | "/currencies" | "/reconcile" | "/settings";
-
-export type FinancialAdviceMode = "recent" | "yearToDate";
-export type FinancialAdviceCoverageLevel = "full" | "sparse" | "empty";
-export type FinancialAdviceEvidenceKind = "income" | "expense" | "category" | "cashflow" | "savings" | "assets" | "anomaly" | "coverage";
-export type FinancialAdviceDirection = "up" | "down" | "flat" | "mixed";
-export type FinancialAdviceRange = { start: string; end: string };
-export type FinancialAdviceCoverage = { level: FinancialAdviceCoverageLevel; currentTxCount: number; baselineTxCount: number; activeExpenseDays: number; unknownCategories: number; missingValuation: boolean };
-export type FinancialAdviceDisplayEvidence = {
-  id: string;
-  kind: FinancialAdviceEvidenceKind;
-  label: string;
-  detail?: string;
-  direction: FinancialAdviceDirection;
-  current?: number | null;
-  baseline?: number | null;
-  delta?: number | null;
-  ratio?: number | null;
-  baselineRatio?: number | null;
-  share?: number | null;
-  count?: number | null;
-  amount?: number | null;
-  median?: number | null;
-  date?: string | null;
-  currency: string;
-  link?: string | null;
-};
-export type FinancialAdviceOpening = { title: string; body: string; evidenceIds: string[] };
-export type FinancialAdviceSection = { topic: string; title: string; body: string; evidenceIds: string[] };
-export type FinancialAdviceMetadata = { mode: FinancialAdviceMode; asOf: string; generatedAt: string; valuationCurrency: string; locale: string; ledgerRevision: string; provider?: string; model?: string; modelGenerated: boolean };
-export type FinancialAdviceError = { code: string; message: string };
-export type FinancialAdviceResponse = {
-  metadata: FinancialAdviceMetadata;
-  coverage: FinancialAdviceCoverage;
-  ranges: { current: FinancialAdviceRange; baseline: FinancialAdviceRange };
-  opening?: FinancialAdviceOpening | null;
-  observations?: FinancialAdviceSection[];
-  recommendations?: FinancialAdviceSection[];
-  evidence: FinancialAdviceDisplayEvidence[];
-  error?: FinancialAdviceError | null;
-};
-
+export type LedgerPage = "agent" | "home" | "dashboard" | "query" | "net-worth" | "investments" | "transactions" | "accounts" | "imports" | "editor" | "reconcile" | "settings" | "income-statement" | "currencies";
+export type LedgerNavHref = "/" | "/agent" | "/home" | "/dashboard" | "/query" | "/transactions" | "/accounts" | "/imports" | "/editor" | "/net-worth" | "/investments" | "/income-statement" | "/currencies" | "/reconcile" | "/settings";
 export type HomePagePreference = "agent" | "overview";
 export type PrivacySettings = { homePage: HomePagePreference; showHomeSummaryAmounts: boolean; showAccountBalancesByDefault: boolean; showNetWorthByDefault: boolean; showIncomeStatementByDefault: boolean; valuationCurrency: string };
 export type ThemeMode = "system" | "light" | "dark";

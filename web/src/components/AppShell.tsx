@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BookOpen, Bot, ChevronLeft, ChevronRight, Coins, Database, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, Plus, Scale, Settings, Sparkles, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
+import { Activity, BookOpen, Bot, ChevronLeft, ChevronRight, Coins, Database, FileCode2, FileUp, Home, Landmark, LayoutDashboard, List, LockKeyhole, Menu, Monitor, Moon, Plus, Scale, Settings, Sun, TrendingUp, UnlockKeyhole, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ClientNavLink } from "./ledger/ClientNavLink";
@@ -24,7 +24,6 @@ export const ledgerNavItems: LedgerNavItem[] = [
   { href: "/home", labelKey: "nav.home", icon: Home, mobilePrimary: false, group: "observe" },
   { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, mobilePrimary: false, group: "observe" },
   { href: "/query", labelKey: "nav.query", icon: Database, mobilePrimary: false, group: "observe" },
-  { href: "/advice", labelKey: "nav.advice", icon: Sparkles, mobilePrimary: false, group: "observe" },
   { href: "/net-worth", labelKey: "nav.netWorth", icon: Landmark, mobilePrimary: false, group: "observe" },
   { href: "/income-statement", labelKey: "nav.incomeStatement", icon: TrendingUp, mobilePrimary: false, group: "observe" },
   { href: "/investments", labelKey: "nav.investments", icon: TrendingUp, mobilePrimary: false, group: "observe" },

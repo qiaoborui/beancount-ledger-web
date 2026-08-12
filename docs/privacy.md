@@ -16,19 +16,6 @@ If AI parsing is enabled, the server sends the user's input and the active accou
 
 Disable AI by not configuring provider API keys.
 
-## AI financial advice (/advice)
-
-The on-demand financial review is a privacy-preserving utility page:
-
-- Generation is explicit: opening or navigating to `/advice` never contacts the provider. Only pressing Generate calls the API, and only after the sensitive-data unlock succeeds.
-- The server computes all evidence from the ledger first. The provider receives only the canonical review scope and de-identified structured evidence: opaque evidence IDs, typed kinds, directions, ratios, counts, and major-unit decimal aggregates. Exact period dates and anomaly transaction dates or amounts stay on the application server. The provider never receives account names, aliases, payees, narrations, tags, metadata, source file paths, hashes, or any raw ledger or transaction text. Request fields are strictly validated and canonicalized before anything is built or sent.
-- The model cannot supply user-visible prose. It returns only closed topic and claim enums plus opaque evidence citations; the server rejects unknown fields, validates every citation and direction, then renders titles and neutral body copy from application-owned templates. Exact displayed facts always come from server evidence.
-- Nothing about the review is durably stored: no advice history, responses, or evidence are written to Postgres, browser storage (localStorage, IndexedDB, service-worker caches), runtime stores, notification history, or Agent session history. Results live only in component memory and are cleared on lock, scope or mode change, or navigation away.
-- Responses are `no-store`, generation has a dedicated rate limit, and the provider call has a 45-second deadline. Logs contain only the operation name, mode, safe counts, result code, and elapsed time.
-- The page discloses that the review structure is model-selected, shows the configured provider and model name only after a validated model result (never base URLs or credentials), displays cited evidence directly under every claim, and provides transaction drill-down links where the evidence supports one.
-
-Rollback is removal of the route, page, nav item, endpoint, and this documentation; the feature stores no state and requires no data migration.
-
 ## Runtime state
 
 The stateless `ledger-web` service stores runtime state in Postgres:
