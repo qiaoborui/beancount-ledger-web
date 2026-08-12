@@ -58,6 +58,7 @@ import {
   loadCommandPalette,
   loadCurrencyPage,
   loadDashboardPage,
+  loadFinancialAdvicePage,
   loadEntryModal,
   loadImportPage,
   loadIncomeStatementPage,
@@ -82,6 +83,7 @@ const LazyInvestmentsPage = lazy(() => loadInvestmentsPage().then((mod) => ({ de
 
 const LazyDashboardPage = lazy(() => loadDashboardPage().then((mod) => ({ default: mod.DashboardPage })));
 const LazyBQLQueryPage = lazy(() => loadBQLQueryPage().then((mod) => ({ default: mod.BQLQueryPage })));
+const LazyFinancialAdvicePage = lazy(() => loadFinancialAdvicePage().then((mod) => ({ default: mod.FinancialAdvicePage })));
 
 const LazyLedgerAgentWorkspace = lazy(() => loadLedgerAgentWorkspace().then((mod) => ({ default: mod.LedgerAgentWorkspace })));
 
@@ -123,6 +125,11 @@ const MemoDashboardPage = memo(function DashboardPage(props: ComponentProps<type
 const MemoBQLQueryPage = memo(function BQLQueryPage(props: ComponentProps<typeof LazyBQLQueryPage>) {
   const { t } = useTranslation();
   return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">{t("ledgerApp.preparingQuery")}</section>}><LazyBQLQueryPage {...props} /></Suspense>;
+});
+
+const MemoFinancialAdvicePage = memo(function FinancialAdvicePage(props: ComponentProps<typeof LazyFinancialAdvicePage>) {
+  const { t } = useTranslation();
+  return <Suspense fallback={<section className="border-b border-line bg-panel p-6 text-sm text-stone">{t("ledgerApp.preparingAdvice")}</section>}><LazyFinancialAdvicePage {...props} /></Suspense>;
 });
 
 function AgentPageLoading() {
@@ -839,6 +846,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       {page === "dashboard" && (unlocked ? <MemoDashboardPage timeRange={timeRange} valuationCurrency={valuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} onSensitiveLocked={handleServerSensitiveLocked} onOpenTransactions={openTransactionsHref} /> : requireSensitiveUnlock(t("ledgerApp.dashboardHidden"), t("ledgerApp.dashboardHiddenDetail")))}
       {page === "query" && (unlocked ? <MemoBQLQueryPage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} onOpenAgent={openAgentFromQuery} agentQuery={agentBQLQuery} /> : requireSensitiveUnlock(t("ledgerApp.queryHidden"), t("ledgerApp.queryHiddenDetail")))}
+      {page === "advice" && (unlocked ? <MemoFinancialAdvicePage valuationCurrency={valuationCurrency} onSensitiveLocked={handleServerSensitiveLocked} /> : requireSensitiveUnlock(t("ledgerApp.adviceHidden"), t("ledgerApp.adviceHiddenDetail")))}
       {page === "net-worth" && (unlocked ? <MemoNetWorthPage rows={netWorthChart} monthEndRows={monthEndNetWorthRows} windows={netWorthWindows} accountBalances={accountBalances} accounts={accounts} comparisons={comparisons?.totalAssets} valuationCurrency={dataValuationCurrency} visible={netWorthVisible} onToggleVisible={toggleNetWorthVisible} /> : requireSensitiveUnlock(t("ledgerApp.netWorthHidden"), t("ledgerApp.netWorthHiddenDetail")))}
       {page === "investments" && (unlocked ? <MemoInvestmentsPage investments={investments} /> : requireSensitiveUnlock(t("ledgerApp.investmentsHidden"), t("ledgerApp.investmentsHiddenDetail")))}
       {page === "income-statement" && <MemoIncomeStatementPage income={incomeStatement?.income ?? []} expense={incomeStatement?.expense ?? []} expenseAnalytics={incomeStatement?.expenseAnalytics ?? []} topPayees={incomeStatement?.topPayees ?? []} topPaymentAccounts={incomeStatement?.topPaymentAccounts ?? []} totalIncome={incomeStatement?.totalIncome ?? 0} totalExpense={incomeStatement?.totalExpense ?? 0} netIncome={incomeStatement?.netIncome ?? 0} valuationCurrency={incomeStatementCurrency} visible={incomeStatementVisible} sensitiveUnlocked={unlocked} onToggleVisible={toggleIncomeStatementVisible} onUnlockSensitive={unlockOnlineSensitive} onSelectCategory={openCategoryTransactions} />}
@@ -973,12 +981,13 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
 
 function pageHeader(page: LedgerPage, range: TimeRange, t: (key: string, options?: Record<string, unknown>) => string) {
   const label = formatTimeRangeLabel(range);
-  const isMonthScoped = page !== "agent" && page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query";
+  const isMonthScoped = page !== "agent" && page !== "accounts" && page !== "settings" && page !== "imports" && page !== "editor" && page !== "currencies" && page !== "investments" && page !== "query" && page !== "advice";
   const headers: Record<LedgerPage, { eyebrow: string; title: string }> = {
     agent: { eyebrow: "ledger agent", title: t("ledgerApp.pageAgent") },
     home: { eyebrow: "financial overview", title: t("ledgerApp.pageHome") },
     dashboard: { eyebrow: "income and spending analysis", title: t("ledgerApp.pageDashboard", { label }) },
     query: { eyebrow: "ledger query", title: t("ledgerApp.pageQuery") },
+    advice: { eyebrow: "ai financial advice", title: t("ledgerApp.pageAdvice") },
     transactions: { eyebrow: "transactions", title: t("ledgerApp.pageTransactions", { label }) },
     imports: { eyebrow: "statement import", title: t("ledgerApp.pageImports") },
     editor: { eyebrow: "ledger editor", title: t("ledgerApp.pageEditor") },
