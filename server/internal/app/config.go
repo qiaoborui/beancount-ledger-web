@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	SelfHosted                  bool
 	AppRoot                     string
 	LedgerClusterID             string
 	LedgerRoot                  string
@@ -36,6 +37,9 @@ type Config struct {
 	LedgerGitReadToken          string
 	LedgerIndexNotifyEnabled    bool
 	LedgerIndexBeanCheckEnabled bool
+	IndexerConfigURL            string
+	IndexerHealthURL            string
+	IndexerIdentityToken        string
 	DatabaseURL                 string
 	LedgerReadModel             string
 	ReadModelStrict             bool
@@ -105,6 +109,9 @@ func LoadConfig() Config {
 		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
 		LedgerIndexNotifyEnabled:    envBool("LEDGER_INDEX_NOTIFY_ENABLED", false),
 		LedgerIndexBeanCheckEnabled: envBool("LEDGER_INDEX_BEAN_CHECK_ENABLED", false),
+		IndexerConfigURL:            strings.TrimSpace(os.Getenv("INDEXER_CONFIG_URL")),
+		IndexerHealthURL:            strings.TrimSpace(os.Getenv("INDEXER_HEALTH_URL")),
+		IndexerIdentityToken:        strings.TrimSpace(os.Getenv("INDEXER_IDENTITY_TOKEN")),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		LedgerReadModel:             ledgerReadModel,
 		ReadModelStrict:             envBool("LEDGER_READ_MODEL_STRICT", ledgerReadModel == "postgres" || ledgerReadModel == "pg"),
@@ -148,7 +155,9 @@ func LoadWebConfig() Config {
 // remains stateless: ledger reads and writes go through the GitHub API, while
 // the separate indexer owns the local Git checkout used to build Postgres.
 func LoadSelfHostedConfig() Config {
-	return LoadWebConfig()
+	cfg := LoadWebConfig()
+	cfg.SelfHosted = true
+	return cfg
 }
 
 func LoadIndexerConfig() Config {
@@ -171,6 +180,7 @@ func loadBaseConfig() Config {
 	return Config{
 		AppRoot:                     "",
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
+		AuthTransport:               authTransportMode(),
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
 		Port:                        env("PORT", "3000"),
@@ -186,6 +196,9 @@ func loadBaseConfig() Config {
 		LedgerGitReadToken:          strings.TrimSpace(os.Getenv("LEDGER_GITHUB_INDEX_TOKEN")),
 		LedgerIndexNotifyEnabled:    envBool("LEDGER_INDEX_NOTIFY_ENABLED", false),
 		LedgerIndexBeanCheckEnabled: envBool("LEDGER_INDEX_BEAN_CHECK_ENABLED", false),
+		IndexerConfigURL:            strings.TrimSpace(os.Getenv("INDEXER_CONFIG_URL")),
+		IndexerHealthURL:            strings.TrimSpace(os.Getenv("INDEXER_HEALTH_URL")),
+		IndexerIdentityToken:        strings.TrimSpace(os.Getenv("INDEXER_IDENTITY_TOKEN")),
 		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		EnabledModules:              parseEnabledModules(os.Getenv("LEDGER_ENABLED_MODULES")),
 		NotificationRefreshInterval: env("LEDGER_NOTIFICATION_REFRESH_INTERVAL", "off"),
@@ -265,6 +278,14 @@ func notificationRefreshInterval(raw string) (time.Duration, error) {
 }
 
 func ValidateWebConfig(cfg Config) error {
+	if err := validateAuthTransportConfig(cfg); err != nil {
+		return err
+	}
+	for _, key := range []string{"LEDGER_ROOT", "RUNTIME_DIR", "BEAN_CHECK_BIN", "INDEXER_CONFIG_URL"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return fmt.Errorf("%s belongs to the indexer or filesystem runtime and must not be set on the stateless API service", key)
+		}
+	}
 	if _, err := enabledBuiltinModules(cfg.EnabledModules); err != nil {
 		return err
 	}
@@ -304,7 +325,13 @@ func ValidateSelfHostedConfig(cfg Config) error {
 	if err := ValidateWebConfig(cfg); err != nil {
 		return err
 	}
-	return nil
+	if strings.TrimSpace(cfg.IndexerIdentityToken) == "" {
+		return errors.New("INDEXER_IDENTITY_TOKEN is required for the self-hosted API")
+	}
+	if err := validateInternalServiceURL("INDEXER_HEALTH_URL", cfg.IndexerHealthURL); err != nil {
+		return err
+	}
+	return validateSelfHostedOriginConfig(cfg)
 }
 
 func ValidateIndexerConfig(cfg Config) error {
@@ -313,6 +340,14 @@ func ValidateIndexerConfig(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.LedgerRoot) == "" || cfg.LedgerRoot == "." {
 		return errors.New("LEDGER_ROOT is required for ledger-indexer")
+	}
+	if !filepath.IsAbs(cfg.LedgerRoot) {
+		return errors.New("LEDGER_ROOT must be an absolute path for ledger-indexer")
+	}
+	if info, err := os.Stat(cfg.LedgerRoot); err != nil {
+		return fmt.Errorf("LEDGER_ROOT is unavailable: %w", err)
+	} else if !info.IsDir() {
+		return errors.New("LEDGER_ROOT must be a directory")
 	}
 	if cfg.LedgerFilesystemLockEnabled {
 		if _, err := ledgerFilesystemLockPath(cfg); err != nil {
@@ -324,6 +359,14 @@ func ValidateIndexerConfig(cfg Config) error {
 	}
 	if cfg.LedgerGitSyncEnabled && strings.TrimSpace(cfg.LedgerGitRemoteURL) == "" {
 		return errors.New("LEDGER_GIT_REMOTE_URL is required when LEDGER_GIT_SYNC_ENABLED=true")
+	}
+	if cfg.IndexerConfigURL != "" {
+		if err := validateInternalServiceURL("INDEXER_CONFIG_URL", cfg.IndexerConfigURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(cfg.IndexerIdentityToken) == "" {
+			return errors.New("INDEXER_IDENTITY_TOKEN is required when INDEXER_CONFIG_URL is set")
+		}
 	}
 	if maxOpenConns := postgresPoolSettingsFromEnv().maxOpenConns; maxOpenConns > 0 && maxOpenConns < 2 {
 		return errors.New("ledger-indexer requires POSTGRES_MAX_OPEN_CONNS to be at least 2 when it is set")
@@ -426,7 +469,7 @@ func validateAuthTransportConfig(cfg Config) error {
 				return errors.New("" + key + " cannot be set when LEDGER_AUTH_TRANSPORT=http")
 			}
 		}
-		for _, key := range []string{"WEBAUTHN_PUBLIC_ORIGIN", "WEBAUTHN_RP_ORIGINS", "WEBAUTHN_RP_ID"} {
+		for _, key := range []string{"PUBLIC_ORIGIN", "LEDGER_PUBLIC_ORIGIN", "WEBAUTHN_PUBLIC_ORIGIN", "WEBAUTHN_RP_ORIGINS", "WEBAUTHN_RP_ID"} {
 			if strings.TrimSpace(os.Getenv(key)) != "" {
 				return errors.New("" + key + " requires LEDGER_AUTH_TRANSPORT=https")
 			}
@@ -435,6 +478,51 @@ func validateAuthTransportConfig(cfg Config) error {
 	default:
 		return errors.New("LEDGER_AUTH_TRANSPORT must be https or http")
 	}
+}
+
+func validateInternalServiceURL(name, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s must be an HTTP or HTTPS URL without credentials, query, or fragment", name)
+	}
+	return nil
+}
+
+func validateSelfHostedOriginConfig(cfg Config) error {
+	if cfg.AuthTransport == "http" {
+		return nil
+	}
+	origin := strings.TrimSpace(os.Getenv("PUBLIC_ORIGIN"))
+	if origin == "" {
+		origin = strings.TrimSpace(os.Getenv("LEDGER_PUBLIC_ORIGIN"))
+	}
+	parsed, err := url.ParseRequestURI(origin)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("PUBLIC_ORIGIN must be the external HTTPS origin without a path, credentials, query, or fragment when LEDGER_AUTH_TRANSPORT=https")
+	}
+	rpID := strings.ToLower(strings.TrimSpace(os.Getenv("WEBAUTHN_RP_ID")))
+	if rpID == "" {
+		return errors.New("WEBAUTHN_RP_ID is required when LEDGER_AUTH_TRANSPORT=https")
+	}
+	if !webAuthnOriginMatchesRPID(origin, rpID) {
+		return errors.New("PUBLIC_ORIGIN host must equal or be a subdomain of WEBAUTHN_RP_ID")
+	}
+	for _, value := range []string{os.Getenv("WEBAUTHN_PUBLIC_ORIGIN"), os.Getenv("WEBAUTHN_RP_ORIGINS")} {
+		for _, candidate := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' || r == '\t' || r == ' ' }) {
+			parsedCandidate, err := url.ParseRequestURI(candidate)
+			if err != nil || parsedCandidate.Scheme != "https" || parsedCandidate.Host == "" || parsedCandidate.User != nil || parsedCandidate.Path != "" || parsedCandidate.RawQuery != "" || parsedCandidate.Fragment != "" {
+				return errors.New("WebAuthn origins must be HTTPS origins without paths, credentials, queries, or fragments")
+			}
+			if !webAuthnOriginMatchesRPID(candidate, rpID) {
+				return fmt.Errorf("WebAuthn origin %q does not match WEBAUTHN_RP_ID", candidate)
+			}
+		}
+	}
+	return nil
 }
 
 func gmailAutomationConfigured(cfg Config) bool {

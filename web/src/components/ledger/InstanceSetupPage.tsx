@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, Check, Database, Github, KeyRound, LoaderCircle, ShieldCheck } from "lucide-react";
+import { Bot, Check, CircleAlert, Database, Github, KeyRound, LoaderCircle, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { fetchJson } from "@/lib/clientFetch";
 
 type SetupForm = {
@@ -42,8 +42,26 @@ const initialForm: SetupForm = {
 };
 
 const fieldClass = "mt-2 h-11 w-full rounded-md border border-line bg-paper px-3 text-sm text-ink outline-none placeholder:text-stone focus-visible:ring-2 focus-visible:ring-brand/25";
+export function InstanceSetupUnavailablePage({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return <main className="grid min-h-dvh place-items-center bg-paper px-5 py-10 text-ink">
+    <section className="w-full max-w-2xl border-y border-line bg-panel px-5 py-8 sm:px-8" aria-labelledby="setup-unavailable-title">
+      <span className="grid h-10 w-10 place-items-center rounded-md bg-danger/10 text-danger"><CircleAlert className="h-5 w-5" /></span>
+      <h1 id="setup-unavailable-title" className="mt-5 text-2xl font-semibold tracking-[-0.02em]">{t("instanceSetup.unavailableTitle")}</h1>
+      <p className="mt-3 text-sm leading-6 text-olive">{t("instanceSetup.unavailableDesc")}</p>
+      <p role="alert" className="mt-4 break-words rounded-md bg-danger/10 px-4 py-3 font-mono text-xs leading-5 text-danger">{error}</p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button type="button" onClick={onRetry} className="inline-flex h-11 min-w-40 items-center justify-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-paper transition-transform active:scale-[0.98]">
+          <RefreshCw className="h-4 w-4" />{t("instanceSetup.retryStatus")}
+        </button>
+        <a href="/api/health" target="_blank" rel="noreferrer" className="inline-flex h-11 min-w-40 items-center justify-center rounded-md border border-line bg-paper px-4 text-sm font-medium text-brand hover:bg-tag">{t("instanceSetup.openDiagnostics")}</a>
+      </div>
+      <p className="mt-6 border-t border-line pt-5 text-sm leading-6 text-olive">{t("instanceSetup.operatorChecks")}</p>
+    </section>
+  </main>;
+}
 
-export function InstanceSetupPage({ onComplete }: { onComplete: () => void }) {
+export function InstanceSetupPage({ onComplete, recoverInstallCodeCommand }: { onComplete: () => void; recoverInstallCodeCommand?: string }) {
   const { t } = useTranslation();
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
@@ -133,6 +151,11 @@ export function InstanceSetupPage({ onComplete }: { onComplete: () => void }) {
           <div className="mx-auto max-w-3xl space-y-10 pb-[calc(2rem+env(safe-area-inset-bottom))]">
             <SetupSection icon={<KeyRound className="h-4 w-4" />} title={t("instanceSetup.verifyInstance")} description={t("instanceSetup.verifyInstanceDesc")}>
               <Field label={t("instanceSetup.installCode")}><input required autoComplete="one-time-code" value={form.installCode} onChange={(event) => update("installCode", event.target.value.toUpperCase())} placeholder={t("instanceSetup.installCodePlaceholder")} className={`${fieldClass} font-mono uppercase tracking-wide`} /></Field>
+              {recoverInstallCodeCommand && <details className="rounded-md bg-panel px-4 py-3">
+                <summary className="cursor-pointer text-sm font-medium text-brand">{t("instanceSetup.lostInstallCode")}</summary>
+                <p className="mt-3 text-xs leading-5 text-stone">{t("instanceSetup.recoverInstallCodeDesc")}</p>
+                <code className="mt-2 block overflow-x-auto rounded-md bg-paper px-3 py-2 text-xs text-ink"><Terminal className="mr-2 inline h-3.5 w-3.5" />{recoverInstallCodeCommand}</code>
+              </details>}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t("instanceSetup.adminPassword")} error={passwordError}><input required minLength={12} type="password" autoComplete="new-password" value={form.adminPassword} onChange={(event) => update("adminPassword", event.target.value)} className={fieldClass} /></Field>
                 <Field label={t("instanceSetup.confirmPasswordLabel")}><input required type="password" autoComplete="new-password" value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} className={fieldClass} /></Field>

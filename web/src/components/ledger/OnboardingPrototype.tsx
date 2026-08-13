@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Bot, ChevronDown, CircleDollarSign, LoaderCircle, Send } from "lucide-react";
+import { ArrowRight, Bot, ChevronDown, CircleAlert, CircleDollarSign, LoaderCircle, RefreshCw, Send } from "lucide-react";
 import { apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream } from "@/lib/ledgerAgentStream";
 import i18n from "@/i18n";
@@ -22,6 +22,22 @@ export type OnboardingPayload = {
   incomeCategories: CategorySelection[];
   expenseCategories: CategorySelection[];
 };
+
+export function OnboardingStatusUnavailable({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return <main className="grid min-h-dvh place-items-center bg-paper px-5 py-10 text-ink">
+    <section className="w-full max-w-2xl border-y border-line bg-panel px-5 py-8 sm:px-8" aria-labelledby="onboarding-status-title">
+      <span className="grid h-10 w-10 place-items-center rounded-md bg-danger/10 text-danger"><CircleAlert className="h-5 w-5" /></span>
+      <h1 id="onboarding-status-title" className="mt-5 text-2xl font-semibold tracking-[-0.02em]">{t("onboarding.statusUnavailableTitle")}</h1>
+      <p className="mt-3 text-sm leading-6 text-olive">{t("onboarding.statusUnavailableDesc")}</p>
+      <p role="alert" className="mt-4 break-words rounded-md bg-danger/10 px-4 py-3 font-mono text-xs leading-5 text-danger">{error}</p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button type="button" onClick={onRetry} className="inline-flex h-11 min-w-40 items-center justify-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-paper transition-transform active:scale-[0.98]"><RefreshCw className="h-4 w-4" />{t("onboarding.retryStatus")}</button>
+        <a href="/api/setup/status" target="_blank" rel="noreferrer" className="inline-flex h-11 min-w-40 items-center justify-center rounded-md border border-line bg-paper px-4 text-sm font-medium text-brand hover:bg-tag">{t("onboarding.openReadiness")}</a>
+      </div>
+    </section>
+  </main>;
+}
 
 function normalizeOnboardingDraft(draft: OnboardingPayload): OnboardingPayload {
   return {

@@ -54,7 +54,7 @@ publishing the Postgres read model.
 
 ```bash
 cp .env.selfhost.example .env.selfhost
-# Set the checkout path, UID/GID, Postgres password, AUTH_SECRET,
+# Set the checkout path, UID/GID, Postgres password, a permanent AUTH_SECRET,
 # the internal indexer identity token, and AGENT_SERVICE_TOKEN.
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
@@ -62,6 +62,13 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up
 Read the one-time installation code from `docker compose ... logs server`,
 then open the browser installer to configure the private GitHub repository,
 separate write/read tokens, administrator password, AI, and indexer timing.
+If the log line has rotated away before installation finishes, the host-only
+`ledger-selfhost recover-install-code` command replaces it, invalidates the old
+code, and records the rotation without weakening installation authentication.
+
+`AUTH_SECRET` is the encryption root for credentials stored in Postgres. Never
+rotate it during an ordinary update, and keep the exact value in the same
+recovery set as every Postgres backup.
 The default browser endpoint is `http://127.0.0.1:8080`. See the
 [self-hosted guide](docs/self-hosted-compose.md) for LAN TLS, backups,
 restores, image updates, and the full configuration reference.
