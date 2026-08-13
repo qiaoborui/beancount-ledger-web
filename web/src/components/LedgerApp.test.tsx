@@ -6,7 +6,7 @@ const source = readFileSync(new URL("./LedgerApp.tsx", import.meta.url), "utf8")
 
 describe("LedgerApp routes", () => {
   it("calls every LedgerApp hook before any authentication or setup early return", () => {
-    const firstEarlyReturn = source.indexOf('if (instanceSetup === "checking")');
+    const firstEarlyReturn = source.indexOf('if (instanceSetup.kind === "checking")');
     const componentEnd = source.indexOf("function PullRefreshIndicator", firstEarlyReturn);
     const postReturnHooks = source
       .slice(firstEarlyReturn, componentEnd)
@@ -36,5 +36,12 @@ describe("LedgerApp routes", () => {
     expect(source).toContain('desktopViewport ? "h-dvh" : "fixed inset-0 z-40 h-dvh"');
     expect(source).toContain("return desktopViewport ? loading : createPortal(loading, document.body);");
     expect(source).toContain('request={null}');
+  });
+
+  it("does not treat failed setup or onboarding status requests as ready", () => {
+    expect(source).toContain('instanceSetup.kind === "unavailable"');
+    expect(source).toContain('setOnboardingState("unavailable")');
+    expect(source).toContain('result.state !== "uninitialized" && result.state !== "ready"');
+    expect(source).not.toContain('.catch(() => { if (!cancelled) setOnboardingState("ready"); });');
   });
 });

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { OnboardingPrototype } from "./OnboardingPrototype";
+import { OnboardingPrototype, OnboardingStatusUnavailable } from "./OnboardingPrototype";
 
 describe("OnboardingPrototype", () => {
   it("starts with a plain-language personal finance workflow", () => {
@@ -25,5 +25,13 @@ describe("OnboardingPrototype", () => {
 
     expect(html).toContain("bean-check 失败，请检查账户名");
     expect(html).toContain("回答建账 Agent 的问题");
+  });
+
+  it("keeps a failed onboarding status explicit and retryable", () => {
+    const html = renderToStaticMarkup(<OnboardingStatusUnavailable error="read model unavailable" onRetry={vi.fn()} />);
+
+    expect(html).toContain("无法确认建账状态");
+    expect(html).toContain("read model unavailable");
+    expect(html).toContain("/api/setup/status");
   });
 });

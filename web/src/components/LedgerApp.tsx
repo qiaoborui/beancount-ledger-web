@@ -46,8 +46,9 @@ import { useDesktopViewport } from "./ledger/hooks/useDesktopViewport";
 import { AppSkeleton, LoginScreen, PasskeyBanner, SensitiveUnlockPanel } from "./ledger/AuthScreens";
 import type { CommandAction } from "./ledger/CommandPalette";
 import { HomePage } from "./ledger/HomePage";
-import { OnboardingPrototype, type OnboardingPayload } from "./ledger/OnboardingPrototype";
-import { InstanceSetupPage } from "./ledger/InstanceSetupPage";
+import { OnboardingPrototype, OnboardingStatusUnavailable, type OnboardingPayload } from "./ledger/OnboardingPrototype";
+import { InstanceSetupPage, InstanceSetupUnavailablePage } from "./ledger/InstanceSetupPage";
+import { loadInstanceSetupState, type InstanceSetupGateState } from "./ledger/instanceSetupState";
 import { Toast } from "./ledger/shared";
 import { haptic } from "./ledger/haptics";
 import { TimeRangePicker } from "./ledger/TimeRangePicker";
@@ -175,7 +176,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [isRoutePending, startRouteTransition] = useTransition();
   const [authed, setAuthed] = useState<boolean | null>(() => readInitialLedgerAuthState());
-  const [instanceSetup, setInstanceSetup] = useState<"checking" | "required" | "ready">("checking");
+  const [instanceSetup, setInstanceSetup] = useState<InstanceSetupGateState>({ kind: "checking" });
   const activeApiEndpointIdRef = useRef(readApiEndpointSettings().activeId);
   const [password, setPassword] = useState("");
   const { toast, showToast, clearToast } = useToast();
@@ -217,7 +218,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [agentRequest, setAgentRequest] = useState<LedgerAgentRequest | null>(null);
   const [agentBQLQuery, setAgentBQLQuery] = useState<{ id: number; query: string } | null>(null);
   const [indexInfo, setIndexInfo] = useState<LedgerIndexInfo | null>(null);
-  const [onboardingState, setOnboardingState] = useState<"checking" | "uninitialized" | "ready">("checking");
+  const [onboardingState, setOnboardingState] = useState<"checking" | "uninitialized" | "ready" | "unavailable">("checking");
+  const [onboardingStatusError, setOnboardingStatusError] = useState("");
+  const [onboardingStatusRevision, setOnboardingStatusRevision] = useState(0);
   const [onboardingCreating, setOnboardingCreating] = useState(false);
   const [onboardingWaiting, setOnboardingWaiting] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
@@ -229,11 +232,13 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [mobileTabHrefs, setMobileTabHrefs] = useState<LedgerNavHref[]>(defaultMobileTabHrefs);
+  const refreshInstanceSetup = useCallback(async () => {
+    setInstanceSetup({ kind: "checking" });
+    setInstanceSetup(await loadInstanceSetupState());
+  }, []);
   useEffect(() => {
     let cancelled = false;
-    void fetchJson<{ setupRequired?: boolean }>("/api/setup/status", { cache: "no-store" }, undefined, { kind: "health" })
-      .then((status) => { if (!cancelled) setInstanceSetup(status.setupRequired ? "required" : "ready"); })
-      .catch(() => { if (!cancelled) setInstanceSetup("ready"); });
+    void loadInstanceSetupState().then((state) => { if (!cancelled) setInstanceSetup(state); });
     return () => { cancelled = true; };
   }, []);
   const hasPasskey = passkeyRegistered === true;
@@ -342,16 +347,22 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   useEffect(() => {
     if (!authed) {
       setOnboardingState("checking");
+      setOnboardingStatusError("");
       setOnboardingWaiting(false);
       setOnboardingGitSHA("");
       return;
     }
     let cancelled = false;
     void fetchJson<{ state?: string }>("/api/onboarding", undefined, undefined, { kind: "read" }).then((result) => {
-      if (!cancelled) setOnboardingState(result.state === "uninitialized" ? "uninitialized" : "ready");
-    }).catch(() => { if (!cancelled) setOnboardingState("ready"); });
+      if (result.state !== "uninitialized" && result.state !== "ready") throw new Error(t("onboarding.statusUnavailableFallback"));
+      if (!cancelled) setOnboardingState(result.state);
+    }).catch((cause) => {
+      if (cancelled) return;
+      setOnboardingStatusError(cause instanceof Error ? cause.message : t("onboarding.statusUnavailableFallback"));
+      setOnboardingState("unavailable");
+    });
     return () => { cancelled = true; };
-  }, [authed]);
+  }, [authed, onboardingStatusRevision, t]);
 
   const initializeOnboarding = useCallback(async (payload: OnboardingPayload) => {
     setOnboardingCreating(true); setOnboardingError("");
@@ -631,14 +642,16 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [authed, online, page, router, timeRange, unlocked]);
 
-  if (instanceSetup === "checking") return <AppSkeleton />;
-  if (instanceSetup === "required") return <InstanceSetupPage onComplete={() => { setAuthed(false); setInstanceSetup("ready"); }} />;
+  if (instanceSetup.kind === "checking") return <AppSkeleton />;
+  if (instanceSetup.kind === "unavailable") return <InstanceSetupUnavailablePage error={instanceSetup.error} onRetry={() => { void refreshInstanceSetup(); }} />;
+  if (instanceSetup.kind === "required") return <InstanceSetupPage recoverInstallCodeCommand={instanceSetup.status.operations?.recoverInstallCodeCommand} onComplete={() => { setAuthed(false); void refreshInstanceSetup(); }} />;
   if (authed === null && !online && hasKnownLedgerAuthentication()) return <AppSkeleton />;
   if (searchParams.get("prototype") === "onboarding") return <OnboardingPrototype />;
   if (authed === null && !online) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text ?? t("auth.offlineColdStart")} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (authed === null) return <AppSkeleton />;
   if (!authed) return <LoginScreen password={password} setPassword={setPassword} passkeyRegistered={hasPasskey} passkeyLoading={unlocking} toastText={toast?.text} onLogin={login} onPasskeyLogin={() => { void unlockPasskeySensitive(); }} />;
   if (onboardingState === "checking") return <AppSkeleton />;
+  if (onboardingState === "unavailable") return <OnboardingStatusUnavailable error={onboardingStatusError} onRetry={() => { setOnboardingState("checking"); setOnboardingStatusRevision((value) => value + 1); }} />;
   if (onboardingState === "uninitialized") return <OnboardingPrototype onCreate={initializeOnboarding} creating={onboardingCreating} waiting={onboardingWaiting} error={onboardingError} />;
 
   const sensitiveMessage = toast?.kind === "error" ? toast.text : "";

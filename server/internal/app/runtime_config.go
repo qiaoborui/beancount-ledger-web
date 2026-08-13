@@ -213,6 +213,36 @@ func (s *RuntimeConfigStore) Bootstrap(ctx context.Context, boot Config) (Config
 	return s.EffectiveConfig(ctx, boot)
 }
 
+// RegenerateInstallCode replaces the setup credential only while setup is
+// incomplete. The previous code becomes invalid in the same transaction and
+// the operator action is retained in the runtime configuration audit log.
+func (s *RuntimeConfigStore) RegenerateInstallCode(ctx context.Context) (string, error) {
+	var installCode string
+	err := withRuntimeConfigTransaction(ctx, s.db, func(tx *sql.Tx) error {
+		settings, found, err := readRuntimeConfigSettings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if found && settings.SetupComplete {
+			return errors.New("instance setup is already complete; the install code cannot be regenerated")
+		}
+		installCode, err = randomInstallCode()
+		if err != nil {
+			return err
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(installCode), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		if err := putCredential(ctx, tx, installCodeKey, string(hash)); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_config_audit (actor, action, changed_keys) VALUES ('operator_cli', 'regenerate_install_code', $1::jsonb)`, `["install_code"]`)
+		return err
+	})
+	return installCode, err
+}
+
 func withRuntimeConfigTransaction(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

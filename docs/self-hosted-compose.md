@@ -9,8 +9,9 @@ no public endpoint and no GitHub Action.
 ## Requirements
 
 - Docker Compose v2
-- A private GitHub repository. It may be empty; the onboarding Agent can create
-  the initial Beancount files after installation.
+- A private GitHub repository with a default branch (initialize it with a
+  README). It may omit `main.bean`; the onboarding Agent can create the initial
+  Beancount files after installation.
 - Two fine-grained GitHub tokens: API `Contents` read/write, indexer `Contents`
   read-only
 - A host directory with persistent storage for Docker volumes
@@ -59,8 +60,16 @@ safe in Compose and PostgreSQL environment variables.
 Start every required service with one command:
 
 ```bash
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml config --quiet
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
 ```
+
+The API now fails before opening its listener when filesystem/indexer-only
+variables such as `LEDGER_ROOT`, `RUNTIME_DIR`, `BEAN_CHECK_BIN`, or
+`INDEXER_CONFIG_URL` are accidentally assigned to it. The indexer separately
+requires an existing absolute `LEDGER_ROOT`, its internal config URL, and its
+identity token. This keeps each service's credential and filesystem boundary
+explicit.
 
 The stack is always built from the checked-out source — the `-selfhost-*`
 images are intentionally never pushed to a registry because they bake in your
@@ -72,6 +81,20 @@ Read the one-time installation code, then open `http://localhost:8080`:
 ```bash
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml logs server
 ```
+
+If the log line has rotated away while installation is still incomplete, run
+the recovery command from the Docker host:
+
+```bash
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec server \
+  /app/ledger-selfhost recover-install-code
+```
+
+It prints a fresh one-time code, invalidates the previous code atomically, and
+records `regenerate_install_code` with actor `operator_cli` in
+`runtime_config_audit`. It refuses to run after setup is complete. There is no
+HTTP reset endpoint, so installation authentication still requires control of
+the self-hosted runtime and database credentials.
 
 The installer asks for the administrator password, GitHub owner/repository/
 branch, a Contents read/write Token for the API, a separate Contents read-only
@@ -113,6 +136,15 @@ read model. Application writes and imports keep their existing GitHub API
 transaction, preview, and commit-conflict protection; the API never edits a
 local checkout.
 
+`/api/setup/status` reports the actual readiness phase: `setup_required`,
+`indexing`, `indexer_error`, `indexer_unavailable`, `database_error`, or
+`ready`. The browser never treats a failed status request as ready. The install
+gate offers a retry and the public `/api/health` diagnostic, while Settings ->
+Instance runtime shows the indexer's latest attempt, first-index state, and
+sanitized error. Indexing problems do not block signing in because an empty
+ledger on an initialized default branch may need the onboarding Agent to create
+its first `main.bean` revision.
+
 The browser connects to Bub through Go's Web Channel gateway. Telegram connects
 directly to Bub's native Channel; both use the same stateless MCP ledger tools
 and Go model proxy. For a laptop or workstation, create a revocable
@@ -137,11 +169,19 @@ LEDGER_AUTH_TRANSPORT=https
 PUBLIC_ORIGIN=https://ledger.home.example
 WEBAUTHN_PUBLIC_ORIGIN=https://ledger.home.example
 WEBAUTHN_RP_ID=ledger.home.example
+TRUST_PROXY_HEADERS=false
 ```
 
 `tls internal` requires installing Caddy's local CA certificate on each client.
 Use a DNS name and Caddy's normal public-certificate flow instead when that is
 appropriate. Do not bind port 80 to a LAN interface.
+
+HTTPS mode fails fast unless `PUBLIC_ORIGIN` is one exact external HTTPS origin
+without a path, `WEBAUTHN_RP_ID` matches that host or a parent domain, and every
+configured WebAuthn origin is HTTPS and belongs to the same RP ID. Caddy
+preserves the browser host and sends `X-Forwarded-Proto`; do not enable
+`TRUST_PROXY_HEADERS` merely because Caddy is present. Enable it only when a
+trusted outer proxy must supply `X-Forwarded-Host`.
 
 ### HTTP-only LAN compatibility mode
 
@@ -155,30 +195,46 @@ guarantee, cannot use passkeys/WebAuthn, and rejects configured cross-origin
 cookie access. One hostname must use either HTTP mode or HTTPS mode, never
 both, because an HTTP cookie can overwrite a Secure cookie with the same name.
 
-## Backup and update
+## Backup, restore, and update
 
 Stop the stack before a consistent backup. GitHub is the ledger backup/source
 of truth; back up the indexer's disposable checkout only if you need a local
-cache, and take a logical Postgres dump (not a raw copy of a live volume):
+cache. The required recovery set is one logical Postgres dump plus the exact
+`.env.selfhost` that was active when the dump was taken. Store that environment
+file in an encrypted backup with mode `0600`; it contains `AUTH_SECRET` and
+other infrastructure credentials. Do not put it in Git.
+
+`AUTH_SECRET` and the Postgres dump are an inseparable pair. It encrypts the
+GitHub and AI credentials held in Postgres, so generating a new value during
+restore does not rotate those credentials; it makes them undecryptable.
+
+Create the recovery set with:
 
 ```bash
 set -a; . ./.env.selfhost; set +a
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml down
-tar -C "$(dirname "$LEDGER_CHECKOUT_HOST_PATH")" -czf ledger-checkout-backup.tgz "$(basename "$LEDGER_CHECKOUT_HOST_PATH")"
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d database
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database \
   pg_dump -Fc -U ledger -d ledger > postgres-backup.dump
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml down
+install -m 600 .env.selfhost /path/to/encrypted-backup/.env.selfhost
+# Optional disposable checkout cache:
+tar -C "$(dirname "$LEDGER_CHECKOUT_HOST_PATH")" -czf ledger-checkout-backup.tgz "$(basename "$LEDGER_CHECKOUT_HOST_PATH")"
 ```
 
-Keep the exact `AUTH_SECRET` with the backup. Restored encrypted GitHub and AI
-credentials cannot be decrypted with a different value.
+When `CADDY_TLS_DIRECTIVE=tls internal`, also back up the `caddy_data` volume.
+It contains the private local CA whose certificate is trusted by your devices.
+Losing it causes Caddy to create a different CA and every client must be
+enrolled again. The `caddy_config` volume is rebuildable, but may be archived
+with it for a complete edge-proxy snapshot.
 
-To restore, keep a copy of the failed database dump, restore the optional
-checkout archive to `LEDGER_CHECKOUT_HOST_PATH`, bring up only `database`, then
-replace the database before restoring its archive:
+To restore, first put the backed-up `.env.selfhost` back in place without
+changing `AUTH_SECRET`. Restore the optional checkout archive to
+`LEDGER_CHECKOUT_HOST_PATH`, bring up only `database`, then replace the database
+before restoring its archive:
 
 ```bash
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d database
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database dropdb -U ledger --if-exists ledger
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database createdb -U ledger ledger
 docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec -T database pg_restore -U ledger -d ledger --clean --if-exists < postgres-backup.dump
@@ -186,6 +242,23 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml ex
 
 Finally start the full stack. The indexer will fetch GitHub and replace the
 active read-model snapshot from its checkout.
+
+Before an update, create the recovery set above and record the currently
+checked-out commit. Then update the source, validate the rendered Compose
+configuration, rebuild, and inspect both setup status and readiness:
+
+```bash
+git rev-parse HEAD
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml config --quiet
+docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml up -d --build
+curl -fsS http://127.0.0.1:8080/api/setup/status
+curl -fsS http://127.0.0.1:8080/api/ready
+```
+
+Do not generate a new `.env.selfhost` during an upgrade. If the new revision
+cannot start, return to the recorded application commit while keeping the same
+database and environment file. Restore Postgres only when a migration or data
+change requires it; keep the failed-state dump before overwriting anything.
 
 Check service health with:
 

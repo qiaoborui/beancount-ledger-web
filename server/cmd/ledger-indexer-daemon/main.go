@@ -33,7 +33,7 @@ type indexerStatus struct {
 func main() {
 	logger := logging.New(logging.LoadConfig())
 	cfg := app.LoadIndexerConfig()
-	runtimeConfigURL := strings.TrimSpace(os.Getenv("INDEXER_CONFIG_URL"))
+	runtimeConfigURL := cfg.IndexerConfigURL
 	validationConfig := cfg
 	if runtimeConfigURL != "" {
 		validationConfig.LedgerGitSyncEnabled = false
@@ -92,7 +92,7 @@ func runIndexer(ctx context.Context, logger *slog.Logger, cfg app.Config, status
 		activeConfig := cfg
 		activeInterval, activeRetry, activeMaxRetry := interval, retry, maxRetry
 		if runtimeConfigURL != "" {
-			runtimeConfig, err := fetchIndexerRuntimeConfig(ctx, runtimeConfigURL, os.Getenv("INDEXER_IDENTITY_TOKEN"))
+			runtimeConfig, err := fetchIndexerRuntimeConfig(ctx, runtimeConfigURL, cfg.IndexerIdentityToken)
 			if err != nil {
 				failures++
 				status.mu.Lock()

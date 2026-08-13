@@ -178,14 +178,12 @@ func TestLoadConfigGitHubAlias(t *testing.T) {
 	}
 }
 
-func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
+func TestLoadWebConfigRejectsFilesystemWorkerVariables(t *testing.T) {
 	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
 	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_STORAGE", "filesystem")
 	t.Setenv("LEDGER_READ_MODEL", "files")
 	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
-	t.Setenv("LEDGER_ROOT", "/tmp/ledger")
-	t.Setenv("RUNTIME_DIR", "/tmp/runtime")
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("AUTH_SECRET", "test-auth-secret")
 	t.Setenv("LEDGER_GITHUB_OWNER", "example")
@@ -204,8 +202,12 @@ func TestLoadWebConfigIgnoresLegacyStorageModes(t *testing.T) {
 	if got := strings.Join(cfg.EnabledModules, ","); got != "importers" {
 		t.Fatalf("EnabledModules=%q, want importers", got)
 	}
-	if err := ValidateWebConfig(cfg); err != nil {
-		t.Fatal(err)
+	for _, key := range []string{"LEDGER_ROOT", "RUNTIME_DIR", "BEAN_CHECK_BIN", "INDEXER_CONFIG_URL"} {
+		t.Setenv(key, "/misplaced/value")
+		if err := ValidateWebConfig(cfg); err == nil || !strings.Contains(err.Error(), key) {
+			t.Fatalf("expected misplaced %s to fail fast, got %v", key, err)
+		}
+		t.Setenv(key, "")
 	}
 }
 
@@ -213,6 +215,9 @@ func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
 	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
 	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
+	t.Setenv("LEDGER_AUTH_TRANSPORT", "http")
+	t.Setenv("INDEXER_HEALTH_URL", "http://indexer:3001/health")
+	t.Setenv("INDEXER_IDENTITY_TOKEN", "indexer-identity-token")
 	t.Setenv("LEDGER_STORAGE", "github_api")
 	t.Setenv("LEDGER_READ_MODEL", "files")
 	t.Setenv("LEDGER_READ_MODEL_STRICT", "false")
@@ -224,7 +229,7 @@ func TestLoadSelfHostedConfigForcesGitHubAPITopology(t *testing.T) {
 	t.Setenv("LEDGER_GITHUB_TOKEN", "secret")
 
 	cfg := LoadSelfHostedConfig()
-	if cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict || cfg.LedgerFilesystemLockEnabled {
+	if !cfg.SelfHosted || cfg.LedgerStorage != "github_api" || cfg.LedgerReadModel != "postgres" || !cfg.ReadModelStrict || cfg.LedgerFilesystemLockEnabled {
 		t.Fatalf("self-hosted topology = %#v", cfg)
 	}
 	if cfg.RuntimeDir != "" || cfg.LedgerRoot != "" {
@@ -239,15 +244,21 @@ func TestValidateSelfHostedConfigRequiresPlatformSecretsNotRuntimeGitHubConfig(t
 	t.Setenv("AGENT_SERVICE_URL", "http://agent:8080")
 	t.Setenv("AGENT_SERVICE_TOKEN", "test-agent-token")
 	t.Setenv("LEDGER_AUTH_DISABLED", "false")
+	t.Setenv("PUBLIC_ORIGIN", "")
+	t.Setenv("WEBAUTHN_PUBLIC_ORIGIN", "")
+	t.Setenv("WEBAUTHN_RP_ID", "")
 	t.Setenv("AUTH_SECRET", "")
 	t.Setenv("APP_PASSWORD", "")
 	cfg := Config{
-		LedgerStorage:     "github_api",
-		DatabaseURL:       "postgres://example",
-		LedgerReadModel:   "postgres",
-		ReadModelStrict:   true,
-		AgentServiceURL:   "http://agent:8080",
-		AgentServiceToken: "test-agent-token",
+		LedgerStorage:        "github_api",
+		DatabaseURL:          "postgres://example",
+		LedgerReadModel:      "postgres",
+		ReadModelStrict:      true,
+		AuthTransport:        "http",
+		IndexerHealthURL:     "http://indexer:3001/health",
+		IndexerIdentityToken: "indexer-identity-token",
+		AgentServiceURL:      "http://agent:8080",
+		AgentServiceToken:    "test-agent-token",
 	}
 
 	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "AUTH_SECRET") {
@@ -257,6 +268,50 @@ func TestValidateSelfHostedConfigRequiresPlatformSecretsNotRuntimeGitHubConfig(t
 	t.Setenv("AUTH_SECRET", "runtime-encryption-key")
 	if err := ValidateSelfHostedConfig(cfg); err != nil {
 		t.Fatalf("database-backed runtime configuration should allow missing GitHub env vars: %v", err)
+	}
+}
+
+func TestValidateSelfHostedConfigRequiresCoherentHTTPSOrigin(t *testing.T) {
+	t.Setenv("AUTH_SECRET", "runtime-encryption-key")
+	t.Setenv("PUBLIC_ORIGIN", "https://ledger.home.example")
+	t.Setenv("WEBAUTHN_PUBLIC_ORIGIN", "https://ledger.home.example")
+	t.Setenv("WEBAUTHN_RP_ID", "home.example")
+	cfg := Config{
+		LedgerStorage:        "github_api",
+		DatabaseURL:          "postgres://example",
+		LedgerReadModel:      "postgres",
+		ReadModelStrict:      true,
+		AuthTransport:        "https",
+		IndexerHealthURL:     "http://indexer:3001/health",
+		IndexerIdentityToken: "indexer-identity-token",
+		AgentServiceURL:      "http://agent:8080",
+		AgentServiceToken:    "test-agent-token",
+	}
+	if err := ValidateSelfHostedConfig(cfg); err != nil {
+		t.Fatalf("valid reverse-proxy origin rejected: %v", err)
+	}
+	t.Setenv("WEBAUTHN_RP_ID", "other.example")
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "WEBAUTHN_RP_ID") {
+		t.Fatalf("mismatched RP ID error=%v", err)
+	}
+}
+
+func TestValidateSelfHostedConfigRejectsPasskeysInHTTPMode(t *testing.T) {
+	t.Setenv("AUTH_SECRET", "runtime-encryption-key")
+	t.Setenv("PUBLIC_ORIGIN", "https://ledger.home.example")
+	cfg := Config{
+		LedgerStorage:        "github_api",
+		DatabaseURL:          "postgres://example",
+		LedgerReadModel:      "postgres",
+		ReadModelStrict:      true,
+		AuthTransport:        "http",
+		IndexerHealthURL:     "http://indexer:3001/health",
+		IndexerIdentityToken: "indexer-identity-token",
+		AgentServiceURL:      "http://agent:8080",
+		AgentServiceToken:    "test-agent-token",
+	}
+	if err := ValidateSelfHostedConfig(cfg); err == nil || !strings.Contains(err.Error(), "requires LEDGER_AUTH_TRANSPORT=https") {
+		t.Fatalf("HTTP origin error=%v", err)
 	}
 }
 
@@ -295,6 +350,29 @@ func TestValidateIndexerConfigRequiresTwoPostgresConnections(t *testing.T) {
 
 	if err := ValidateIndexerConfig(cfg); err == nil {
 		t.Fatal("expected indexer pool capacity to be rejected")
+	}
+}
+
+func TestValidateIndexerConfigRequiresPersistentAbsoluteLedgerRoot(t *testing.T) {
+	cfg := Config{DatabaseURL: "postgres://example", LedgerRoot: "relative-ledger", LedgerReadModel: "postgres"}
+	if err := ValidateIndexerConfig(cfg); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative LEDGER_ROOT error=%v", err)
+	}
+	cfg.LedgerRoot = filepath.Join(t.TempDir(), "missing")
+	if err := ValidateIndexerConfig(cfg); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("missing LEDGER_ROOT error=%v", err)
+	}
+}
+
+func TestValidateIndexerConfigRequiresIdentityForRuntimeConfig(t *testing.T) {
+	cfg := Config{
+		DatabaseURL:      "postgres://example",
+		LedgerRoot:       t.TempDir(),
+		LedgerReadModel:  "postgres",
+		IndexerConfigURL: "http://server:3000/api/indexer/config",
+	}
+	if err := ValidateIndexerConfig(cfg); err == nil || !strings.Contains(err.Error(), "INDEXER_IDENTITY_TOKEN") {
+		t.Fatalf("identity token error=%v", err)
 	}
 }
 

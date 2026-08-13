@@ -16,6 +16,7 @@ import { AgentAccessTokenSettings } from "./AgentAccessTokenSettings";
 import type { PasskeyCredentialSummary } from "./passkeys";
 import type { QuickUnlockMode } from "./quickUnlock";
 import type { LedgerNavHref, PrivacySettings, ResolvedTheme, ThemeMode } from "./types";
+import { loadInstanceSetupState, type InstanceSetupGateState } from "./instanceSetupState";
 
 type ToastFn = (kind: "info" | "success" | "error", text: string) => void;
 
@@ -426,6 +427,8 @@ function RuntimeConfigPanel({ headingId, sensitiveUnlocked, showToast }: { headi
   const { t } = useTranslation();
   const [status, setStatus] = useState<RuntimeConfigView | null | undefined>(undefined);
   const [loadRevision, setLoadRevision] = useState(0);
+  const [diagnostics, setDiagnostics] = useState<InstanceSetupGateState>({ kind: "checking" });
+  const [diagnosticsRevision, setDiagnosticsRevision] = useState(0);
   const [form, setForm] = useState({
     githubOwner: "", githubRepo: "", githubBranch: "main", githubApiUrl: "",
     githubWriteToken: "", githubIndexToken: "",
@@ -433,6 +436,12 @@ function RuntimeConfigPanel({ headingId, sensitiveUnlocked, showToast }: { headi
     adminPassword: "", indexerIntervalSeconds: 60, indexerRetryInitialSeconds: 5, indexerRetryMaximumSeconds: 60,
   });
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadInstanceSetupState().then((next) => { if (!cancelled) setDiagnostics(next); });
+    return () => { cancelled = true; };
+  }, [diagnosticsRevision]);
 
   useEffect(() => {
     if (!sensitiveUnlocked) {
@@ -490,6 +499,7 @@ function RuntimeConfigPanel({ headingId, sensitiveUnlocked, showToast }: { headi
       <h1 id={headingId} className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t("settingsRuntime.title")}</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-olive">{t("settingsRuntime.desc")}</p>
     </div>
+    <RuntimeDiagnostics state={diagnostics} onRetry={() => { setDiagnostics({ kind: "checking" }); setDiagnosticsRevision((value) => value + 1); }} />
     {!sensitiveUnlocked ? <p className="mt-5 rounded-xl bg-tag px-4 py-3 text-sm text-stone">{t("settingsRuntime.lockedHint")}</p> :
       status === undefined ? <p className="mt-5 text-sm text-stone">{t("settingsRuntime.loading")}</p> :
       status === null ? <div className="mt-5 border-y border-line py-5" role="alert">
@@ -531,6 +541,38 @@ function RuntimeConfigPanel({ headingId, sensitiveUnlocked, showToast }: { headi
           {saving ? <RotateCcw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? t("settingsRuntime.saving") : t("settingsRuntime.save")}
         </button>
       </div>}
+  </section>;
+}
+
+function RuntimeDiagnostics({ state, onRetry }: { state: InstanceSetupGateState; onRetry: () => void }) {
+  const { t } = useTranslation();
+  if (state.kind === "checking") return <p className="mt-5 text-sm text-stone">{t("settingsRuntime.diagnosticsLoading")}</p>;
+  const readiness = state.kind === "ready" || state.kind === "required" ? state.status.readiness : undefined;
+  const phase = state.kind === "unavailable" ? "unavailable" : readiness?.state ?? (state.kind === "required" ? "setup_required" : "ready");
+  const error = state.kind === "unavailable" ? state.error : readiness?.error;
+  const healthy = phase === "ready";
+  const waiting = phase === "indexing" || phase === "setup_required";
+  const tone = healthy ? "bg-brand/10 text-brand" : waiting ? "bg-tag text-olive" : "bg-danger/10 text-danger";
+  const indexer = readiness?.indexer;
+  return <section className="mt-5 border-y border-line py-4" aria-labelledby="runtime-diagnostics-title">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 id="runtime-diagnostics-title" className="text-sm font-semibold text-ink">{t("settingsRuntime.diagnosticsTitle")}</h2>
+        <p className="mt-1 text-xs leading-5 text-stone">{t("settingsRuntime.diagnosticsDesc")}</p>
+      </div>
+      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>{t(`settingsRuntime.phase.${phase}`)}</span>
+    </div>
+    {error && <p role="alert" className="mt-3 break-words rounded-md bg-danger/10 px-3 py-2 font-mono text-xs leading-5 text-danger">{error}</p>}
+    {indexer && <dl className="mt-3 grid gap-2 text-xs text-stone sm:grid-cols-3">
+      <div><dt>{t("settingsRuntime.indexerReachable")}</dt><dd className="mt-0.5 font-medium text-ink">{indexer.reachable ? t("settingsRuntime.yes") : t("settingsRuntime.no")}</dd></div>
+      <div><dt>{t("settingsRuntime.indexerAttempts")}</dt><dd className="mt-0.5 font-medium tabular-nums text-ink">{indexer.attempts}</dd></div>
+      <div><dt>{t("settingsRuntime.firstIndex")}</dt><dd className="mt-0.5 font-medium text-ink">{indexer.firstIndexSucceeded ? t("settingsRuntime.complete") : t("settingsRuntime.pending")}</dd></div>
+    </dl>}
+    <div className="mt-4 flex flex-wrap gap-2">
+      <button type="button" onClick={onRetry} className="inline-flex h-10 items-center gap-2 rounded-md border border-line bg-panel px-3 text-sm font-medium text-brand hover:bg-tag"><RotateCcw className="h-4 w-4" />{t("settingsRuntime.retryDiagnostics")}</button>
+      <a href="/api/health" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-md border border-line bg-panel px-3 text-sm font-medium text-brand hover:bg-tag">{t("settingsRuntime.openHealth")}</a>
+    </div>
+    {!healthy && (state.kind === "ready" || state.kind === "required") && state.status.operations?.logsCommand && <code className="mt-3 block overflow-x-auto rounded-md bg-paper px-3 py-2 text-xs text-ink">{state.status.operations.logsCommand}</code>}
   </section>;
 }
 

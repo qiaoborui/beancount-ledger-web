@@ -12,21 +12,40 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	selfHostedLogsCommand           = "docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml logs --tail=200 server indexer"
+	selfHostedRecoverInstallCommand = "docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml exec server /app/ledger-selfhost recover-install-code"
+)
+
 func (s *Server) setupStatus(c *gin.Context) {
 	if s.runtimeConfig == nil {
-		c.JSON(http.StatusOK, gin.H{"setupRequired": false, "setupComplete": true, "configSource": "environment"})
+		c.JSON(http.StatusOK, gin.H{"setupRequired": false, "setupComplete": true, "configSource": "environment", "readiness": s.setupReadiness(c.Request.Context())})
 		return
 	}
 	status, err := s.runtimeConfig.Status(c.Request.Context())
 	if err != nil {
-		errorJSON(c, http.StatusServiceUnavailable, err)
+		s.loggerOr().Warn("read public setup status", "error", err)
+		errorJSON(c, http.StatusServiceUnavailable, errors.New(databaseReadinessError))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"setupRequired": status.SetupRequired,
 		"setupComplete": status.SetupComplete,
 		"configSource":  status.ConfigSource,
-	})
+	}
+	if status.SetupRequired {
+		body["readiness"] = setupReadinessStatus{State: "setup_required"}
+		if s.cfg.SelfHosted {
+			body["operations"] = gin.H{"logsCommand": selfHostedLogsCommand, "recoverInstallCodeCommand": selfHostedRecoverInstallCommand}
+		}
+	} else {
+		body["readiness"] = s.setupReadiness(c.Request.Context())
+		if s.cfg.SelfHosted {
+			body["operations"] = gin.H{"logsCommand": selfHostedLogsCommand}
+		}
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, body)
 }
 
 func (s *Server) indexerRuntimeConfig(c *gin.Context) {
@@ -34,7 +53,7 @@ func (s *Server) indexerRuntimeConfig(c *gin.Context) {
 		errorJSON(c, http.StatusNotFound, errors.New("database runtime configuration is unavailable"))
 		return
 	}
-	expected := strings.TrimSpace(os.Getenv("INDEXER_IDENTITY_TOKEN"))
+	expected := strings.TrimSpace(s.cfg.IndexerIdentityToken)
 	provided := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
 	if expected == "" || len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
