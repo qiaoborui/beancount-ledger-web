@@ -674,6 +674,58 @@ html[data-theme="dark"] .home-daily-chart-line {
   }
 }
 .kami-float { box-shadow: var(--float-shadow); }
+
+.dot-matrix-loader {
+  --dot-matrix-size: 1rem;
+  --dot-matrix-gap: 1px;
+  display: inline-grid;
+  flex: none;
+  inline-size: var(--dot-matrix-size);
+  block-size: var(--dot-matrix-size);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--dot-matrix-gap);
+  vertical-align: middle;
+}
+
+.dot-matrix-loader--sm {
+  --dot-matrix-size: 0.75rem;
+  --dot-matrix-gap: 0.75px;
+}
+
+.dot-matrix-loader--md {
+  --dot-matrix-size: 1rem;
+}
+
+.dot-matrix-loader--lg {
+  --dot-matrix-size: 1.25rem;
+}
+
+.dot-matrix-loader__dot {
+  min-inline-size: 0;
+  aspect-ratio: 1;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.22;
+  transform: scale(0.72);
+  animation: dot-matrix-loader-pulse 1400ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: var(--dot-delay);
+}
+
+@keyframes dot-matrix-loader-pulse {
+  0%, 100% {
+    opacity: 0.22;
+    transform: scale(0.72);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  36% {
+    opacity: 0.42;
+    transform: scale(0.82);
+  }
+}
+
 .ledger-toast { animation: ledger-toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1); }
 .kami-overlay { background: var(--overlay); }
 .kami-status-ok { color: var(--success); }
@@ -1220,6 +1272,12 @@ html[data-theme="dark"] .amount-danger {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
+  }
+
+  .dot-matrix-loader__dot {
+    animation: none !important;
+    opacity: 0.72;
+    transform: none;
   }
 }
 

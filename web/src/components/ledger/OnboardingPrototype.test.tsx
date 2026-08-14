@@ -8,6 +8,8 @@ describe("OnboardingPrototype", () => {
 
     expect(html).toContain("建账 Agent");
     expect(html).toContain("正在开始");
+    expect(html).toContain("dot-matrix-loader");
+    expect(html).toContain('role="status"');
     expect(html).toContain("资金账户");
     expect(html).toContain("收入分类");
     expect(html).toContain("支出分类");
