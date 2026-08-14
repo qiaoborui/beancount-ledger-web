@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Bot, ChevronDown, CircleAlert, CircleDollarSign, LoaderCircle, RefreshCw, Send } from "lucide-react";
+import { ArrowRight, Bot, ChevronDown, CircleAlert, CircleDollarSign, RefreshCw, Send } from "lucide-react";
+import { DotMatrixLoader } from "@/components/ui/spinner";
 import { apiFetch } from "@/lib/apiEndpoints";
 import { readLedgerAgentStream } from "@/lib/ledgerAgentStream";
 import i18n from "@/i18n";
@@ -209,7 +210,7 @@ export function OnboardingPrototype({ onCreate, creating = false, error = "", wa
         <div ref={conversationRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-6">
           <div className="mx-auto max-w-3xl space-y-5">
             {messages.map((message, index) => <AgentMessageBubble key={`${message.role}-${index}`} role={message.role} content={message.content} />)}
-            {planning && <div className="flex justify-start"><div className="inline-flex items-center gap-2 border border-line bg-paper px-4 py-3 text-sm text-stone"><LoaderCircle className="h-4 w-4 animate-spin text-brand" />{messages.length ? t("onboarding.responding") : t("onboarding.starting")}</div></div>}
+            {planning && <div className="flex justify-start"><div className="inline-flex items-center gap-2 border border-line bg-paper px-4 py-3 text-sm text-stone" role="status" aria-atomic="true"><DotMatrixLoader className="text-brand" aria-hidden="true" />{messages.length ? t("onboarding.responding") : t("onboarding.starting")}</div></div>}
             {(planError || error) && <p role="alert" className="border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{planError || error}</p>}
           </div>
         </div>

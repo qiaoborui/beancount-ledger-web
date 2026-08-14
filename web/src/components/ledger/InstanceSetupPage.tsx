@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, Check, CircleAlert, Database, Github, KeyRound, LoaderCircle, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
+import { Bot, Check, CircleAlert, Database, Github, KeyRound, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
+import { DotMatrixLoader } from "@/components/ui/spinner";
 import { fetchJson } from "@/lib/clientFetch";
 
 type SetupForm = {
@@ -195,8 +196,8 @@ export function InstanceSetupPage({ onComplete, recoverInstallCodeCommand }: { o
             {error && <p role="alert" className="rounded-md bg-danger/10 px-4 py-3 text-sm leading-6 text-danger">{error}</p>}
             <div className="flex flex-col-reverse items-stretch justify-between gap-3 border-t border-line pt-5 sm:flex-row sm:items-center">
               <p className="flex items-center gap-2 text-xs text-stone"><Check className="h-4 w-4 text-brand" />{t("instanceSetup.dbInitialized")}</p>
-              <button type="submit" disabled={submitting} className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-5 text-sm font-medium text-paper transition-transform active:scale-[0.98] disabled:opacity-50">
-                {submitting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              <button type="submit" disabled={submitting} aria-busy={submitting} className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-5 text-sm font-medium text-paper transition-transform active:scale-[0.98] disabled:opacity-50">
+                {submitting ? <DotMatrixLoader className="text-paper" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" />}
                 {submitStage === "testing" ? t("instanceSetup.testing") : submitStage === "saving" ? t("instanceSetup.saving") : t("instanceSetup.verifyAndInstall")}
               </button>
             </div>
