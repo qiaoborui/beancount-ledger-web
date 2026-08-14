@@ -30,6 +30,8 @@ type LedgerIndexRevision struct {
 	IndexedAt     time.Time
 }
 
+const ledgerIndexSupersededRevisionGracePeriod = time.Minute
+
 func NewLedgerIndexStore(cfg Config) (*LedgerIndexStore, error) {
 	if cfg.DatabaseURL == "" {
 		return nil, errors.New("DATABASE_URL is required when LEDGER_READ_MODEL=postgres")
@@ -959,7 +961,37 @@ RETURNING id`, sourceKey, gitSHA, snapshot.Version, snapshot.LatestMtime, snapsh
 	if _, err := tx.Exec(ctx, `UPDATE ledger_index_revisions SET status = 'active', activated_at = now() WHERE id = $1`, revisionID); err != nil {
 		return 0, err
 	}
+	if err := pruneSupersededRevisionsPGX(ctx, tx, sourceKey); err != nil {
+		return 0, err
+	}
 	return revisionID, nil
+}
+
+func pruneSupersededRevisionsPGX(ctx context.Context, tx pgx.Tx, sourceKey string) error {
+	// Keep the immediately previous revision for readers that cached its ID.
+	// Delete at most two older snapshots per activation so legacy history
+	// converges without turning one index update into a large cascade.
+	_, err := tx.Exec(ctx, `
+WITH newest_superseded AS (
+  SELECT id
+  FROM ledger_index_revisions
+  WHERE source_key = $1 AND status = 'superseded'
+  ORDER BY activated_at DESC NULLS LAST, indexed_at DESC, id DESC
+  LIMIT 1
+), stale_superseded AS (
+  SELECT id
+  FROM ledger_index_revisions
+  WHERE source_key = $1
+    AND status = 'superseded'
+    AND id <> COALESCE((SELECT id FROM newest_superseded), 0)
+    AND (activated_at IS NULL OR activated_at < now() - ($2 * INTERVAL '1 second'))
+  ORDER BY activated_at ASC NULLS FIRST, indexed_at ASC, id ASC
+  LIMIT 2
+)
+DELETE FROM ledger_index_revisions AS revisions
+USING stale_superseded
+WHERE revisions.id = stale_superseded.id`, sourceKey, int64(ledgerIndexSupersededRevisionGracePeriod/time.Second))
+	return err
 }
 
 func clearRevisionRowsPGX(ctx context.Context, tx pgx.Tx, revisionID int64) error {
