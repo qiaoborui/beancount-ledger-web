@@ -176,6 +176,14 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if postingCount != 4 {
 		t.Fatalf("posting count=%d, want 4", postingCount)
 	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE ledger_index_revisions SET activated_at = now() - INTERVAL '2 minutes' WHERE id = $1`, firstID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+INSERT INTO ledger_index_revisions (source_key, ledger_version, status, indexed_at, activated_at)
+VALUES ($1, 'legacy-stale', 'superseded', now() - INTERVAL '2 minutes', now() - INTERVAL '2 minutes')`, store.sourceKey); err != nil {
+		t.Fatal(err)
+	}
 
 	third := testIndexSnapshot("v3", second.Transactions)
 	thirdID, err := store.ReplaceActiveSnapshot(ctx, third, "sha-3")
@@ -190,6 +198,27 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	}
 	if postingCount != 4 {
 		t.Fatalf("reused-only posting count=%d, want 4", postingCount)
+	}
+	var revisionCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM ledger_index_revisions WHERE source_key = $1`, store.sourceKey).Scan(&revisionCount); err != nil {
+		t.Fatal(err)
+	}
+	if revisionCount != 2 {
+		t.Fatalf("revision count=%d, want active plus one superseded revision", revisionCount)
+	}
+	var secondStatus string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM ledger_index_revisions WHERE id = $1`, secondID).Scan(&secondStatus); err != nil {
+		t.Fatal(err)
+	}
+	if secondStatus != "superseded" {
+		t.Fatalf("previous revision status=%q, want superseded", secondStatus)
+	}
+	var firstEntryCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM ledger_index_bean_entries WHERE revision_id = $1`, firstID).Scan(&firstEntryCount); err != nil {
+		t.Fatal(err)
+	}
+	if firstEntryCount != 0 {
+		t.Fatalf("pruned revision bean entry count=%d, want 0", firstEntryCount)
 	}
 	thirdSnapshot, ok, err := store.ActiveSnapshot(ctx)
 	if err != nil || !ok {
