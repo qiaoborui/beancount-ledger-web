@@ -33,6 +33,12 @@ describe("LedgerAgentWorkspace", () => {
     expect(source).toContain("open && mobileSessionListOpen && mobileSessionList");
   });
 
+  it("provides a mobile exit from the full-screen Agent page", () => {
+    expect(source).toContain('presentation === "page" && <button');
+    expect(source).toContain('onClick={() => onNavigate("/home")}');
+    expect(source).toContain('title={i18n.t("agentWorkspace.close")}');
+  });
+
   it("uses typed artifact events", () => {
     expect(source).toContain('artifact.type === "bql_query"');
     expect(source).toContain('artifact.type === "transaction_draft"');

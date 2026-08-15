@@ -440,6 +440,7 @@ export function LedgerAgentWorkspace({
             </DropdownMenuContent>
           </DropdownMenu>
           <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:h-8 md:w-8" title={i18n.t("agentWorkspace.newSession")} aria-label={i18n.t("agentWorkspace.newSession")} onClick={createSession} disabled={busy}><Plus className="h-4 w-4" /></button>
+          {presentation === "page" && <button type="button" className="grid h-9 w-9 place-items-center rounded-md border border-line text-stone hover:bg-tag md:hidden" title={i18n.t("agentWorkspace.close")} aria-label={i18n.t("agentWorkspace.close")} onClick={() => onNavigate("/home")}><X className="h-4 w-4" /></button>}
           {presentation === "dock" && <button type="button" className="grid h-8 w-8 place-items-center rounded-md border border-line text-stone hover:bg-tag" title={i18n.t("agentWorkspace.close")} aria-label={i18n.t("agentWorkspace.close")} onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>}
         </div>
       </header>
