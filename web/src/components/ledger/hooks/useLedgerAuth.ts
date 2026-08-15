@@ -38,6 +38,12 @@ type PreparedPasskeyLogin = {
 
 const passkeyOptionsMaxAgeMs = 8 * 60 * 1000;
 
+function isApiEndpoint(value: unknown): value is ApiEndpoint {
+  if (!value || typeof value !== "object") return false;
+  const endpoint = value as Partial<ApiEndpoint>;
+  return typeof endpoint.id === "string" && typeof endpoint.url === "string" && typeof endpoint.enabled === "boolean";
+}
+
 function emptyLedgerAuthInFlight(): LedgerAuthInFlight {
   return {
     login: null,
@@ -189,17 +195,18 @@ export function createLedgerAuthActions({ password, setPassword, setAuthed, setU
     }
   }
 
-  async function registerPasskey(endpoint: ApiEndpoint = currentApiEndpoint(readApiEndpointSettings())) {
+  async function registerPasskey(endpoint?: ApiEndpoint) {
     if (inFlight.passkeyRegistration) return inFlight.passkeyRegistration;
+    const targetEndpoint = isApiEndpoint(endpoint) ? endpoint : currentApiEndpoint(readApiEndpointSettings());
     inFlight.passkeyRegistration = (async () => {
       showToast("info", i18n.t("ledgerAuth.addingPasskey"));
       try {
-        const optionsResponse = await apiFetch("/api/passkey/register/options", { method: "POST" }, { kind: "auth", endpoint });
+        const optionsResponse = await apiFetch("/api/passkey/register/options", { method: "POST" }, { kind: "auth", endpoint: targetEndpoint });
         const options = await readJson<PublicKeyCredentialCreationOptionsJSON & { error?: string }>(optionsResponse);
         if (!optionsResponse.ok) throw new Error(options.error || i18n.t("ledgerAuth.cannotStartPasskey"));
         if (options.error) throw new Error(options.error);
         const response = await startRegistration({ optionsJSON: options });
-        const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth", endpoint });
+        const verify = await apiFetch("/api/passkey/register/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(response) }, { kind: "auth", endpoint: targetEndpoint });
         const data = await readJson<{ error?: string; credential?: PasskeyCredentialSummary }>(verify);
         if (!verify.ok) throw new Error(data.error || i18n.t("ledgerAuth.faceIdEnableFailed"));
         setPasskeyRegistered(true);

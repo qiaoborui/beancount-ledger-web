@@ -103,6 +103,16 @@ describe("createLedgerAuthActions", () => {
     expect(args.showToast).toHaveBeenCalledWith("success", "Passkey 已添加");
   });
 
+  it("falls back to the current API endpoint when a click event is forwarded accidentally", async () => {
+    const args = authArgs();
+    const actions = createLedgerAuthActions(args);
+
+    await (actions.registerPasskey as unknown as (endpoint: unknown) => Promise<unknown>)({ type: "click" });
+
+    const [optionsCall] = vi.mocked(window.fetch).mock.calls;
+    expect(String(optionsCall?.[0])).toBe("/api/passkey/register/options");
+  });
+
   it("accepts a successful registration response from an older backend without a credential summary", async () => {
     window.fetch = vi.fn(async (input) => {
       const url = String(input);
