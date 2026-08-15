@@ -220,7 +220,7 @@ function PasswordUnlockControls({ onUnlock, unlocking, autoFocusInput, initially
 
 export function PasskeyBanner({ onRegister }: { onRegister: () => void }) {
   const { t } = useTranslation();
-  return <section className="card mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-xl font-medium">{t("auth.enableFaceId")}</h2><p className="mt-1 text-sm text-olive">{t("auth.enableFaceIdDesc")}</p></div><Button className="h-12 rounded-xl px-5" onClick={onRegister}>{t("auth.enable")}</Button></section>;
+  return <section className="card mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-serif text-xl font-medium">{t("auth.enableFaceId")}</h2><p className="mt-1 text-sm text-olive">{t("auth.enableFaceIdDesc")}</p></div><Button className="h-12 rounded-xl px-5" onClick={() => onRegister()}>{t("auth.enable")}</Button></section>;
 }
 
 function QuickUnlockControls({ mode, passkeyRegistered, onUnlock, onPasskeyUnlock, unlocking, autoFocusInput, t }: { mode: QuickUnlockMode; passkeyRegistered?: boolean; onUnlock: (secret: string) => void; onPasskeyUnlock: () => void; unlocking?: boolean; autoFocusInput?: boolean; t: (key: string) => string }) {
