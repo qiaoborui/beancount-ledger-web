@@ -31,6 +31,7 @@ func (s *Server) gmailStatus(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"configured":       configured,
+		"deliveryMode":     normalizedGmailDeliveryMode(s.cfg),
 		"connected":        connected,
 		"email":            connection.Email,
 		"label":            valueOr(connection.LabelName, s.cfg.GmailLabel),
@@ -121,11 +122,12 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	watch, err := api.Watch(c.Request.Context(), s.cfg.GmailPubSubTopic, labelID)
+	connection, err := s.gmailConnectionFromOAuth(c.Request.Context(), api, profile, encryptedRefreshToken, labelID)
 	if err == nil {
 		err = s.gmailState().WithLock(c.Request.Context(), "gmail-state", func(lockCtx context.Context) error {
 			now := time.Now().UTC().Format(time.RFC3339Nano)
-			connection := gmailConnection{Version: 1, Email: strings.ToLower(profile.EmailAddress), EncryptedRefreshToken: encryptedRefreshToken, LabelID: labelID, LabelName: s.cfg.GmailLabel, HistoryID: watch.HistoryId, WatchExpiration: watch.Expiration, ConnectedAt: now, UpdatedAt: now}
+			connection.ConnectedAt = now
+			connection.UpdatedAt = now
 			return s.writeGmailConnection(lockCtx, connection)
 		})
 	}
@@ -139,6 +141,10 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 
 func (s *Server) gmailRenew(c *gin.Context) {
 	if !s.requireCronOrAuth(c) {
+		return
+	}
+	if normalizedGmailDeliveryMode(s.cfg) != "webhook" {
+		errorJSON(c, http.StatusBadRequest, errors.New("Gmail poll mode does not use users.watch renewal"))
 		return
 	}
 	connection, err := s.renewGmailWatch(c.Request.Context())
@@ -183,7 +189,7 @@ func (s *Server) gmailDisconnect(c *gin.Context) {
 }
 
 func (s *Server) gmailPubSub(c *gin.Context) {
-	if !gmailAutomationConfigured(s.cfg) {
+	if !gmailAutomationConfigured(s.cfg) || normalizedGmailDeliveryMode(s.cfg) != "webhook" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Gmail automation is disabled"})
 		return
 	}

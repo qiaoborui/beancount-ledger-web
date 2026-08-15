@@ -1,8 +1,10 @@
 # Gmail bill import automation
 
-Gmail automation watches one Gmail Label, receives mailbox history notifications through authenticated Cloud Pub/Sub, downloads matching messages with the Gmail API, and stores parsed imports in Postgres for manual Review. Ledger writes still use the existing preview, validation, deduplication, and commit path.
+Gmail automation monitors one Gmail Label, downloads matching messages with the Gmail API, and stores parsed imports in Postgres for manual Review. Ledger writes still use the existing preview, validation, deduplication, and commit path. Select its delivery mode explicitly with `GMAIL_DELIVERY_MODE`; the application never infers it from a public URL.
 
 ## Runtime flow
+
+Webhook mode (`GMAIL_DELIVERY_MODE=webhook`, the hosted/default mode):
 
 ```text
 Gmail sender filter
@@ -23,11 +25,24 @@ Cloud Scheduler every 30 minutes
   -> retry persisted transient failures
 ```
 
-The Cloud Run backend scales to zero during quiet periods. Pub/Sub wakes it to validate, persist, and immediately process each event. Google Cloud Scheduler wakes the drain endpoint every 30 minutes as a retry fallback and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work.
+The Cloud Run backend scales to zero during quiet periods. Pub/Sub wakes it to validate, persist, and immediately process each event. Google Cloud Scheduler wakes the drain endpoint every 30 minutes as a retry fallback and renews the seven-day Gmail Watch once per day. Failed transient Gmail calls use persisted backoff, so deployment restarts and Pub/Sub redelivery preserve the queued work. The webhook always validates Google's signed OIDC token, audience, and exact service-account email before it reads a payload.
+
+Polling mode (`GMAIL_DELIVERY_MODE=poll`, the self-hosted Compose default) is for Tailnet, LAN, and other deployments without public inbound access:
+
+```text
+local long-running server
+  -> periodic outbound Gmail history.list + messages.get(format=raw)
+  -> EML / CSV / XLSX / PDF / ZIP parsing
+  -> Postgres pending import
+  -> /import Review
+  -> existing import commit
+```
+
+The process runs one immediate attempt at startup and then one attempt every `GMAIL_POLL_INTERVAL` (default `15m`). Each attempt has the `GMAIL_POLL_TIMEOUT` deadline (default `4m`, range `30s`–`4m`), which stays below the durable five-minute Gmail sync lease. It cannot overlap another local attempt and uses that lease to avoid colliding with a manual sync. Failures are retained as the connection's last error and retried on the next interval. Shutdown cancels the active request and waits for the worker to finish. Poll mode makes only outbound Gmail API calls: it does not create `users.watch`, a Pub/Sub subscription, a Scheduler job, or an inbound webhook.
 
 When processing reaches a durable `ready` or `failed` pending-import state, the notification service publishes one aggregated Web Push message per Gmail message. The notification reports the counts waiting for Review and requiring attention, links to `/import`, and uses a stable tag so browser notification trays can collapse repeated delivery. Retry processing publishes the same completion result with a retry-specific tag. Web Push delivery remains best-effort after the pending state is stored.
 
-## Google Cloud setup
+## Webhook mode: Google Cloud setup
 
 1. Create a personal Google Cloud project and enable the Gmail API and Cloud Pub/Sub API.
 2. Configure an OAuth consent screen. Use Production status for durable offline access; External apps left in Testing receive refresh tokens that expire after seven days when Gmail scopes are requested.
@@ -65,8 +80,14 @@ When processing reaches a durable `ready` or `failed` pending-import state, the 
    Use the same Scheduler service account and OIDC audience. The job renews
    Gmail Watch before its seven-day expiration.
 
-The backend validates Google-signed OIDC tokens, their audience, and the exact
-service-account email for Pub/Sub and Scheduler requests.
+## Poll mode: no-public-ingress setup
+
+1. Create an OAuth Web application client and add the callback URI reachable by the browser during connection, for example `https://ledger.tailnet.example/api/integrations/gmail/callback`.
+2. Set `GMAIL_DELIVERY_MODE=poll` and the shared Gmail variables below. No Pub/Sub, Scheduler, Pub/Sub service account, or cron credentials are needed.
+3. Keep the self-hosted `server` container running. Its built-in worker calls Gmail from the container; no Google service-account credential or inbound port is required.
+4. Connect Gmail once from `/import`. Poll mode initializes its history cursor from the authenticated Gmail profile and starts the regular outgoing syncs.
+
+For Tailnet HTTPS, follow the normal WebAuthn and OAuth redirect setup. The redirect URI must be reachable by the user agent, but Gmail delivery itself never needs to reach the server.
 
 ## Gmail filter
 
@@ -81,12 +102,10 @@ This covers Alipay, China Construction Bank credit cards, and China Merchants Ba
 ## Environment
 
 ```dotenv
+# Shared in both modes
 GMAIL_CLIENT_ID=
 GMAIL_CLIENT_SECRET=
 GMAIL_OAUTH_REDIRECT_URL=https://YOUR_LEDGER_HOST/api/integrations/gmail/callback
-GMAIL_PUBSUB_TOPIC=projects/PROJECT_ID/topics/ledger-gmail
-GMAIL_PUBSUB_AUDIENCE=https://YOUR_LEDGER_HOST/api/integrations/gmail/pubsub
-GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@PROJECT_ID.iam.gserviceaccount.com
 GMAIL_LABEL=Ledger/Bills
 GMAIL_ALLOWED_SENDERS=service@mail.alipay.com,service@vip.ccb.com,ccsvc@message.cmbchina.com
 GMAIL_TOKEN_ENCRYPTION_KEY=
@@ -95,10 +114,21 @@ GMAIL_ZIP_PASSWORDS=
 GMAIL_ZIP_TIMEOUT_SECONDS=20
 ZIP_WORKER_URL=
 ZIP_WORKER_AUDIENCE=
+
+# Hosted/public deployment (default): authenticated Pub/Sub push + Scheduler
+GMAIL_DELIVERY_MODE=webhook
+GMAIL_PUBSUB_TOPIC=projects/PROJECT_ID/topics/ledger-gmail
+GMAIL_PUBSUB_AUDIENCE=https://YOUR_LEDGER_HOST/api/integrations/gmail/pubsub
+GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@PROJECT_ID.iam.gserviceaccount.com
 CRON_OIDC_AUDIENCE=https://YOUR_LEDGER_HOST
 CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@PROJECT_ID.iam.gserviceaccount.com
 # Transition fallback for Vercel Cron and existing secret-header jobs.
 CRON_SECRET=
+
+# Tailnet/LAN deployment: outbound local scheduler only
+# GMAIL_DELIVERY_MODE=poll
+# GMAIL_POLL_INTERVAL=15m
+# GMAIL_POLL_TIMEOUT=4m
 ```
 
 Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS` accepts comma-separated known passwords and tries them before automatic search. Automatic search tries six-digit numeric passwords in the main application, then sends the archive to the IAM-protected ZIP Worker for six-character uppercase-alphanumeric search when `ZIP_WORKER_URL` is configured. `ZIP_WORKER_AUDIENCE` defaults to the worker URL. The main application verifies the returned password against the archive before extraction. Local and non-Cloud Run environments retain the in-process uppercase-alphanumeric fallback. The built-in fast path supports unencrypted ZIP and classic ZipCrypto entries using stored or deflate compression. AES-encrypted, ZIP64, multi-disk, oversized, and deeply nested archives are rejected with a visible pending-import error.
@@ -112,7 +142,11 @@ Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS
 5. Confirm the Web Push notification reports the processing result and links to `/import`.
 6. Review the generated entries and commit them through the normal import flow.
 
-The status endpoint is `GET /api/integrations/gmail/status`. Sensitive unlock protects connection changes, synchronization, pending financial previews, dismissal, and Gmail-backed commits. Cloud Scheduler calls `POST /api/integrations/gmail/drain` and `POST /api/integrations/gmail/renew` with Google-signed OIDC tokens. Disconnect revokes the Google refresh token before deleting the local encrypted credential.
+The status endpoint is `GET /api/integrations/gmail/status`; it includes the active delivery mode. Sensitive unlock protects connection changes, synchronization, pending financial previews, dismissal, and Gmail-backed commits. In webhook mode, Cloud Scheduler calls `POST /api/integrations/gmail/drain` and `POST /api/integrations/gmail/renew` with Google-signed OIDC tokens. Disconnect revokes the Google refresh token before deleting the local encrypted credential.
+
+## Migrating modes
+
+To move from webhook to poll, deploy `GMAIL_DELIVERY_MODE=poll` with the shared variables intact, then remove or disable the Pub/Sub push subscription and both Scheduler jobs after the new server has started. Existing persisted retry events are drained by the polling worker before its regular history sync. To move back, first create or verify the authenticated push subscription and Scheduler jobs, set the webhook-only variables, and deploy `GMAIL_DELIVERY_MODE=webhook`. Immediately invoke `POST /api/integrations/gmail/renew` once with the Scheduler OIDC identity (or configured cron secret) before considering the migration complete; this establishes the new `users.watch` without waiting for the daily renewal schedule. The webhook endpoint remains authenticated in either release; poll mode returns `404` for incoming Pub/Sub delivery instead of accepting an unauthenticated fallback.
 
 See [google-cloud-run.md](google-cloud-run.md) for the Cloud Run, Secret
 Manager, Scheduler, domain, and rollback commands.

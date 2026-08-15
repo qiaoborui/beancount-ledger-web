@@ -51,6 +51,9 @@ type Config struct {
 	GmailPubSubTopic            string
 	GmailPubSubAudience         string
 	GmailPubSubServiceAccount   string
+	GmailDeliveryMode           string
+	GmailPollInterval           time.Duration
+	GmailPollTimeout            time.Duration
 	GmailLabel                  string
 	GmailAllowedSenders         []string
 	GmailTokenEncryptionKey     string
@@ -123,6 +126,9 @@ func LoadConfig() Config {
 		GmailPubSubTopic:            strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_TOPIC")),
 		GmailPubSubAudience:         strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_AUDIENCE")),
 		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
+		GmailDeliveryMode:           gmailDeliveryModeFromEnv("webhook"),
+		GmailPollInterval:           envDuration("GMAIL_POLL_INTERVAL", 15*time.Minute),
+		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", 4*time.Minute),
 		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
 		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
 		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
@@ -157,6 +163,10 @@ func LoadWebConfig() Config {
 func LoadSelfHostedConfig() Config {
 	cfg := LoadWebConfig()
 	cfg.SelfHosted = true
+	// A self-hosted server commonly has no public ingress. Polling only makes
+	// outbound Gmail API calls, while a deployment that has a public endpoint
+	// can opt back into the webhook mode explicitly.
+	cfg.GmailDeliveryMode = gmailDeliveryModeFromEnv("poll")
 	return cfg
 }
 
@@ -208,6 +218,9 @@ func loadBaseConfig() Config {
 		GmailPubSubTopic:            strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_TOPIC")),
 		GmailPubSubAudience:         strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_AUDIENCE")),
 		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
+		GmailDeliveryMode:           gmailDeliveryModeFromEnv("webhook"),
+		GmailPollInterval:           envDuration("GMAIL_POLL_INTERVAL", 15*time.Minute),
+		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", 4*time.Minute),
 		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
 		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
 		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
@@ -529,6 +542,22 @@ func gmailAutomationConfigured(cfg Config) bool {
 	return cfg.GmailClientID != "" || cfg.GmailClientSecret != "" || cfg.GmailOAuthRedirectURL != "" || cfg.GmailPubSubTopic != "" || cfg.GmailPubSubAudience != "" || cfg.GmailPubSubServiceAccount != "" || cfg.GmailTokenEncryptionKey != "" || len(cfg.GmailAllowedSenders) > 0
 }
 
+func gmailDeliveryModeFromEnv(fallback string) string {
+	return strings.ToLower(strings.TrimSpace(env("GMAIL_DELIVERY_MODE", fallback)))
+}
+
+func gmailPollingEnabled(cfg Config) bool {
+	return gmailAutomationConfigured(cfg) && normalizedGmailDeliveryMode(cfg) == "poll"
+}
+
+func normalizedGmailDeliveryMode(cfg Config) string {
+	mode := strings.ToLower(strings.TrimSpace(cfg.GmailDeliveryMode))
+	if mode == "" {
+		return "webhook"
+	}
+	return mode
+}
+
 func validateZIPWorkerConfig(cfg Config) error {
 	workerURL := strings.TrimSpace(cfg.ZIPWorkerURL)
 	audience := strings.TrimSpace(cfg.ZIPWorkerAudience)
@@ -553,14 +582,15 @@ func validateGmailAutomationConfig(cfg Config) error {
 	if !gmailAutomationConfigured(cfg) {
 		return nil
 	}
+	mode := normalizedGmailDeliveryMode(cfg)
+	if mode != "webhook" && mode != "poll" {
+		return errors.New("GMAIL_DELIVERY_MODE must be webhook or poll")
+	}
 	required := map[string]string{
-		"GMAIL_CLIENT_ID":              cfg.GmailClientID,
-		"GMAIL_CLIENT_SECRET":          cfg.GmailClientSecret,
-		"GMAIL_OAUTH_REDIRECT_URL":     cfg.GmailOAuthRedirectURL,
-		"GMAIL_PUBSUB_TOPIC":           cfg.GmailPubSubTopic,
-		"GMAIL_PUBSUB_AUDIENCE":        cfg.GmailPubSubAudience,
-		"GMAIL_PUBSUB_SERVICE_ACCOUNT": cfg.GmailPubSubServiceAccount,
-		"GMAIL_TOKEN_ENCRYPTION_KEY":   cfg.GmailTokenEncryptionKey,
+		"GMAIL_CLIENT_ID":            cfg.GmailClientID,
+		"GMAIL_CLIENT_SECRET":        cfg.GmailClientSecret,
+		"GMAIL_OAUTH_REDIRECT_URL":   cfg.GmailOAuthRedirectURL,
+		"GMAIL_TOKEN_ENCRYPTION_KEY": cfg.GmailTokenEncryptionKey,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -570,20 +600,41 @@ func validateGmailAutomationConfig(cfg Config) error {
 	if len(cfg.GmailAllowedSenders) == 0 {
 		return errors.New("GMAIL_ALLOWED_SENDERS is required when Gmail automation is configured")
 	}
-	cronSecretConfigured := strings.TrimSpace(cfg.CronSecret) != ""
-	cronOIDCAudienceConfigured := strings.TrimSpace(cfg.CronOIDCAudience) != ""
-	cronOIDCServiceAccountConfigured := strings.TrimSpace(cfg.CronOIDCServiceAccount) != ""
-	if cronOIDCAudienceConfigured != cronOIDCServiceAccountConfigured {
-		return errors.New("CRON_OIDC_AUDIENCE and CRON_OIDC_SERVICE_ACCOUNT must be configured together")
-	}
-	if !cronSecretConfigured && !cronOIDCAudienceConfigured {
-		return errors.New("CRON_SECRET or Cloud Scheduler OIDC configuration is required when Gmail automation is configured")
-	}
-	if cronOIDCAudienceConfigured && !strings.HasPrefix(cfg.CronOIDCAudience, "https://") {
-		return errors.New("CRON_OIDC_AUDIENCE must use HTTPS")
-	}
-	if !strings.HasPrefix(cfg.GmailPubSubTopic, "projects/") || !strings.Contains(cfg.GmailPubSubTopic, "/topics/") {
-		return errors.New("GMAIL_PUBSUB_TOPIC must use projects/<project>/topics/<topic>")
+	switch mode {
+	case "webhook":
+		for name, value := range map[string]string{
+			"GMAIL_PUBSUB_TOPIC":           cfg.GmailPubSubTopic,
+			"GMAIL_PUBSUB_AUDIENCE":        cfg.GmailPubSubAudience,
+			"GMAIL_PUBSUB_SERVICE_ACCOUNT": cfg.GmailPubSubServiceAccount,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("%s is required when GMAIL_DELIVERY_MODE=webhook", name)
+			}
+		}
+		cronSecretConfigured := strings.TrimSpace(cfg.CronSecret) != ""
+		cronOIDCAudienceConfigured := strings.TrimSpace(cfg.CronOIDCAudience) != ""
+		cronOIDCServiceAccountConfigured := strings.TrimSpace(cfg.CronOIDCServiceAccount) != ""
+		if cronOIDCAudienceConfigured != cronOIDCServiceAccountConfigured {
+			return errors.New("CRON_OIDC_AUDIENCE and CRON_OIDC_SERVICE_ACCOUNT must be configured together")
+		}
+		if !cronSecretConfigured && !cronOIDCAudienceConfigured {
+			return errors.New("CRON_SECRET or Cloud Scheduler OIDC configuration is required when GMAIL_DELIVERY_MODE=webhook")
+		}
+		if cronOIDCAudienceConfigured && !strings.HasPrefix(cfg.CronOIDCAudience, "https://") {
+			return errors.New("CRON_OIDC_AUDIENCE must use HTTPS")
+		}
+		if !strings.HasPrefix(cfg.GmailPubSubTopic, "projects/") || !strings.Contains(cfg.GmailPubSubTopic, "/topics/") {
+			return errors.New("GMAIL_PUBSUB_TOPIC must use projects/<project>/topics/<topic>")
+		}
+	case "poll":
+		if cfg.GmailPollInterval < time.Minute || cfg.GmailPollInterval > 24*time.Hour {
+			return errors.New("GMAIL_POLL_INTERVAL must be between 1m and 24h when GMAIL_DELIVERY_MODE=poll")
+		}
+		// Keep every local run below the existing five-minute durable sync lease,
+		// so another process cannot claim an expired lease while it still runs.
+		if cfg.GmailPollTimeout < 30*time.Second || cfg.GmailPollTimeout > 4*time.Minute {
+			return errors.New("GMAIL_POLL_TIMEOUT must be between 30s and 4m when GMAIL_DELIVERY_MODE=poll")
+		}
 	}
 	key, err := base64.RawStdEncoding.DecodeString(cfg.GmailTokenEncryptionKey)
 	if err != nil {
@@ -633,6 +684,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return fallback
 	}
