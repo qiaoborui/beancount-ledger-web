@@ -389,6 +389,27 @@ func findGmailLabel(labels []*gmail.Label, name string) (string, bool) {
 	return "", false
 }
 
+func (s *Server) gmailConnectionFromOAuth(ctx context.Context, api gmailAPI, profile *gmail.Profile, encryptedRefreshToken, labelID string) (gmailConnection, error) {
+	connection := gmailConnection{
+		Version:               1,
+		Email:                 strings.ToLower(profile.EmailAddress),
+		EncryptedRefreshToken: encryptedRefreshToken,
+		LabelID:               labelID,
+		LabelName:             s.cfg.GmailLabel,
+		HistoryID:             profile.HistoryId,
+	}
+	if normalizedGmailDeliveryMode(s.cfg) != "webhook" {
+		return connection, nil
+	}
+	watch, err := api.Watch(ctx, s.cfg.GmailPubSubTopic, labelID)
+	if err != nil {
+		return gmailConnection{}, err
+	}
+	connection.HistoryID = watch.HistoryId
+	connection.WatchExpiration = watch.Expiration
+	return connection, nil
+}
+
 func (s *Server) renewGmailWatch(ctx context.Context) (gmailConnection, error) {
 	api, connection, err := s.connectedGmailAPI(ctx)
 	if err != nil {

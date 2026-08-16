@@ -13,10 +13,16 @@ import (
 
 // Application owns the HTTP handler and every resource opened while wiring it.
 type Application struct {
-	router    *gin.Engine
-	closers   []io.Closer
-	closeOnce sync.Once
-	closeErr  error
+	router            *gin.Engine
+	server            *Server
+	closers           []io.Closer
+	pollWorkerFactory func() *gmailPollWorker
+
+	lifecycleMu    sync.Mutex
+	closed         bool
+	pollingStarted bool
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 type applicationDependencies struct {
@@ -84,7 +90,7 @@ func NewApplicationWithLogger(cfg Config, logger *slog.Logger) (*Application, er
 		txService:            dependencies.txService,
 		limiter:              dependencies.limiter,
 	}
-	return newApplication(newRouter(dependencies.cfg, server), dependencies.closers), nil
+	return newApplication(newRouter(dependencies.cfg, server), server, dependencies.closers), nil
 }
 
 func buildApplicationDependencies(cfg Config) (*applicationDependencies, error) {
@@ -187,12 +193,45 @@ func buildApplicationDependenciesWithLogger(cfg Config, logger *slog.Logger) (*a
 	return dependencies, nil
 }
 
-func newApplication(router *gin.Engine, closers []io.Closer) *Application {
-	return &Application{router: router, closers: append([]io.Closer(nil), closers...)}
+func newApplication(router *gin.Engine, server *Server, closers []io.Closer) *Application {
+	return &Application{router: router, server: server, closers: append([]io.Closer(nil), closers...)}
 }
 
 func (a *Application) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	a.router.ServeHTTP(writer, request)
+}
+
+// StartGmailPolling starts the self-hosted, outbound-only Gmail scheduler when
+// the explicit poll delivery mode is configured. It is a no-op for webhook
+// deployments and for instances without Gmail automation configured.
+func (a *Application) StartGmailPolling(ctx context.Context) {
+	if a == nil || a.server == nil {
+		return
+	}
+	a.server.cfgMu.RLock()
+	enabled := gmailPollingEnabled(a.server.cfg)
+	a.server.cfgMu.RUnlock()
+	if !enabled {
+		return
+	}
+	a.lifecycleMu.Lock()
+	defer a.lifecycleMu.Unlock()
+	if a.closed || a.pollingStarted {
+		return
+	}
+	worker := a.newGmailPollWorker()
+	worker.Start(ctx)
+	// Register while holding the same lifecycle lock Close uses, so Close can
+	// neither miss a started worker nor permit a worker after resources close.
+	a.closers = append(a.closers, worker)
+	a.pollingStarted = true
+}
+
+func (a *Application) newGmailPollWorker() *gmailPollWorker {
+	if a.pollWorkerFactory != nil {
+		return a.pollWorkerFactory()
+	}
+	return a.server.newGmailPollWorker()
 }
 
 func (a *Application) Close() error {
@@ -200,7 +239,11 @@ func (a *Application) Close() error {
 		return nil
 	}
 	a.closeOnce.Do(func() {
-		a.closeErr = closeResources(a.closers)
+		a.lifecycleMu.Lock()
+		a.closed = true
+		closers := append([]io.Closer(nil), a.closers...)
+		a.lifecycleMu.Unlock()
+		a.closeErr = closeResources(closers)
 	})
 	return a.closeErr
 }

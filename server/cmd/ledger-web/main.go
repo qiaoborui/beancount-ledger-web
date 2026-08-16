@@ -57,6 +57,7 @@ func run(logger *slog.Logger) (err error) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	application.StartGmailPolling(ctx)
 	server := newHTTPServer(addr, application)
 	logger.Info("ledger web listening", "addr", addr)
 	return serveHTTP(ctx, server, listener)

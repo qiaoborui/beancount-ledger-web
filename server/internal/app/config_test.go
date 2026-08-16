@@ -1,9 +1,11 @@
 package app
 
 import (
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfigFilesystemRespectsLedgerRoot(t *testing.T) {
@@ -43,6 +45,58 @@ func TestLoadConfigReadsNotificationRefreshInterval(t *testing.T) {
 
 	if got := LoadConfig().NotificationRefreshInterval; got != "15m" {
 		t.Fatalf("NotificationRefreshInterval=%q, want 15m", got)
+	}
+}
+
+func TestGmailDeliveryModeDefaultsByDeployment(t *testing.T) {
+	if got := LoadWebConfig().GmailDeliveryMode; got != "webhook" {
+		t.Fatalf("web delivery mode=%q, want webhook", got)
+	}
+	if got := LoadSelfHostedConfig().GmailDeliveryMode; got != "poll" {
+		t.Fatalf("self-host delivery mode=%q, want poll", got)
+	}
+}
+
+func TestValidateGmailPollModeDoesNotRequirePubSubOrCron(t *testing.T) {
+	cfg := Config{
+		GmailDeliveryMode:       "poll",
+		GmailPollInterval:       15 * time.Minute,
+		GmailPollTimeout:        4 * time.Minute,
+		GmailClientID:           "client",
+		GmailClientSecret:       "secret",
+		GmailOAuthRedirectURL:   "https://ledger.example/api/integrations/gmail/callback",
+		GmailTokenEncryptionKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
+		GmailAllowedSenders:     []string{"billing@example.com"},
+		GmailSyncLookbackDays:   30,
+		GmailZipTimeoutSeconds:  20,
+	}
+	if err := validateGmailAutomationConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateGmailAutomationConfigRejectsUnknownDeliveryMode(t *testing.T) {
+	cfg := Config{GmailDeliveryMode: "push", GmailClientID: "configured"}
+	if err := validateGmailAutomationConfig(cfg); err == nil || !strings.Contains(err.Error(), "GMAIL_DELIVERY_MODE") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestValidateGmailPollModeKeepsTimeoutBelowSyncLease(t *testing.T) {
+	cfg := Config{
+		GmailDeliveryMode:       "poll",
+		GmailPollInterval:       15 * time.Minute,
+		GmailPollTimeout:        5 * time.Minute,
+		GmailClientID:           "client",
+		GmailClientSecret:       "secret",
+		GmailOAuthRedirectURL:   "https://ledger.example/api/integrations/gmail/callback",
+		GmailTokenEncryptionKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
+		GmailAllowedSenders:     []string{"billing@example.com"},
+		GmailSyncLookbackDays:   30,
+		GmailZipTimeoutSeconds:  20,
+	}
+	if err := validateGmailAutomationConfig(cfg); err == nil || !strings.Contains(err.Error(), "GMAIL_POLL_TIMEOUT") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

@@ -28,6 +28,8 @@ type fakeGmailAPI struct {
 	rawCalls    []string
 	recentCalls int
 	historyErr  error
+	watchCalls  int
+	watch       *gmail.WatchResponse
 }
 
 type recordingNotificationChannel struct {
@@ -54,6 +56,10 @@ func recordingNotificationService(t *testing.T) (*NotificationService, *recordin
 func (f *fakeGmailAPI) Profile(context.Context) (*gmail.Profile, error) { return &gmail.Profile{}, nil }
 func (f *fakeGmailAPI) Labels(context.Context) ([]*gmail.Label, error)  { return nil, nil }
 func (f *fakeGmailAPI) Watch(context.Context, string, string) (*gmail.WatchResponse, error) {
+	f.watchCalls++
+	if f.watch != nil {
+		return f.watch, nil
+	}
 	return &gmail.WatchResponse{}, nil
 }
 func (f *fakeGmailAPI) History(context.Context, uint64, string) ([]string, uint64, error) {
@@ -123,6 +129,49 @@ func TestGmailSecretRoundTrip(t *testing.T) {
 	}
 	if plain != "refresh-token" {
 		t.Fatalf("decrypted token = %q", plain)
+	}
+}
+
+func TestGmailOAuthConnectionUsesProfileCursorInPollMode(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailDeliveryMode = "poll"
+	server := &Server{cfg: cfg}
+	api := &fakeGmailAPI{watch: &gmail.WatchResponse{HistoryId: 99, Expiration: 100}}
+
+	connection, err := server.gmailConnectionFromOAuth(context.Background(), api, &gmail.Profile{EmailAddress: "Owner@Example.com", HistoryId: 42}, "encrypted", "label-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.watchCalls != 0 || connection.HistoryID != 42 || connection.WatchExpiration != 0 || connection.Email != "owner@example.com" {
+		t.Fatalf("connection=%#v watchCalls=%d", connection, api.watchCalls)
+	}
+}
+
+func TestGmailOAuthConnectionStartsWatchInWebhookMode(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailDeliveryMode = "webhook"
+	cfg.GmailPubSubTopic = "projects/example/topics/ledger-gmail"
+	server := &Server{cfg: cfg}
+	api := &fakeGmailAPI{watch: &gmail.WatchResponse{HistoryId: 99, Expiration: 100}}
+
+	connection, err := server.gmailConnectionFromOAuth(context.Background(), api, &gmail.Profile{EmailAddress: "owner@example.com", HistoryId: 42}, "encrypted", "label-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.watchCalls != 1 || connection.HistoryID != 99 || connection.WatchExpiration != 100 {
+		t.Fatalf("connection=%#v watchCalls=%d", connection, api.watchCalls)
+	}
+}
+
+func TestGmailPubSubIsDisabledInPollMode(t *testing.T) {
+	cfg := testLedger(t)
+	cfg.GmailClientID = "configured"
+	cfg.GmailDeliveryMode = "poll"
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	response := httptest.NewRecorder()
+	newRouter(cfg, server).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/integrations/gmail/pubsub", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

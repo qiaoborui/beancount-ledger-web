@@ -54,6 +54,15 @@ Compose keeps `BUB_TELEGRAM_MODE=polling` by default. Webhook mode is intended
 for the hosted Cloud Run deployment where the public Go API receives Telegram's
 webhook; a LAN self-hosted instance should keep polling.
 
+Gmail bill import also defaults to outbound polling in this Compose deployment.
+Set the optional `GMAIL_*` values in `.env.selfhost` (including
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URL`,
+`GMAIL_ALLOWED_SENDERS`, and `GMAIL_TOKEN_ENCRYPTION_KEY`), then connect Gmail
+from `/import`. Keep `GMAIL_DELIVERY_MODE=poll` for Tailnet/LAN deployments:
+the server does not need a public Pub/Sub webhook or Cloud Scheduler. See
+[gmail-import-automation.md](gmail-import-automation.md) for OAuth callback,
+interval, and migration details.
+
 Use `openssl rand -hex 32` for `POSTGRES_PASSWORD`. It is both high-entropy and
 safe in Compose and PostgreSQL environment variables.
 
