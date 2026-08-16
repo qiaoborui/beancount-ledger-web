@@ -12,7 +12,7 @@ vi.mock("@/lib/indexedLedgerCache", () => ({
   writeIndexedCache: indexedCache.write,
 }));
 
-import { maskSensitiveLedgerCache, readLedgerCacheAsync, writeLedgerCache } from "./storage";
+import { maskSensitiveLedgerCache, readLedgerCacheAsync, readThemeMode, writeLedgerCache, writeThemeMode } from "./storage";
 
 const range: TimeRange = { start: "2026-08-01", end: "2026-09-01", preset: "month" };
 
@@ -123,6 +123,25 @@ describe("ledger cache storage boundary", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [undefined, "system"],
+    ["light", "light"],
+    ["dark", "dark"],
+  ])("reads a stored theme mode of %s as %s", (stored, expected) => {
+    memoryStorage(stored ? { ledger_theme_mode: stored } : {});
+
+    expect(readThemeMode()).toBe(expected);
+  });
+
+  it("restores system theme mode after switching from an explicit theme", () => {
+    const local = memoryStorage({ ledger_theme_mode: "dark" });
+
+    writeThemeMode("system");
+
+    expect(local.has("ledger_theme_mode")).toBe(false);
+    expect(readThemeMode()).toBe("system");
   });
 
   it("masks sensitive fields before writing to durable storage", async () => {
