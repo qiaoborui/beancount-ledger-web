@@ -46,6 +46,16 @@ for required in \
   fi
 done
 
+if ! grep -Fq 'compose "$maintenance_env" up -d --no-build database server indexer frontend' scripts/selfhost/beancount-ledger-deploy-run; then
+  echo "maintenance validation must start only services that can run behind the 503 guard" >&2
+  exit 1
+fi
+if grep -Fq 'compose "$maintenance_env" up -d --no-build database server agent indexer frontend' scripts/selfhost/beancount-ledger-deploy-run \
+  || grep -Fq 'wait_for_healthy_service "$maintenance_env" agent' scripts/selfhost/beancount-ledger-deploy-run; then
+  echo "agent cannot become ready while the server is in deployment maintenance mode" >&2
+  exit 1
+fi
+
 if grep -Eq 'runs-on:[[:space:]]*\[?self-hosted|runs-on:[[:space:]]*mibook' "$workflow"; then
   echo "local production deployment must not run on a self-hosted runner" >&2
   exit 1

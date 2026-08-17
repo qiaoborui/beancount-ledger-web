@@ -782,11 +782,10 @@ jq -n \
     backup_file: $backup_file, instance: $instance, status_file: $status_file, sha: $sha}' \
   | write_json_atomic "$pending_file"
 
-compose "$maintenance_env" up -d --no-build database server agent indexer frontend
+compose "$maintenance_env" up -d --no-build database server indexer frontend
 jq '.phase = "candidate"' "$pending_file" | write_json_atomic "$pending_file"
 wait_for_healthy_service "$maintenance_env" database
 wait_for_healthy_service "$maintenance_env" server
-wait_for_healthy_service "$maintenance_env" agent
 wait_for_healthy_service "$maintenance_env" indexer
 wait_for_running_service "$maintenance_env" frontend
 compose "$maintenance_env" exec -T server python3 -c \
