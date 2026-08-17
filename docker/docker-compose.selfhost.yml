@@ -9,7 +9,8 @@ x-database-env: &database-env
 
 services:
   database:
-    image: postgres:17-alpine
+    image: ${SELFHOST_POSTGRES_IMAGE:-postgres:17-alpine}
+    pull_policy: ${SELFHOST_DATABASE_PULL_POLICY:-missing}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ledger
@@ -24,6 +25,8 @@ services:
       retries: 20
 
   server:
+    image: ${SELFHOST_SERVER_IMAGE:-beancount-ledger-selfhost-server:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -31,6 +34,7 @@ services:
       args:
         LEDGER_UID: "${LEDGER_UID:-1000}"
         LEDGER_GID: "${LEDGER_GID:-1000}"
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -52,6 +56,7 @@ services:
       WEBAUTHN_PUBLIC_ORIGIN: "${WEBAUTHN_PUBLIC_ORIGIN:-}"
       WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
       LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
+      LEDGER_MAINTENANCE_MODE: "${LEDGER_MAINTENANCE_MODE:-false}"
       # Gmail polling is outbound-only and is the self-hosted default. Leave
       # the remaining Gmail values empty to keep the integration disabled.
       GMAIL_DELIVERY_MODE: "${GMAIL_DELIVERY_MODE:-poll}"
@@ -81,10 +86,14 @@ services:
       retries: 12
 
   agent:
+    image: ${SELFHOST_AGENT_IMAGE:-beancount-ledger-selfhost-agent:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
       target: agent
+      args:
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
     restart: unless-stopped
     depends_on:
       database:
@@ -111,6 +120,8 @@ services:
       retries: 12
 
   indexer:
+    image: ${SELFHOST_INDEXER_IMAGE:-beancount-ledger-selfhost-indexer:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -118,6 +129,7 @@ services:
       args:
         LEDGER_UID: "${LEDGER_UID:-1000}"
         LEDGER_GID: "${LEDGER_GID:-1000}"
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
     restart: unless-stopped
     depends_on:
       database:
@@ -131,6 +143,7 @@ services:
       INDEXER_IDENTITY_TOKEN: ${INDEXER_IDENTITY_TOKEN:?set INDEXER_IDENTITY_TOKEN in .env.selfhost}
       LEDGER_INDEX_NOTIFY_ENABLED: "true"
       LEDGER_INDEX_BEAN_CHECK_ENABLED: "true"
+      LEDGER_INDEXER_STANDBY: "${LEDGER_INDEXER_STANDBY:-false}"
       BEAN_CHECK_BIN: bean-check
     volumes:
       - type: bind
@@ -146,17 +159,22 @@ services:
       retries: 20
 
   frontend:
+    image: ${SELFHOST_FRONTEND_IMAGE:-beancount-ledger-selfhost-frontend:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
       target: frontend
       args:
         VITE_ENABLE_SPEED_INSIGHTS: "false"
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
     restart: unless-stopped
     expose:
       - "80"
 
   caddy:
+    image: ${SELFHOST_CADDY_IMAGE:-beancount-ledger-selfhost-caddy:local}
+    pull_policy: ${SELFHOST_CADDY_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -174,6 +192,7 @@ services:
       - "${SELFHOST_HTTP_BIND_ADDRESS:-127.0.0.1}:${SELFHOST_HTTP_PORT:-8080}:80"
       - "${SELFHOST_HTTPS_BIND_ADDRESS:-127.0.0.1}:${SELFHOST_HTTPS_PORT:-8443}:443"
     volumes:
+      - ${SELFHOST_CADDYFILE_PATH:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
 

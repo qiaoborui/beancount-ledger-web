@@ -1,0 +1,292 @@
+name: Deploy local self-hosted stack
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-selfhost-production
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SERVER_IMAGE: ghcr.io/qiaoborui/beancount-ledger-web-server
+  INDEXER_IMAGE: ghcr.io/qiaoborui/beancount-ledger-web-indexer
+  AGENT_IMAGE: ghcr.io/qiaoborui/beancount-ledger-web-agent
+  FRONTEND_IMAGE: ghcr.io/qiaoborui/beancount-ledger-web-frontend
+
+jobs:
+  ref-guard:
+    name: Deployment ref guard
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.activation.outputs.enabled }}
+    steps:
+      - name: Require main for manual deployment
+        id: activation
+        env:
+          DEPLOY_ENABLED: ${{ vars.SELFHOST_DEPLOY_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$GIT_REF" != "refs/heads/main" ]]; then
+            echo "::error::manual self-hosted deployment must target refs/heads/main"
+            exit 1
+          fi
+          if [[ "$DEPLOY_ENABLED" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "::error::set repository variable SELFHOST_DEPLOY_ENABLED=true only after every prerequisite is ready"
+              exit 1
+            fi
+            echo "::notice::local self-hosted deployment remains disabled"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+  checks:
+    name: Application checks
+    needs: ref-guard
+    uses: ./.github/workflows/ci.yml
+    with:
+      reusable_call: true
+      backend: true
+      agent: true
+      web: true
+
+  build-server:
+    name: Build self-hosted server
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ghcr.io/qiaoborui/beancount-ledger-web-server@${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable server image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: selfhost-server
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.SERVER_IMAGE }}:selfhost-uid1000-gid1000-sha-${{ github.sha }}
+          build-args: |
+            LEDGER_UID=1000
+            LEDGER_GID=1000
+            VCS_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=selfhost-server
+          cache-to: type=gha,scope=selfhost-server,mode=max
+
+  build-indexer:
+    name: Build self-hosted indexer
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ghcr.io/qiaoborui/beancount-ledger-web-indexer@${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable indexer image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: selfhost-indexer
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.INDEXER_IMAGE }}:selfhost-uid1000-gid1000-sha-${{ github.sha }}
+          build-args: |
+            LEDGER_UID=1000
+            LEDGER_GID=1000
+            VCS_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=selfhost-indexer
+          cache-to: type=gha,scope=selfhost-indexer,mode=max
+
+  build-agent:
+    name: Build self-hosted agent
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ghcr.io/qiaoborui/beancount-ledger-web-agent@${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable agent image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: agent
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.AGENT_IMAGE }}:selfhost-sha-${{ github.sha }}
+          build-args: VCS_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=selfhost-agent
+          cache-to: type=gha,scope=selfhost-agent,mode=max
+
+  build-frontend:
+    name: Build self-hosted frontend
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ghcr.io/qiaoborui/beancount-ledger-web-frontend@${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable frontend image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: frontend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.FRONTEND_IMAGE }}:selfhost-sha-${{ github.sha }}
+          build-args: |
+            VITE_ENABLE_SPEED_INSIGHTS=false
+            VCS_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=selfhost-frontend
+          cache-to: type=gha,scope=selfhost-frontend,mode=max
+
+  deploy:
+    name: Deploy local production
+    if: ${{ needs.ref-guard.outputs.enabled == 'true' }}
+    needs: [ref-guard, checks, build-server, build-indexer, build-agent, build-frontend]
+    runs-on: ubuntu-latest
+    environment: local-selfhost-production
+    permissions:
+      contents: read
+    steps:
+      - name: Reject an outdated main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo "::error::main advanced to ${current_main}; refusing to deploy ${GITHUB_SHA}"
+            exit 1
+          fi
+
+      - name: Join Headscale for this job
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          authkey: ${{ secrets.HEADSCALE_CI_PREAUTH_KEY }}
+          version: 1.94.2
+          hostname: gha-ledger-${{ github.run_id }}
+          args: --login-server=${{ vars.HEADSCALE_CONTROL_URL }} --accept-dns=false
+          ping: ${{ vars.SELFHOST_DEPLOY_IP }}
+          log-mode: quiet
+
+      - name: Submit immutable release manifest
+        env:
+          DEPLOY_KEY: ${{ secrets.SELFHOST_DEPLOY_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SELFHOST_SSH_KNOWN_HOSTS }}
+          DEPLOY_IP: ${{ vars.SELFHOST_DEPLOY_IP }}
+          DEPLOY_USER: ${{ vars.SELFHOST_DEPLOY_USER }}
+          SERVER: ${{ needs.build-server.outputs.image }}
+          INDEXER: ${{ needs.build-indexer.outputs.image }}
+          AGENT: ${{ needs.build-agent.outputs.image }}
+          FRONTEND: ${{ needs.build-frontend.outputs.image }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_file="$(mktemp)"
+          known_hosts_file="$(mktemp)"
+          manifest_file="$(mktemp)"
+          trap 'rm -f "$key_file" "$known_hosts_file" "$manifest_file"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          printf '%s\n' "$KNOWN_HOSTS" > "$known_hosts_file"
+
+          image_re='^ghcr\.io/qiaoborui/beancount-ledger-web-(server|indexer|agent|frontend)@sha256:[0-9a-f]{64}$'
+          for image in "$SERVER" "$INDEXER" "$AGENT" "$FRONTEND"; do
+            if [[ ! "$image" =~ $image_re ]]; then
+              echo "::error::build output is not an allowed immutable image: ${image}"
+              exit 1
+            fi
+          done
+
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg server "$SERVER" \
+            --arg indexer "$INDEXER" \
+            --arg agent "$AGENT" \
+            --arg frontend "$FRONTEND" \
+            '{schema: 1, host_contract: 1, repository: $repository, sha: $sha,
+              run_id: $run_id, run_attempt: $run_attempt,
+              images: {server: $server, indexer: $indexer, agent: $agent, frontend: $frontend}}' \
+            > "$manifest_file"
+
+          ssh -i "$key_file" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" \
+            -o ConnectTimeout=15 \
+            "${DEPLOY_USER}@${DEPLOY_IP}" < "$manifest_file"

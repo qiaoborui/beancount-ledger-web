@@ -184,13 +184,22 @@ func buildApplicationDependenciesWithLogger(cfg Config, logger *slog.Logger) (*a
 	if err != nil {
 		return fail(err)
 	}
-	if err := modules.Start(context.Background()); err != nil {
+	if err := startApplicationModules(context.Background(), modules, cfg.MaintenanceMode); err != nil {
 		return fail(err)
 	}
 	dependencies.modules = modules
 	dependencies.moduleNames = modules.Names()
-	dependencies.closers = append(dependencies.closers, modules)
+	if !cfg.MaintenanceMode {
+		dependencies.closers = append(dependencies.closers, modules)
+	}
 	return dependencies, nil
+}
+
+func startApplicationModules(ctx context.Context, modules *ModuleRegistry, maintenanceMode bool) error {
+	if maintenanceMode {
+		return nil
+	}
+	return modules.Start(ctx)
 }
 
 func newApplication(router *gin.Engine, server *Server, closers []io.Closer) *Application {
@@ -209,7 +218,7 @@ func (a *Application) StartGmailPolling(ctx context.Context) {
 		return
 	}
 	a.server.cfgMu.RLock()
-	enabled := gmailPollingEnabled(a.server.cfg)
+	enabled := !a.server.cfg.MaintenanceMode && gmailPollingEnabled(a.server.cfg)
 	a.server.cfgMu.RUnlock()
 	if !enabled {
 		return

@@ -1,0 +1,807 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+config_dir=/etc/beancount-ledger-selfhost
+compose_file="${config_dir}/compose.yml"
+runtime_env="${config_dir}/runtime.env"
+caddyfile="${config_dir}/Caddyfile"
+contract_file="${config_dir}/deploy-contract"
+state_dir=/var/lib/beancount-ledger-deploy
+release_dir="${state_dir}/releases"
+run_dir="${state_dir}/runs"
+pending_file="${state_dir}/pending.json"
+activation_file="${state_dir}/activation.json"
+completion_file="${state_dir}/completion.json"
+rollback_activation_file="${state_dir}/rollback-activation.json"
+rollback_file="${state_dir}/rollback.json"
+current_env="${release_dir}/current.env"
+previous_env="${release_dir}/previous.env"
+backup_root="${state_dir}/backups"
+lock_file=/run/lock/beancount-ledger-selfhost.deploy.lock
+project=beancount-ledger-selfhost
+postgres_image='postgres:17-alpine@sha256:67f624a4ad70edba8d65c82341124fab7054b277b4f7dea4b04be6f939ce2314'
+caddy_image='caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648'
+public_origin=https://beancount.mesh.arpa
+health_timeout_seconds=120
+compose_timeout_seconds=600
+host_contract=1
+emergency_release_env=""
+
+log() {
+  printf '[selfhost-deploy] %s\n' "$*"
+}
+
+compose() {
+  local release_env="$1"
+  shift
+  timeout --foreground "${DEPLOY_COMMAND_TIMEOUT_SECONDS:-$compose_timeout_seconds}" \
+    docker compose \
+    -p "$project" \
+    --env-file "$runtime_env" \
+    --env-file "$release_env" \
+    -f "$compose_file" \
+    "$@"
+}
+
+quiesce_application() {
+  local release_env="$1"
+  local service container_id container_ids state
+
+  compose "$release_env" stop caddy frontend agent indexer server || true
+  for service in caddy frontend agent indexer server; do
+    container_ids="$(DEPLOY_COMMAND_TIMEOUT_SECONDS=15 compose "$release_env" ps -aq "$service")" || return 1
+    while IFS= read -r container_id; do
+      if [[ -z "$container_id" ]]; then
+        continue
+      fi
+      state="$(timeout --foreground 15 docker inspect --format '{{.State.Status}}' "$container_id")" || return 1
+      if [[ "$state" == "paused" ]]; then
+        timeout --foreground 15 docker unpause "$container_id" >/dev/null || return 1
+        state=running
+      fi
+      if [[ "$state" != "exited" && "$state" != "dead" && "$state" != "created" ]]; then
+        timeout --foreground 45 docker stop --time 30 "$container_id" >/dev/null \
+          || timeout --foreground 15 docker kill "$container_id" >/dev/null \
+          || return 1
+      fi
+      state="$(timeout --foreground 15 docker inspect --format '{{.State.Status}}' "$container_id")" || return 1
+      if [[ "$state" != "exited" && "$state" != "dead" && "$state" != "created" ]]; then
+        echo "service remained active while quiescing: ${service}" >&2
+        return 1
+      fi
+    done <<< "$container_ids"
+  done
+}
+
+write_json_atomic() {
+  local destination="$1"
+  local temporary
+  temporary="$(mktemp "$(dirname "$destination")/.json.XXXXXX")" || return 1
+  if ! cat > "$temporary" \
+    || ! chmod 600 "$temporary" \
+    || ! sync -f "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv "$temporary" "$destination"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  sync -f "$(dirname "$destination")" || return 1
+}
+
+validate_fixed_host() {
+  local required_file required_command
+  for required_file in "$compose_file" "$runtime_env" "$caddyfile" "$contract_file" "$current_env"; do
+    if [[ ! -f "$required_file" ]]; then
+      echo "required host deployment file is missing: ${required_file}" >&2
+      return 1
+    fi
+  done
+  for required_command in awk cmp curl df dirname docker flock git install jq mktemp mv runuser sha256sum stat sync timeout; do
+    if ! command -v "$required_command" >/dev/null 2>&1; then
+      echo "required host command is unavailable: ${required_command}" >&2
+      return 1
+    fi
+  done
+  if [[ "$(stat -c '%U:%G:%a' "$config_dir")" != "root:root:700" ]]; then
+    echo "deployment configuration directory must be root:root mode 0700" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%U:%G:%a' "$runtime_env")" != "root:root:600" ]]; then
+    echo "runtime.env must be root:root mode 0600" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%U:%G:%a' "$compose_file")" != "root:root:644" \
+        || "$(stat -c '%U:%G:%a' "$caddyfile")" != "root:root:644" \
+        || "$(stat -c '%U:%G:%a' "$contract_file")" != "root:root:644" \
+        || "$(stat -c '%U:%G:%a' "$current_env")" != "root:root:600" ]]; then
+    echo "fixed deployment files have unsafe ownership or modes" >&2
+    return 1
+  fi
+  if [[ "$(<"$contract_file")" != "$host_contract" ]]; then
+    echo "installed host contract is unsupported" >&2
+    return 1
+  fi
+}
+
+wait_for_healthy_service() {
+  local release_env="$1"
+  local service="$2"
+  local deadline=$((SECONDS + health_timeout_seconds))
+  local container_id health state
+  while (( SECONDS < deadline )); do
+    container_id="$(DEPLOY_COMMAND_TIMEOUT_SECONDS=15 compose "$release_env" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      state="$(timeout --foreground 15 docker inspect --format '{{.State.Status}}' "$container_id")"
+      health="$(timeout --foreground 15 docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")"
+      if [[ "$state" == "running" && "$health" == "healthy" ]]; then
+        return 0
+      fi
+    fi
+    sleep 3
+  done
+  echo "service did not become healthy: ${service}" >&2
+  return 1
+}
+
+wait_for_running_service() {
+  local release_env="$1"
+  local service="$2"
+  local deadline=$((SECONDS + health_timeout_seconds))
+  local container_id state
+  while (( SECONDS < deadline )); do
+    container_id="$(DEPLOY_COMMAND_TIMEOUT_SECONDS=15 compose "$release_env" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      state="$(timeout --foreground 15 docker inspect --format '{{.State.Status}}' "$container_id")"
+      if [[ "$state" == "running" ]]; then
+        return 0
+      fi
+    fi
+    sleep 3
+  done
+  echo "service did not start: ${service}" >&2
+  return 1
+}
+
+start_active_release() {
+  local release_env="$1"
+
+  compose "$release_env" up -d --no-build database server agent indexer frontend || return 1
+  wait_for_healthy_service "$release_env" database || return 1
+  wait_for_healthy_service "$release_env" server || return 1
+  wait_for_healthy_service "$release_env" agent || return 1
+  wait_for_healthy_service "$release_env" indexer || return 1
+  wait_for_running_service "$release_env" frontend || return 1
+  compose "$release_env" exec -T server python3 -c \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/ready', timeout=5)" || return 1
+  compose "$release_env" exec -T indexer python3 -c \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/ready', timeout=5)" || return 1
+  compose "$release_env" up -d --no-build caddy || return 1
+  wait_for_running_service "$release_env" caddy || return 1
+  curl --max-time 15 -fsS http://127.0.0.1:3000/api/ready >/dev/null || return 1
+  curl --resolve beancount.mesh.arpa:443:127.0.0.1 \
+    --cacert /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt \
+    --max-time 15 -fsS "${public_origin}/api/ready" >/dev/null || return 1
+}
+
+stop_active_release_after_signal() {
+  trap - INT TERM
+  if [[ -n "$emergency_release_env" ]]; then
+    quiesce_application "$emergency_release_env" || true
+  fi
+  exit 130
+}
+
+activate_rollback_release() {
+  if [[ ! -f "$rollback_activation_file" ]]; then
+    return 0
+  fi
+  if [[ -f "$pending_file" ]]; then
+    echo "rollback activation cannot start while pending.json remains" >&2
+    return 1
+  fi
+
+  local source_sha rollback_instance release_env
+  source_sha="$(jq -r '.source_sha' "$rollback_activation_file")"
+  rollback_instance="$(jq -r '.instance' "$rollback_activation_file")"
+  release_env="$(jq -r '.release_env' "$rollback_activation_file")"
+  if [[ "$(jq -r '.schema' "$rollback_activation_file")" != "1" \
+        || ! "$source_sha" =~ ^[0-9a-f]{40}$ \
+        || ! "$rollback_instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ \
+        || "$release_env" != "${release_dir}/${rollback_instance}.prior.env" \
+        || ! -f "$release_env" \
+        || "$(stat -c '%U:%G:%a' "$release_env")" != "root:root:600" ]]; then
+    echo "rollback activation metadata is invalid" >&2
+    return 1
+  fi
+  if ! cmp -s "$release_env" "$current_env"; then
+    echo "rollback activation does not match current.env" >&2
+    return 1
+  fi
+
+  emergency_release_env="$release_env"
+  log "activating restored prior release"
+  quiesce_application "$release_env" || return 1
+  if ! start_active_release "$release_env"; then
+    quiesce_application "$release_env" || return 1
+    return 1
+  fi
+  emergency_release_env=""
+  if ! rm -f "$rollback_activation_file"; then
+    quiesce_application "$release_env" || return 1
+    return 1
+  fi
+  if ! sync -f "$state_dir"; then
+    log "rollback activation marker removal could not be fsynced; a reboot may safely replay activation"
+  fi
+  log "restored prior release activation complete"
+}
+
+finalize_completed_activation() {
+  if [[ ! -f "$completion_file" ]]; then
+    return 0
+  fi
+  if [[ -f "$activation_file" ]]; then
+    echo "activation cannot be completed while its activation marker remains" >&2
+    return 1
+  fi
+
+  local completed_sha completed_instance completed_env completed_status completed_backup
+  completed_sha="$(jq -r '.sha' "$completion_file")"
+  completed_instance="$(jq -r '.instance' "$completion_file")"
+  completed_env="$(jq -r '.deployed_env' "$completion_file")"
+  completed_status="$(jq -r '.status_file' "$completion_file")"
+  completed_backup="$(jq -r '.backup_file' "$completion_file")"
+  if [[ "$(jq -r '.schema' "$completion_file")" != "1" \
+        || ! "$completed_sha" =~ ^[0-9a-f]{40}$ \
+        || ! "$completed_instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ \
+        || "$completed_env" != "${release_dir}/${completed_sha}-${completed_instance}.candidate.env" \
+        || "$completed_status" != "${run_dir}/${completed_instance}.status.json" \
+        || ! "$completed_backup" =~ ^${backup_root}/deploy-${completed_sha}-${completed_instance}-[0-9]{8}T[0-9]{6}Z/postgres\.dump$ \
+        || ! -f "$completed_env" \
+        || ! -f "$completed_backup" \
+        || ! -f "$rollback_file" ]]; then
+    echo "completed activation metadata is invalid" >&2
+    return 1
+  fi
+  if ! cmp -s "$completed_env" "$current_env" \
+    || [[ "$(jq -r '.deployed_sha' "$rollback_file")" != "$completed_sha" \
+          || "$(jq -r '.instance' "$rollback_file")" != "$completed_instance" \
+          || "$(jq -r '.deployed_env' "$rollback_file")" != "$completed_env" \
+          || "$(jq -r '.backup_file' "$rollback_file")" != "$completed_backup" ]]; then
+    echo "completed activation does not match the active release" >&2
+    return 1
+  fi
+  sha256sum --check "${completed_backup}.sha256" || return 1
+  emergency_release_env="$completed_env"
+  quiesce_application "$completed_env" || return 1
+  if ! start_active_release "$completed_env"; then
+    quiesce_application "$completed_env" || return 1
+    return 1
+  fi
+  if ! jq -n \
+    --arg sha "$completed_sha" \
+    --arg backup "$completed_backup" \
+    '{ok: true, sha: $sha, backup: $backup}' \
+    | write_json_atomic "$completed_status"; then
+    quiesce_application "$completed_env" || return 1
+    return 1
+  fi
+  emergency_release_env=""
+  if ! rm -f "$completion_file"; then
+    log "release is healthy and status is published; completion marker cleanup will retry on recovery"
+    return 0
+  fi
+  if ! sync -f "$state_dir"; then
+    log "completion marker removal could not be fsynced; a reboot may safely republish status"
+  fi
+  log "activation status publication complete"
+}
+
+activate_committed_release() {
+  if [[ ! -f "$activation_file" ]]; then
+    return 0
+  fi
+
+  local activation_sha activation_instance activation_env activation_status rollback_sha rollback_instance rollback_backup rollback_previous
+  activation_sha="$(jq -r '.sha' "$activation_file")"
+  activation_instance="$(jq -r '.instance' "$activation_file")"
+  activation_env="$(jq -r '.deployed_env' "$activation_file")"
+  activation_status="$(jq -r '.status_file' "$activation_file")"
+  if [[ "$(jq -r '.schema' "$activation_file")" != "1" \
+        || ! "$activation_sha" =~ ^[0-9a-f]{40}$ \
+        || ! "$activation_instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ \
+        || "$activation_env" != "${release_dir}/${activation_sha}-${activation_instance}.candidate.env" \
+        || "$activation_status" != "${run_dir}/${activation_instance}.status.json" \
+        || ! -f "$activation_env" \
+        || "$(stat -c '%U:%G:%a' "$activation_env")" != "root:root:600" \
+        || ! -f "$rollback_file" ]]; then
+    echo "pending activation metadata is invalid" >&2
+    return 1
+  fi
+  if ! cmp -s "$activation_env" "$current_env"; then
+    echo "pending activation does not match current.env" >&2
+    return 1
+  fi
+  rollback_sha="$(jq -r '.deployed_sha' "$rollback_file")"
+  rollback_instance="$(jq -r '.instance' "$rollback_file")"
+  rollback_backup="$(jq -r '.backup_file' "$rollback_file")"
+  rollback_previous="$(jq -r '.previous_env' "$rollback_file")"
+  if [[ "$(jq -r '.schema' "$rollback_file")" != "1" \
+        || "$rollback_sha" != "$activation_sha" \
+        || "$rollback_instance" != "$activation_instance" \
+        || "$(jq -r '.deployed_env' "$rollback_file")" != "$activation_env" \
+        || "$rollback_previous" != "${release_dir}/${activation_instance}.prior.env" \
+        || ! -f "$rollback_previous" \
+        || ! "$rollback_backup" =~ ^${backup_root}/deploy-${activation_sha}-${activation_instance}-[0-9]{8}T[0-9]{6}Z/postgres\.dump$ \
+        || ! -f "$rollback_backup" ]]; then
+    echo "pending activation does not match the rollback record" >&2
+    return 1
+  fi
+  sha256sum --check "${rollback_backup}.sha256" || return 1
+
+  emergency_release_env="$activation_env"
+  log "activating committed release ${activation_sha}"
+  quiesce_application "$activation_env" || return 1
+  if ! start_active_release "$activation_env"; then
+    log "committed release activation failed; keeping activation marker for forward recovery"
+    quiesce_application "$activation_env" || return 1
+    return 1
+  fi
+  if ! jq -n \
+    --argjson schema 1 \
+    --arg sha "$activation_sha" \
+    --arg instance "$activation_instance" \
+    --arg deployed_env "$activation_env" \
+    --arg status_file "$activation_status" \
+    --arg backup_file "$rollback_backup" \
+    '{schema: $schema, sha: $sha, instance: $instance, deployed_env: $deployed_env,
+      status_file: $status_file, backup_file: $backup_file}' \
+    | write_json_atomic "$completion_file"; then
+    quiesce_application "$activation_env" || return 1
+    return 1
+  fi
+  if ! rm -f "$activation_file" || ! sync -f "$state_dir"; then
+    quiesce_application "$activation_env" || return 1
+    return 1
+  fi
+  finalize_completed_activation || return 1
+  emergency_release_env=""
+  log "committed release activation complete"
+}
+
+restore_pending_release() {
+  if [[ ! -f "$pending_file" ]]; then
+    return 0
+  fi
+
+  local phase prior_env candidate_env maintenance_env backup_file pending_sha pending_instance pending_status quiesce_env
+  phase="$(jq -r '.phase' "$pending_file")"
+  prior_env="$(jq -r '.prior_env' "$pending_file")"
+  candidate_env="$(jq -r '.candidate_env // empty' "$pending_file")"
+  maintenance_env="$(jq -r '.maintenance_env // empty' "$pending_file")"
+  backup_file="$(jq -r '.backup_file // empty' "$pending_file")"
+  pending_sha="$(jq -r '.sha' "$pending_file")"
+  pending_instance="$(jq -r '.instance // empty' "$pending_file")"
+  pending_status="$(jq -r '.status_file // empty' "$pending_file")"
+
+  if [[ ! "$phase" =~ ^(pre-backup|backup-complete|candidate|committed|operator-rollback)$ ]]; then
+    echo "pending deployment has an invalid phase" >&2
+    return 1
+  fi
+  if [[ ! "$pending_sha" =~ ^[0-9a-f]{40}$ \
+        || ! "$pending_instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+    echo "pending deployment identity is invalid" >&2
+    return 1
+  fi
+  if [[ "$prior_env" != "${release_dir}/${pending_instance}.prior.env" || ! -f "$prior_env" ]]; then
+    echo "pending deployment does not reference an immutable prior release" >&2
+    return 1
+  fi
+  if [[ "$candidate_env" != "${release_dir}/${pending_sha}-${pending_instance}.candidate.env" || ! -f "$candidate_env" ]]; then
+    echo "pending deployment candidate path escaped the release directory" >&2
+    return 1
+  fi
+  if [[ "$(stat -c '%U:%G:%a' "$prior_env")" != "root:root:600" || \
+        "$(stat -c '%U:%G:%a' "$candidate_env")" != "root:root:600" ]]; then
+    echo "pending release files must be root:root mode 0600" >&2
+    return 1
+  fi
+  if [[ "$phase" != "operator-rollback" ]]; then
+    if [[ "$maintenance_env" != "${release_dir}/${pending_sha}-${pending_instance}.maintenance.env" \
+          || ! -f "$maintenance_env" \
+          || "$(stat -c '%U:%G:%a' "$maintenance_env")" != "root:root:600" ]]; then
+      echo "pending maintenance release file is invalid" >&2
+      return 1
+    fi
+  fi
+
+  if [[ "$phase" == "committed" ]]; then
+    if [[ "$pending_status" != "${run_dir}/${pending_instance}.status.json" ]]; then
+      echo "committed deployment has an invalid run status path" >&2
+      return 1
+    fi
+    if ! cmp -s "$candidate_env" "$current_env"; then
+      echo "committed deployment does not match current.env" >&2
+      return 1
+    fi
+    if [[ ! "$backup_file" =~ ^${backup_root}/deploy-${pending_sha}-${pending_instance}-[0-9]{8}T[0-9]{6}Z/postgres\.dump$ \
+          || ! -f "$backup_file" ]]; then
+      echo "committed deployment has no valid database backup" >&2
+      return 1
+    fi
+    sha256sum --check "${backup_file}.sha256" || return 1
+    jq -n \
+      --argjson schema 1 \
+      --arg deployed_sha "$pending_sha" \
+      --arg instance "$pending_instance" \
+      --arg deployed_env "$candidate_env" \
+      --arg previous_env "$prior_env" \
+      --arg backup_file "$backup_file" \
+      '{schema: $schema, deployed_sha: $deployed_sha, instance: $instance, deployed_env: $deployed_env,
+        previous_env: $previous_env, backup_file: $backup_file}' \
+      | write_json_atomic "$rollback_file" || return 1
+    jq -n \
+      --argjson schema 1 \
+      --arg sha "$pending_sha" \
+      --arg instance "$pending_instance" \
+      --arg deployed_env "$candidate_env" \
+      --arg status_file "$pending_status" \
+      '{schema: $schema, sha: $sha, instance: $instance, deployed_env: $deployed_env,
+        status_file: $status_file}' \
+      | write_json_atomic "$activation_file" || return 1
+    rm -f "$pending_file" || return 1
+    sync -f "$state_dir" || return 1
+    log "committed deployment metadata finalized; forward activation is pending"
+    return 0
+  fi
+
+  log "rolling back pending deployment from phase ${phase}"
+  quiesce_env="$candidate_env"
+  if [[ "$phase" != "operator-rollback" ]]; then
+    quiesce_env="$maintenance_env"
+  fi
+  quiesce_application "$quiesce_env" || return 1
+
+  if [[ "$phase" != "pre-backup" ]]; then
+    if [[ ! "$backup_file" =~ ^${backup_root}/deploy-${pending_sha}-${pending_instance}-[0-9]{8}T[0-9]{6}Z/postgres\.dump$ \
+          || ! -f "$backup_file" ]]; then
+      echo "pending deployment has no valid database backup" >&2
+      return 1
+    fi
+    sha256sum --check "${backup_file}.sha256" || return 1
+    compose "$prior_env" up -d --no-build database || return 1
+    wait_for_healthy_service "$prior_env" database || return 1
+    compose "$prior_env" exec -T database \
+      psql -v ON_ERROR_STOP=1 -U ledger -d postgres \
+      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'ledger' AND pid <> pg_backend_pid();" || return 1
+    compose "$prior_env" exec -T database dropdb -U ledger --if-exists ledger || return 1
+    compose "$prior_env" exec -T database createdb -U ledger ledger || return 1
+    compose "$prior_env" exec -T database pg_restore --exit-on-error -U ledger -d ledger < "$backup_file" || return 1
+  fi
+
+  if ! install -m 600 -o root -g root "$prior_env" "$current_env"; then
+    return 1
+  fi
+  if ! sync -f "$current_env" || ! sync -f "$release_dir"; then
+    return 1
+  fi
+  if [[ -f "$rollback_file" ]] && [[ "$(jq -r '.deployed_sha // empty' "$rollback_file")" == "$pending_sha" ]]; then
+    if ! rm -f "$rollback_file"; then
+      return 1
+    fi
+    if ! sync -f "$state_dir"; then
+      return 1
+    fi
+  fi
+  jq -n \
+    --argjson schema 1 \
+    --arg source_sha "$pending_sha" \
+    --arg instance "$pending_instance" \
+    --arg release_env "$prior_env" \
+    '{schema: $schema, source_sha: $source_sha, instance: $instance, release_env: $release_env}' \
+    | write_json_atomic "$rollback_activation_file" || return 1
+  if ! rm -f "$pending_file" || ! sync -f "$state_dir"; then
+    return 1
+  fi
+  log "pending deployment restored; prior release activation is pending"
+  activate_rollback_release || return 1
+}
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "deployment runner must run as root" >&2
+  exit 1
+fi
+
+install -d -m 700 -o root -g root "$state_dir" "$release_dir" "$run_dir" "$backup_root"
+exec 9> "$lock_file"
+if ! flock -n 9; then
+  echo "another self-hosted deployment is active" >&2
+  exit 1
+fi
+validate_fixed_host
+trap stop_active_release_after_signal INT TERM
+
+if [[ "${1:-}" == "--recover" ]]; then
+  restore_pending_release
+  activate_rollback_release
+  activate_committed_release
+  finalize_completed_activation
+  exit 0
+fi
+
+if [[ "${1:-}" == "--rollback" ]]; then
+  expected_sha="${2:-}"
+  if [[ ! "$expected_sha" =~ ^[0-9a-f]{40}$ || ! -f "$rollback_file" ]]; then
+    echo "a valid deployed SHA and rollback record are required" >&2
+    exit 1
+  fi
+  if [[ -f "$pending_file" || -f "$rollback_activation_file" || -f "$activation_file" || -f "$completion_file" ]]; then
+    echo "an interrupted deployment or activation must be recovered before operator rollback" >&2
+    exit 1
+  fi
+  deployed_sha="$(jq -r '.deployed_sha' "$rollback_file")"
+  instance="$(jq -r '.instance' "$rollback_file")"
+  prior_env="$(jq -r '.previous_env' "$rollback_file")"
+  deployed_env="$(jq -r '.deployed_env' "$rollback_file")"
+  backup_file="$(jq -r '.backup_file' "$rollback_file")"
+  if [[ "$deployed_sha" != "$expected_sha" ]] \
+    || [[ ! "$instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ ]] \
+    || [[ "$prior_env" != "${release_dir}/${instance}.prior.env" ]] \
+    || [[ "$deployed_env" != "${release_dir}/${deployed_sha}-${instance}.candidate.env" ]] \
+    || [[ ! "$backup_file" =~ ^${backup_root}/deploy-${deployed_sha}-${instance}-[0-9]{8}T[0-9]{6}Z/postgres\.dump$ ]] \
+    || [[ ! -f "$prior_env" || ! -f "$deployed_env" || ! -f "$backup_file" ]] \
+    || ! cmp -s "$deployed_env" "$current_env"; then
+    echo "rollback record does not match the active release" >&2
+    exit 1
+  fi
+  jq -n \
+    --arg phase operator-rollback \
+    --arg prior_env "$prior_env" \
+    --arg candidate_env "$deployed_env" \
+    --arg backup_file "$backup_file" \
+    --arg instance "$instance" \
+    --arg sha "$deployed_sha" \
+    '{phase: $phase, prior_env: $prior_env, candidate_env: $candidate_env,
+      backup_file: $backup_file, instance: $instance, sha: $sha}' \
+    | write_json_atomic "$pending_file"
+  restore_pending_release
+  exit 0
+fi
+
+if [[ -f "$pending_file" ]]; then
+  log "recovering an interrupted deployment before accepting a new release"
+  restore_pending_release
+fi
+if [[ -f "$rollback_activation_file" ]]; then
+  log "finishing a restored prior release activation before accepting a new release"
+  activate_rollback_release
+fi
+if [[ -f "$activation_file" ]]; then
+  log "finishing a committed release activation before accepting a new release"
+  activate_committed_release
+fi
+if [[ -f "$completion_file" ]]; then
+  log "publishing a completed activation before accepting a new release"
+  finalize_completed_activation
+fi
+
+instance="${1:-}"
+if [[ ! "$instance" =~ ^[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+  echo "deployment instance identifier is invalid" >&2
+  exit 1
+fi
+manifest_file="${run_dir}/${instance}.manifest.json"
+status_file="${run_dir}/${instance}.status.json"
+if [[ ! -f "$manifest_file" ]]; then
+  echo "deployment manifest does not exist" >&2
+  exit 1
+fi
+sha="$(jq -r '.sha' "$manifest_file")"
+repository="$(jq -r '.repository' "$manifest_file")"
+if [[ "$repository" != "qiaoborui/beancount-ledger-web" || ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "deployment manifest identity is invalid" >&2
+  exit 1
+fi
+if [[ -f "$status_file" ]]; then
+  jq -e --arg sha "$sha" '.ok == true and .sha == $sha' "$status_file" >/dev/null
+  log "deployment instance ${instance} already completed"
+  exit 0
+fi
+
+candidate_env="${release_dir}/${sha}-${instance}.candidate.env"
+maintenance_env="${release_dir}/${sha}-${instance}.maintenance.env"
+prior_env="${release_dir}/${instance}.prior.env"
+backup_dir="${backup_root}/deploy-${sha}-${instance}-$(date -u +%Y%m%dT%H%M%SZ)"
+backup_file="${backup_dir}/postgres.dump"
+deployment_started=false
+rollback_ok=false
+activation_pending=false
+
+finish() {
+  local exit_code=$?
+  local recovery_phase="" recovery_activation_env=""
+  trap - EXIT INT TERM
+  if [[ "$exit_code" -ne 0 ]]; then
+    if [[ "$deployment_started" == "true" && -f "$pending_file" ]]; then
+      recovery_phase="$(jq -r '.phase // empty' "$pending_file")"
+      if restore_pending_release && [[ "$recovery_phase" != "committed" ]]; then
+        rollback_ok=true
+      fi
+    fi
+    if [[ -f "$activation_file" ]]; then
+      activation_pending=true
+      recovery_activation_env="$(jq -r '.deployed_env // empty' "$activation_file")"
+      if [[ "$recovery_activation_env" == "${release_dir}/${sha}-${instance}.candidate.env" ]]; then
+        quiesce_application "$recovery_activation_env" || true
+      fi
+    fi
+    if [[ -f "$completion_file" && ! -f "$activation_file" ]]; then
+      if finalize_completed_activation; then
+        exit 0
+      fi
+    fi
+    jq -n \
+      --arg sha "$sha" \
+      --argjson rollback_ok "$rollback_ok" \
+      --argjson activation_pending "$activation_pending" \
+      '{ok: false, sha: $sha, rollback_ok: $rollback_ok, activation_pending: $activation_pending}' \
+      | write_json_atomic "$status_file"
+  fi
+  exit "$exit_code"
+}
+trap finish EXIT
+trap stop_active_release_after_signal INT TERM
+
+if [[ "$(jq -r '.host_contract' "$manifest_file")" != "$host_contract" ]]; then
+  echo "deployment manifest and host contract do not match" >&2
+  exit 1
+fi
+if [[ ! -d /home/borui/beancount-ledger-selfhost/ledger-checkout ]]; then
+  echo "ledger checkout is missing" >&2
+  exit 1
+fi
+if [[ "$(stat -c '%U' /home/borui/beancount-ledger-selfhost/ledger-checkout)" != "borui" ]]; then
+  echo "ledger checkout must be owned by borui" >&2
+  exit 1
+fi
+if ! ledger_status="$(timeout --foreground 30 runuser -u borui -- env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
+  -C /home/borui/beancount-ledger-selfhost/ledger-checkout status --porcelain)"; then
+  echo "ledger checkout status could not be verified" >&2
+  exit 1
+fi
+if [[ -n "$ledger_status" ]]; then
+  echo "ledger checkout is dirty; refusing deployment" >&2
+  exit 1
+fi
+if ! free_kb="$(df -Pk "$state_dir" | awk 'NR == 2 {print $4}')" \
+  || [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
+  echo "deployment free space could not be verified" >&2
+  exit 1
+fi
+if (( free_kb < 5242880 )); then
+  echo "fewer than 5 GiB are available for deployment and backup" >&2
+  exit 1
+fi
+
+declare -A images
+for component in server indexer agent frontend; do
+  images[$component]="$(jq -r --arg component "$component" '.images[$component]' "$manifest_file")"
+done
+
+install -m 600 -o root -g root "$current_env" "$prior_env"
+sync -f "$prior_env"
+sync -f "$release_dir"
+
+candidate_tmp="$(mktemp "${release_dir}/.release.XXXXXX")"
+{
+  printf 'SELFHOST_SERVER_IMAGE=%s\n' "${images[server]}"
+  printf 'SELFHOST_INDEXER_IMAGE=%s\n' "${images[indexer]}"
+  printf 'SELFHOST_AGENT_IMAGE=%s\n' "${images[agent]}"
+  printf 'SELFHOST_FRONTEND_IMAGE=%s\n' "${images[frontend]}"
+  printf 'SELFHOST_POSTGRES_IMAGE=%s\n' "$postgres_image"
+  printf 'SELFHOST_CADDY_IMAGE=%s\n' "$caddy_image"
+  printf 'SELFHOST_APP_PULL_POLICY=never\n'
+  printf 'SELFHOST_DATABASE_PULL_POLICY=never\n'
+  printf 'SELFHOST_CADDY_PULL_POLICY=never\n'
+  printf 'SELFHOST_CADDYFILE_PATH=%s\n' "$caddyfile"
+  printf 'SELFHOST_VCS_REF=%s\n' "$sha"
+  printf 'LEDGER_MAINTENANCE_MODE=false\n'
+  printf 'LEDGER_INDEXER_STANDBY=false\n'
+} > "$candidate_tmp"
+chmod 600 "$candidate_tmp"
+sync -f "$candidate_tmp"
+mv "$candidate_tmp" "$candidate_env"
+sync -f "$release_dir"
+
+maintenance_tmp="$(mktemp "${release_dir}/.maintenance.XXXXXX")"
+{
+  cat "$candidate_env"
+  printf 'LEDGER_MAINTENANCE_MODE=true\n'
+  printf 'LEDGER_INDEXER_STANDBY=true\n'
+  printf 'BUB_TELEGRAM_TOKEN=\n'
+} > "$maintenance_tmp"
+chmod 600 "$maintenance_tmp"
+sync -f "$maintenance_tmp"
+mv "$maintenance_tmp" "$maintenance_env"
+sync -f "$release_dir"
+
+compose "$candidate_env" config --quiet
+compose "$maintenance_env" config --quiet
+compose "$current_env" config --quiet
+wait_for_healthy_service "$current_env" database
+
+for component in server indexer agent frontend; do
+  log "pulling immutable ${component} image"
+  timeout --foreground 300 docker pull "${images[$component]}"
+  revision="$(timeout --foreground 30 docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${images[$component]}")"
+  if [[ "$revision" != "$sha" ]]; then
+    echo "${component} image revision ${revision} does not match ${sha}" >&2
+    exit 1
+  fi
+done
+timeout --foreground 300 docker pull "$postgres_image"
+timeout --foreground 300 docker pull "$caddy_image"
+
+jq -n \
+  --arg phase pre-backup \
+  --arg prior_env "$prior_env" \
+  --arg candidate_env "$candidate_env" \
+  --arg maintenance_env "$maintenance_env" \
+  --arg instance "$instance" \
+  --arg status_file "$status_file" \
+  --arg sha "$sha" \
+  '{phase: $phase, prior_env: $prior_env, candidate_env: $candidate_env, maintenance_env: $maintenance_env,
+    instance: $instance, status_file: $status_file, sha: $sha}' \
+  | write_json_atomic "$pending_file"
+deployment_started=true
+
+quiesce_application "$current_env"
+install -d -m 700 -o root -g root "$backup_dir"
+compose "$current_env" exec -T database pg_dump -Fc -U ledger -d ledger > "$backup_file"
+compose "$current_env" exec -T database pg_restore --list < "$backup_file" >/dev/null
+sha256sum "$backup_file" > "${backup_file}.sha256"
+chmod 600 "$backup_file" "${backup_file}.sha256"
+sync -f "$backup_file"
+sync -f "${backup_file}.sha256"
+sync -f "$backup_dir"
+
+jq -n \
+  --arg phase backup-complete \
+  --arg prior_env "$prior_env" \
+  --arg candidate_env "$candidate_env" \
+  --arg maintenance_env "$maintenance_env" \
+  --arg backup_file "$backup_file" \
+  --arg instance "$instance" \
+  --arg status_file "$status_file" \
+  --arg sha "$sha" \
+  '{phase: $phase, prior_env: $prior_env, candidate_env: $candidate_env, maintenance_env: $maintenance_env,
+    backup_file: $backup_file, instance: $instance, status_file: $status_file, sha: $sha}' \
+  | write_json_atomic "$pending_file"
+
+compose "$maintenance_env" up -d --no-build database server agent indexer frontend
+jq '.phase = "candidate"' "$pending_file" | write_json_atomic "$pending_file"
+wait_for_healthy_service "$maintenance_env" database
+wait_for_healthy_service "$maintenance_env" server
+wait_for_healthy_service "$maintenance_env" agent
+wait_for_healthy_service "$maintenance_env" indexer
+wait_for_running_service "$maintenance_env" frontend
+compose "$maintenance_env" exec -T server python3 -c \
+  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/ready', timeout=5)"
+quiesce_application "$maintenance_env"
+
+install -m 600 -o root -g root "$prior_env" "$previous_env"
+install -m 600 -o root -g root "$candidate_env" "$current_env"
+sync -f "$previous_env"
+sync -f "$current_env"
+sync -f "$release_dir"
+jq '.phase = "committed"' "$pending_file" | write_json_atomic "$pending_file"
+restore_pending_release
+deployment_started=false
+activate_committed_release
+rollback_ok=true
+trap - EXIT INT TERM
+log "deployment ${sha} is healthy"

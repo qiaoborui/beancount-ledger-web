@@ -1,0 +1,17 @@
+[Unit]
+Description=Recover an interrupted Beancount Ledger Web deployment
+After=docker.service tailscaled.service
+Before=caddy.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/beancount-ledger-recover-pending
+TimeoutStartSec=20min
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=multi-user.target

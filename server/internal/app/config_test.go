@@ -48,6 +48,14 @@ func TestLoadConfigReadsNotificationRefreshInterval(t *testing.T) {
 	}
 }
 
+func TestLoadSelfHostedConfigReadsMaintenanceMode(t *testing.T) {
+	t.Setenv("LEDGER_MAINTENANCE_MODE", "true")
+
+	if !LoadSelfHostedConfig().MaintenanceMode {
+		t.Fatal("MaintenanceMode=false, want true")
+	}
+}
+
 func TestGmailDeliveryModeDefaultsByDeployment(t *testing.T) {
 	if got := LoadWebConfig().GmailDeliveryMode; got != "webhook" {
 		t.Fatalf("web delivery mode=%q, want webhook", got)

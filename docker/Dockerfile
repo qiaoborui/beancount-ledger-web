@@ -3,6 +3,7 @@
 ARG BUILDPLATFORM=linux/amd64
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG VCS_REF=local
 
 # ── Bub Agent runtime ──
 FROM python:3.12-slim-bookworm AS agent-builder
@@ -17,6 +18,8 @@ COPY agent/src ./src
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim-bookworm AS agent
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 WORKDIR /app/agent
 ENV PATH=/app/agent/.venv/bin:$PATH
 ENV PYTHONUNBUFFERED=1
@@ -105,12 +108,16 @@ USER ledger
 
 # ── Recurring self-hosted indexer ──
 FROM selfhost-base AS selfhost-indexer
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 CMD ["/app/ledger-indexer-daemon"]
 
 # ── Complete self-hosted API ──
 # This image includes bean-check because local ledger writes validate and roll
 # back within the user's own mounted ledger directory.
 FROM selfhost-base AS selfhost-server
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 COPY --from=go-builder /app/ledger-selfhost /app/ledger-selfhost
 EXPOSE 3000
 CMD ["/app/ledger-selfhost"]
@@ -128,6 +135,8 @@ RUN pnpm run build
 
 # ── Static SPA ──
 FROM nginx:1.27-alpine AS frontend
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=web-builder /app/web/dist /srv
 

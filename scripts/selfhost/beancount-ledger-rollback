@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "operator rollback must run as root" >&2
+  exit 1
+fi
+if [[ "${1:-}" != "--confirm-deployed-sha" || ! "${2:-}" =~ ^[0-9a-f]{40}$ || "$#" -ne 2 ]]; then
+  echo "usage: beancount-ledger-rollback --confirm-deployed-sha <40-character-sha>" >&2
+  exit 2
+fi
+
+exec /usr/local/sbin/beancount-ledger-deploy-run --rollback "$2"
