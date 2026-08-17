@@ -173,7 +173,7 @@ that public line through the existing admin SSH path, and install it as
 
 ```bash
 {
-  printf '%s ' 'restrict,from="100.64.0.0/10",command="sudo -n /usr/local/sbin/beancount-ledger-deploy-submit"'
+  printf '%s ' 'restrict,from="127.0.0.1",command="sudo -n /usr/local/sbin/beancount-ledger-deploy-submit"'
   cat "$deploy_key_dir/id_ed25519.pub"
 } > "$deploy_key_dir/authorized_key"
 ssh mibook 'install -d -m 700 /home/borui/.config/beancount-ledger-deploy-transfer'
@@ -183,6 +183,14 @@ ssh mibook 'sudo install -m 600 -o ledger-deploy -g ledger-deploy \
   /home/borui/.config/beancount-ledger-deploy-transfer/authorized_key \
   /home/ledger-deploy/.ssh/authorized_keys'
 ```
+
+The production host runs `tailscaled` with `--tun=userspace-networking`, so an
+inbound tailnet connection is handed to `sshd` from loopback. Keep the key's
+`from` restriction at the exact `127.0.0.1` address for this host; using the
+tailnet CIDR rejects the correct key because OpenSSH never sees the remote
+tailnet source address. The Headscale grant remains the network source control:
+only `tag:ci-deploy` may reach this host on TCP/6247. Direct LAN or public
+connections do not arrive from loopback and therefore cannot use this key.
 
 Install `/etc/sudoers.d/beancount-ledger-deploy` as root, mode 0440:
 

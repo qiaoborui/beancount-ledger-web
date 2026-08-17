@@ -6,13 +6,23 @@ workflow="${1:-.github/workflows/deploy-selfhost.yml}"
 ci="${2:-.github/workflows/ci.yml}"
 compose="${3:-docker/docker-compose.selfhost.yml}"
 dockerfile="${4:-docker/Dockerfile}"
+runbook="${5:-docs/headscale-local-cicd.md}"
 
-for file in "$workflow" "$ci" "$compose" "$dockerfile"; do
+for file in "$workflow" "$ci" "$compose" "$dockerfile" "$runbook"; do
   if [[ ! -f "$file" ]]; then
     echo "required self-host deployment file is missing: ${file}" >&2
     exit 1
   fi
 done
+
+if ! grep -Fq 'restrict,from="127.0.0.1",command="sudo -n /usr/local/sbin/beancount-ledger-deploy-submit"' "$runbook"; then
+  echo "userspace Tailscale deploy SSH key must accept only the loopback handoff" >&2
+  exit 1
+fi
+if grep -Fq 'restrict,from="100.64.0.0/10",command="sudo -n /usr/local/sbin/beancount-ledger-deploy-submit"' "$runbook"; then
+  echo "tailnet source CIDR is not visible to sshd behind userspace Tailscale" >&2
+  exit 1
+fi
 
 for required in \
   'branches: [main]' \
