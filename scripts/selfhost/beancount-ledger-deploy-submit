@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+state_dir=/var/lib/beancount-ledger-deploy
+run_dir="${state_dir}/runs"
+max_payload_bytes=32768
+
+payload="$(dd bs=$((max_payload_bytes + 1)) count=1 2>/dev/null)"
+if [[ -z "$payload" || "${#payload}" -gt "$max_payload_bytes" ]]; then
+  echo "deployment manifest is empty or too large" >&2
+  exit 1
+fi
+if ! jq -e '
+  type == "object" and
+  (keys | sort) == ["host_contract", "images", "repository", "run_attempt", "run_id", "schema", "sha"] and
+  .schema == 1 and
+  .host_contract == 1 and
+  .repository == "qiaoborui/beancount-ledger-web" and
+  (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
+  (.run_id | type == "string" and test("^[1-9][0-9]{0,19}$")) and
+  (.run_attempt | type == "string" and test("^[1-9][0-9]{0,3}$")) and
+  (.images | type == "object" and (keys | sort) == ["agent", "frontend", "indexer", "server"])
+' >/dev/null <<< "$payload"; then
+  echo "deployment manifest schema is invalid" >&2
+  exit 1
+fi
+
+declare -A expected_repositories=(
+  [server]='ghcr.io/qiaoborui/beancount-ledger-web-server'
+  [indexer]='ghcr.io/qiaoborui/beancount-ledger-web-indexer'
+  [agent]='ghcr.io/qiaoborui/beancount-ledger-web-agent'
+  [frontend]='ghcr.io/qiaoborui/beancount-ledger-web-frontend'
+)
+for component in server indexer agent frontend; do
+  image="$(jq -r --arg component "$component" '.images[$component]' <<< "$payload")"
+  expected="${expected_repositories[$component]}"
+  if [[ "${image%@sha256:*}" != "$expected" || ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
+    echo "deployment manifest contains an invalid ${component} image" >&2
+    exit 1
+  fi
+done
+
+if [[ "${1:-}" == "--validate-only" && "$#" -eq 1 ]]; then
+  exit 0
+fi
+if [[ "$#" -ne 0 ]]; then
+  echo "deployment submission does not accept arguments" >&2
+  exit 1
+fi
+if [[ "$EUID" -ne 0 ]]; then
+  echo "deployment submission must run as root" >&2
+  exit 1
+fi
+if [[ -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
+  echo "the deployment SSH key does not accept remote commands" >&2
+  exit 1
+fi
+
+install -d -m 700 -o root -g root "$state_dir" "$run_dir"
+
+run_id="$(jq -r '.run_id' <<< "$payload")"
+run_attempt="$(jq -r '.run_attempt' <<< "$payload")"
+instance="${run_id}-${run_attempt}"
+manifest_path="${run_dir}/${instance}.manifest.json"
+status_path="${run_dir}/${instance}.status.json"
+unit="beancount-ledger-deploy@${instance}.service"
+
+if [[ -f "$manifest_path" ]]; then
+  if ! cmp -s <(jq -S . <<< "$payload") <(jq -S . "$manifest_path"); then
+    echo "deployment run identifier was already used with a different manifest" >&2
+    exit 1
+  fi
+else
+  manifest_tmp="$(mktemp "${run_dir}/.manifest.XXXXXX")"
+  trap 'rm -f "$manifest_tmp"' EXIT
+  jq -S . <<< "$payload" > "$manifest_tmp"
+  chmod 600 "$manifest_tmp"
+  mv "$manifest_tmp" "$manifest_path"
+  trap - EXIT
+fi
+
+if [[ -f "$status_path" ]]; then
+  unit_state="$(systemctl show --property=ActiveState --value "$unit")"
+  if [[ "$unit_state" != "activating" && "$unit_state" != "active" && "$unit_state" != "deactivating" ]]; then
+    cat "$status_path"
+    jq -e '.ok == true' "$status_path" >/dev/null
+    exit
+  fi
+fi
+
+systemctl start --no-block "$unit"
+for _ in $(seq 1 1800); do
+  if [[ -f "$status_path" ]]; then
+    unit_state="$(systemctl show --property=ActiveState --value "$unit")"
+    if [[ "$unit_state" != "activating" && "$unit_state" != "active" && "$unit_state" != "deactivating" ]]; then
+      cat "$status_path"
+      jq -e '.ok == true' "$status_path" >/dev/null
+      exit
+    fi
+  fi
+  if systemctl is-failed --quiet "$unit"; then
+    echo "deployment service failed before publishing status" >&2
+    journalctl -u "$unit" --no-pager --lines=40 >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+echo "deployment service did not publish status within one hour" >&2
+exit 1

@@ -41,6 +41,12 @@ jobs:
       - name: Verify deployment workflow guards
         run: bash .github/scripts/verify-deploy-google-cloud.sh
 
+      - name: Verify self-hosted deployment guards
+        run: bash .github/scripts/verify-deploy-selfhost.sh
+
+      - name: Test self-hosted deployment manifest validation
+        run: bash .github/scripts/test-deploy-selfhost-submit.sh
+
       - name: Detect changed components
         id: changes
         env:
@@ -164,3 +170,44 @@ jobs:
       - name: Build
         working-directory: web
         run: pnpm run build
+
+  gate:
+    name: Gate
+    if: ${{ always() }}
+    needs: [plan, go, agent, web]
+    runs-on: ubuntu-latest
+    env:
+      PLAN_RESULT: ${{ needs.plan.result }}
+      BACKEND_REQUIRED: ${{ needs.plan.outputs.backend }}
+      BACKEND_RESULT: ${{ needs.go.result }}
+      AGENT_REQUIRED: ${{ needs.plan.outputs.agent }}
+      AGENT_RESULT: ${{ needs.agent.result }}
+      WEB_REQUIRED: ${{ needs.plan.outputs.web }}
+      WEB_RESULT: ${{ needs.web.result }}
+    steps:
+      - name: Require every planned check to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$PLAN_RESULT" != "success" ]]; then
+            echo "::error::CI planning failed"
+            exit 1
+          fi
+
+          check_result() {
+            local component="$1"
+            local required="$2"
+            local result="$3"
+            if [[ "$required" == "true" && "$result" != "success" ]]; then
+              echo "::error::${component} was required but finished with ${result}"
+              return 1
+            fi
+            if [[ "$required" != "true" && "$result" != "skipped" ]]; then
+              echo "::error::${component} was not required but finished with ${result}"
+              return 1
+            fi
+          }
+
+          check_result Backend "$BACKEND_REQUIRED" "$BACKEND_RESULT"
+          check_result Agent "$AGENT_REQUIRED" "$AGENT_RESULT"
+          check_result Frontend "$WEB_REQUIRED" "$WEB_RESULT"

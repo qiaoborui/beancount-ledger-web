@@ -46,3 +46,22 @@ func TestIndexerReadyFailsWhenLatestAttemptHasAnError(t *testing.T) {
 		t.Fatalf("body=%s", recorder.Body.String())
 	}
 }
+
+func TestIndexerStandbyDoesNotStartAndRemainsUnready(t *testing.T) {
+	t.Setenv("LEDGER_INDEXER_STANDBY", "true")
+	if indexerShouldRun() {
+		t.Fatal("indexerShouldRun=true in standby mode")
+	}
+
+	status := &indexerStatus{}
+	health := httptest.NewRecorder()
+	status.health(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("health status=%d body=%s", health.Code, health.Body.String())
+	}
+	ready := httptest.NewRecorder()
+	status.ready(ready, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if ready.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ready status=%d body=%s", ready.Code, ready.Body.String())
+	}
+}

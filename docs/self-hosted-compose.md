@@ -3,8 +3,10 @@
 This deployment keeps the browser service, Postgres data, credentials, and
 indexer on your Docker host. The ledger remains a private GitHub repository:
 the API uses GitHub's Contents API for every read and write, and only the
-indexer receives a local checkout to publish the Postgres read model. It uses
-no public endpoint and no GitHub Action.
+indexer receives a local checkout to publish the Postgres read model. The
+runtime itself needs no public endpoint. Operators may build it locally, or use
+the digest-pinned GitHub-hosted deployment described in
+[headscale-local-cicd.md](headscale-local-cicd.md).
 
 ## Requirements
 
@@ -80,10 +82,14 @@ requires an existing absolute `LEDGER_ROOT`, its internal config URL, and its
 identity token. This keeps each service's credential and filesystem boundary
 explicit.
 
-The stack is always built from the checked-out source — the `-selfhost-*`
-images are intentionally never pushed to a registry because they bake in your
-`LEDGER_UID`/`LEDGER_GID`, which differs by host. For a repeatable deployment,
-check out a released commit or tag before running this command.
+Local operator starts build from the checked-out source. The automated mibook
+deployment instead publishes host-specific `linux/amd64` server and indexer
+images with `LEDGER_UID=1000` and `LEDGER_GID=1000`, then deploys all four
+application images by registry digest. Hosts with different IDs must keep using
+the local build path or create a separately reviewed image profile.
+`LEDGER_MAINTENANCE_MODE` and `LEDGER_INDEXER_STANDBY` are deployer-owned
+transaction controls; do not set them in `.env.selfhost` or the production
+operator runtime environment.
 
 Read the one-time installation code, then open `http://localhost:8080`:
 
@@ -252,7 +258,7 @@ docker compose --env-file .env.selfhost -f docker/docker-compose.selfhost.yml ex
 Finally start the full stack. The indexer will fetch GitHub and replace the
 active read-model snapshot from its checkout.
 
-Before an update, create the recovery set above and record the currently
+For a manual update, create the recovery set above and record the currently
 checked-out commit. Then update the source, validate the rendered Compose
 configuration, rebuild, and inspect both setup status and readiness:
 

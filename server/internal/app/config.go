@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	SelfHosted                  bool
+	MaintenanceMode             bool
 	AppRoot                     string
 	LedgerClusterID             string
 	LedgerRoot                  string
@@ -89,6 +90,7 @@ func LoadConfig() Config {
 	ledgerReadModel := strings.ToLower(env("LEDGER_READ_MODEL", "files"))
 
 	return Config{
+		MaintenanceMode:             envBool("LEDGER_MAINTENANCE_MODE", false),
 		AppRoot:                     "",
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		LedgerRoot:                  filepath.Clean(ledgerRoot),
@@ -188,6 +190,7 @@ func LoadIndexerConfig() Config {
 func loadBaseConfig() Config {
 	zipWorkerURL, zipWorkerAudience := loadZIPWorkerConfig()
 	return Config{
+		MaintenanceMode:             envBool("LEDGER_MAINTENANCE_MODE", false),
 		AppRoot:                     "",
 		LedgerClusterID:             strings.TrimSpace(os.Getenv("LEDGER_CLUSTER_ID")),
 		AuthTransport:               authTransportMode(),

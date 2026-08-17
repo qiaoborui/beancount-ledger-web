@@ -1,0 +1,20 @@
+[Unit]
+Description=Deploy Beancount Ledger Web release %i
+After=docker.service network-online.target
+Requires=docker.service
+OnFailure=beancount-ledger-recover.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/beancount-ledger-deploy-run %i
+TimeoutStartSec=35min
+TimeoutStopSec=20min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

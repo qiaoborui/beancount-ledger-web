@@ -96,6 +96,66 @@ func TestApplicationGmailPollingDoesNotStartAfterClose(t *testing.T) {
 	}
 }
 
+func TestApplicationMaintenanceModeDoesNotStartBackgroundWork(t *testing.T) {
+	var moduleStarted, pollWorkerCreated atomic.Int32
+	registry, err := NewModuleRegistry(testModule{
+		name: "background",
+		start: func(context.Context) error {
+			moduleStarted.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startApplicationModules(context.Background(), registry, true); err != nil {
+		t.Fatal(err)
+	}
+	application := newApplication(gin.New(), &Server{cfg: Config{
+		MaintenanceMode:   true,
+		GmailDeliveryMode: "poll",
+		GmailClientID:     "configured",
+	}}, nil)
+	application.pollWorkerFactory = func() *gmailPollWorker {
+		pollWorkerCreated.Add(1)
+		return newGmailPollWorker(time.Hour, time.Second, nil, func(context.Context) error { return nil })
+	}
+
+	application.StartGmailPolling(context.Background())
+
+	if got := moduleStarted.Load(); got != 0 {
+		t.Fatalf("modules started in maintenance mode=%d, want 0", got)
+	}
+	if got := pollWorkerCreated.Load(); got != 0 {
+		t.Fatalf("Gmail poll workers created in maintenance mode=%d, want 0", got)
+	}
+}
+
+func TestMaintenanceModeOnlyAllowsHealthAndReadiness(t *testing.T) {
+	router := gin.New()
+	router.Use(maintenanceModeGuard(true))
+	called := false
+	router.Any("/*path", func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusNoContent)
+	})
+
+	blocked := httptest.NewRecorder()
+	router.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/api/setup/install", nil))
+	if blocked.Code != http.StatusServiceUnavailable || called {
+		t.Fatalf("blocked status=%d called=%v body=%s", blocked.Code, called, blocked.Body.String())
+	}
+
+	for _, path := range []string{"/api/health", "/api/ready"} {
+		called = false
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNoContent || !called {
+			t.Fatalf("%s status=%d called=%v", path, response.Code, called)
+		}
+	}
+}
+
 func TestApplicationGmailPollingRegistersWorkerBeforeClose(t *testing.T) {
 	started := make(chan struct{})
 	stopped := make(chan struct{})

@@ -48,7 +48,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go runIndexer(ctx, logger, cfg, status, interval, retry, maxRetry, runtimeConfigURL)
+	if indexerShouldRun() {
+		go runIndexer(ctx, logger, cfg, status, interval, retry, maxRetry, runtimeConfigURL)
+	} else {
+		logger.Info("ledger indexer started in standby mode")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", status.health)
@@ -62,6 +66,15 @@ func main() {
 	}()
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+func indexerShouldRun() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LEDGER_INDEXER_STANDBY"))) {
+	case "1", "true", "yes", "on":
+		return false
+	default:
+		return true
 	}
 }
 
