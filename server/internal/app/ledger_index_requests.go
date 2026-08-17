@@ -32,10 +32,10 @@ func WaitForLedgerIndexTrigger(ctx context.Context, cfg Config, delay time.Durat
 			return true
 		}
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, delay)
-	defer cancel()
-	_, err = conn.WaitForNotification(waitCtx)
-	return err == nil
+	return waitForLedgerIndexNotification(ctx, delay, func(waitCtx context.Context) error {
+		_, err := conn.WaitForNotification(waitCtx)
+		return err
+	})
 }
 
 func PendingLedgerIndexRequestBoundary(ctx context.Context, cfg Config) (int64, error) {
@@ -71,4 +71,23 @@ func waitForContext(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// waitForLedgerIndexNotification treats the child deadline as a normal poll
+// interval. Only the daemon's parent context stopping should end its loop.
+func waitForLedgerIndexNotification(ctx context.Context, delay time.Duration, wait func(context.Context) error) bool {
+	waitCtx, cancel := context.WithTimeout(ctx, delay)
+	defer cancel()
+
+	err := wait(waitCtx)
+	if ctx.Err() != nil {
+		return false
+	}
+	if err == nil {
+		return true
+	}
+	if waitCtx.Err() == context.DeadlineExceeded {
+		return true
+	}
+	return waitForContext(ctx, delay)
 }
