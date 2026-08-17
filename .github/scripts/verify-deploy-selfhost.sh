@@ -26,6 +26,8 @@ for required in \
   'host_contract: 1' \
   'tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' \
   '--login-server=${{ vars.HEADSCALE_CONTROL_URL }}' \
+  'DEPLOY_PORT: ${{ vars.SELFHOST_DEPLOY_PORT }}' \
+  '-p "$DEPLOY_PORT"' \
   'StrictHostKeyChecking=yes' \
   'needs: [ref-guard, checks, build-server, build-indexer, build-agent, build-frontend]'; do
   if ! grep -Fq -- "$required" "$workflow"; then

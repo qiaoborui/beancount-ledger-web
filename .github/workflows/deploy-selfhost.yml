@@ -246,6 +246,7 @@ jobs:
           DEPLOY_KEY: ${{ secrets.SELFHOST_DEPLOY_SSH_PRIVATE_KEY }}
           KNOWN_HOSTS: ${{ secrets.SELFHOST_SSH_KNOWN_HOSTS }}
           DEPLOY_IP: ${{ vars.SELFHOST_DEPLOY_IP }}
+          DEPLOY_PORT: ${{ vars.SELFHOST_DEPLOY_PORT }}
           DEPLOY_USER: ${{ vars.SELFHOST_DEPLOY_USER }}
           SERVER: ${{ needs.build-server.outputs.image }}
           INDEXER: ${{ needs.build-indexer.outputs.image }}
@@ -254,6 +255,10 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          if [[ "$DEPLOY_IP" != "100.64.0.5" || "$DEPLOY_PORT" != "6247" || "$DEPLOY_USER" != "ledger-deploy" ]]; then
+            echo "::error::deployment target does not match host contract 1"
+            exit 1
+          fi
           key_file="$(mktemp)"
           known_hosts_file="$(mktemp)"
           manifest_file="$(mktemp)"
@@ -284,6 +289,7 @@ jobs:
             > "$manifest_file"
 
           ssh -i "$key_file" \
+            -p "$DEPLOY_PORT" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \

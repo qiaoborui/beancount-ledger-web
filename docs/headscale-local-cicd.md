@@ -1,7 +1,7 @@
 # Local self-hosted CI/CD over Headscale
 
 This deployment builds immutable application images on GitHub-hosted runners,
-then gives one approved job temporary TCP/22 access to the Docker host over
+then gives one approved job temporary TCP/6247 access to the Docker host over
 Headscale. The privileged deploy job does not check out repository code and
 cannot open a normal shell, read the ledger, read application credentials, or
 access the Docker socket.
@@ -10,12 +10,13 @@ The production host contract in this document is specific to `mibook`:
 
 - Headscale control URL: `https://headscale.borry.org`
 - deploy target: `100.64.0.5`
+- deploy SSH port: `6247`
 - public application origin: `https://beancount.mesh.arpa`
 - host UID/GID baked into self-host images: `1000:1000`
 - Compose project: `beancount-ledger-selfhost`
 
 Do not apply this profile to another host without changing and reviewing all
-five values together.
+six values together.
 
 ## Trust boundary
 
@@ -48,7 +49,7 @@ the active server-side policy and merge this grant into it:
     {
       "src": ["tag:ci-deploy"],
       "dst": ["100.64.0.5"],
-      "ip": ["tcp:22"]
+      "ip": ["tcp:6247"]
     }
   ]
 }
@@ -208,16 +209,16 @@ Validate before reloading SSH:
 sudo visudo -cf /etc/sudoers.d/beancount-ledger-deploy
 sudo sshd -t
 sudo systemctl reload ssh
-ss -ltn '( sport = :22 )'
+ss -ltn '( sport = :6247 )'
 ```
 
 Compare the host's ed25519 fingerprint with the scanned key, then store the
-scan's full `100.64.0.5 ssh-ed25519 ...` line as the
+scan's full `[100.64.0.5]:6247 ssh-ed25519 ...` line as the
 `SELFHOST_SSH_KNOWN_HOSTS` environment secret:
 
 ```bash
 ssh mibook 'sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
-ssh-keyscan -t ed25519 100.64.0.5 > "$deploy_key_dir/known_hosts"
+ssh-keyscan -p 6247 -t ed25519 100.64.0.5 > "$deploy_key_dir/known_hosts"
 ssh-keygen -lf "$deploy_key_dir/known_hosts"
 ```
 
@@ -245,6 +246,7 @@ Environment variables:
 ```text
 HEADSCALE_CONTROL_URL=https://headscale.borry.org
 SELFHOST_DEPLOY_IP=100.64.0.5
+SELFHOST_DEPLOY_PORT=6247
 SELFHOST_DEPLOY_USER=ledger-deploy
 ```
 
@@ -252,6 +254,8 @@ SELFHOST_DEPLOY_USER=ledger-deploy
 gh variable set HEADSCALE_CONTROL_URL --body https://headscale.borry.org \
   --repo qiaoborui/beancount-ledger-web --env local-selfhost-production
 gh variable set SELFHOST_DEPLOY_IP --body 100.64.0.5 \
+  --repo qiaoborui/beancount-ledger-web --env local-selfhost-production
+gh variable set SELFHOST_DEPLOY_PORT --body 6247 \
   --repo qiaoborui/beancount-ledger-web --env local-selfhost-production
 gh variable set SELFHOST_DEPLOY_USER --body ledger-deploy \
   --repo qiaoborui/beancount-ledger-web --env local-selfhost-production
@@ -412,7 +416,7 @@ health checks against the bootstrap release, then dispatch and approve the same
 `main` SHA again. Only the second healthy digest promotion proves both forward
 deployment and recovery. Confirm that nodes whose names begin with
 `gha-ledger-` are absent or expired after each job. Policy tests must prove
-that `tag:ci-deploy` can reach only `100.64.0.5:22`; separately preserve every
+that `tag:ci-deploy` can reach only `100.64.0.5:6247`; separately preserve every
 pre-existing personal-device and subnet-router grant.
 
 ## Retire the persistent runner
