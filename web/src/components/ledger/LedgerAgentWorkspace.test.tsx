@@ -96,6 +96,13 @@ describe("LedgerAgentWorkspace", () => {
     expect(importPageSource.slice(openPendingStart, dismissPendingStart)).toContain('{ kind: "write" }');
   });
 
+  it("refreshes connected Gmail imports after background queue processing", () => {
+    expect(importPageSource).toContain("gmailAutomationRefreshIntervalMs");
+    expect(importPageSource).toContain("window.setInterval");
+    expect(importPageSource).toContain('document.visibilityState === "visible"');
+    expect(importPageSource).toContain("window.clearInterval");
+  });
+
   it("converts BQL money values from minor units before charting", () => {
     expect(normalizeBQLChartValue(63070, { name: "total", type: "money" })).toBe(630.7);
     expect(normalizeBQLChartValue(12, { name: "count", type: "number" })).toBe(12);

@@ -105,6 +105,7 @@ type GmailImportStatus = { configured: boolean; connected: boolean; email?: stri
 type GmailPendingImport = { id: string; importId?: string; messageId: string; sender: string; subject: string; receivedAt: string; filename: string; provider?: Provider; candidateCount: number; status: "processing" | "ready" | "failed" | "committing" | "committed" | "dismissed"; error?: string; createdAt: string; updatedAt: string };
 
 const importDraftKey = "ledger_import_review_draft";
+const gmailAutomationRefreshIntervalMs = 10_000;
 
 const fallbackProviderChoices: ProviderChoice[] = [
   { value: "auto", labelKey: "importPage.autoDetect", detailKey: "importPage.autoDetectDetail", acceptKey: "importPage.autoDetectAccept" },
@@ -367,6 +368,19 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     void loadImportDocuments();
     void loadGmailAutomation();
   }, []);
+
+  useEffect(() => {
+    if (!gmailStatus?.connected) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadGmailAutomation();
+    };
+    const interval = window.setInterval(refresh, gmailAutomationRefreshIntervalMs);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [gmailStatus?.connected]);
 
   useEffect(() => {
     if (!preview || hasCommitted) return;

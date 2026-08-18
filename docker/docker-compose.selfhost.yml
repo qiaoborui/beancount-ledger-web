@@ -60,7 +60,7 @@ services:
       # Gmail polling is outbound-only and is the self-hosted default. Leave
       # the remaining Gmail values empty to keep the integration disabled.
       GMAIL_DELIVERY_MODE: "${GMAIL_DELIVERY_MODE:-poll}"
-      GMAIL_POLL_INTERVAL: "${GMAIL_POLL_INTERVAL:-15m}"
+      GMAIL_POLL_INTERVAL: "${GMAIL_POLL_INTERVAL:-2m}"
       GMAIL_POLL_TIMEOUT: "${GMAIL_POLL_TIMEOUT:-4m}"
       GMAIL_CLIENT_ID: "${GMAIL_CLIENT_ID:-}"
       GMAIL_CLIENT_SECRET: "${GMAIL_CLIENT_SECRET:-}"
