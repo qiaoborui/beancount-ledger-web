@@ -60,7 +60,9 @@ Gmail bill import also defaults to outbound polling in this Compose deployment.
 Set the optional `GMAIL_*` values in `.env.selfhost` (including
 `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URL`,
 `GMAIL_ALLOWED_SENDERS`, and `GMAIL_TOKEN_ENCRYPTION_KEY`), then connect Gmail
-from `/import`. Keep `GMAIL_DELIVERY_MODE=poll` for Tailnet/LAN deployments:
+from `/import`. The Compose stack checks Gmail every two minutes by default;
+set `GMAIL_POLL_INTERVAL` explicitly to override it. Keep
+`GMAIL_DELIVERY_MODE=poll` for Tailnet/LAN deployments:
 the server does not need a public Pub/Sub webhook or Cloud Scheduler. See
 [gmail-import-automation.md](gmail-import-automation.md) for OAuth callback,
 interval, and migration details.
