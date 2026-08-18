@@ -120,6 +120,12 @@ func (s *Server) pollGmail(ctx context.Context) error {
 		return err
 	}
 	err = s.syncGmail(ctx, connection.HistoryID)
+	if err == nil {
+		// Every scan persists message IDs before advancing the cursor. Start
+		// draining that durable work in the same attempt so a deployment does not
+		// need to wait a full poll interval for progress.
+		_, err = s.drainGmailPushEvents(ctx, 5)
+	}
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		// syncGmail records normal Gmail failures itself. A deadline means its
 		// write may use an already-expired context, so retain a visible error

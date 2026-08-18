@@ -366,7 +366,12 @@ func (s *Server) gmailSyncNow(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	processed, err := s.drainGmailPushEvents(c.Request.Context(), 5)
+	if err != nil && !gmailErrorTransient(err) {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "processed": processed, "retryPending": err != nil})
 }
 
 func (s *Server) gmailDrain(c *gin.Context) {
