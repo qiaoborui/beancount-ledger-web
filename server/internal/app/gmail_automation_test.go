@@ -399,8 +399,10 @@ func TestGmailSyncRecordsPoisonMessageAndContinues(t *testing.T) {
 			"later":  {Id: "later", LabelIds: []string{"other"}},
 		},
 	}
-	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
-		t.Fatal(err)
+	for _, messageID := range api.messageIDs {
+		if err := server.processGmailMessageForSync(context.Background(), api, messageID, connection.LabelID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if strings.Join(api.rawCalls, ",") != "poison,later" {
 		t.Fatalf("raw calls=%v", api.rawCalls)
@@ -408,10 +410,6 @@ func TestGmailSyncRecordsPoisonMessageAndContinues(t *testing.T) {
 	pending, err := server.readGmailPending(context.Background())
 	if err != nil || len(pending.Items) != 1 || pending.Items[0].Status != "failed" {
 		t.Fatalf("pending=%#v err=%v", pending.Items, err)
-	}
-	updated, ok, err := server.gmailConnection(context.Background())
-	if err != nil || !ok || updated.HistoryID != 100 {
-		t.Fatalf("connection=%#v ok=%v err=%v", updated, ok, err)
 	}
 }
 
@@ -438,7 +436,7 @@ func TestGmailSyncRecordsUnsupportedMessage(t *testing.T) {
 			"unsupported": {Id: "unsupported", LabelIds: []string{"label-1"}, Raw: base64.RawURLEncoding.EncodeToString([]byte(raw))},
 		},
 	}
-	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+	if err := server.processGmailMessageForSync(context.Background(), api, "unsupported", connection.LabelID); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := server.readGmailPending(context.Background())
@@ -477,18 +475,23 @@ func TestGmailSyncScansRecentWhenHistoryIsEmpty(t *testing.T) {
 	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(api.rawCalls, ",") != "recent" {
-		t.Fatalf("raw calls=%v", api.rawCalls)
+	if len(api.rawCalls) != 0 {
+		t.Fatalf("recent backfill was processed inline: raw calls=%v", api.rawCalls)
 	}
 	if api.recentCalls != 1 {
 		t.Fatalf("recent calls=%d", api.recentCalls)
 	}
 	pending, err := server.readGmailPending(context.Background())
-	if err != nil || len(pending.Items) != 1 {
+	if err != nil || len(pending.Items) != 0 {
 		t.Fatalf("pending=%#v err=%v", pending.Items, err)
 	}
-	if pending.Items[0].Status != "failed" || !strings.Contains(pending.Items[0].Error, "没有可识别") {
-		t.Fatalf("item=%#v", pending.Items[0])
+	events, err := server.readGmailPushEvents(context.Background())
+	if err != nil || len(events.Items) != 1 || events.Items[0].ID != gmailMessageEventID("recent") || events.Items[0].Status != "queued" {
+		t.Fatalf("events=%#v err=%v", events.Items, err)
+	}
+	updated, ok, err := server.gmailConnection(context.Background())
+	if err != nil || !ok || updated.HistoryID != 100 || updated.LastSyncAt == "" {
+		t.Fatalf("connection=%#v ok=%v err=%v", updated, ok, err)
 	}
 }
 
@@ -517,6 +520,36 @@ func TestGmailSyncDoesNotRescanRecentMessagesAfterInitialSync(t *testing.T) {
 	}
 }
 
+func TestGmailSyncQueuesHistoryMessagesBeforeCursorAdvance(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{
+		Email:                 "owner@example.com",
+		EncryptedRefreshToken: "present",
+		LabelID:               "label-1",
+		HistoryID:             10,
+		LastSyncAt:            time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeGmailAPI{messageIDs: []string{"message-1", "message-2"}}
+	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.rawCalls) != 0 {
+		t.Fatalf("history messages were processed before durable progress: rawCalls=%v", api.rawCalls)
+	}
+	events, err := server.readGmailPushEvents(context.Background())
+	if err != nil || len(events.Items) != 2 {
+		t.Fatalf("events=%#v err=%v", events.Items, err)
+	}
+	updated, ok, err := server.gmailConnection(context.Background())
+	if err != nil || !ok || updated.HistoryID != 100 || updated.LastSyncAt == "" {
+		t.Fatalf("connection=%#v ok=%v err=%v", updated, ok, err)
+	}
+}
+
 func TestGmailSyncScansRecentMessagesWhenHistoryExpired(t *testing.T) {
 	cfg := testLedger(t)
 	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
@@ -538,8 +571,64 @@ func TestGmailSyncScansRecentMessagesWhenHistoryExpired(t *testing.T) {
 	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
 		t.Fatal(err)
 	}
-	if api.recentCalls != 1 || strings.Join(api.rawCalls, ",") != "recovered" {
+	if api.recentCalls != 1 || len(api.rawCalls) != 0 {
 		t.Fatalf("recent calls=%d raw calls=%v", api.recentCalls, api.rawCalls)
+	}
+	events, err := server.readGmailPushEvents(context.Background())
+	if err != nil || len(events.Items) != 1 || events.Items[0].ID != gmailMessageEventID("recovered") {
+		t.Fatalf("events=%#v err=%v", events.Items, err)
+	}
+}
+
+func TestGmailMessageQueueDeduplicatesMessageIDs(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{Email: "owner@example.com", HistoryID: 10}
+	messageIDs := []string{"message-1", "message-2", "message-1"}
+	if err := server.enqueueGmailMessageEvents(context.Background(), connection, 99, messageIDs); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.enqueueGmailMessageEvents(context.Background(), connection, 99, messageIDs); err != nil {
+		t.Fatal(err)
+	}
+	events, err := server.readGmailPushEvents(context.Background())
+	if err != nil || len(events.Items) != 2 {
+		t.Fatalf("events=%#v err=%v", events.Items, err)
+	}
+	for _, event := range events.Items {
+		if _, ok := gmailMessageIDFromEvent(event.ID); !ok || event.Status != "queued" || event.Email != connection.Email {
+			t.Fatalf("event=%#v", event)
+		}
+	}
+}
+
+func TestGmailMessageEventIDUsesSeparateNamespace(t *testing.T) {
+	if _, ok := gmailMessageIDFromEvent("1234567890"); ok {
+		t.Fatal("Pub/Sub message ID was classified as per-message work")
+	}
+	if messageID, ok := gmailMessageIDFromEvent(gmailMessageEventID("message-1")); !ok || messageID != "message-1" {
+		t.Fatalf("messageID=%q ok=%v", messageID, ok)
+	}
+	if _, ok := gmailMessageIDFromEvent(gmailMessageEventPrefix); ok {
+		t.Fatal("empty per-message ID was accepted")
+	}
+}
+
+func TestCompleteGmailSyncPersistsAfterCallerCancellation(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir)}
+	connection := gmailConnection{Email: "owner@example.com", EncryptedRefreshToken: "present", HistoryID: 10}
+	if err := server.writeGmailConnection(context.Background(), connection); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := server.completeGmailSync(ctx, 99, 100); err != nil {
+		t.Fatal(err)
+	}
+	updated, ok, err := server.gmailConnection(context.Background())
+	if err != nil || !ok || updated.HistoryID != 100 || updated.LastSyncAt == "" {
+		t.Fatalf("connection=%#v ok=%v err=%v", updated, ok, err)
 	}
 }
 
@@ -665,7 +754,7 @@ func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
 		"",
 	}, "\r\n")
 	api := &fakeGmailAPI{
-		recentIDs: []string{"alipay"},
+		messageIDs: []string{"alipay"},
 		messages: map[string]*gmail.Message{
 			"alipay": {
 				Id:           "alipay",
@@ -676,7 +765,7 @@ func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
 			},
 		},
 	}
-	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+	if err := server.processGmailMessageForSync(context.Background(), api, "alipay", connection.LabelID); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(api.rawCalls, ",") != "alipay" {
@@ -798,7 +887,7 @@ func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
 		"",
 	}, "\r\n")
 	api := &fakeGmailAPI{
-		recentIDs: []string{"cmb"},
+		messageIDs: []string{"cmb"},
 		messages: map[string]*gmail.Message{
 			"cmb": {
 				Id:           "cmb",
@@ -809,7 +898,7 @@ func TestGmailSyncCreatesReadyPendingFromCmbPDFAttachment(t *testing.T) {
 			},
 		},
 	}
-	if err := server.syncGmailWithAPI(context.Background(), api, connection, 100); err != nil {
+	if err := server.processGmailMessageForSync(context.Background(), api, "cmb", connection.LabelID); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := server.readGmailPending(context.Background())

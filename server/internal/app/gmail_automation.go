@@ -43,6 +43,9 @@ const (
 	maxGmailPendingItems = 500
 	maxGmailPendingBytes = 100 * 1024 * 1024
 	maxGmailPushEvents   = 1000
+	// Pub/Sub message IDs are opaque to the application. Keep per-message work
+	// items in a versioned namespace so they can never be mistaken for a push.
+	gmailMessageEventPrefix = "message-v1:"
 
 	cmbCreditGmailSender = "ccsvc@message.cmbchina.com"
 )
@@ -521,6 +524,62 @@ func (s *Server) enqueueGmailPushEvent(ctx context.Context, messageID string, da
 	})
 }
 
+func gmailMessageEventID(messageID string) string {
+	return gmailMessageEventPrefix + messageID
+}
+
+func gmailMessageIDFromEvent(eventID string) (string, bool) {
+	messageID, ok := strings.CutPrefix(eventID, gmailMessageEventPrefix)
+	return messageID, ok && messageID != ""
+}
+
+// enqueueGmailMessageEvents turns a potentially slow history or recent-message
+// scan into durable work before the Gmail cursor advances. A poll attempt can
+// therefore time out while parsing an attachment without restarting the scan.
+func (s *Server) enqueueGmailMessageEvents(ctx context.Context, connection gmailConnection, historyID uint64, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	return s.gmailState().WithLock(ctx, "gmail-push-events", func(lockCtx context.Context) error {
+		store, err := s.readGmailPushEvents(lockCtx)
+		if err != nil {
+			return err
+		}
+		existing := make(map[string]struct{}, len(store.Items))
+		active := 0
+		for _, item := range store.Items {
+			existing[item.ID] = struct{}{}
+			if item.Status == "queued" || item.Status == "retry" || item.Status == "leased" {
+				active++
+			}
+		}
+		missing := make([]string, 0, len(messageIDs))
+		for _, messageID := range messageIDs {
+			eventID := gmailMessageEventID(messageID)
+			if _, ok := existing[eventID]; !ok {
+				missing = append(missing, messageID)
+				existing[eventID] = struct{}{}
+			}
+		}
+		if active+len(missing) > maxGmailPushEvents {
+			return fmt.Errorf("Gmail sync needs %d queue slots but only %d are available; drain the queue or reduce GMAIL_SYNC_LOOKBACK_DAYS", len(missing), maxGmailPushEvents-active)
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		for _, messageID := range missing {
+			store.Items = append(store.Items, gmailPushEvent{
+				ID:          gmailMessageEventID(messageID),
+				Email:       strings.ToLower(connection.Email),
+				HistoryID:   historyID,
+				Status:      "queued",
+				AvailableAt: now,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			})
+		}
+		return s.writeGmailPushEvents(lockCtx, store)
+	})
+}
+
 func (s *Server) readGmailPushEvents(ctx context.Context) (gmailPushEventStore, error) {
 	return s.gmailState().PushEvents(ctx)
 }
@@ -623,7 +682,11 @@ func (s *Server) drainGmailPushEvents(ctx context.Context, limit int) (int, erro
 		if err == nil && (!connected || !strings.EqualFold(connection.Email, event.Email)) {
 			err = nil
 		} else if err == nil {
-			err = s.syncGmail(ctx, event.HistoryID)
+			if messageID, messageEvent := gmailMessageIDFromEvent(event.ID); messageEvent {
+				err = s.syncGmailMessage(ctx, messageID)
+			} else {
+				err = s.syncGmail(ctx, event.HistoryID)
+			}
 		}
 		if finishErr := s.finishGmailPushEvent(ctx, event, err); finishErr != nil {
 			return processed, finishErr
@@ -637,6 +700,18 @@ func (s *Server) drainGmailPushEvents(ctx context.Context, limit int) (int, erro
 }
 
 func (s *Server) syncGmail(ctx context.Context, notifiedHistoryID uint64) error {
+	return s.withGmailSyncLease(ctx, func(api gmailAPI, connection gmailConnection) error {
+		return s.syncGmailWithAPI(ctx, api, connection, notifiedHistoryID)
+	})
+}
+
+func (s *Server) syncGmailMessage(ctx context.Context, messageID string) error {
+	return s.withGmailSyncLease(ctx, func(api gmailAPI, connection gmailConnection) error {
+		return s.processGmailMessageForSync(ctx, api, messageID, connection.LabelID)
+	})
+}
+
+func (s *Server) withGmailSyncLease(ctx context.Context, run func(gmailAPI, gmailConnection) error) error {
 	owner := randomID()
 	claimed, err := s.claimGmailSyncLease(ctx, owner)
 	if err != nil {
@@ -650,7 +725,7 @@ func (s *Server) syncGmail(ctx context.Context, notifiedHistoryID uint64) error 
 	if err != nil {
 		return err
 	}
-	return s.syncGmailWithAPI(ctx, api, connection, notifiedHistoryID)
+	return run(api, connection)
 }
 
 func (s *Server) syncGmailWithAPI(ctx context.Context, api gmailAPI, connection gmailConnection, notifiedHistoryID uint64) error {
@@ -662,18 +737,28 @@ func (s *Server) syncGmailWithAPI(ctx context.Context, api gmailAPI, connection 
 		_ = s.updateGmailConnectionError(ctx, err)
 		return err
 	}
-	for _, messageID := range messageIDs {
-		if err := s.processGmailMessage(ctx, api, messageID, connection.LabelID); err != nil {
-			if gmailErrorTransient(err) {
-				_ = s.updateGmailConnectionError(ctx, err)
-				return err
-			}
-			if recordErr := s.recordGmailMessageFailure(ctx, messageID, err); recordErr != nil {
-				return recordErr
-			}
-		}
+	if err := s.enqueueGmailMessageEvents(ctx, connection, latestHistoryID, messageIDs); err != nil {
+		_ = s.updateGmailConnectionError(ctx, err)
+		return err
 	}
-	return s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+	return s.completeGmailSync(ctx, latestHistoryID, notifiedHistoryID)
+}
+
+func (s *Server) processGmailMessageForSync(ctx context.Context, api gmailAPI, messageID, labelID string) error {
+	err := s.processGmailMessage(ctx, api, messageID, labelID)
+	if err == nil || gmailErrorTransient(err) {
+		return err
+	}
+	return s.recordGmailMessageFailure(ctx, messageID, err)
+}
+
+func (s *Server) completeGmailSync(ctx context.Context, latestHistoryID, notifiedHistoryID uint64) error {
+	// At this point every discovered message was either processed or durably
+	// queued. Commit that progress even if the HTTP request or poll deadline
+	// expired at the boundary; otherwise the next attempt restarts the scan.
+	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return s.gmailState().WithLock(completionCtx, "gmail-state", func(lockCtx context.Context) error {
 		latest, ok, err := s.gmailConnection(lockCtx)
 		if err != nil || !ok {
 			return err
