@@ -425,20 +425,23 @@ func TestImportProvidersEndpoint(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Providers) != 6 {
+	if len(response.Providers) != 7 {
 		t.Fatalf("providers = %#v", response.Providers)
 	}
-	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "alipay-small-purse" || response.Providers[2].ID != "wechat" || response.Providers[3].ID != "cmb" || response.Providers[4].ID != "ccb-credit" || response.Providers[5].ID != "cmb-checking" {
+	if response.Providers[0].ID != "alipay" || response.Providers[1].ID != "alipay-small-purse" || response.Providers[2].ID != "wechat" || response.Providers[3].ID != "cmb" || response.Providers[4].ID != "ccb-credit" || response.Providers[5].ID != "hsbchk-credit" || response.Providers[6].ID != "cmb-checking" {
 		t.Fatalf("unexpected provider order: %#v", response.Providers)
 	}
 	if response.Providers[4].Label != "建设银行信用卡" || response.Providers[4].Accept != ".eml / .html / .htm / .pdf / .csv" {
 		t.Fatalf("unexpected ccb metadata: %#v", response.Providers[4])
 	}
-	if response.Providers[0].Engine != "deg-module" || response.Providers[1].Engine != "native-alipay-small-purse" || response.Providers[4].Engine != "native-ccb-credit" || response.Providers[5].Engine != "deg-module" {
+	if response.Providers[0].Engine != "deg-module" || response.Providers[1].Engine != "native-alipay-small-purse" || response.Providers[4].Engine != "native-ccb-credit" || response.Providers[5].Engine != "deg-module" || response.Providers[6].Engine != "deg-module" {
 		t.Fatalf("unexpected provider engines: %#v", response.Providers)
 	}
-	if response.Providers[5].Label != "招商银行储蓄卡" || response.Providers[5].Accept != ".pdf / .csv" {
-		t.Fatalf("unexpected checking metadata: %#v", response.Providers[5])
+	if response.Providers[5].Label != "汇丰香港信用卡" || response.Providers[5].Accept != ".csv" {
+		t.Fatalf("unexpected hsbchk metadata: %#v", response.Providers[5])
+	}
+	if response.Providers[6].Label != "招商银行储蓄卡" || response.Providers[6].Accept != ".pdf / .csv" {
+		t.Fatalf("unexpected checking metadata: %#v", response.Providers[6])
 	}
 }
 

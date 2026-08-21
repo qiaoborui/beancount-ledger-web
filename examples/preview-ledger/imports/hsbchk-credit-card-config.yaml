@@ -1,0 +1,17 @@
+defaultMinusAccount: Expenses:Unknown
+defaultPlusAccount: Expenses:Unknown
+defaultCashAccount: Liabilities:HK:HSBC:CreditCard
+defaultCurrency: HKD
+title: 汇丰香港信用卡导入示例
+hsbchk:
+  rules:
+    - item: PAYMENT - THANK YOU
+      targetAccount: Assets:HK:HSBC:HKD
+    - item: RETURN,REFUND
+      targetAccount: Expenses:Shopping:Other
+    - peer: MCDONALDS,KFC,RESTAURANT,CAFE
+      targetAccount: Expenses:Food:Meals
+    - peer: 7-ELEVEN,SUPERMARKET
+      targetAccount: Expenses:Food:Groceries
+    - peer: METRO,MTR,BUS,TAXI
+      targetAccount: Expenses:Transport:Public
