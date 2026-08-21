@@ -42,7 +42,7 @@ import {
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
-type Provider = "alipay" | "alipay-small-purse" | "wechat" | "cmb" | "ccb-credit" | "cmb-checking";
+type Provider = "alipay" | "alipay-small-purse" | "wechat" | "cmb" | "ccb-credit" | "hsbchk-credit" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
 type ProviderChoice = { value: ProviderOverride; labelKey: string; detailKey: string; acceptKey: string };
 type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string; engine?: string };
@@ -114,6 +114,7 @@ const fallbackProviderChoices: ProviderChoice[] = [
   { value: "wechat", labelKey: "importPage.wechat", detailKey: "importPage.wechatDetail", acceptKey: "importPage.wechatAccept" },
   { value: "cmb", labelKey: "importPage.cmb", detailKey: "importPage.cmbDetail", acceptKey: "importPage.cmbAccept" },
   { value: "ccb-credit", labelKey: "importPage.ccbCredit", detailKey: "importPage.ccbCreditDetail", acceptKey: "importPage.ccbCreditAccept" },
+  { value: "hsbchk-credit", labelKey: "importPage.hsbchkCredit", detailKey: "importPage.hsbchkCreditDetail", acceptKey: "importPage.hsbchkCreditAccept" },
   { value: "cmb-checking", labelKey: "importPage.cmbChecking", detailKey: "importPage.cmbCheckingDetail", acceptKey: "importPage.cmbCheckingAccept" },
 ];
 
@@ -152,7 +153,7 @@ function providerChoiceAccept(choice: ProviderChoice) {
 }
 
 function isProvider(value: string | undefined): value is Provider {
-  return value === "alipay" || value === "alipay-small-purse" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "cmb-checking";
+  return value === "alipay" || value === "alipay-small-purse" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "hsbchk-credit" || value === "cmb-checking";
 }
 
 function importDocumentCoverageValue(document: ImportDocument) {

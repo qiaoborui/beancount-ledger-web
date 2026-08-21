@@ -52,6 +52,9 @@
 2026-01-01 open Liabilities:CN:CreditCard CNY
   alias: "信用卡"
 
+2026-01-01 open Liabilities:HK:HSBC:CreditCard
+  alias: "汇丰香港信用卡"
+
 2026-01-01 open Liabilities:Payable:Friends CNY
   alias: "欠朋友的钱"
 

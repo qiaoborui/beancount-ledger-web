@@ -189,10 +189,12 @@ describe("latest import coverage by provider", () => {
       document({ provider: "alipay", dateStart: "2026-05-01", dateEnd: "2026-05-31", modTime: "2026-06-08T08:00:00Z", name: "older-uploaded-later.pdf" }),
       document({ provider: "alipay", dateStart: "2026-06-01", dateEnd: "2026-06-10", modTime: "2026-06-07T08:00:00Z", name: "newer-statement.pdf" }),
       document({ provider: "wechat", dateStart: "2026-06-01", dateEnd: "2026-06-05", name: "wechat.xlsx" }),
+      document({ provider: "hsbchk-credit", dateStart: "2026-07-01", dateEnd: "2026-07-31", name: "hsbc.csv", ext: ".csv" }),
     ]);
 
     expect(latest.alipay?.name).toBe("newer-statement.pdf");
     expect(latest.wechat?.dateEnd).toBe("2026-06-05");
+    expect(latest["hsbchk-credit"]?.name).toBe("hsbc.csv");
   });
 
   it("ignores documents without a known provider", () => {

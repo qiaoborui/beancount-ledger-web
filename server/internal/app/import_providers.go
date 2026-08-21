@@ -319,6 +319,40 @@ var billImporters = []billImporter{
 		},
 	},
 	staticBillImporter{
+		id:              "hsbchk-credit",
+		label:           "汇丰香港信用卡",
+		title:           "HSBC HK Credit Card",
+		uiOrder:         37,
+		config:          importProviderConfig{Config: "imports/hsbchk-credit-card-config.yaml", Output: "hsbchk-credit-output.bean", Extensions: []string{".csv"}, Label: "汇丰香港信用卡", Detail: "HSBC HK 网上银行导出的信用卡交易 CSV", DEGProviderID: "hsbchk"},
+		documentAccount: "Liabilities:HK:HSBC:CreditCard",
+		detect: func(filename, sample, ext string) (providerDetection, bool) {
+			if ext != ".csv" {
+				return providerDetection{}, false
+			}
+			normalized := strings.ReplaceAll(strings.ReplaceAll(sample, "\r", ""), "\t", "")
+			if strings.Contains(normalized, strings.Join(hsbchkCreditCSVHeaders, ",")) {
+				return providerDetection{Provider: "hsbchk-credit", Reason: "CSV 内容包含 HSBC HK 信用卡交易字段", Confidence: "high"}, true
+			}
+			return providerDetection{}, false
+		},
+		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
+			return s.prepareHsbcHKCreditInput(input.InputFile, input.ImportID)
+		},
+		dedupArgs: func(options importDedupOptions) []string {
+			return []string{"--credit-card"}
+		},
+		decorateEntries: decorateStatementHashEntries,
+		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
+			if generated.CandidateCount != prepared.FilteredRowCount {
+				return nil, fmt.Errorf("汇丰香港信用卡行数核对失败：CSV 明细 %d 条，但 DEG 生成 %d 条。已停止导入，请检查账单格式或配置", prepared.RawRowCount, generated.CandidateCount)
+			}
+			return []string{fmt.Sprintf("汇丰香港信用卡行数核对通过：CSV 明细 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+		},
+		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
+			return prepared.RawRowCount, prepared.FilteredRowCount
+		},
+	},
+	staticBillImporter{
 		id:              "alipay",
 		label:           "支付宝",
 		title:           "Alipay",
@@ -400,7 +434,7 @@ func detectImportProvider(filename string, content []byte, override string) (pro
 }
 
 func errorsUnsupportedBillType() error {
-	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/PDF/CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
+	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/PDF/CSV、汇丰香港信用卡 CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func decorateStatementHashEntries(meta importMeta, entries []ImportEntry) {
