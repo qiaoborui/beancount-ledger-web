@@ -329,8 +329,7 @@ var billImporters = []billImporter{
 			if ext != ".csv" {
 				return providerDetection{}, false
 			}
-			normalized := strings.ReplaceAll(strings.ReplaceAll(sample, "\r", ""), "\t", "")
-			if strings.Contains(normalized, strings.Join(hsbchkCreditCSVHeaders, ",")) {
+			if looksLikeHsbcHKCreditCSV(sample) {
 				return providerDetection{Provider: "hsbchk-credit", Reason: "CSV 内容包含 HSBC HK 信用卡交易字段", Confidence: "high"}, true
 			}
 			return providerDetection{}, false

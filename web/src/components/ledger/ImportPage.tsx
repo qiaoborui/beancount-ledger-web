@@ -118,16 +118,19 @@ const fallbackProviderChoices: ProviderChoice[] = [
   { value: "cmb-checking", labelKey: "importPage.cmbChecking", detailKey: "importPage.cmbCheckingDetail", acceptKey: "importPage.cmbCheckingAccept" },
 ];
 
-function providerChoicesFromAPI(providers: ImportProviderInfo[]): ProviderChoice[] {
+export function providerChoicesFromAPI(providers: ImportProviderInfo[]): ProviderChoice[] {
   if (!providers.length) return fallbackProviderChoices;
   return [
     fallbackProviderChoices[0],
-    ...providers.map((provider) => ({
-      value: provider.id,
-      labelKey: provider.label,
-      detailKey: provider.detail,
-      acceptKey: provider.accept || provider.extensions.join(" / "),
-    })),
+    ...providers.map((provider) => {
+      const localized = fallbackProviderChoices.find((choice) => choice.value === provider.id);
+      return {
+        value: provider.id,
+        labelKey: localized?.labelKey ?? provider.label,
+        detailKey: localized?.detailKey ?? provider.detail,
+        acceptKey: localized?.acceptKey ?? (provider.accept || provider.extensions.join(" / ")),
+      };
+    }),
   ];
 }
 
