@@ -167,7 +167,7 @@ export function TimeRangePicker({ range, onChange }: TimeRangePickerProps) {
 
   return (
     <div ref={containerRef} className="relative w-full min-w-0 md:w-auto">
-      <div data-time-range-control="segmented" className="flex h-14 w-full min-w-0 overflow-hidden rounded-lg border border-lineSoft bg-panel md:h-12">
+      <div data-time-range-control="segmented" className="flex h-14 w-full min-w-0 overflow-hidden rounded-lg border border-lineSoft bg-panel md:h-10">
         <button type="button" className="grid h-full w-10 shrink-0 place-items-center border-r border-line bg-panel text-brand transition-colors hover:bg-tag active:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40 md:w-9" onClick={() => move(-1)} disabled={!canMovePrevious} aria-label={t("timeRange.previousPeriod")}>
           <ChevronLeft className="h-4 w-4" />
         </button>

@@ -123,7 +123,7 @@ export function HomeReportWorkspace({ report, summary, comparisons, timeRange, v
 }
 
 function ReportSectionIntro({ title, detail, meta, action }: { title: string; detail: string; meta?: string; action?: ReactNode }) {
-  return <div className="flex min-h-24 items-start justify-between gap-5 px-4 py-5 md:px-6 xl:px-8">
+  return <div className="flex min-h-24 items-start justify-between gap-5 px-4 py-5 md:min-h-20 md:px-6 md:py-4 xl:px-8">
     <div className="min-w-0"><h2 className="text-lg font-semibold tracking-[-0.018em] text-ink">{title}</h2><p className="mt-1 text-sm leading-5 text-stone">{detail}</p></div>
     <div className="flex shrink-0 items-center gap-3">{meta && <span className="hidden text-xs tabular-nums text-stone sm:block">{meta}</span>}{action}</div>
   </div>;
@@ -138,7 +138,7 @@ function ReportPanel({ title, detail, action, children }: { title: string; detai
 }
 
 function ChartViewport({ show, loading, error, hasReport, hasData, pointCount = 0, onReload, t, children }: { show: boolean; loading: boolean; error: string; hasReport: boolean; hasData: boolean; pointCount?: number; onReload?: () => void; t: (key: string) => string; children: ReactNode }) {
-  const height = !hasData ? "min-h-48" : pointCount <= 1 ? "h-[13rem] md:h-[15rem]" : pointCount <= 4 ? "h-[16rem] md:h-[18rem]" : "h-[18rem] md:h-[21rem]";
+  const height = !hasData ? "min-h-48" : pointCount <= 1 ? "h-[13rem] md:h-[15rem]" : pointCount <= 4 ? "h-[16rem] md:h-[18rem]" : "h-[18rem]";
   if (!show) return <ChartStatus className={height} text={t("home.unlockToView")} />;
   if (error && !hasReport) return <ChartStatus className={height} text={error} action={onReload ? <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-xs font-medium text-ink hover:bg-tag" onClick={onReload}><RefreshCw className="h-3.5 w-3.5" />{t("home.retry")}</button> : null} />;
   if (loading && !hasReport) return <ChartStatus className={height} text={t("home.generatingBrief")} />;
