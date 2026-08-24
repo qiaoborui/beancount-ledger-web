@@ -17,7 +17,7 @@ describe("TimeRangePicker layout", () => {
 
     expect(html).toContain("md:min-w-64");
     expect(html).toContain("h-14");
-    expect(html).toContain("md:h-12");
+    expect(html).toContain("md:h-10");
     expect(html).toContain("md:px-3");
     expect(html).toContain("md:w-9");
     expect(html).toMatch(/data-time-range-control="segmented"[^>]*overflow-hidden[^>]*rounded-lg[^>]*border-lineSoft/);
