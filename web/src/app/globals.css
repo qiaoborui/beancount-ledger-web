@@ -8,6 +8,7 @@
 
 :root {
   color-scheme: light;
+  --app-safe-area-top: env(safe-area-inset-top, 0px);
   --radius: 0.625rem;
   --radius-xs: 0.25rem;
   --radius-sm: 0.375rem;
@@ -97,6 +98,16 @@
   --ledger-token-account: oklch(0.50 0.10 250);
   --ledger-token-number: oklch(0.60 0.12 82);
   --ledger-token-currency: oklch(0.43 0.012 255);
+}
+
+@media (display-mode: standalone) {
+  :root {
+    --app-safe-area-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+  }
+}
+
+html[data-display-mode="standalone"] {
+  --app-safe-area-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
 }
 
 html[data-theme="dark"] {

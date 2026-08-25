@@ -161,10 +161,10 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
   const isAgentRoute = isActivePath(pathname, "/agent");
   const showingRouteProgress = routePending || Boolean(navPendingHref);
   return (
-    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(3.5rem+env(safe-area-inset-top))] text-ink [overscroll-behavior-y:none] md:pt-0">
+    <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(3.5rem+var(--app-safe-area-top))] text-ink [overscroll-behavior-y:none] md:pt-0">
       <a href="#main-content" className="skip-link">{t("appShell.skipToContent")}</a>
-      {showingRouteProgress && <div className="fixed left-0 right-0 top-[env(safe-area-inset-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
-      <header className="app-shell-header fixed inset-x-0 top-0 z-30 border-b border-line bg-panel pt-[env(safe-area-inset-top)] text-ink md:hidden">
+      {showingRouteProgress && <div className="fixed left-0 right-0 top-[var(--app-safe-area-top)] z-50 h-0.5 overflow-hidden bg-line"><div className="app-route-progress h-full w-1/3 bg-brand" /></div>}
+      <header className="app-shell-header fixed inset-x-0 top-0 z-30 border-b border-line bg-panel pt-[var(--app-safe-area-top)] text-ink md:hidden">
         <div className="flex h-14 items-center px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] md:h-12 md:px-3">
           <div className="flex min-w-0 items-center gap-2.5 md:w-48 md:gap-2">
             <button className="grid h-9 w-9 place-items-center rounded-md border border-line bg-paper text-brand hover:bg-tag md:hidden" onClick={openMobileMenu} aria-label={t("appShell.openSidebar")}>
@@ -198,7 +198,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
       </header>
 
       {(mobileMenuOpen || mobileMenuClosing) && <div className={`mobile-sidebar-backdrop fixed inset-0 z-40 bg-ink/45 md:hidden ${mobileMenuClosing ? "mobile-sidebar-backdrop-close" : ""}`} onClick={closeMobileMenu}>
-        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
+        <aside className={`mobile-sidebar-panel kami-float h-full w-72 max-w-[85vw] overflow-y-auto border-r border-line bg-panel pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-[calc(var(--app-safe-area-top)+0.75rem)] ${mobileMenuClosing ? "mobile-sidebar-panel-close" : ""}`} onClick={(event) => event.stopPropagation()}>
           <div className="mb-4 flex items-center justify-between border-b border-line pb-3">
             <div className="flex items-center gap-2.5">
               <span className="grid h-8 w-8 place-items-center rounded-md bg-brand text-primary-foreground"><Activity className="h-4 w-4" /></span>
