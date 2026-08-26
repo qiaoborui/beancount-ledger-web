@@ -69,6 +69,8 @@ describe("NetWorthPage information architecture", () => {
     expect(html).toContain("当前头寸");
     expect(html).toContain("资产结构");
     expect(html).toContain("净值变化");
+    expect(html).toContain("负债（右轴）");
+    expect(html).toContain("负债使用右侧独立刻度，让净资产变化更清晰");
     expect(html).not.toContain("储蓄率");
     expect(html).not.toContain("财富/投资收入");
   });
