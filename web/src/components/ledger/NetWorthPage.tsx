@@ -148,7 +148,33 @@ function NetWorthChart({ rows, visible, mode, canUseMonthEnd, valuationCurrency,
     assets: t("netWorth.assetsSeries"),
     liabilities: t("netWorth.liabilitiesSeries"),
   };
-  return <section className="bg-panel"><div className="flex flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between md:px-6 xl:px-8"><div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-stone"><ChartKey label={t("netWorth.netWorthSeries")} className="bg-brand" /><ChartKey label={t("netWorth.assetsSeries")} className="bg-ink" /><ChartKey label={t("netWorth.liabilitiesSeries")} className="bg-stone" dashed /></div><div className="inline-flex self-start border border-line bg-panel p-0.5 text-xs"><button type="button" className={`px-3 py-1.5 ${effectiveMode === "daily" ? "bg-brand text-primary-foreground" : "text-olive hover:bg-tag"}`} onClick={() => onModeChange("daily")}>{t("netWorth.dailyView")}</button><button type="button" className={`px-3 py-1.5 ${effectiveMode === "month-end" ? "bg-brand text-primary-foreground" : "text-olive hover:bg-tag"} disabled:cursor-not-allowed disabled:opacity-45`} onClick={() => onModeChange("month-end")} disabled={!canUseMonthEnd}>{t("netWorth.monthEndView")}</button></div></div>{visible ? rows.length ? <div className="ledger-chart h-[20rem] min-w-0 px-2 pb-3 pt-2 md:h-[24rem]"><ResponsiveContainer width="100%" height="100%"><LineChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} /><XAxis dataKey="date" minTickGap={18} tick={chartTick} tickLine={false} axisLine={{ stroke: "var(--line)" }} /><YAxis width={60} domain={["dataMin", "dataMax"]} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), seriesNames[String(name)] ?? String(name)]} /><Line type="linear" dataKey="netWorth" stroke="var(--chart-primary)" strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /><Line type="linear" dataKey="assets" stroke="var(--ink)" strokeWidth={1.4} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /><Line type="linear" dataKey="liabilities" stroke="var(--stone)" strokeWidth={1.3} strokeDasharray="5 4" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} /></LineChart></ResponsiveContainer></div> : <ChartEmpty text={t("netWorth.noNetWorthTrend")} /> : <HiddenMoney t={t} />}</section>;
+  return <section className="bg-panel">
+    <div className="flex flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between md:px-6 xl:px-8">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-stone">
+        <ChartKey label={t("netWorth.netWorthSeries")} className="bg-brand" />
+        <ChartKey label={t("netWorth.assetsSeries")} className="bg-ink" />
+        <ChartKey label={t("netWorth.liabilitiesSeriesRightAxis")} className="bg-stone" dashed />
+      </div>
+      <div className="inline-flex self-start border border-line bg-panel p-0.5 text-xs">
+        <button type="button" className={`px-3 py-1.5 ${effectiveMode === "daily" ? "bg-brand text-primary-foreground" : "text-olive hover:bg-tag"}`} onClick={() => onModeChange("daily")}>{t("netWorth.dailyView")}</button>
+        <button type="button" className={`px-3 py-1.5 ${effectiveMode === "month-end" ? "bg-brand text-primary-foreground" : "text-olive hover:bg-tag"} disabled:cursor-not-allowed disabled:opacity-45`} onClick={() => onModeChange("month-end")} disabled={!canUseMonthEnd}>{t("netWorth.monthEndView")}</button>
+      </div>
+    </div>
+    {visible ? rows.length ? <div className="ledger-chart h-[20rem] min-w-0 px-2 pb-3 pt-2 md:h-[24rem]">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={rows} margin={{ left: 8, right: 4, top: 8, bottom: 0 }}>
+          <CartesianGrid stroke="var(--chart-grid)" strokeOpacity={0.72} vertical={false} />
+          <XAxis dataKey="date" minTickGap={18} tick={chartTick} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
+          <YAxis yAxisId="position" width={60} domain={["auto", "auto"]} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} />
+          <YAxis yAxisId="liabilities" orientation="right" width={48} domain={[0, "auto"]} tick={chartTick} tickLine={false} axisLine={false} tickFormatter={(value) => chartMoney(Number(value))} allowDataOverflow={false} />
+          <Tooltip contentStyle={chartTooltipStyle} formatter={(value, name) => [formatValuation(Number(value), valuationCurrency), seriesNames[String(name)] ?? String(name)]} />
+          <Line yAxisId="position" type="linear" dataKey="netWorth" stroke="var(--chart-primary)" strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+          <Line yAxisId="position" type="linear" dataKey="assets" stroke="var(--ink)" strokeWidth={1.4} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+          <Line yAxisId="liabilities" type="linear" dataKey="liabilities" stroke="var(--stone)" strokeWidth={1.3} strokeDasharray="5 4" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div> : <ChartEmpty text={t("netWorth.noNetWorthTrend")} /> : <HiddenMoney t={t} />}
+  </section>;
 }
 
 function ChartKey({ label, className, dashed = false }: { label: string; className: string; dashed?: boolean }) {
