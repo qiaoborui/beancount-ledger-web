@@ -1,5 +1,11 @@
+import { indentWithTab } from "@codemirror/commands";
+import { HighlightStyle, StreamLanguage, indentUnit, syntaxHighlighting, type StreamParser, type StringStream } from "@codemirror/language";
+import { Text, type EditorState } from "@codemirror/state";
+import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { ChevronDown, ChevronRight, FileCode2, FolderOpen, RotateCcw, Save, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
@@ -37,6 +43,113 @@ type DiffLine = {
   text: string;
 };
 
+type EditorStats = {
+  lines: number;
+  chars: number;
+};
+
+type BeanStreamState = Record<string, never>;
+
+const beancountStreamParser: StreamParser<BeanStreamState> = {
+  startState: () => ({}),
+  token(stream: StringStream) {
+    if (stream.eatSpace()) return null;
+    if (stream.peek() === ";") {
+      stream.skipToEnd();
+      return "comment";
+    }
+    if (stream.peek() === '"') {
+      stream.next();
+      let escaped = false;
+      while (!stream.eol()) {
+        const character = stream.next();
+        if (character === '"' && !escaped) break;
+        escaped = character === "\\" && !escaped;
+        if (character !== "\\") escaped = false;
+      }
+      return "string";
+    }
+    if (stream.match(/^\d{4}-\d{2}-\d{2}\b/)) return "meta";
+    if (stream.match(/^[#^][A-Za-z0-9_-]+/)) return "tagName";
+    if (stream.match(/^(?:option|include|plugin|pushtag|poptag|pushmeta|popmeta|open|close|commodity|pad|balance|event|query|price|note|document|custom|txn)\b/)) return "keyword";
+    if (stream.match(/^[A-Z][A-Za-z0-9-]*(?::[A-Za-z0-9-]+)+/)) return "variableName";
+    if (stream.match(/^-?(?:\d+(?:\.\d+)?|\.\d+)\b/)) return "number";
+    if (stream.match(/^[A-Z][A-Z0-9._-]{1,}\b/)) return "typeName";
+    stream.next();
+    return null;
+  },
+};
+
+const beancountLanguage = StreamLanguage.define(beancountStreamParser);
+const beancountHighlightStyle = HighlightStyle.define([
+  { tag: tags.comment, color: "var(--ledger-code-muted)" },
+  { tag: tags.meta, color: "var(--ledger-token-date)" },
+  { tag: tags.keyword, color: "var(--ledger-token-directive)", fontWeight: "600" },
+  { tag: tags.string, color: "var(--ledger-token-string)" },
+  { tag: tags.tagName, color: "var(--ledger-token-tag)" },
+  { tag: tags.variableName, color: "var(--ledger-token-account)" },
+  { tag: tags.number, color: "var(--ledger-token-number)" },
+  { tag: tags.typeName, color: "var(--ledger-token-currency)" },
+]);
+
+const ledgerEditorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    background: "var(--ledger-code-bg)",
+    color: "var(--ledger-code-fg)",
+    fontSize: "0.875rem",
+  },
+  ".cm-scroller": {
+    overflow: "auto",
+    background: "transparent",
+    fontFamily: '"SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace',
+    lineHeight: "1.5rem",
+  },
+  ".cm-content": {
+    minWidth: "max-content",
+    padding: "1rem 0",
+    caretColor: "var(--ledger-code-fg)",
+  },
+  ".cm-line": {
+    padding: "0 1.5rem 0 1rem",
+  },
+  ".cm-gutters": {
+    background: "var(--ledger-code-gutter-bg)",
+    borderRight: "1px solid var(--ledger-code-border)",
+    color: "var(--ledger-code-muted)",
+  },
+  ".cm-activeLine, .cm-activeLineGutter": {
+    background: "color-mix(in srgb, var(--ledger-code-selection) 34%, transparent)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--ledger-code-fg)",
+  },
+  ".cm-focused": {
+    outline: "none",
+  },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+    background: "var(--ledger-code-selection)",
+  },
+  ".cm-panels, .cm-tooltip": {
+    background: "var(--ledger-code-bg)",
+    borderColor: "var(--ledger-code-border)",
+    color: "var(--ledger-code-fg)",
+  },
+});
+
+const ledgerEditorExtensions = [
+  beancountLanguage,
+  syntaxHighlighting(beancountHighlightStyle),
+  indentUnit.of("  "),
+  keymap.of([indentWithTab]),
+];
+
+const ledgerEditorBasicSetup = {
+  foldGutter: false,
+  highlightActiveLine: true,
+  highlightActiveLineGutter: true,
+} as const;
+
 export function LedgerEditorPage({ online, onSaved, showToast }: { online: boolean; onSaved: () => void; showToast: ToastFn }) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<LedgerEditorFile[]>([]);
@@ -44,7 +157,8 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set([""]));
   const [mode, setMode] = useState<EditorMode>("edit");
   const [selectedPath, setSelectedPath] = useState("");
-  const [content, setContent] = useState("");
+  const [editorValue, setEditorValue] = useState("");
+  const [editorGeneration, setEditorGeneration] = useState(0);
   const [originalContent, setOriginalContent] = useState("");
   const [hash, setHash] = useState("");
   const [modTime, setModTime] = useState("");
@@ -52,33 +166,30 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const highlightRef = useRef<HTMLPreElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [stats, setStats] = useState<EditorStats>({ lines: 1, chars: 0 });
+  const [dirty, setDirty] = useState(false);
+  const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const originalDocRef = useRef(Text.of([""]));
   const dirtyRef = useRef(false);
+  const editorGenerationRef = useRef(0);
+  const loadingFileRef = useRef(false);
+  const savingRef = useRef(false);
   const selectedPathRef = useRef("");
+  const saveFileRef = useRef<() => void>(() => undefined);
 
-  const dirty = content !== originalContent;
-  const selectedFile = files.find((file) => file.path === selectedPath);
+  const selectedFile = useMemo(() => files.find((file) => file.path === selectedPath), [files, selectedPath]);
   const visibleFiles = useMemo(() => {
     const query = fileQuery.trim().toLowerCase();
     if (!query) return files;
     return files.filter((file) => file.path.toLowerCase().includes(query));
   }, [fileQuery, files]);
   const tree = useMemo(() => buildFileTree(visibleFiles), [visibleFiles]);
-  const diffLines = useMemo(() => buildLineDiff(originalContent, content), [content, originalContent]);
+  const diffLines = useMemo(() => mode === "diff" ? buildLineDiff(originalContent, editorValue) : [], [editorValue, mode, originalContent]);
   const changeStats = useMemo(() => diffLines.reduce((acc, line) => {
     if (line.kind === "added") acc.added += 1;
     if (line.kind === "removed") acc.removed += 1;
     return acc;
   }, { added: 0, removed: 0 }), [diffLines]);
-  const stats = useMemo(() => {
-    const lines = content === "" ? 1 : content.split("\n").length;
-    return { lines, chars: content.length };
-  }, [content]);
-
-  useEffect(() => {
-    dirtyRef.current = dirty;
-  }, [dirty]);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -94,30 +205,48 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     });
   }, [selectedPath]);
 
+  const updateDirty = useCallback((nextDirty: boolean) => {
+    dirtyRef.current = nextDirty;
+    setDirty(nextDirty);
+  }, []);
+
+  const getEditorContent = useCallback(() => editorRef.current?.view?.state.doc.toString() ?? editorValue, [editorValue]);
+
+  const resetEditor = useCallback((nextValue: string) => {
+    editorGenerationRef.current += 1;
+    setEditorValue(nextValue);
+    setEditorGeneration(editorGenerationRef.current);
+  }, []);
+
   const loadFile = useCallback(async (path: string, options: { force?: boolean } = {}) => {
-    if (!path) return;
+    if (!path || loadingFileRef.current || savingRef.current) return;
     if (!options.force && dirtyRef.current && !window.confirm(t("editorPage.confirmSwitch"))) return;
+    loadingFileRef.current = true;
     setLoadingFile(true);
     setError("");
     try {
       const data = await fetchJSON<LedgerEditorFileResponse>(`/api/ledger/editor/file?path=${encodeURIComponent(path)}`);
       selectedPathRef.current = data.path;
       setSelectedPath(data.path);
-      setContent(data.content);
+      resetEditor(data.content);
       setOriginalContent(data.content);
+      originalDocRef.current = Text.of(data.content.split("\n"));
+      updateDirty(false);
+      setStats(countEditorStats(data.content));
       setHash(data.hash);
       setModTime(data.modTime);
       if (shouldAutoFocusEditor()) {
-        window.setTimeout(() => textareaRef.current?.focus(), 40);
+        window.setTimeout(() => editorRef.current?.view?.focus(), 40);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : t("editorPage.readFailed");
       setError(message);
       showToast("error", message);
     } finally {
+      loadingFileRef.current = false;
       setLoadingFile(false);
     }
-  }, [showToast, t]);
+  }, [resetEditor, showToast, t, updateDirty]);
 
   const loadFiles = useCallback(async () => {
     setLoadingFiles(true);
@@ -140,22 +269,33 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
   }, [loadFile, showToast, t]);
 
   const saveFile = useCallback(async () => {
-    if (!selectedPath || saving) return;
+    if (!selectedPath || loadingFileRef.current || savingRef.current) return;
     if (!online) {
       showToast("error", t("editorPage.offlineCannotSave"));
       return;
     }
+    const savePath = selectedPath;
+    const saveGeneration = editorGenerationRef.current;
+    const savedDoc = editorRef.current?.view?.state.doc;
+    const nextContent = getEditorContent();
+    savingRef.current = true;
     setSaving(true);
     setError("");
     try {
       const data = await fetchJSON<{ ok: boolean; hash: string; modTime: string; size: number }>("/api/ledger/editor/file", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: selectedPath, content, previousHash: hash }),
+        body: JSON.stringify({ path: savePath, content: nextContent, previousHash: hash }),
       });
-      setHash(data.hash);
-      setModTime(data.modTime);
-      setOriginalContent(content);
+      if (selectedPathRef.current === savePath && editorGenerationRef.current === saveGeneration) {
+        const savedBaseline = savedDoc ?? Text.of(nextContent.split("\n"));
+        setHash(data.hash);
+        setModTime(data.modTime);
+        setOriginalContent(nextContent);
+        originalDocRef.current = savedBaseline;
+        const currentDoc = editorRef.current?.view?.state.doc;
+        updateDirty(currentDoc ? !currentDoc.eq(savedBaseline) : false);
+      }
       showToast("success", t("editorPage.saved"));
       onSaved();
       void loadFiles();
@@ -164,9 +304,16 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
       setError(message);
       showToast("error", message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
-  }, [content, hash, loadFiles, onSaved, online, saving, selectedPath, showToast, t]);
+  }, [getEditorContent, hash, loadFiles, onSaved, online, selectedPath, showToast, t, updateDirty]);
+
+  useEffect(() => {
+    saveFileRef.current = () => {
+      void saveFile();
+    };
+  }, [saveFile]);
 
   useEffect(() => {
     void loadFiles();
@@ -186,145 +333,151 @@ export function LedgerEditorPage({ online, onSaved, showToast }: { online: boole
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        void saveFile();
+        saveFileRef.current();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [saveFile]);
+  }, []);
 
-  function handleEditorScroll() {
-    const textarea = textareaRef.current;
-    const highlight = highlightRef.current;
-    if (!textarea || !highlight) return;
-    highlight.scrollTop = textarea.scrollTop;
-    highlight.scrollLeft = textarea.scrollLeft;
-  }
+  const handleEditorUpdate = useCallback((update: ViewUpdate) => {
+    if (!update.docChanged) return;
+    updateDirty(!update.state.doc.eq(originalDocRef.current));
+    setStats({ lines: update.state.doc.lines, chars: update.state.doc.length });
+  }, [updateDirty]);
 
-  function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Tab") return;
-    event.preventDefault();
-    const textarea = event.currentTarget;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const next = content.slice(0, start) + "  " + content.slice(end);
-    setContent(next);
-    window.requestAnimationFrame(() => {
-      textarea.selectionStart = start + 2;
-      textarea.selectionEnd = start + 2;
-    });
-  }
+  const handleCreateEditor = useCallback((_view: EditorView, state: EditorState) => {
+    if (!dirtyRef.current) originalDocRef.current = state.doc;
+  }, []);
 
-  function toggleDir(path: string) {
+  const switchMode = useCallback((nextMode: EditorMode) => {
+    if (nextMode === "diff") setEditorValue(getEditorContent());
+    setMode(nextMode);
+  }, [getEditorContent]);
+
+  const revertFile = useCallback(() => {
+    resetEditor(originalContent);
+    setStats(countEditorStats(originalContent));
+    updateDirty(false);
+    showToast("info", t("editorPage.reverted"));
+  }, [originalContent, resetEditor, showToast, t, updateDirty]);
+
+  const toggleDir = useCallback((path: string) => {
     setExpandedDirs((current) => {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
       else next.add(path);
       return next;
     });
-  }
+  }, []);
 
   return (
-    <section className="ledger-editor-shell min-w-0 overflow-hidden rounded-2xl border border-line bg-panel shadow-sm">
-      <div className="grid min-h-[calc(100dvh-13rem)] min-w-0 lg:grid-cols-[310px_minmax(0,1fr)]">
-        <aside className="min-w-0 border-b border-line bg-paper/70 lg:border-b-0 lg:border-r">
-          <div className="border-b border-line p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-stone"><FolderOpen className="h-3.5 w-3.5" /> {t("editorPage.ledgerFiles")}</div>
-            <label className="mt-3 flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-sm text-stone">
+    <section className="ledger-editor-shell min-w-0 overflow-hidden border-y border-line bg-panel">
+      <div className="grid min-h-0 min-w-0 lg:h-full lg:grid-cols-[270px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 min-w-0 flex-col border-b border-line bg-paper/70 lg:border-b-0 lg:border-r" aria-label={t("editorPage.ledgerFiles")}>
+          <div className="shrink-0 border-b border-line p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-stone"><FolderOpen className="h-3.5 w-3.5" /> {t("editorPage.ledgerFiles")}</div>
+            <label className="mt-2 flex h-11 items-center gap-2 rounded-md border border-line bg-panel px-3 text-sm text-stone focus-within:ring-2 focus-within:ring-brand/30 lg:h-9">
               <Search className="h-4 w-4 shrink-0 text-brand" />
-              <input className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-ink shadow-none focus:shadow-none" placeholder={t("editorPage.searchFiles")} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
+              <input className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-ink shadow-none outline-none focus:shadow-none" aria-label={t("editorPage.searchFiles")} placeholder={t("editorPage.searchFiles")} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
             </label>
           </div>
-          <div className="max-h-[42dvh] overflow-auto p-2 lg:max-h-[calc(100dvh-18rem)]">
-            {loadingFiles ? <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">{t("editorPage.loadingFiles")}</div> : tree.children.length ? tree.children.map((node) => (
+          <div className="max-h-[36dvh] min-h-0 overflow-auto p-2 lg:max-h-none lg:flex-1" role="tree" aria-busy={loadingFiles}>
+            {loadingFiles ? <div className="rounded-md border border-line bg-panel p-4 text-sm text-stone" role="status">{t("editorPage.loadingFiles")}</div> : tree.children.length ? tree.children.map((node) => (
               <FileTreeNode key={node.path || node.name} node={node} depth={0} selectedPath={selectedPath} queryActive={fileQuery.trim() !== ""} expandedDirs={expandedDirs} onToggleDir={toggleDir} onOpenFile={loadFile} />
-            )) : <div className="rounded-xl border border-line bg-panel p-4 text-sm text-stone">{t("editorPage.noMatch")}</div>}
+            )) : <div className="rounded-md border border-line bg-panel p-4 text-sm text-stone">{t("editorPage.noMatch")}</div>}
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-col bg-panel">
-          <div className="flex min-w-0 flex-col gap-3 border-b border-line bg-paper px-4 py-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <div className="truncate font-mono text-sm font-semibold text-ink">{selectedPath || t("editorPage.noFileSelected")}{dirty && <span className="ml-2 text-brand">●</span>}</div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-stone">
-                <span>{t("editorPage.lines", { count: stats.lines })}</span>
-                <span>{t("editorPage.chars", { count: stats.chars })}</span>
-                {selectedFile && <span>{formatBytes(selectedFile.size)}</span>}
-                {modTime && <span>{new Date(modTime).toLocaleString(i18n.language)}</span>}
-              </div>
+        <div className="flex min-h-[32rem] min-w-0 flex-col bg-panel lg:min-h-0">
+          <div className="flex min-w-0 shrink-0 flex-col gap-2 border-b border-line bg-paper px-3 py-2 md:flex-row md:items-center md:justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileCode2 className="h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+              <div className="truncate font-mono text-sm font-semibold text-ink">{selectedPath || t("editorPage.noFileSelected")}</div>
+              {dirty && <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-brand"><span aria-hidden="true">●</span><span className="sr-only">{t("editorPage.unsavedChanges")}</span></span>}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <div className="grid h-9 grid-cols-2 overflow-hidden rounded-xl border border-line bg-panel">
-                <button type="button" className={`px-3 text-sm ${mode === "edit" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("edit")}>{t("editorPage.edit")}</button>
-                <button type="button" className={`px-3 text-sm ${mode === "diff" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => setMode("diff")}>Diff</button>
+              <div className="grid h-10 grid-cols-2 overflow-hidden rounded-md border border-line bg-panel lg:h-8" role="group" aria-label={t("editorPage.viewMode")}>
+                <button type="button" aria-pressed={mode === "edit"} className={`px-3 text-sm ${mode === "edit" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => switchMode("edit")}>{t("editorPage.edit")}</button>
+                <button type="button" aria-pressed={mode === "diff"} className={`px-3 text-sm ${mode === "diff" ? "bg-brand text-paper" : "text-warm hover:bg-tag"}`} onClick={() => switchMode("diff")}>{t("editorPage.diff")}</button>
               </div>
-              <Button variant="outline" className="rounded-xl bg-panel text-stone" disabled={!dirty || loadingFile || saving} onClick={() => { setContent(originalContent); showToast("info", t("editorPage.reverted")); }}>
+              <Button variant="outline" size="sm" className="h-10 rounded-md bg-panel text-stone lg:h-8" disabled={!dirty || loadingFile || saving} onClick={revertFile}>
                 <RotateCcw className="h-4 w-4" /> {t("editorPage.revert")}
               </Button>
-              <Button className="rounded-xl" disabled={!dirty || loadingFile || saving || !selectedPath} onClick={() => void saveFile()}>
+              <Button size="sm" className="h-10 rounded-md lg:h-8" disabled={!dirty || loadingFile || saving || !selectedPath || !online} onClick={() => void saveFile()}>
                 <Save className="h-4 w-4" /> {saving ? t("editorPage.saving") : t("editorPage.save")}
               </Button>
             </div>
           </div>
 
-          {error && <div className="border-b border-line bg-[var(--danger)]/10 px-4 py-2 text-sm text-[var(--danger)]">{error}</div>}
-          {mode === "edit" ? (
-            <div className="ledger-code-surface relative min-h-[520px] flex-1 lg:min-h-0">
-              {loadingFile && <div className="ledger-code-loading absolute inset-0 z-20 grid place-items-center text-sm backdrop-blur-sm">{t("editorPage.loadingFile")}</div>}
-              <pre ref={highlightRef} aria-hidden="true" className="ledger-editor-highlight absolute inset-0 overflow-auto p-0">
-                <code className="block min-w-max py-4 pr-6">{renderHighlightedLines(content)}</code>
-              </pre>
-              <textarea
-                ref={textareaRef}
-                className="ledger-editor-input absolute inset-0 resize-none overflow-auto border-0 bg-transparent py-4 pr-6 outline-none"
-                value={content}
-                spellCheck={false}
-                wrap="off"
-                onChange={(event) => setContent(event.target.value)}
-                onScroll={handleEditorScroll}
-                onKeyDown={handleEditorKeyDown}
-                aria-label={t("editorPage.editorLabel")}
-              />
+          {error && <div className="shrink-0 border-b border-line bg-[var(--danger)]/10 px-4 py-2 text-sm text-[var(--danger)]" role="alert">{error}</div>}
+          <div className={mode === "edit" ? "ledger-code-editor ledger-code-surface relative min-h-0 flex-1 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-brand/30" : "hidden"} aria-busy={loadingFile}>
+            {loadingFile && <div className="ledger-code-loading absolute inset-0 z-20 grid place-items-center text-sm" role="status" aria-live="polite">{t("editorPage.loadingFile")}</div>}
+            <CodeMirror
+              key={`${selectedPath}:${editorGeneration}`}
+              ref={editorRef}
+              basicSetup={ledgerEditorBasicSetup}
+              className="h-full"
+              editable={mode === "edit" && !loadingFile && Boolean(selectedPath)}
+              extensions={ledgerEditorExtensions}
+              height="100%"
+              theme={ledgerEditorTheme}
+              value={editorValue}
+              onCreateEditor={handleCreateEditor}
+              onUpdate={handleEditorUpdate}
+              aria-label={t("editorPage.editorLabel")}
+            />
+          </div>
+          {mode === "diff" && <DiffView lines={diffLines} added={changeStats.added} removed={changeStats.removed} />}
+          <div className="ledger-editor-statusbar flex min-h-7 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-paper px-3 py-1 text-[11px] text-stone">
+            <div className="flex items-center gap-2">
+              <span className={dirty ? "font-medium text-brand" : ""}>{dirty ? t("editorPage.unsavedChanges") : t("editorPage.noChanges")}</span>
+              <span aria-hidden="true">·</span>
+              <span>{online ? t("editorPage.online") : t("editorPage.offline")}</span>
             </div>
-          ) : (
-            <DiffView lines={diffLines} added={changeStats.added} removed={changeStats.removed} />
-          )}
+            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono tabular-nums">
+              <span>{t("editorPage.lines", { count: stats.lines })}</span>
+              <span>{t("editorPage.chars", { count: stats.chars })}</span>
+              {selectedFile && <span>{formatBytes(selectedFile.size)}</span>}
+              {modTime && <span>{new Date(modTime).toLocaleString(i18n.language)}</span>}
+            </div>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function FileTreeNode({ node, depth, selectedPath, queryActive, expandedDirs, onToggleDir, onOpenFile }: { node: TreeNode; depth: number; selectedPath: string; queryActive: boolean; expandedDirs: Set<string>; onToggleDir: (path: string) => void; onOpenFile: (path: string) => Promise<void> }) {
+const FileTreeNode = memo(function FileTreeNode({ node, depth, selectedPath, queryActive, expandedDirs, onToggleDir, onOpenFile }: { node: TreeNode; depth: number; selectedPath: string; queryActive: boolean; expandedDirs: Set<string>; onToggleDir: (path: string) => void; onOpenFile: (path: string) => Promise<void> }) {
   const expanded = queryActive || expandedDirs.has(node.path);
   const paddingLeft = `${0.5 + depth * 0.875}rem`;
   if (node.type === "directory") {
     return (
       <div>
-        <button type="button" className="mb-1 flex h-8 w-full min-w-0 items-center gap-1 rounded-lg px-2 text-left text-sm font-medium text-olive hover:bg-panel hover:text-ink" style={{ paddingLeft }} onClick={() => onToggleDir(node.path)} aria-expanded={expanded}>
+        <button type="button" role="treeitem" aria-level={depth + 1} className="mb-1 flex h-11 w-full min-w-0 items-center gap-1 rounded-md px-2 text-left text-sm font-medium text-olive hover:bg-panel hover:text-ink lg:h-8" style={{ paddingLeft }} onClick={() => onToggleDir(node.path)} aria-expanded={expanded}>
           {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-stone" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone" />}
           <FolderOpen className="h-4 w-4 shrink-0 text-brand" />
           <span className="truncate">{node.name}</span>
         </button>
-        {expanded && node.children.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} queryActive={queryActive} expandedDirs={expandedDirs} onToggleDir={onToggleDir} onOpenFile={onOpenFile} />)}
+        {expanded && <div role="group">{node.children.map((child) => <FileTreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} queryActive={queryActive} expandedDirs={expandedDirs} onToggleDir={onToggleDir} onOpenFile={onOpenFile} />)}</div>}
       </div>
     );
   }
   const active = node.path === selectedPath;
   return (
-    <button type="button" className={`mb-1 flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border px-2 text-left text-sm ${active ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-transparent text-olive hover:border-line hover:bg-panel hover:text-ink"}`} style={{ paddingLeft }} onClick={() => void onOpenFile(node.path)} title={node.path}>
+    <button type="button" role="treeitem" aria-level={depth + 1} aria-selected={active} className={`mb-1 flex h-11 w-full min-w-0 items-center gap-2 rounded-md border px-2 text-left text-sm lg:h-8 ${active ? "border-brand bg-[var(--selected-bg)] text-ink" : "border-transparent text-olive hover:border-line hover:bg-panel hover:text-ink"}`} style={{ paddingLeft }} onClick={() => void onOpenFile(node.path)} title={node.path}>
       <span className="w-3.5 shrink-0" />
       <FileCode2 className="h-4 w-4 shrink-0 text-brand" />
       <span className="truncate">{node.name}</span>
     </button>
   );
-}
+});
 
 function DiffView({ lines, added, removed }: { lines: DiffLine[]; added: number; removed: number }) {
   const { t } = useTranslation();
   const hasChanges = added > 0 || removed > 0;
   return (
-    <div className="ledger-code-surface flex min-h-[520px] flex-1 flex-col lg:min-h-0">
+    <div className="ledger-code-surface flex min-h-0 flex-1 flex-col">
       <div className="ledger-diff-toolbar flex shrink-0 items-center justify-between px-4 py-2 font-mono text-xs">
         <span>{hasChanges ? `+${added} / -${removed}` : t("editorPage.noChanges")}</span>
         <span>{t("editorPage.workingCopyDiff")}</span>
@@ -438,49 +591,13 @@ async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit): Promi
   return data as T;
 }
 
-function renderHighlightedLines(content: string) {
-  const lines = content.split("\n");
-  if (lines.length === 0) lines.push("");
-  return lines.map((line, index) => (
-    <span key={index} className="ledger-editor-line">
-      <span className="ledger-editor-line-number">{index + 1}</span>
-      <span className="ledger-editor-code">{highlightBeanLine(line)}</span>
-    </span>
-  ));
-}
-
-function highlightBeanLine(line: string) {
-  if (line.trimStart().startsWith(";")) {
-    return <span className="ledger-token-comment">{line || " "}</span>;
+function countEditorStats(content: string): EditorStats {
+  if (!content) return { lines: 1, chars: 0 };
+  let lines = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) === 10) lines += 1;
   }
-  const tokenRe = /("(?:[^"\\]|\\.)*"|#[A-Za-z0-9_-]+|\b\d{4}-\d{2}-\d{2}\b|\b(?:option|include|open|close|balance|commodity|price|custom|event|note|document|pad|txn)\b|[A-Z][A-Za-z0-9-]*(?::[A-Za-z0-9-]+)+|-?\d+(?:\.\d+)?|[A-Z][A-Z0-9._-]{1,})/g;
-  const parts: ReactNode[] = [];
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  while ((match = tokenRe.exec(line)) !== null) {
-    if (match.index > cursor) {
-      parts.push(<span key={`plain-${cursor}`}>{line.slice(cursor, match.index)}</span>);
-    }
-    const token = match[0];
-    parts.push(<span key={`${match.index}-${token}`} className={beanTokenClass(token)}>{token}</span>);
-    cursor = match.index + token.length;
-  }
-  if (cursor < line.length) {
-    parts.push(<span key={`plain-${cursor}`}>{line.slice(cursor)}</span>);
-  }
-  return parts.length ? parts : " ";
-}
-
-function beanTokenClass(token: string) {
-  if (token.startsWith("\"")) return "ledger-token-string";
-  if (token.startsWith("#")) return "ledger-token-tag";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(token)) return "ledger-token-date";
-  if (/^-?\d/.test(token)) return "ledger-token-number";
-  if (/^(option|include|open|close|balance|commodity|price|custom|event|note|document|pad|txn)$/.test(token)) return "ledger-token-directive";
-  if (token.startsWith("Expenses:") || token.startsWith("Liabilities:")) return "ledger-token-expense";
-  if (token.startsWith("Income:") || token.startsWith("Assets:")) return "ledger-token-income";
-  if (token.includes(":")) return "ledger-token-account";
-  return "ledger-token-currency";
+  return { lines, chars: content.length };
 }
 
 function formatBytes(size: number) {

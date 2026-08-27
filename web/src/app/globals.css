@@ -870,8 +870,8 @@ html[data-theme="dark"] .home-daily-chart-line {
 }
 
 @media (max-width: 767px) {
-  .app-shell:has(.ledger-editor-input:focus) .mobile-bottom-nav,
-  .app-shell:has(.ledger-editor-input:focus) .app-fab {
+  .app-shell:has(.ledger-code-editor:focus-within) .mobile-bottom-nav,
+  .app-shell:has(.ledger-code-editor:focus-within) .app-fab {
     display: none;
   }
 }
@@ -1108,6 +1108,29 @@ html[data-theme="dark"] .home-daily-chart-line {
   min-height: 3.25rem;
 }
 
+.ledger-editor-shell {
+  min-height: calc(100dvh - 8rem);
+}
+
+@media (min-width: 1024px) {
+  .ledger-workspace-content-editor {
+    display: flex;
+    height: 100dvh;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .ledger-workspace-content-editor .workspace-context-row {
+    flex: 0 0 auto;
+  }
+
+  .ledger-workspace-content-editor .ledger-editor-shell {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+}
+
 @keyframes app-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
@@ -1292,14 +1315,6 @@ html[data-theme="dark"] .amount-danger {
   }
 }
 
-.ledger-editor-highlight,
-.ledger-editor-input {
-  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
-  font-size: 13px;
-  line-height: 1.5rem;
-  tab-size: 2;
-}
-
 .ledger-code-surface {
   background: var(--ledger-code-bg);
   color: var(--ledger-code-fg);
@@ -1310,57 +1325,9 @@ html[data-theme="dark"] .amount-danger {
   color: var(--ledger-code-fg);
 }
 
-.ledger-editor-highlight {
-  color: color-mix(in srgb, var(--ledger-code-fg) 86%, transparent);
-  background:
-    linear-gradient(90deg, var(--ledger-code-gutter-bg) 0 4.25rem, transparent 4.25rem),
-    var(--ledger-code-bg);
-}
-
-.ledger-editor-input {
-  padding-left: 5.25rem;
-  color: transparent;
-  caret-color: var(--ledger-code-fg);
-  white-space: pre;
-}
-
-.ledger-editor-input::selection {
-  background: var(--ledger-code-selection);
-}
-
-.ledger-editor-line {
-  display: grid;
-  min-height: 1.5rem;
-  grid-template-columns: 4.25rem minmax(0, 1fr);
-}
-
-.ledger-editor-line-number {
-  user-select: none;
-  padding-right: 0.875rem;
-  text-align: right;
-  color: var(--ledger-code-muted);
-}
-
-.ledger-editor-code {
-  padding-left: 1rem;
-  padding-right: 1.5rem;
-  white-space: pre;
-}
-
-.ledger-token-comment { color: var(--ledger-code-muted); }
-.ledger-token-date { color: var(--ledger-token-date); }
-.ledger-token-directive { color: var(--ledger-token-directive); font-weight: 600; }
-.ledger-token-string { color: var(--ledger-token-string); }
-.ledger-token-tag { color: var(--ledger-token-tag); }
-.ledger-token-income { color: var(--ledger-token-income); }
-.ledger-token-expense { color: var(--ledger-token-expense); }
-.ledger-token-account { color: var(--ledger-token-account); }
-.ledger-token-number { color: var(--ledger-token-number); }
-.ledger-token-currency { color: var(--ledger-token-currency); }
-
 .ledger-diff-view {
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
-  font-size: 13px;
+  font-size: 0.875rem;
   line-height: 1.5rem;
 }
 

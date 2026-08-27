@@ -159,6 +159,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
 
   const mobilePrimaryNav = ledgerNavItems.filter((item) => mobileTabHrefs.includes(item.href));
   const isAgentRoute = isActivePath(pathname, "/agent");
+  const isEditorRoute = isActivePath(pathname, "/editor");
   const showingRouteProgress = routePending || Boolean(navPendingHref);
   return (
     <div className="app-shell app-overflow-guard min-h-dvh max-w-full [overflow-x:clip] bg-paper pt-[calc(3.5rem+var(--app-safe-area-top))] text-ink [overscroll-behavior-y:none] md:pt-0">
@@ -254,7 +255,7 @@ export function AppShell({ children, pathname, routePending = false, onAdd, sens
         </main>
       </div>
 
-      {!isAgentRoute && <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.15rem+env(safe-area-inset-bottom))] right-4 z-30 inline-flex h-12 w-12 items-center justify-center gap-2 rounded-lg bg-brand text-primary-foreground active:scale-95 md:bottom-4 md:right-4 md:h-9 md:w-auto md:px-3" aria-label={t("appShell.openQuickActions")}>
+      {!isAgentRoute && !isEditorRoute && <button onClick={() => { haptic(10); onAdd?.(); }} className="kami-float app-fab fixed bottom-[calc(6.15rem+env(safe-area-inset-bottom))] right-4 z-30 inline-flex h-12 w-12 items-center justify-center gap-2 rounded-lg bg-brand text-primary-foreground active:scale-95 md:bottom-4 md:right-4 md:h-9 md:w-auto md:px-3" aria-label={t("appShell.openQuickActions")}>
         <Plus className="h-5 w-5 md:h-4 md:w-4" /><span className="hidden text-xs font-semibold md:inline">{t("appShell.new")}</span>
       </button>}
       {!isAgentRoute && <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-panel px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1.5 md:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(mobilePrimaryNav.length, 1)}, minmax(0, 1fr))` }}>

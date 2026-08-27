@@ -820,7 +820,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
 
       <PullToRefreshSurface refresh={refreshLedger} disabled={refreshing || loadingFresh}>
       <div className="ledger-workspace-frame min-w-0 max-w-full">
-      <div className="ledger-workspace-content min-w-0 max-w-full">
+      <div className={`ledger-workspace-content min-w-0 max-w-full ${page === "editor" ? "ledger-workspace-content-editor" : ""}`}>
       {page !== "agent" && <div className="workspace-context-row min-w-0 max-w-full border-b border-line bg-panel px-3 py-2.5 md:px-4 md:py-2 xl:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3.5">
           <div className="w-full min-w-0 md:w-auto md:flex-1">
