@@ -33,13 +33,13 @@ for required in \
   'manual self-hosted deployment must target refs/heads/main' \
   'SELFHOST_DEPLOY_ENABLED=true only after every prerequisite is ready' \
   'name: Reject an outdated main commit' \
-  'host_contract: 1' \
+  'host_contract: 2' \
   'tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' \
   '--login-server=${{ vars.HEADSCALE_CONTROL_URL }}' \
   'DEPLOY_PORT: ${{ vars.SELFHOST_DEPLOY_PORT }}' \
   '-p "$DEPLOY_PORT"' \
   'StrictHostKeyChecking=yes' \
-  'needs: [ref-guard, checks, build-server, build-indexer, build-agent, build-frontend]'; do
+  'needs: [ref-guard, checks, build-server, build-indexer, build-agent, build-frontend, build-zip-worker]'; do
   if ! grep -Fq -- "$required" "$workflow"; then
     echo "self-host deployment workflow is missing: ${required}" >&2
     exit 1
@@ -80,23 +80,23 @@ if grep -Eq '(^|[^-])latest([^a-z-]|$)' "$workflow"; then
   exit 1
 fi
 
-if [[ "$(grep -Fc 'platforms: linux/amd64' "$workflow")" -ne 4 ]]; then
-  echo "all four self-hosted application images must target linux/amd64" >&2
+if [[ "$(grep -Fc 'platforms: linux/amd64' "$workflow")" -ne 5 ]]; then
+  echo "all five self-hosted application images must target linux/amd64" >&2
   exit 1
 fi
-if [[ "$(grep -Fc "if: \${{ github.ref == 'refs/heads/main' }}" "$workflow")" -ne 4 ]]; then
+if [[ "$(grep -Fc "if: \${{ github.ref == 'refs/heads/main' }}" "$workflow")" -ne 5 ]]; then
   echo "every image build must refuse non-main workflow dispatches" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'needs: checks' "$workflow")" -ne 4 ]]; then
+if [[ "$(grep -Fc 'needs: checks' "$workflow")" -ne 5 ]]; then
   echo "every image build must wait for application checks" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'VCS_REF=${{ github.sha }}' "$workflow")" -ne 4 ]]; then
-  echo "all four self-hosted application images must carry the source SHA" >&2
+if [[ "$(grep -Fc 'VCS_REF=${{ github.sha }}' "$workflow")" -ne 5 ]]; then
+  echo "all five self-hosted application images must carry the source SHA" >&2
   exit 1
 fi
-for required in 'target: selfhost-server' 'target: selfhost-indexer' 'LEDGER_UID=1000' 'LEDGER_GID=1000'; do
+for required in 'target: selfhost-server' 'target: selfhost-indexer' 'target: zip-worker' 'LEDGER_UID=1000' 'LEDGER_GID=1000'; do
   if ! grep -Fq "$required" "$workflow"; then
     echo "host-specific image build is missing: ${required}" >&2
     exit 1
@@ -118,6 +118,7 @@ for required in \
   'SELFHOST_INDEXER_IMAGE' \
   'SELFHOST_AGENT_IMAGE' \
   'SELFHOST_FRONTEND_IMAGE' \
+  'SELFHOST_ZIP_WORKER_IMAGE' \
   'SELFHOST_APP_PULL_POLICY' \
   'SELFHOST_CADDYFILE_PATH' \
   'LEDGER_MAINTENANCE_MODE' \
@@ -128,7 +129,7 @@ for required in \
   fi
 done
 
-if [[ "$(grep -Fc 'org.opencontainers.image.revision=$VCS_REF' "$dockerfile")" -lt 4 ]]; then
+if [[ "$(grep -Fc 'org.opencontainers.image.revision=$VCS_REF' "$dockerfile")" -lt 5 ]]; then
   echo "self-hosted images must expose their source revision" >&2
   exit 1
 fi

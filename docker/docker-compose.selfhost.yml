@@ -90,15 +90,13 @@ services:
       retries: 12
 
   zip-worker:
-    image: ${SELFHOST_SERVER_IMAGE:-beancount-ledger-selfhost-server:local}
+    image: ${SELFHOST_ZIP_WORKER_IMAGE:-beancount-ledger-selfhost-zip-worker:local}
     pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: selfhost-server
+      target: zip-worker
       args:
-        LEDGER_UID: "${LEDGER_UID:-1000}"
-        LEDGER_GID: "${LEDGER_GID:-1000}"
         VCS_REF: "${SELFHOST_VCS_REF:-local}"
     command: ["/app/zip-worker"]
     restart: unless-stopped
@@ -108,7 +106,7 @@ services:
     expose:
       - "8080"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 12

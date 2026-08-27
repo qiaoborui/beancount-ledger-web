@@ -67,6 +67,8 @@ CMD ["/app/ledger-web"]
 
 # ── Private ZIP password worker ──
 FROM alpine:3.22 AS zip-worker
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates \
@@ -119,7 +121,6 @@ FROM selfhost-base AS selfhost-server
 ARG VCS_REF
 LABEL org.opencontainers.image.revision=$VCS_REF
 COPY --from=go-builder /app/ledger-selfhost /app/ledger-selfhost
-COPY --from=go-builder /app/zip-worker /app/zip-worker
 EXPOSE 3000
 CMD ["/app/ledger-selfhost"]
 
