@@ -69,14 +69,14 @@ func TestValidateGmailPollModeDoesNotRequirePubSubOrCron(t *testing.T) {
 	cfg := Config{
 		GmailDeliveryMode:       "poll",
 		GmailPollInterval:       15 * time.Minute,
-		GmailPollTimeout:        4 * time.Minute,
+		GmailPollTimeout:        14 * time.Minute,
 		GmailClientID:           "client",
 		GmailClientSecret:       "secret",
 		GmailOAuthRedirectURL:   "https://ledger.example/api/integrations/gmail/callback",
 		GmailTokenEncryptionKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
 		GmailAllowedSenders:     []string{"billing@example.com"},
 		GmailSyncLookbackDays:   30,
-		GmailZipTimeoutSeconds:  20,
+		GmailZipTimeoutSeconds:  14 * 60,
 	}
 	if err := validateGmailAutomationConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -94,17 +94,37 @@ func TestValidateGmailPollModeKeepsTimeoutBelowSyncLease(t *testing.T) {
 	cfg := Config{
 		GmailDeliveryMode:       "poll",
 		GmailPollInterval:       15 * time.Minute,
-		GmailPollTimeout:        5 * time.Minute,
+		GmailPollTimeout:        15 * time.Minute,
 		GmailClientID:           "client",
 		GmailClientSecret:       "secret",
 		GmailOAuthRedirectURL:   "https://ledger.example/api/integrations/gmail/callback",
 		GmailTokenEncryptionKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
 		GmailAllowedSenders:     []string{"billing@example.com"},
 		GmailSyncLookbackDays:   30,
-		GmailZipTimeoutSeconds:  20,
+		GmailZipTimeoutSeconds:  14 * 60,
 	}
 	if err := validateGmailAutomationConfig(cfg); err == nil || !strings.Contains(err.Error(), "GMAIL_POLL_TIMEOUT") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLoadConfigDefaultsAllowLongZIPWorkerSearch(t *testing.T) {
+	t.Setenv("GMAIL_POLL_TIMEOUT", "")
+	t.Setenv("GMAIL_ZIP_TIMEOUT_SECONDS", "")
+
+	cfg := LoadConfig()
+	if cfg.GmailPollTimeout != 14*time.Minute || cfg.GmailZipTimeoutSeconds != 14*60 {
+		t.Fatalf("poll timeout=%s zip timeout=%ds, want 14m and 840s", cfg.GmailPollTimeout, cfg.GmailZipTimeoutSeconds)
+	}
+}
+
+func TestGmailLongImportTimeoutsStayInsideSyncLease(t *testing.T) {
+	zipTimeout := time.Duration(maxGmailZIPTimeoutSeconds) * time.Second
+	if zipTimeout > maxGmailPollTimeout {
+		t.Fatalf("ZIP timeout %s exceeds poll timeout %s", zipTimeout, maxGmailPollTimeout)
+	}
+	if maxGmailPollTimeout >= gmailSyncLeaseTTL {
+		t.Fatalf("poll timeout %s must stay below sync lease %s", maxGmailPollTimeout, gmailSyncLeaseTTL)
 	}
 }
 

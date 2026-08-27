@@ -38,7 +38,7 @@ local long-running server
   -> existing import commit
 ```
 
-The process runs one immediate attempt at startup and then one attempt every `GMAIL_POLL_INTERVAL` (application default `15m`; the self-hosted Compose stack sets `2m`). Each attempt has the `GMAIL_POLL_TIMEOUT` deadline (default `4m`, range `30s`–`4m`), which stays below the durable five-minute Gmail sync lease. It cannot overlap another local attempt and uses that lease to avoid colliding with a manual sync. Every history or lookback scan first persists each Gmail message ID in the durable event inbox, then advances the history cursor and processes the queued messages in bounded batches. A slow PDF or ZIP can therefore time out and retry without restarting the scan. Failures are retained as the connection's last error and retried on the next interval. Shutdown cancels the active request and waits for the worker to finish. Poll mode makes only outbound Gmail API calls: it does not create `users.watch`, a Pub/Sub subscription, a Scheduler job, or an inbound webhook.
+The process runs one immediate attempt at startup and then one attempt every `GMAIL_POLL_INTERVAL` (application default `15m`; the self-hosted Compose stack sets `2m`). Each attempt has the `GMAIL_POLL_TIMEOUT` deadline (default `14m`, range `30s`–`14m`), which stays below the durable fifteen-minute Gmail sync lease. It cannot overlap another local attempt and uses that lease to avoid colliding with a manual sync. Every history or lookback scan first persists each Gmail message ID in the durable event inbox, then advances the history cursor and processes the queued messages in bounded batches. A slow PDF or ZIP can therefore time out and retry without restarting the scan. Failures are retained as the connection's last error and retried on the next interval. Shutdown cancels the active request and waits for the worker to finish. Poll mode makes only outbound Gmail API calls: it does not create `users.watch`, a Pub/Sub subscription, a Scheduler job, or an inbound webhook.
 
 When processing reaches a durable `ready` or `failed` pending-import state, the notification service publishes one aggregated Web Push message per Gmail message. The notification reports the counts waiting for Review and requiring attention, links to `/import`, and uses a stable tag so browser notification trays can collapse repeated delivery. Retry processing publishes the same completion result with a retry-specific tag. Web Push delivery remains best-effort after the pending state is stored.
 
@@ -111,7 +111,7 @@ GMAIL_ALLOWED_SENDERS=service@mail.alipay.com,service@vip.ccb.com,ccsvc@message.
 GMAIL_TOKEN_ENCRYPTION_KEY=
 GMAIL_SYNC_LOOKBACK_DAYS=30
 GMAIL_ZIP_PASSWORDS=
-GMAIL_ZIP_TIMEOUT_SECONDS=20
+GMAIL_ZIP_TIMEOUT_SECONDS=840
 ZIP_WORKER_URL=
 ZIP_WORKER_AUDIENCE=
 
@@ -128,7 +128,7 @@ CRON_SECRET=
 # Tailnet/LAN deployment: outbound local scheduler only
 # GMAIL_DELIVERY_MODE=poll
 # GMAIL_POLL_INTERVAL=15m
-# GMAIL_POLL_TIMEOUT=4m
+# GMAIL_POLL_TIMEOUT=14m
 ```
 
 Generate the encryption key with `openssl rand -base64 32`. `GMAIL_ZIP_PASSWORDS` accepts comma-separated known passwords and tries them before automatic search. Automatic search tries six-digit numeric passwords in the main application, then sends the archive to the IAM-protected ZIP Worker for six-character uppercase-alphanumeric search when `ZIP_WORKER_URL` is configured. `ZIP_WORKER_AUDIENCE` defaults to the worker URL. The main application verifies the returned password against the archive before extraction. Local and non-Cloud Run environments retain the in-process uppercase-alphanumeric fallback. The built-in fast path supports unencrypted ZIP and classic ZipCrypto entries using stored or deflate compression. AES-encrypted, ZIP64, multi-disk, oversized, and deeply nested archives are rejected with a visible pending-import error.

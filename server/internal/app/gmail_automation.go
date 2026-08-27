@@ -39,6 +39,7 @@ const (
 	gmailPendingKey    = "pending-imports"
 	gmailPushEventsKey = "push-events"
 	gmailSyncLeaseKey  = "sync-lease"
+	gmailSyncLeaseTTL  = 15 * time.Minute
 
 	maxGmailPendingItems = 500
 	maxGmailPendingBytes = 100 * 1024 * 1024
@@ -805,7 +806,7 @@ func (s *Server) claimGmailSyncLease(ctx context.Context, owner string) (bool, e
 			return nil
 		}
 		claimed = true
-		return s.gmailState().SaveSyncLease(lockCtx, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)})
+		return s.gmailState().SaveSyncLease(lockCtx, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(gmailSyncLeaseTTL).Format(time.RFC3339Nano)})
 	})
 	return claimed, err
 }
