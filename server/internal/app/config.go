@@ -253,7 +253,7 @@ func parseCSVLower(raw string) []string {
 func loadZIPWorkerConfig() (string, string) {
 	workerURL := strings.TrimSpace(os.Getenv("ZIP_WORKER_URL"))
 	audience := strings.TrimSpace(os.Getenv("ZIP_WORKER_AUDIENCE"))
-	if audience == "" {
+	if audience == "" && strings.HasPrefix(workerURL, "https://") {
 		audience = workerURL
 	}
 	return workerURL, audience
@@ -567,12 +567,24 @@ func validateZIPWorkerConfig(cfg Config) error {
 	if workerURL == "" && audience == "" {
 		return nil
 	}
-	if workerURL == "" || audience == "" {
+	if workerURL == "" {
 		return errors.New("ZIP_WORKER_URL and ZIP_WORKER_AUDIENCE must be configured together")
 	}
 	parsed, err := url.ParseRequestURI(workerURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" {
+		return errors.New("ZIP_WORKER_URL must be a valid URL")
+	}
+	if cfg.SelfHosted && workerURL == "http://zip-worker:8080" {
+		if audience != "" {
+			return errors.New("ZIP_WORKER_AUDIENCE must be empty for the self-hosted internal ZIP Worker")
+		}
+		return nil
+	}
+	if parsed.Scheme != "https" {
 		return errors.New("ZIP_WORKER_URL must be an HTTPS URL")
+	}
+	if audience == "" {
+		return errors.New("ZIP_WORKER_URL and ZIP_WORKER_AUDIENCE must be configured together")
 	}
 	audienceURL, err := url.ParseRequestURI(audience)
 	if err != nil || audienceURL.Scheme != "https" || audienceURL.Host == "" {

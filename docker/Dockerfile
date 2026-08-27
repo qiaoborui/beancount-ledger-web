@@ -119,6 +119,7 @@ FROM selfhost-base AS selfhost-server
 ARG VCS_REF
 LABEL org.opencontainers.image.revision=$VCS_REF
 COPY --from=go-builder /app/ledger-selfhost /app/ledger-selfhost
+COPY --from=go-builder /app/zip-worker /app/zip-worker
 EXPOSE 3000
 CMD ["/app/ledger-selfhost"]
 

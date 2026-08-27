@@ -46,13 +46,18 @@ for required in \
   fi
 done
 
-if ! grep -Fq 'compose "$maintenance_env" up -d --no-build database server indexer frontend' scripts/selfhost/beancount-ledger-deploy-run; then
+if ! grep -Fq 'compose "$maintenance_env" up -d --no-build database zip-worker server indexer frontend' scripts/selfhost/beancount-ledger-deploy-run; then
   echo "maintenance validation must start only services that can run behind the 503 guard" >&2
   exit 1
 fi
 if grep -Fq 'compose "$maintenance_env" up -d --no-build database server agent indexer frontend' scripts/selfhost/beancount-ledger-deploy-run \
   || grep -Fq 'wait_for_healthy_service "$maintenance_env" agent' scripts/selfhost/beancount-ledger-deploy-run; then
   echo "agent cannot become ready while the server is in deployment maintenance mode" >&2
+  exit 1
+fi
+if ! grep -Fq 'compose "$release_env" up -d --no-build database zip-worker server agent indexer frontend' scripts/selfhost/beancount-ledger-deploy-run \
+  || ! grep -Fq 'wait_for_healthy_service "$release_env" zip-worker' scripts/selfhost/beancount-ledger-deploy-run; then
+  echo "active releases must start and verify the internal ZIP Worker" >&2
   exit 1
 fi
 

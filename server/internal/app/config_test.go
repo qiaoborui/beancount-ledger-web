@@ -136,6 +136,14 @@ func TestValidateConfigRejectsInsecureZIPWorkerURL(t *testing.T) {
 	}
 }
 
+func TestValidateSelfHostedConfigAllowsInternalZIPWorker(t *testing.T) {
+	cfg := Config{SelfHosted: true, ZIPWorkerURL: "http://zip-worker:8080"}
+
+	if err := validateZIPWorkerConfig(cfg); err != nil {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestValidateConfigRejectsInvalidTelegramWebhookSecret(t *testing.T) {
 	cfg := Config{LedgerStorage: "filesystem", TelegramWebhookSecret: "base64+secret="}
 

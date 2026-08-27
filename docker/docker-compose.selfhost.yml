@@ -41,6 +41,8 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      zip-worker:
+        condition: service_healthy
     environment:
       <<: *database-env
       PORT: "3000"
@@ -74,6 +76,8 @@ services:
       GMAIL_SYNC_LOOKBACK_DAYS: "${GMAIL_SYNC_LOOKBACK_DAYS:-30}"
       GMAIL_ZIP_PASSWORDS: "${GMAIL_ZIP_PASSWORDS:-}"
       GMAIL_ZIP_TIMEOUT_SECONDS: "${GMAIL_ZIP_TIMEOUT_SECONDS:-20}"
+      ZIP_WORKER_URL: "http://zip-worker:8080"
+      ZIP_WORKER_AUDIENCE: ""
       CRON_SECRET: "${CRON_SECRET:-}"
       CRON_OIDC_AUDIENCE: "${CRON_OIDC_AUDIENCE:-}"
       CRON_OIDC_SERVICE_ACCOUNT: "${CRON_OIDC_SERVICE_ACCOUNT:-}"
@@ -81,6 +85,30 @@ services:
       - "3000"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  zip-worker:
+    image: ${SELFHOST_SERVER_IMAGE:-beancount-ledger-selfhost-server:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: selfhost-server
+      args:
+        LEDGER_UID: "${LEDGER_UID:-1000}"
+        LEDGER_GID: "${LEDGER_GID:-1000}"
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
+    command: ["/app/zip-worker"]
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      ZIP_WORKERS: "${ZIP_WORKERS:-8}"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 12
