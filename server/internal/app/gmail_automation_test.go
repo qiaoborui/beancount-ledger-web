@@ -689,6 +689,30 @@ func TestGmailSyncSkipsDuplicateZIPBeforePasswordSearch(t *testing.T) {
 	}
 }
 
+func TestGmailZIPRetryMatchesOriginalAttachmentAfterExtraction(t *testing.T) {
+	archive := []byte("encrypted ZIP bytes")
+	extracted := importUpload{Filename: "alipay-statement.csv", Content: []byte("交易号,金额\n1,12.34\n")}
+	messageID := "alipay-zip-retry"
+	sourceKey := messageID + ":" + sha256Hex(archive)
+
+	originalExtract := extractGmailImportZIP
+	extractGmailImportZIP = func(*Server, context.Context, []byte, []string) (importUpload, string, error) {
+		return extracted, "ABC123", nil
+	}
+	t.Cleanup(func() { extractGmailImportZIP = originalExtract })
+
+	server := &Server{cfg: Config{GmailZipTimeoutSeconds: 20}}
+	candidates, _ := server.gmailImportCandidates(context.Background(), gmailMessageEnvelope{
+		Attachments: []importUpload{{Filename: "alipay-statement.zip", Content: archive}},
+	}, nil, messageID, map[string]struct{}{})
+	if len(candidates) != 1 {
+		t.Fatalf("candidates=%#v", candidates)
+	}
+	if _, ok := gmailRetryCandidate(candidates, messageID, sourceKey); !ok {
+		t.Fatalf("retry did not match original ZIP source key %q after extraction", sourceKey)
+	}
+}
+
 func TestGmailSyncCreatesReadyPendingFromAlipayAttachment(t *testing.T) {
 	cfg := testLedger(t)
 	cfg.GmailAllowedSenders = []string{"service@mail.alipay.com"}
