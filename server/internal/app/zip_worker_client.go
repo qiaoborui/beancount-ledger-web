@@ -41,12 +41,13 @@ func (s *Server) searchZIPWorkerPassword(ctx context.Context, archive []byte) (s
 		return "", errors.New("ZIP Worker URL 未配置")
 	}
 	audience := strings.TrimSpace(s.cfg.ZIPWorkerAudience)
-	if audience == "" {
-		audience = workerURL
-	}
-	client, err := newZIPWorkerHTTPClient(ctx, audience)
-	if err != nil {
-		return "", fmt.Errorf("创建 ZIP Worker 身份客户端: %w", err)
+	client := http.DefaultClient
+	if audience != "" {
+		var err error
+		client, err = newZIPWorkerHTTPClient(ctx, audience)
+		if err != nil {
+			return "", fmt.Errorf("创建 ZIP Worker 身份客户端: %w", err)
+		}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, workerURL+zipWorkerPasswordPath, bytes.NewReader(archive))
 	if err != nil {

@@ -39,6 +39,7 @@ const (
 	gmailPendingKey    = "pending-imports"
 	gmailPushEventsKey = "push-events"
 	gmailSyncLeaseKey  = "sync-lease"
+	gmailSyncLeaseTTL  = 15 * time.Minute
 
 	maxGmailPendingItems = 500
 	maxGmailPendingBytes = 100 * 1024 * 1024
@@ -170,6 +171,7 @@ type gmailMessageEnvelope struct {
 
 type gmailImportCandidate struct {
 	Upload           importUpload
+	SourceKey        string
 	ProviderOverride string
 	Error            error
 	EmailFallback    bool
@@ -805,7 +807,7 @@ func (s *Server) claimGmailSyncLease(ctx context.Context, owner string) (bool, e
 			return nil
 		}
 		claimed = true
-		return s.gmailState().SaveSyncLease(lockCtx, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)})
+		return s.gmailState().SaveSyncLease(lockCtx, gmailSyncLease{Owner: owner, ExpiresAt: time.Now().UTC().Add(gmailSyncLeaseTTL).Format(time.RFC3339Nano)})
 	})
 	return claimed, err
 }
@@ -861,7 +863,7 @@ func (s *Server) processGmailMessage(ctx context.Context, api gmailAPI, messageI
 	}
 	ready, failed := 0, 0
 	for _, candidate := range candidates {
-		sourceKey := messageID + ":" + sha256Hex(candidate.Upload.Content)
+		sourceKey := gmailCandidateSourceKey(candidate, messageID)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		item := GmailPendingImport{ID: randomID(), ImportID: randomID(), SourceKey: sourceKey, MessageID: messageID, ThreadID: message.ThreadId, Sender: envelope.Sender, Subject: envelope.Subject, ReceivedAt: envelope.ReceivedAt, Filename: candidate.Upload.Filename, Status: "processing", StoredBytes: int64(len(candidate.Upload.Content) + len(raw)), CreatedAt: now, UpdatedAt: now}
 		reserved, err := s.reserveGmailPending(ctx, item)
@@ -1016,7 +1018,7 @@ func (s *Server) retryGmailPendingImportWithAPI(ctx context.Context, api gmailAP
 
 func gmailRetryCandidate(candidates []gmailImportCandidate, messageID, sourceKey string) (gmailImportCandidate, bool) {
 	for _, candidate := range candidates {
-		if messageID+":"+sha256Hex(candidate.Upload.Content) == sourceKey {
+		if gmailCandidateSourceKey(candidate, messageID) == sourceKey {
 			return candidate, true
 		}
 	}
@@ -1024,6 +1026,13 @@ func gmailRetryCandidate(candidates []gmailImportCandidate, messageID, sourceKey
 		return candidates[0], true
 	}
 	return gmailImportCandidate{}, false
+}
+
+func gmailCandidateSourceKey(candidate gmailImportCandidate, messageID string) string {
+	if candidate.SourceKey != "" {
+		return candidate.SourceKey
+	}
+	return messageID + ":" + sha256Hex(candidate.Upload.Content)
 }
 
 func (s *Server) recordGmailEnvelopeFailure(ctx context.Context, messageID string, raw []byte, envelope gmailMessageEnvelope, reason, message string) error {
@@ -1080,22 +1089,22 @@ func (s *Server) gmailImportCandidates(ctx context.Context, envelope gmailMessag
 			extracted, _, err := extractGmailImportZIP(s, zipContext, attachment.Content, s.cfg.GmailZipPasswords)
 			cancel()
 			if err != nil {
-				candidates = append(candidates, gmailImportCandidate{Upload: attachment, Error: err})
+				candidates = append(candidates, gmailImportCandidate{Upload: attachment, SourceKey: sourceKey, Error: err})
 			} else if s.importFilenameSupported(extracted.Filename) {
-				candidates = append(candidates, gmailImportCandidate{Upload: extracted, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, extracted.Filename)})
+				candidates = append(candidates, gmailImportCandidate{Upload: extracted, SourceKey: sourceKey, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, extracted.Filename)})
 				usable++
 			}
 			continue
 		}
 		if s.importFilenameSupported(attachment.Filename) {
-			candidates = append(candidates, gmailImportCandidate{Upload: attachment, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, attachment.Filename)})
+			candidates = append(candidates, gmailImportCandidate{Upload: attachment, SourceKey: sourceKey, ProviderOverride: gmailAttachmentProviderOverride(envelope.Sender, attachment.Filename)})
 			usable++
 		}
 	}
 	if usable == 0 && !duplicateSkipped {
 		filename := "gmail-" + safeSuffix(messageID) + ".eml"
 		if _, err := s.importerRegistry().Detect(filename, raw, ""); err == nil {
-			candidates = append(candidates, gmailImportCandidate{Upload: importUpload{Filename: filename, Content: raw}, EmailFallback: true})
+			candidates = append(candidates, gmailImportCandidate{Upload: importUpload{Filename: filename, Content: raw}, SourceKey: messageID + ":" + sha256Hex(raw), EmailFallback: true})
 		}
 	}
 	return candidates, duplicateSkipped

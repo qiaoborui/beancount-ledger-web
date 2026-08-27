@@ -18,7 +18,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const alipaySmallPurseCashAccount = "Assets:CN:Alipay:SmallPurse"
+const (
+	alipaySmallPurseCashAccount    = "Assets:CN:Alipay:SmallPurse"
+	alipaySmallPurseMaxAmountCents = 1_000_000_000
+)
 
 type alipaySmallPurseConfig struct {
 	DefaultMinusAccount string                        `yaml:"defaultMinusAccount"`
@@ -89,7 +92,11 @@ func (s *Server) prepareAlipaySmallPurseInput(inputFile, importID string) (prepa
 		return preparedImportInput{}, err
 	}
 	start, end := alipaySmallPurseDateRange(statement)
-	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows)
+	snapshot, err := s.alipaySmallPurseSnapshot(context.Background())
+	if err != nil {
+		return preparedImportInput{}, err
+	}
+	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows, alipaySmallPurseSnapshotOrderIDs(snapshot))
 	generatedRows := 0
 	skippedRows := 0
 	for _, row := range statement.Rows {
@@ -132,21 +139,20 @@ func (s *Server) generateAlipaySmallPurseBean(ctx context.Context, inputFile, ou
 	}
 	blocks := make([]string, 0, len(statement.Rows))
 	rows := alipaySmallPurseRowsForRendering(statement.Rows, config)
-	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows)
-	ownInitial, partnerInitial, err := s.alipaySmallPurseInitialContributionBalances(ctx, statement, config)
+	snapshot, err := s.alipaySmallPurseSnapshot(ctx)
 	if err != nil {
 		return err
 	}
+	refundSkips := alipaySmallPurseRefundSkipRows(statement.Rows, alipaySmallPurseSnapshotOrderIDs(snapshot))
+	ownInitial, partnerInitial := alipaySmallPurseInitialContributionBalances(snapshot, statement, config)
 	allocator := newAlipaySmallPurseContributionAllocator(config, ownInitial, partnerInitial)
+	refunds := newAlipaySmallPurseRefundTracker(snapshot, config)
 	for _, row := range rows {
-		if refundSkips[row.OrderID] {
-			continue
-		}
-		block, ignore, err := renderAlipaySmallPurseEntry(statement, row, config, allocator)
+		block, ignore, err := renderAlipaySmallPurseEntry(statement, row, config, allocator, refunds)
 		if err != nil {
 			return err
 		}
-		if ignore || block == "" {
+		if refundSkips[row.OrderID] || ignore || block == "" {
 			continue
 		}
 		blocks = append(blocks, block)
@@ -189,9 +195,12 @@ func (s *Server) loadAlipaySmallPurseConfig() (alipaySmallPurseConfig, error) {
 	return config, nil
 }
 
-func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig, allocator *alipaySmallPurseContributionAllocator) (string, bool, error) {
+func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipaySmallPurseRow, config alipaySmallPurseConfig, allocator *alipaySmallPurseContributionAllocator, refunds *alipaySmallPurseRefundTracker) (string, bool, error) {
 	income := cents(row.Income)
 	expense := cents(row.Expense)
+	if income < 0 || expense < 0 || income > alipaySmallPurseMaxAmountCents || expense > alipaySmallPurseMaxAmountCents {
+		return "", false, fmt.Errorf("支付宝小荷包第 %d 行金额超出安全范围", row.RowNumber)
+	}
 	if income == 0 && expense == 0 {
 		return "", true, nil
 	}
@@ -269,9 +278,15 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 				return "", true, nil
 			}
 		}
-		if allocator != nil && incomeKind == "refund" && alipaySmallPurseSharedExpenseSplit(config) {
-			ownShare, partnerShare := allocator.refund(amount)
-			lines = appendAlipaySmallPurseSharedPostings(lines, target, alipaySmallPursePartnerLiabilityAccount(config), alipaySmallPurseCashAccountForConfig(config), -ownShare, -partnerShare, amount, currency)
+		if incomeKind == "refund" && alipaySmallPurseSharedExpenseSplit(config) {
+			postings, err := refunds.refund(row.OrderID, date, amount)
+			if err != nil {
+				return "", false, fmt.Errorf("支付宝小荷包第 %d 行退款无法安全分摊: %w", row.RowNumber, err)
+			}
+			if allocator != nil {
+				allocator.restore(postings, alipaySmallPursePartnerLiabilityAccount(config))
+			}
+			lines = appendAlipaySmallPurseRefundPostings(lines, postings, alipaySmallPurseCashAccountForConfig(config), amount, currency)
 			return strings.Join(lines, "\n"), false, nil
 		}
 		lines = append(lines,
@@ -281,11 +296,28 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		return strings.Join(lines, "\n"), false, nil
 	}
 	if alipaySmallPurseSharedExpenseSplit(config) {
-		ownShare, partnerShare := amount/2, amount-(amount/2)
-		if allocator != nil {
-			ownShare, partnerShare = allocator.spend(amount)
+		partnerLiability := alipaySmallPursePartnerLiabilityAccount(config)
+		allocated, found, err := refunds.original(row.OrderID, amount)
+		if err != nil {
+			return "", false, fmt.Errorf("支付宝小荷包第 %d 行原消费无法安全分摊: %w", row.RowNumber, err)
 		}
-		lines = appendAlipaySmallPurseSharedPostings(lines, target, alipaySmallPursePartnerLiabilityAccount(config), alipaySmallPurseCashAccountForConfig(config), ownShare, partnerShare, -amount, currency)
+		ownShare, partnerShare := amount/2, amount-(amount/2)
+		if found {
+			ownShare, partnerShare = alipaySmallPurseAllocationShares(allocated, partnerLiability)
+			if allocator != nil {
+				allocator.consume(allocated, partnerLiability)
+			}
+		} else {
+			if allocator != nil {
+				ownShare, partnerShare = allocator.spend(amount)
+			}
+			refunds.record(row.OrderID, date, amount, []alipaySmallPurseAllocatedPosting{
+				{Account: target, Amount: ownShare},
+				{Account: partnerLiability, Amount: partnerShare},
+			})
+			refunds.markOriginalRendered(row.OrderID)
+		}
+		lines = appendAlipaySmallPurseSharedPostings(lines, target, partnerLiability, alipaySmallPurseCashAccountForConfig(config), ownShare, partnerShare, -amount, currency)
 		return strings.Join(lines, "\n"), false, nil
 	}
 	lines = append(lines,
@@ -339,10 +371,36 @@ func (a *alipaySmallPurseContributionAllocator) spend(amount int) (int, int) {
 	return ownShare, partnerShare
 }
 
-func (a *alipaySmallPurseContributionAllocator) refund(amount int) (int, int) {
-	ownShare, partnerShare := a.split(amount)
-	a.ownBalance += ownShare
-	a.partnerBalance += partnerShare
+func (a *alipaySmallPurseContributionAllocator) restore(postings []alipaySmallPurseAllocatedPosting, partnerLiability string) {
+	for _, posting := range postings {
+		if posting.Account == partnerLiability {
+			a.partnerBalance += posting.Amount
+		} else {
+			a.ownBalance += posting.Amount
+		}
+	}
+}
+
+func (a *alipaySmallPurseContributionAllocator) consume(postings []alipaySmallPurseAllocatedPosting, partnerLiability string) {
+	for _, posting := range postings {
+		if posting.Account == partnerLiability {
+			a.partnerBalance -= posting.Amount
+		} else {
+			a.ownBalance -= posting.Amount
+		}
+	}
+}
+
+func alipaySmallPurseAllocationShares(postings []alipaySmallPurseAllocatedPosting, partnerLiability string) (int, int) {
+	ownShare := 0
+	partnerShare := 0
+	for _, posting := range postings {
+		if posting.Account == partnerLiability {
+			partnerShare += posting.Amount
+		} else {
+			ownShare += posting.Amount
+		}
+	}
 	return ownShare, partnerShare
 }
 
@@ -369,18 +427,400 @@ func appendAlipaySmallPurseSharedPostings(lines []string, target, partnerLiabili
 	return lines
 }
 
+func appendAlipaySmallPurseRefundPostings(lines []string, postings []alipaySmallPurseAllocatedPosting, cashAccount string, cashAmount int, currency string) []string {
+	for _, posting := range postings {
+		if posting.Amount == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  %-38s %12s %s", posting.Account, fromCents(-posting.Amount), currency))
+	}
+	return append(lines, fmt.Sprintf("  %-38s %12s %s", cashAccount, fromCents(cashAmount), currency))
+}
+
+type alipaySmallPurseAllocatedPosting struct {
+	Account string
+	Amount  int
+}
+
+type alipaySmallPurseRefundAllocation struct {
+	originalDate      string
+	remainingAmount   int
+	remainingPostings []alipaySmallPurseAllocatedPosting
+}
+
+type alipaySmallPurseRecordedRefund struct {
+	date     string
+	amount   int
+	postings []alipaySmallPurseAllocatedPosting
+	rendered bool
+}
+
+type alipaySmallPurseRefundTracker struct {
+	allocations       map[string]*alipaySmallPurseRefundAllocation
+	originalPostings  map[string][]alipaySmallPurseAllocatedPosting
+	renderedOriginal  map[string]bool
+	recordedRefunds   map[string]alipaySmallPurseRecordedRefund
+	invalidAllocation map[string]bool
+}
+
+func newAlipaySmallPurseRefundTracker(snapshot *LedgerSnapshot, config alipaySmallPurseConfig) *alipaySmallPurseRefundTracker {
+	tracker := &alipaySmallPurseRefundTracker{
+		allocations:       map[string]*alipaySmallPurseRefundAllocation{},
+		originalPostings:  map[string][]alipaySmallPurseAllocatedPosting{},
+		renderedOriginal:  map[string]bool{},
+		recordedRefunds:   map[string]alipaySmallPurseRecordedRefund{},
+		invalidAllocation: map[string]bool{},
+	}
+	if snapshot == nil || !alipaySmallPurseSharedExpenseSplit(config) {
+		return tracker
+	}
+	cashAccount := alipaySmallPurseCashAccountForConfig(config)
+	partnerLiability := alipaySmallPursePartnerLiabilityAccount(config)
+	currency := config.DefaultCurrency
+	seenOriginals := map[string]bool{}
+	for _, txn := range snapshot.Transactions {
+		orderID := metadataString(txn.Metadata["orderId"])
+		baseID := alipaySmallPurseBaseOrderID(orderID)
+		if baseID == "" || orderID != baseID {
+			continue
+		}
+		if seenOriginals[baseID] {
+			tracker.invalidate(baseID)
+			continue
+		}
+		seenOriginals[baseID] = true
+		amount, postings, ok := alipaySmallPurseOriginalAllocation(txn, cashAccount, partnerLiability, currency)
+		if !ok {
+			continue
+		}
+		tracker.record(baseID, txn.Date, amount, postings)
+	}
+	seenRefunds := map[string]bool{}
+	for _, txn := range snapshot.Transactions {
+		orderID := metadataString(txn.Metadata["orderId"])
+		baseID := alipaySmallPurseBaseOrderID(orderID)
+		if baseID == "" || orderID == baseID {
+			continue
+		}
+		if seenRefunds[orderID] {
+			tracker.invalidate(baseID)
+			continue
+		}
+		seenRefunds[orderID] = true
+		tracker.applyRecordedRefund(orderID, baseID, txn, cashAccount, currency)
+	}
+	return tracker
+}
+
+func alipaySmallPurseOriginalAllocation(txn Transaction, cashAccount, partnerLiability, currency string) (int, []alipaySmallPurseAllocatedPosting, bool) {
+	cashAmount := 0
+	postings := make([]alipaySmallPurseAllocatedPosting, 0, len(txn.Postings))
+	total := 0
+	for _, posting := range txn.Postings {
+		if valueOr(posting.Currency, "CNY") != currency {
+			continue
+		}
+		if posting.Account == cashAccount {
+			if posting.Amount < -alipaySmallPurseMaxAmountCents || posting.Amount > alipaySmallPurseMaxAmountCents {
+				return 0, nil, false
+			}
+			cashAmount += posting.Amount
+			continue
+		}
+		if posting.Amount <= 0 {
+			continue
+		}
+		if strings.HasPrefix(posting.Account, "Liabilities:") && posting.Account != partnerLiability {
+			return 0, nil, false
+		}
+		if posting.Amount > alipaySmallPurseMaxAmountCents || total > alipaySmallPurseMaxAmountCents-posting.Amount {
+			return 0, nil, false
+		}
+		postings = append(postings, alipaySmallPurseAllocatedPosting{Account: posting.Account, Amount: posting.Amount})
+		total += posting.Amount
+	}
+	if cashAmount >= 0 || -cashAmount > alipaySmallPurseMaxAmountCents || total != -cashAmount || len(postings) == 0 {
+		return 0, nil, false
+	}
+	return -cashAmount, postings, true
+}
+
+func (t *alipaySmallPurseRefundTracker) record(orderID, date string, amount int, postings []alipaySmallPurseAllocatedPosting) {
+	orderID = strings.TrimSpace(orderID)
+	if orderID == "" || amount <= 0 || t.invalidAllocation[orderID] {
+		return
+	}
+	if !alipaySmallPurseValidDate(date) {
+		t.invalidate(orderID)
+		return
+	}
+	remaining := make([]alipaySmallPurseAllocatedPosting, 0, len(postings))
+	accountIndexes := map[string]int{}
+	total := 0
+	for _, posting := range postings {
+		if posting.Account == "" || posting.Amount <= 0 {
+			continue
+		}
+		if index, ok := accountIndexes[posting.Account]; ok {
+			remaining[index].Amount += posting.Amount
+		} else {
+			accountIndexes[posting.Account] = len(remaining)
+			remaining = append(remaining, posting)
+		}
+		total += posting.Amount
+	}
+	if total != amount {
+		return
+	}
+	if existing := t.originalPostings[orderID]; existing != nil {
+		if !alipaySmallPurseAllocatedPostingsEqual(existing, remaining) {
+			t.invalidate(orderID)
+		}
+		return
+	}
+	t.originalPostings[orderID] = append([]alipaySmallPurseAllocatedPosting(nil), remaining...)
+	t.allocations[orderID] = &alipaySmallPurseRefundAllocation{originalDate: date, remainingAmount: amount, remainingPostings: remaining}
+}
+
+func alipaySmallPurseAllocatedPostingsEqual(left, right []alipaySmallPurseAllocatedPosting) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func (t *alipaySmallPurseRefundTracker) original(orderID string, amount int) ([]alipaySmallPurseAllocatedPosting, bool, error) {
+	orderID = strings.TrimSpace(orderID)
+	if t.invalidAllocation[orderID] {
+		return nil, false, fmt.Errorf("原订单 %s 在账本中存在冲突分录", orderID)
+	}
+	postings := t.originalPostings[orderID]
+	if postings == nil {
+		return nil, false, nil
+	}
+	if t.renderedOriginal[orderID] {
+		return nil, false, fmt.Errorf("原订单 %s 在账单中重复出现", orderID)
+	}
+	total := 0
+	for _, posting := range postings {
+		total += posting.Amount
+	}
+	if total != amount {
+		t.invalidate(orderID)
+		return nil, false, fmt.Errorf("原订单 %s 的账单金额 %s 与账本金额 %s 不一致", orderID, fromCents(amount), fromCents(total))
+	}
+	t.renderedOriginal[orderID] = true
+	return append([]alipaySmallPurseAllocatedPosting(nil), postings...), true, nil
+}
+
+func (t *alipaySmallPurseRefundTracker) markOriginalRendered(orderID string) {
+	t.renderedOriginal[strings.TrimSpace(orderID)] = true
+}
+
+func (t *alipaySmallPurseRefundTracker) applyRecordedRefund(orderID, baseID string, txn Transaction, cashAccount, currency string) {
+	allocation := t.allocations[baseID]
+	if allocation == nil {
+		return
+	}
+	if !alipaySmallPurseValidDate(allocation.originalDate) || !alipaySmallPurseValidDate(txn.Date) {
+		t.invalidate(baseID)
+		return
+	}
+	if txn.Date < allocation.originalDate {
+		t.invalidate(baseID)
+		return
+	}
+	cashAmount := 0
+	reversedByAccount := map[string]int{}
+	for _, posting := range txn.Postings {
+		if valueOr(posting.Currency, "CNY") != currency {
+			continue
+		}
+		if posting.Account == cashAccount {
+			cashAmount += posting.Amount
+		} else if posting.Amount < 0 {
+			reversedByAccount[posting.Account] += -posting.Amount
+		}
+	}
+	if cashAmount <= 0 || cashAmount > alipaySmallPurseMaxAmountCents {
+		t.invalidate(baseID)
+		return
+	}
+	total := 0
+	remainingByAccount := make(map[string]int, len(allocation.remainingPostings))
+	for _, posting := range allocation.remainingPostings {
+		remainingByAccount[posting.Account] = posting.Amount
+	}
+	for account, reversed := range reversedByAccount {
+		if reversed > remainingByAccount[account] {
+			t.invalidate(baseID)
+			return
+		}
+		total += reversed
+	}
+	if total != cashAmount || cashAmount > allocation.remainingAmount {
+		t.invalidate(baseID)
+		return
+	}
+	postings := make([]alipaySmallPurseAllocatedPosting, 0, len(reversedByAccount))
+	for index := range allocation.remainingPostings {
+		reversed := reversedByAccount[allocation.remainingPostings[index].Account]
+		if reversed > 0 {
+			postings = append(postings, alipaySmallPurseAllocatedPosting{Account: allocation.remainingPostings[index].Account, Amount: reversed})
+		}
+		allocation.remainingPostings[index].Amount -= reversed
+	}
+	allocation.remainingAmount -= cashAmount
+	t.recordedRefunds[orderID] = alipaySmallPurseRecordedRefund{date: txn.Date, amount: cashAmount, postings: postings}
+}
+
+func (t *alipaySmallPurseRefundTracker) invalidate(baseID string) {
+	delete(t.allocations, baseID)
+	delete(t.originalPostings, baseID)
+	delete(t.renderedOriginal, baseID)
+	for orderID := range t.recordedRefunds {
+		if alipaySmallPurseBaseOrderID(orderID) == baseID {
+			delete(t.recordedRefunds, orderID)
+		}
+	}
+	t.invalidAllocation[baseID] = true
+}
+
+func (t *alipaySmallPurseRefundTracker) refund(orderID, date string, amount int) ([]alipaySmallPurseAllocatedPosting, error) {
+	baseID := alipaySmallPurseBaseOrderID(orderID)
+	if t.invalidAllocation[baseID] {
+		return nil, fmt.Errorf("原订单 %s 的历史退款分录与原消费不一致", baseID)
+	}
+	allocation := t.allocations[baseID]
+	if allocation == nil {
+		return nil, fmt.Errorf("找不到原订单 %s 的分录", baseID)
+	}
+	if !alipaySmallPurseValidDate(allocation.originalDate) {
+		t.invalidate(baseID)
+		return nil, fmt.Errorf("原订单 %s 的历史退款分录与原消费不一致", baseID)
+	}
+	if !alipaySmallPurseValidDate(date) {
+		return nil, fmt.Errorf("退款日期 %s 无效", date)
+	}
+	if date < allocation.originalDate {
+		return nil, fmt.Errorf("退款日期 %s 早于原订单日期 %s", date, allocation.originalDate)
+	}
+	if recorded, ok := t.recordedRefunds[orderID]; ok {
+		if !alipaySmallPurseValidDate(recorded.date) {
+			t.invalidate(baseID)
+			return nil, fmt.Errorf("原订单 %s 的历史退款分录与原消费不一致", baseID)
+		}
+		if recorded.date != date {
+			return nil, fmt.Errorf("退款日期 %s 与账本中的已有退款日期 %s 不一致", date, recorded.date)
+		}
+		if recorded.amount != amount {
+			return nil, fmt.Errorf("退款金额 %s 与账本中的已有退款 %s 不一致", fromCents(amount), fromCents(recorded.amount))
+		}
+		if recorded.rendered {
+			return nil, fmt.Errorf("退款订单 %s 在账单中重复出现", orderID)
+		}
+		recorded.rendered = true
+		t.recordedRefunds[orderID] = recorded
+		return append([]alipaySmallPurseAllocatedPosting(nil), recorded.postings...), nil
+	}
+	if amount <= 0 || amount > allocation.remainingAmount {
+		return nil, fmt.Errorf("退款金额 %s 超过原订单剩余金额 %s", fromCents(amount), fromCents(allocation.remainingAmount))
+	}
+	postings := proportionalAlipaySmallPursePostings(allocation.remainingPostings, allocation.remainingAmount, amount)
+	for _, refunded := range postings {
+		for index := range allocation.remainingPostings {
+			if allocation.remainingPostings[index].Account == refunded.Account {
+				allocation.remainingPostings[index].Amount -= refunded.Amount
+				break
+			}
+		}
+	}
+	allocation.remainingAmount -= amount
+	t.recordedRefunds[orderID] = alipaySmallPurseRecordedRefund{date: date, amount: amount, postings: append([]alipaySmallPurseAllocatedPosting(nil), postings...), rendered: true}
+	return postings, nil
+}
+
+func proportionalAlipaySmallPursePostings(remaining []alipaySmallPurseAllocatedPosting, remainingAmount, amount int) []alipaySmallPurseAllocatedPosting {
+	type remainderShare struct {
+		index     int
+		remainder int64
+	}
+	out := make([]alipaySmallPurseAllocatedPosting, len(remaining))
+	remainders := make([]remainderShare, len(remaining))
+	allocated := 0
+	for index, posting := range remaining {
+		numerator := int64(amount) * int64(posting.Amount)
+		share := int(numerator / int64(remainingAmount))
+		out[index] = alipaySmallPurseAllocatedPosting{Account: posting.Account, Amount: share}
+		remainders[index] = remainderShare{index: index, remainder: numerator % int64(remainingAmount)}
+		allocated += share
+	}
+	sort.SliceStable(remainders, func(i, j int) bool {
+		return remainders[i].remainder > remainders[j].remainder
+	})
+	for index := 0; index < amount-allocated; index++ {
+		out[remainders[index].index].Amount++
+	}
+	return out
+}
+
 func alipaySmallPurseRowsForRendering(rows []alipaySmallPurseRow, config alipaySmallPurseConfig) []alipaySmallPurseRow {
 	out := append([]alipaySmallPurseRow(nil), rows...)
-	if !alipaySmallPurseUsesRunningContributionBalance(config) {
+	if !alipaySmallPurseUsesRunningContributionBalance(config) && !alipaySmallPurseSharedExpenseSplit(config) {
 		return out
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].DateTime == out[j].DateTime {
-			return out[i].RowNumber < out[j].RowNumber
+	originalRows := map[string]int{}
+	for _, row := range out {
+		if cents(row.Expense) <= 0 {
+			continue
 		}
-		return out[i].DateTime < out[j].DateTime
+		baseID := alipaySmallPurseBaseOrderID(row.OrderID)
+		if baseID == "" {
+			continue
+		}
+		key := alipaySmallPurseTimestampOrderKey(row.DateTime, baseID)
+		if current, ok := originalRows[key]; !ok || row.RowNumber < current {
+			originalRows[key] = row.RowNumber
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DateTime != out[j].DateTime {
+			return out[i].DateTime < out[j].DateTime
+		}
+		leftRow := alipaySmallPurseEffectiveRowNumber(out[i], originalRows)
+		rightRow := alipaySmallPurseEffectiveRowNumber(out[j], originalRows)
+		if leftRow != rightRow {
+			return leftRow < rightRow
+		}
+		leftRefund := cents(out[i].Income) > 0 && alipaySmallPurseIncomeKind(out[i]) == "refund"
+		rightRefund := cents(out[j].Income) > 0 && alipaySmallPurseIncomeKind(out[j]) == "refund"
+		if leftRefund != rightRefund {
+			return !leftRefund
+		}
+		return out[i].RowNumber < out[j].RowNumber
 	})
 	return out
+}
+
+func alipaySmallPurseEffectiveRowNumber(row alipaySmallPurseRow, originalRows map[string]int) int {
+	if cents(row.Income) <= 0 || alipaySmallPurseIncomeKind(row) != "refund" {
+		return row.RowNumber
+	}
+	baseID := alipaySmallPurseBaseOrderID(row.OrderID)
+	originalRow, ok := originalRows[alipaySmallPurseTimestampOrderKey(row.DateTime, baseID)]
+	if ok && row.RowNumber < originalRow {
+		return originalRow
+	}
+	return row.RowNumber
+}
+
+func alipaySmallPurseTimestampOrderKey(dateTime, baseID string) string {
+	return dateTime + "\x00" + baseID
 }
 
 func alipaySmallPurseUsesRunningContributionBalance(config alipaySmallPurseConfig) bool {
@@ -438,7 +878,7 @@ type alipaySmallPurseRefundGroup struct {
 	refundAmount   int
 }
 
-func alipaySmallPurseRefundSkipRows(rows []alipaySmallPurseRow) map[string]bool {
+func alipaySmallPurseRefundSkipRows(rows []alipaySmallPurseRow, existingOrderIDs map[string]bool) map[string]bool {
 	groups := map[string]*alipaySmallPurseRefundGroup{}
 	for _, row := range rows {
 		baseID := alipaySmallPurseBaseOrderID(row.OrderID)
@@ -464,12 +904,38 @@ func alipaySmallPurseRefundSkipRows(rows []alipaySmallPurseRow) map[string]bool 
 		if group.expenseOrderID == "" || len(group.refundOrderIDs) == 0 || group.expenseAmount != group.refundAmount {
 			continue
 		}
+		if existingOrderIDs[group.expenseOrderID] {
+			continue
+		}
+		overlapsLedger := false
+		for _, orderID := range group.refundOrderIDs {
+			if existingOrderIDs[orderID] {
+				overlapsLedger = true
+				break
+			}
+		}
+		if overlapsLedger {
+			continue
+		}
 		skips[group.expenseOrderID] = true
 		for _, orderID := range group.refundOrderIDs {
 			skips[orderID] = true
 		}
 	}
 	return skips
+}
+
+func alipaySmallPurseSnapshotOrderIDs(snapshot *LedgerSnapshot) map[string]bool {
+	orderIDs := map[string]bool{}
+	if snapshot == nil {
+		return orderIDs
+	}
+	for _, txn := range snapshot.Transactions {
+		if orderID := metadataString(txn.Metadata["orderId"]); orderID != "" {
+			orderIDs[orderID] = true
+		}
+	}
+	return orderIDs
 }
 
 func alipaySmallPurseRefundGroupForID(groups map[string]*alipaySmallPurseRefundGroup, orderID string) *alipaySmallPurseRefundGroup {
@@ -487,9 +953,26 @@ func alipaySmallPurseBaseOrderID(orderID string) string {
 		return ""
 	}
 	if index := strings.Index(orderID, "_"); index > 0 {
-		return orderID[:index]
+		baseID := orderID[:index]
+		refundID := orderID[index+1:]
+		testRefundID := strings.TrimPrefix(refundID, "refund-")
+		if (alipaySmallPurseDigitsOnly(baseID) && alipaySmallPurseDigitsOnly(refundID)) || (testRefundID != refundID && alipaySmallPurseDigitsOnly(testRefundID)) {
+			return baseID
+		}
 	}
 	return orderID
+}
+
+func alipaySmallPurseDigitsOnly(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func alipaySmallPurseIncomeKind(row alipaySmallPurseRow) string {
@@ -545,22 +1028,18 @@ func maxInt(left, right int) int {
 	return right
 }
 
-func (s *Server) alipaySmallPurseInitialContributionBalances(ctx context.Context, statement alipaySmallPurseStatement, config alipaySmallPurseConfig) (int, int, error) {
+func alipaySmallPurseInitialContributionBalances(snapshot *LedgerSnapshot, statement alipaySmallPurseStatement, config alipaySmallPurseConfig) (int, int) {
 	if !alipaySmallPurseUsesRunningContributionBalance(config) || !alipaySmallPurseSharedExpenseSplit(config) {
-		return 0, 0, nil
+		return 0, 0
 	}
 	start, _ := alipaySmallPurseDateRange(statement)
-	if start == "" {
-		return 0, 0, nil
-	}
-	snapshot, err := s.alipaySmallPurseSnapshot(ctx)
-	if err != nil {
-		return 0, 0, err
+	if start == "" || snapshot == nil {
+		return 0, 0
 	}
 	balances := balancesBefore(snapshot.Transactions, start)
 	cashBalance := balances[alipaySmallPurseCashAccountForConfig(config)]["CNY"]
 	partnerBalance := -balances[alipaySmallPursePartnerLiabilityAccount(config)]["CNY"]
-	return cashBalance - partnerBalance, partnerBalance, nil
+	return cashBalance - partnerBalance, partnerBalance
 }
 
 func (s *Server) alipaySmallPurseSnapshot(ctx context.Context) (*LedgerSnapshot, error) {
@@ -808,10 +1287,14 @@ func alipaySmallPurseDate(value string) string {
 		return ""
 	}
 	date := value[:len("2006-01-02")]
-	if regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`).MatchString(date) {
+	if alipaySmallPurseValidDate(date) {
 		return date
 	}
 	return ""
+}
+
+func alipaySmallPurseValidDate(value string) bool {
+	return validateDate("date", value) == nil
 }
 
 func alipaySmallPursePayTime(value string) string {

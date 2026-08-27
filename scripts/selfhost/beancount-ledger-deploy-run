@@ -25,7 +25,7 @@ caddy_image='caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1d
 public_origin=https://beancount.mesh.arpa
 health_timeout_seconds=120
 compose_timeout_seconds=600
-host_contract=1
+host_contract=2
 emergency_release_env=""
 
 log() {
@@ -48,8 +48,8 @@ quiesce_application() {
   local release_env="$1"
   local service container_id container_ids state
 
-  compose "$release_env" stop caddy frontend agent indexer server || true
-  for service in caddy frontend agent indexer server; do
+  compose "$release_env" stop caddy frontend agent indexer server zip-worker || true
+  for service in caddy frontend agent indexer server zip-worker; do
     container_ids="$(DEPLOY_COMMAND_TIMEOUT_SECONDS=15 compose "$release_env" ps -aq "$service")" || return 1
     while IFS= read -r container_id; do
       if [[ -z "$container_id" ]]; then
@@ -168,8 +168,9 @@ wait_for_running_service() {
 start_active_release() {
   local release_env="$1"
 
-  compose "$release_env" up -d --no-build database server agent indexer frontend || return 1
+  compose "$release_env" up -d --no-build database zip-worker server agent indexer frontend || return 1
   wait_for_healthy_service "$release_env" database || return 1
+  wait_for_healthy_service "$release_env" zip-worker || return 1
   wait_for_healthy_service "$release_env" server || return 1
   wait_for_healthy_service "$release_env" agent || return 1
   wait_for_healthy_service "$release_env" indexer || return 1
@@ -688,7 +689,7 @@ if (( free_kb < 5242880 )); then
 fi
 
 declare -A images
-for component in server indexer agent frontend; do
+for component in server indexer agent frontend zip_worker; do
   images[$component]="$(jq -r --arg component "$component" '.images[$component]' "$manifest_file")"
 done
 
@@ -702,6 +703,7 @@ candidate_tmp="$(mktemp "${release_dir}/.release.XXXXXX")"
   printf 'SELFHOST_INDEXER_IMAGE=%s\n' "${images[indexer]}"
   printf 'SELFHOST_AGENT_IMAGE=%s\n' "${images[agent]}"
   printf 'SELFHOST_FRONTEND_IMAGE=%s\n' "${images[frontend]}"
+  printf 'SELFHOST_ZIP_WORKER_IMAGE=%s\n' "${images[zip_worker]}"
   printf 'SELFHOST_POSTGRES_IMAGE=%s\n' "$postgres_image"
   printf 'SELFHOST_CADDY_IMAGE=%s\n' "$caddy_image"
   printf 'SELFHOST_APP_PULL_POLICY=never\n'
@@ -734,7 +736,7 @@ compose "$maintenance_env" config --quiet
 compose "$current_env" config --quiet
 wait_for_healthy_service "$current_env" database
 
-for component in server indexer agent frontend; do
+for component in server indexer agent frontend zip_worker; do
   log "pulling immutable ${component} image"
   timeout --foreground 300 docker pull "${images[$component]}"
   revision="$(timeout --foreground 30 docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${images[$component]}")"
@@ -782,9 +784,10 @@ jq -n \
     backup_file: $backup_file, instance: $instance, status_file: $status_file, sha: $sha}' \
   | write_json_atomic "$pending_file"
 
-compose "$maintenance_env" up -d --no-build database server indexer frontend
+compose "$maintenance_env" up -d --no-build database zip-worker server indexer frontend
 jq '.phase = "candidate"' "$pending_file" | write_json_atomic "$pending_file"
 wait_for_healthy_service "$maintenance_env" database
+wait_for_healthy_service "$maintenance_env" zip-worker
 wait_for_healthy_service "$maintenance_env" server
 wait_for_healthy_service "$maintenance_env" indexer
 wait_for_running_service "$maintenance_env" frontend

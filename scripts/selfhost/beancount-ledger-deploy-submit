@@ -15,12 +15,12 @@ if ! jq -e '
   type == "object" and
   (keys | sort) == ["host_contract", "images", "repository", "run_attempt", "run_id", "schema", "sha"] and
   .schema == 1 and
-  .host_contract == 1 and
+  .host_contract == 2 and
   .repository == "qiaoborui/beancount-ledger-web" and
   (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
   (.run_id | type == "string" and test("^[1-9][0-9]{0,19}$")) and
   (.run_attempt | type == "string" and test("^[1-9][0-9]{0,3}$")) and
-  (.images | type == "object" and (keys | sort) == ["agent", "frontend", "indexer", "server"])
+  (.images | type == "object" and (keys | sort) == ["agent", "frontend", "indexer", "server", "zip_worker"])
 ' >/dev/null <<< "$payload"; then
   echo "deployment manifest schema is invalid" >&2
   exit 1
@@ -31,8 +31,9 @@ declare -A expected_repositories=(
   [indexer]='ghcr.io/qiaoborui/beancount-ledger-web-indexer'
   [agent]='ghcr.io/qiaoborui/beancount-ledger-web-agent'
   [frontend]='ghcr.io/qiaoborui/beancount-ledger-web-frontend'
+  [zip_worker]='ghcr.io/qiaoborui/beancount-ledger-web-zip-worker'
 )
-for component in server indexer agent frontend; do
+for component in server indexer agent frontend zip_worker; do
   image="$(jq -r --arg component "$component" '.images[$component]' <<< "$payload")"
   expected="${expected_repositories[$component]}"
   if [[ "${image%@sha256:*}" != "$expected" || ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then

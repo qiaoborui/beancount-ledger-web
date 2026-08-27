@@ -67,6 +67,8 @@ CMD ["/app/ledger-web"]
 
 # ── Private ZIP password worker ──
 FROM alpine:3.22 AS zip-worker
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates \

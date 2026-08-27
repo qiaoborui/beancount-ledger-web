@@ -20,7 +20,7 @@ six values together.
 
 ## Trust boundary
 
-The workflow publishes four images for one full source SHA and passes only
+The workflow publishes five images for one full source SHA and passes only
 their registry digests to a forced SSH command. Application and ledger secrets
 remain in `/etc/beancount-ledger-selfhost/runtime.env`. Root-owned Compose,
 Caddy, systemd, and deployment files are not updated by CI. Changes to those
@@ -96,7 +96,7 @@ sudo install -m 644 -o root -g root docker/systemd/beancount-ledger-deploy@.serv
   /etc/systemd/system/beancount-ledger-deploy@.service
 sudo install -m 644 -o root -g root docker/systemd/beancount-ledger-recover.service \
   /etc/systemd/system/beancount-ledger-recover.service
-printf '1\n' | sudo tee /etc/beancount-ledger-selfhost/deploy-contract >/dev/null
+printf '2\n' | sudo tee /etc/beancount-ledger-selfhost/deploy-contract >/dev/null
 sudo chmod 644 /etc/beancount-ledger-selfhost/deploy-contract
 sudo chown root:root /etc/beancount-ledger-selfhost/deploy-contract
 ```
@@ -119,6 +119,7 @@ SELFHOST_SERVER_IMAGE=sha256:b841a113b530336ededf270956f16003a80ff555c7b1cddefbd
 SELFHOST_INDEXER_IMAGE=sha256:0f2b4403c887648ed466302c1664cf24b275e85424ecda789334702b48aeaea1
 SELFHOST_AGENT_IMAGE=sha256:3ec919b8b5e1b4afd623b486b73bb0593c0dda49e6ad3e6a46765ebbaf342a8a
 SELFHOST_FRONTEND_IMAGE=sha256:dccadf2537bc6b64a1707f866c22fb67507a7558e27fa860a7ff1b76a971092a
+SELFHOST_ZIP_WORKER_IMAGE=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 SELFHOST_POSTGRES_IMAGE=postgres:17-alpine@sha256:67f624a4ad70edba8d65c82341124fab7054b277b4f7dea4b04be6f939ce2314
 SELFHOST_CADDY_IMAGE=sha256:441dab1be51efa0e5644c17391b27a06d5af86ac695df9504a34de69d821bef7
 SELFHOST_APP_PULL_POLICY=never
@@ -296,7 +297,7 @@ rm -f "$deploy_key_dir/id_ed25519.pub" \
 rmdir "$deploy_key_dir"
 ```
 
-The four GHCR packages are built only after the reusable CI gate passes. Keep
+The five GHCR packages are built only after the reusable CI gate passes. Keep
 them linked to this public source repository and make these exact packages
 public so the host needs no registry credential:
 
@@ -305,7 +306,7 @@ public so the host needs no registry credential:
 - `beancount-ledger-web-agent`
 - `beancount-ledger-web-frontend`
 
-The first `main` push creates all four packages while the activation variable is
+The first `main` push creates all five packages while the activation variable is
 still unset and the deploy job is skipped. Set their visibility to public and
 prove one emitted digest can be pulled without `docker login` before enabling
 deployment.
@@ -392,7 +393,7 @@ reconciliation before reopening traffic.
 
 ## First deployment verification
 
-After the approved workflow reports success, verify the promoted SHA, all four
+After the approved workflow reports success, verify the promoted SHA, all five
 runtime labels, health, and absence of an unfinished transaction:
 
 ```bash
@@ -403,7 +404,7 @@ sudo test ! -e /var/lib/beancount-ledger-deploy/activation.json
 sudo test ! -e /var/lib/beancount-ledger-deploy/completion.json
 sudo jq -e --arg sha "$release_sha" '.deployed_sha == $sha' \
   /var/lib/beancount-ledger-deploy/rollback.json
-for service in server indexer agent frontend; do
+for service in server indexer agent frontend zip-worker; do
   container_id="$(sudo docker compose \
     -p beancount-ledger-selfhost \
     --env-file /etc/beancount-ledger-selfhost/runtime.env \

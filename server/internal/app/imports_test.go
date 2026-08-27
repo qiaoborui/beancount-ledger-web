@@ -714,6 +714,453 @@ func TestAlipaySmallPurseFiltersFullyRefundedGroups(t *testing.T) {
 	}
 }
 
+func TestAlipaySmallPurseFullyRefundedGroupStillUpdatesRunningAllocation(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  ownerNames: [Owner]",
+		"  partnerNames: [Partner]",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "owner-topup", DateTime: "2026-08-01 09:00:00", Description: "转入", OperatorName: "Owner", Income: "0.01"},
+		{OrderID: "partner-topup", DateTime: "2026-08-01 09:01:00", Description: "转入", OperatorName: "Partner", Income: "0.02"},
+		{OrderID: "fully-refunded", DateTime: "2026-08-01 10:00:00", Description: "已退款 - 购物", Expense: "0.01"},
+		{OrderID: "interleaved-spend", DateTime: "2026-08-01 10:01:00", Description: "购物", Expense: "0.01"},
+		{OrderID: "fully-refunded_refund-1", DateTime: "2026-08-01 10:02:00", Description: "退款-购物", Income: "0.01"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	if strings.Contains(generated, `orderId: "fully-refunded"`) || strings.Contains(generated, `orderId: "fully-refunded_refund-1"`) {
+		t.Fatalf("fully refunded rows should remain suppressed:\n%s", generated)
+	}
+	spend := transactionBlockForOrderID(t, generated, "interleaved-spend")
+	requirePostingLine(t, spend, "Expenses:Shopping", "0.01")
+	if strings.Contains(spend, "Liabilities:Payable:Friends:SmallPurse") {
+		t.Fatalf("interleaved spend used pre-refund allocation state:\n%s", spend)
+	}
+}
+
+func TestAlipaySmallPursePartialRefundReversesOriginalAllocation(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  ownerNames:",
+		"    - Owner",
+		"  partnerNames:",
+		"    - Partner",
+		"  rules:",
+		"    - item: 购物",
+		"      targetAccount: Expenses:Shopping",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "owner-topup", DateTime: "2026-08-01 09:00:00", Description: "转入", OperatorName: "Owner", Income: "0.70"},
+		{OrderID: "partner-topup", DateTime: "2026-08-01 09:01:00", Description: "转入", OperatorName: "Partner", Income: "32.80"},
+		{OrderID: "partial-order", DateTime: "2026-08-01 10:00:00", Description: "已退款 - 购物", OperatorName: "Owner", Expense: "33.50"},
+		{OrderID: "later-owner-topup", DateTime: "2026-08-01 10:30:00", Description: "转入", OperatorName: "Owner", Income: "100.00"},
+		{OrderID: "partial-order_refund-1", DateTime: "2026-08-01 11:00:00", Description: "退款-购物", OperatorName: "Owner", Income: "8.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	refund := transactionBlockForOrderID(t, string(mustRead(t, output)), "partial-order_refund-1")
+	requirePostingLine(t, refund, "Expenses:Shopping", "-0.17")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-7.83")
+	requirePostingLine(t, refund, "Assets:SmallPurse", "8.00")
+}
+
+func TestAlipaySmallPursePartialRefundSortsOriginalBeforeRefundWithoutRunningBalance(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "reverse-order_refund-1", DateTime: "2026-08-01 11:00:00", Description: "退款-购物", Income: "4.00"},
+		{OrderID: "reverse-order", DateTime: "2026-08-01 11:00:00", Description: "已退款 - 购物", Expense: "10.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+	refund := transactionBlockForOrderID(t, string(mustRead(t, output)), "reverse-order_refund-1")
+	requirePostingLine(t, refund, "Expenses:Shopping", "-2.00")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-2.00")
+	requirePostingLine(t, refund, "Assets:SmallPurse", "4.00")
+}
+
+func TestAlipaySmallPursePartialRefundSortsOriginalBeforeRefundWithInterleavedRow(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "reverse-order_refund-1", DateTime: "2026-08-01 11:00:00", Description: "退款-购物", Income: "4.00"},
+		{OrderID: "unrelated-order", DateTime: "2026-08-01 11:00:00", Description: "购物", Expense: "1.00"},
+		{OrderID: "reverse-order", DateTime: "2026-08-01 11:00:00", Description: "已退款 - 购物", Expense: "10.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+	refund := transactionBlockForOrderID(t, string(mustRead(t, output)), "reverse-order_refund-1")
+	requirePostingLine(t, refund, "Expenses:Shopping", "-2.00")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-2.00")
+	requirePostingLine(t, refund, "Assets:SmallPurse", "4.00")
+}
+
+func TestAlipaySmallPurseDuplicateRefundOrderIsRejected(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "duplicate-base", DateTime: "2026-08-01 10:00:00", Description: "已退款 - 购物", Expense: "10.00"},
+		{OrderID: "duplicate-base_refund-1", DateTime: "2026-08-01 11:00:00", Description: "退款-购物", Income: "2.00"},
+		{OrderID: "duplicate-base_refund-1", DateTime: "2026-08-01 11:01:00", Description: "退款-购物", Income: "2.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	err := server.generateAlipaySmallPurseBean(context.Background(), input, filepath.Join(t.TempDir(), "smallpurse.bean"))
+	if err == nil || !strings.Contains(err.Error(), "退款订单") || !strings.Contains(err.Error(), "重复") {
+		t.Fatalf("generate error = %v, want duplicate refund rejection", err)
+	}
+}
+
+func TestAlipaySmallPurseCrossPeriodRefundReversesLedgerTransaction(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  rules:",
+		"    - item: 购物",
+		"      targetAccount: Expenses:Shopping",
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "small-purse-refund-history.bean"), strings.Join([]string{
+		`2026-08-06 * "商户" "历史消费"`,
+		`  orderId: "historic-order"`,
+		`  source: "支付宝小荷包"`,
+		`  type: "支出"`,
+		`  Expenses:Shopping 16.92 CNY`,
+		`  Liabilities:Payable:Friends:SmallPurse 10.58 CNY`,
+		`  Assets:SmallPurse -27.50 CNY`,
+		"",
+	}, "\n"))
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "main.bean"), strings.Join([]string{
+		`option "title" "Test Ledger"`,
+		`option "operating_currency" "CNY"`,
+		`include "commodities.bean"`,
+		`include "accounts.bean"`,
+		`include "prices.bean"`,
+		`include "transactions/2026/05.bean"`,
+		`include "transactions/2026/imports/small-purse-refund-history.bean"`,
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "historic-order_refund-1", DateTime: "2026-08-26 12:00:00", Description: "退款-购物", OperatorName: "Owner", Income: "27.50"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	refund := transactionBlockForOrderID(t, string(mustRead(t, output)), "historic-order_refund-1")
+	requirePostingLine(t, refund, "Expenses:Shopping", "-16.92")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-10.58")
+	requirePostingLine(t, refund, "Assets:SmallPurse", "27.50")
+}
+
+func TestAlipaySmallPurseOverlappingFullRefundUsesLedgerAllocationState(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "overlap-order", DateTime: "2026-08-02 10:00:00", Description: "已退款 - 购物", Expense: "100.00"},
+		{OrderID: "overlap-order_refund-1", DateTime: "2026-08-03 10:00:00", Description: "退款-购物", Income: "100.00"},
+		{OrderID: "later-spend", DateTime: "2026-08-04 10:00:00", Description: "购物", Expense: "100.00"},
+	})
+	readPorts := fakeLedgerReadPorts{snapshot: &LedgerSnapshot{Transactions: []Transaction{
+		{Date: "2026-07-31", Postings: []Posting{
+			{Account: "Assets:SmallPurse", Amount: 20000, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -10000, Currency: "CNY"},
+			{Account: "Assets:OwnerFunding", Amount: -10000, Currency: "CNY"},
+		}},
+		{Date: "2026-08-02", Metadata: map[string]MetadataValue{"orderId": "overlap-order"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: 2000, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 8000, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: -10000, Currency: "CNY"},
+		}},
+	}}}
+	server := &Server{cfg: cfg, snapshotPort: readPorts}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := string(mustRead(t, output))
+	refund := transactionBlockForOrderID(t, generated, "overlap-order_refund-1")
+	requirePostingLine(t, refund, "Expenses:Shopping", "-20.00")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-80.00")
+	later := transactionBlockForOrderID(t, generated, "later-spend")
+	requirePostingLine(t, later, "Expenses:Shopping", "50.00")
+	requirePostingLine(t, later, "Liabilities:Payable:Friends:SmallPurse", "50.00")
+}
+
+func TestAlipaySmallPurseRefundWithoutOriginalAllocationIsRejected(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "missing-order_refund-1", DateTime: "2026-08-26 12:00:00", Description: "退款-购物", Income: "8.00"},
+	})
+
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	err := server.generateAlipaySmallPurseBean(context.Background(), input, output)
+	if err == nil || !strings.Contains(err.Error(), "找不到原订单") {
+		t.Fatalf("generate error = %v, want missing original allocation", err)
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerReusesAlreadyImportedRefund(t *testing.T) {
+	config := alipaySmallPurseConfig{
+		DefaultCurrency: "CNY",
+		AlipaySmallPurse: alipaySmallPurseConfigSection{
+			CashAccount:             "Assets:SmallPurse",
+			PartnerLiabilityAccount: "Liabilities:Payable:Friends:SmallPurse",
+		},
+	}
+	snapshot := &LedgerSnapshot{Transactions: []Transaction{
+		{Date: "2026-08-01", Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: 70, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 3280, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: -3350, Currency: "CNY"},
+		}},
+		{Date: "2026-08-02", Metadata: map[string]MetadataValue{"orderId": "historic-order_refund-1"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: -17, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -783, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: 800, Currency: "CNY"},
+		}},
+	}}
+
+	tracker := newAlipaySmallPurseRefundTracker(snapshot, config)
+	postings, err := tracker.refund("historic-order_refund-1", "2026-08-02", 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(postings) != 2 || postings[0].Amount != 17 || postings[1].Amount != 783 {
+		t.Fatalf("recorded refund postings = %#v", postings)
+	}
+	remaining, err := tracker.refund("historic-order_refund-2", "2026-08-03", 2550)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 || remaining[0].Amount != 53 || remaining[1].Amount != 2497 {
+		t.Fatalf("remaining refund postings = %#v", remaining)
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerRejectsRecordedRefundDateMismatch(t *testing.T) {
+	config := alipaySmallPurseConfig{
+		DefaultCurrency: "CNY",
+		AlipaySmallPurse: alipaySmallPurseConfigSection{
+			CashAccount:             "Assets:SmallPurse",
+			PartnerLiabilityAccount: "Liabilities:Payable:Friends:SmallPurse",
+		},
+	}
+	snapshot := &LedgerSnapshot{Transactions: []Transaction{
+		{Date: "2026-08-01", Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: 70, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 3280, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: -3350, Currency: "CNY"},
+		}},
+		{Date: "2026-08-02", Metadata: map[string]MetadataValue{"orderId": "historic-order_refund-1"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: -17, Currency: "CNY"},
+			{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -783, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: 800, Currency: "CNY"},
+		}},
+	}}
+
+	tracker := newAlipaySmallPurseRefundTracker(snapshot, config)
+	_, err := tracker.refund("historic-order_refund-1", "2026-08-03", 800)
+	if err == nil || !strings.Contains(err.Error(), "日期") {
+		t.Fatalf("refund error = %v, want recorded refund date mismatch", err)
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerRejectsInvalidLedgerDates(t *testing.T) {
+	config := alipaySmallPurseConfig{
+		DefaultCurrency: "CNY",
+		AlipaySmallPurse: alipaySmallPurseConfigSection{
+			CashAccount:             "Assets:SmallPurse",
+			PartnerLiabilityAccount: "Liabilities:Payable:Friends:SmallPurse",
+		},
+	}
+	tests := []struct {
+		name         string
+		originalDate string
+		refundDate   string
+	}{
+		{name: "missing original date", refundDate: "2026-08-02"},
+		{name: "invalid original date", originalDate: "2026-02-30", refundDate: "2026-08-02"},
+		{name: "missing refund date", originalDate: "2026-08-01"},
+		{name: "invalid refund date", originalDate: "2026-08-01", refundDate: "2026-02-30"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := &LedgerSnapshot{Transactions: []Transaction{
+				{Date: tt.originalDate, Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+					{Account: "Expenses:Shopping", Amount: 1000, Currency: "CNY"},
+					{Account: "Assets:SmallPurse", Amount: -1000, Currency: "CNY"},
+				}},
+				{Date: tt.refundDate, Metadata: map[string]MetadataValue{"orderId": "historic-order_refund-1"}, Postings: []Posting{
+					{Account: "Expenses:Shopping", Amount: -500, Currency: "CNY"},
+					{Account: "Assets:SmallPurse", Amount: 500, Currency: "CNY"},
+				}},
+			}}
+
+			tracker := newAlipaySmallPurseRefundTracker(snapshot, config)
+			_, err := tracker.refund("historic-order_refund-1", "2026-08-02", 500)
+			if err == nil || !strings.Contains(err.Error(), "历史退款分录") {
+				t.Fatalf("refund error = %v, want invalid ledger date rejection", err)
+			}
+		})
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerRejectsInconsistentLedgerRefund(t *testing.T) {
+	config := alipaySmallPurseConfig{
+		DefaultCurrency: "CNY",
+		AlipaySmallPurse: alipaySmallPurseConfigSection{
+			CashAccount:             "Assets:SmallPurse",
+			PartnerLiabilityAccount: "Liabilities:Payable:Friends:SmallPurse",
+		},
+	}
+	snapshot := &LedgerSnapshot{Transactions: []Transaction{
+		{Date: "2026-08-01", Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: 1000, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: -1000, Currency: "CNY"},
+		}},
+		{Date: "2026-08-02", Metadata: map[string]MetadataValue{"orderId": "historic-order_refund-1"}, Postings: []Posting{
+			{Account: "Income:Other", Amount: -500, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: 500, Currency: "CNY"},
+		}},
+	}}
+
+	tracker := newAlipaySmallPurseRefundTracker(snapshot, config)
+	_, err := tracker.refund("historic-order_refund-2", "2026-08-03", 500)
+	if err == nil || !strings.Contains(err.Error(), "历史退款分录") {
+		t.Fatalf("refund error = %v, want inconsistent ledger refund", err)
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerRejectsDuplicateOriginalWithInvalidPosting(t *testing.T) {
+	config := alipaySmallPurseConfig{
+		DefaultCurrency: "CNY",
+		AlipaySmallPurse: alipaySmallPurseConfigSection{
+			CashAccount:             "Assets:SmallPurse",
+			PartnerLiabilityAccount: "Liabilities:Payable:Friends:SmallPurse",
+		},
+	}
+	snapshot := &LedgerSnapshot{Transactions: []Transaction{
+		{Date: "2026-08-01", Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+			{Account: "Expenses:Shopping", Amount: 1000, Currency: "CNY"},
+			{Account: "Assets:SmallPurse", Amount: -1000, Currency: "CNY"},
+		}},
+		{Date: "2026-08-01", Metadata: map[string]MetadataValue{"orderId": "historic-order"}, Postings: []Posting{
+			{Account: "Assets:SmallPurse", Amount: -1000, Currency: "CNY"},
+		}},
+	}}
+
+	tracker := newAlipaySmallPurseRefundTracker(snapshot, config)
+	_, err := tracker.refund("historic-order_refund-1", "2026-08-02", 500)
+	if err == nil || !strings.Contains(err.Error(), "历史退款分录") {
+		t.Fatalf("refund error = %v, want duplicate original rejection", err)
+	}
+}
+
+func TestAlipaySmallPurseRefundTrackerRejectsAmbiguousOrderIDSuffix(t *testing.T) {
+	tracker := &alipaySmallPurseRefundTracker{
+		allocations:       map[string]*alipaySmallPurseRefundAllocation{},
+		originalPostings:  map[string][]alipaySmallPurseAllocatedPosting{},
+		renderedOriginal:  map[string]bool{},
+		recordedRefunds:   map[string]alipaySmallPurseRecordedRefund{},
+		invalidAllocation: map[string]bool{},
+	}
+	tracker.record("ambiguous", "2026-08-01", 1000, []alipaySmallPurseAllocatedPosting{{Account: "Expenses:Shopping", Amount: 1000}})
+	_, err := tracker.refund("ambiguous_other", "2026-08-02", 500)
+	if err == nil || !strings.Contains(err.Error(), "找不到原订单") {
+		t.Fatalf("refund error = %v, want ambiguous suffix rejection", err)
+	}
+}
+
 func TestAlipaySmallPurseRunningContributionBalanceUsesLedgerHistory(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
@@ -816,6 +1263,7 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHub
 	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
 	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
 		{OrderID: "read-model-spend", DateTime: "2026-07-05 12:00:00", Description: "盒马 晚饭", OperatorNick: "阿一哒哒", OperatorName: "何缘立", Expense: "130.00"},
+		{OrderID: "historic-read-model_refund-1", DateTime: "2026-07-15 12:00:00", Description: "退款-购物", OperatorNick: "borui", OperatorName: "乔博睿", Income: "27.50"},
 	})
 
 	readPorts := fakeLedgerReadPorts{snapshot: &LedgerSnapshot{
@@ -833,6 +1281,11 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHub
 			{Date: "2026-06-30", Postings: []Posting{
 				{Account: "Assets:SmallPurse", Amount: 50000, Currency: "CNY"},
 				{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: -50000, Currency: "CNY"},
+			}},
+			{Date: "2026-07-10", Metadata: map[string]MetadataValue{"orderId": "historic-read-model"}, Postings: []Posting{
+				{Account: "Expenses:Food", Amount: 1692, Currency: "CNY"},
+				{Account: "Liabilities:Payable:Friends:SmallPurse", Amount: 1058, Currency: "CNY"},
+				{Account: "Assets:SmallPurse", Amount: -2750, Currency: "CNY"},
 			}},
 		},
 	}}
@@ -860,6 +1313,10 @@ func TestAlipaySmallPurseRunningContributionBalanceUsesReadModelSnapshotInGitHub
 		}
 	}
 	requirePostingLine(t, generated, "Liabilities:Payable:Friends:SmallPurse", "48.75")
+	refund := transactionBlockForOrderID(t, generated, "historic-read-model_refund-1")
+	requirePostingLine(t, refund, "Expenses:Food", "-16.92")
+	requirePostingLine(t, refund, "Liabilities:Payable:Friends:SmallPurse", "-10.58")
+	requirePostingLine(t, refund, "Assets:SmallPurse", "27.50")
 }
 
 func TestAlipaySmallPurseFallbackRulesSkipGenericAlipayMethodIgnore(t *testing.T) {
@@ -1973,6 +2430,26 @@ func requirePostingLine(t *testing.T, beanText, account, amount string) {
 	if !pattern.MatchString(beanText) {
 		t.Fatalf("generated bean missing posting %s %s CNY:\n%s", account, amount, beanText)
 	}
+}
+
+func transactionBlockForOrderID(t *testing.T, generated, orderID string) string {
+	t.Helper()
+	needle := fmt.Sprintf(`  orderId: "%s"`, orderID)
+	metadataIndex := strings.Index(generated, needle)
+	if metadataIndex < 0 {
+		t.Fatalf("missing transaction for order %q:\n%s", orderID, generated)
+	}
+	start := strings.LastIndex(generated[:metadataIndex], "\n\n")
+	if start < 0 {
+		start = 0
+	} else {
+		start += 2
+	}
+	endOffset := strings.Index(generated[metadataIndex:], "\n\n")
+	if endOffset < 0 {
+		return generated[start:]
+	}
+	return generated[start : metadataIndex+endOffset]
 }
 
 type fakeLedgerReadPorts struct {

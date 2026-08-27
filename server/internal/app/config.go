@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+const (
+	defaultGmailPollTimeout       = 14 * time.Minute
+	maxGmailPollTimeout           = 14 * time.Minute
+	defaultGmailZIPTimeoutSeconds = 14 * 60
+	maxGmailZIPTimeoutSeconds     = 14 * 60
+)
+
 type Config struct {
 	SelfHosted                  bool
 	MaintenanceMode             bool
@@ -130,13 +137,13 @@ func LoadConfig() Config {
 		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
 		GmailDeliveryMode:           gmailDeliveryModeFromEnv("webhook"),
 		GmailPollInterval:           envDuration("GMAIL_POLL_INTERVAL", 15*time.Minute),
-		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", 4*time.Minute),
+		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", defaultGmailPollTimeout),
 		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
 		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
 		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
 		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
-		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", defaultGmailZIPTimeoutSeconds),
 		ZIPWorkerURL:                zipWorkerURL,
 		ZIPWorkerAudience:           zipWorkerAudience,
 		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
@@ -223,13 +230,13 @@ func loadBaseConfig() Config {
 		GmailPubSubServiceAccount:   strings.ToLower(strings.TrimSpace(os.Getenv("GMAIL_PUBSUB_SERVICE_ACCOUNT"))),
 		GmailDeliveryMode:           gmailDeliveryModeFromEnv("webhook"),
 		GmailPollInterval:           envDuration("GMAIL_POLL_INTERVAL", 15*time.Minute),
-		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", 4*time.Minute),
+		GmailPollTimeout:            envDuration("GMAIL_POLL_TIMEOUT", defaultGmailPollTimeout),
 		GmailLabel:                  env("GMAIL_LABEL", "Ledger/Bills"),
 		GmailAllowedSenders:         parseCSVLower(os.Getenv("GMAIL_ALLOWED_SENDERS")),
 		GmailTokenEncryptionKey:     strings.TrimSpace(os.Getenv("GMAIL_TOKEN_ENCRYPTION_KEY")),
 		GmailSyncLookbackDays:       envInt("GMAIL_SYNC_LOOKBACK_DAYS", 30),
 		GmailZipPasswords:           parseCSV(os.Getenv("GMAIL_ZIP_PASSWORDS")),
-		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", 20),
+		GmailZipTimeoutSeconds:      envInt("GMAIL_ZIP_TIMEOUT_SECONDS", defaultGmailZIPTimeoutSeconds),
 		ZIPWorkerURL:                zipWorkerURL,
 		ZIPWorkerAudience:           zipWorkerAudience,
 		AgentServiceURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AGENT_SERVICE_URL")), "/"),
@@ -253,7 +260,7 @@ func parseCSVLower(raw string) []string {
 func loadZIPWorkerConfig() (string, string) {
 	workerURL := strings.TrimSpace(os.Getenv("ZIP_WORKER_URL"))
 	audience := strings.TrimSpace(os.Getenv("ZIP_WORKER_AUDIENCE"))
-	if audience == "" {
+	if audience == "" && strings.HasPrefix(workerURL, "https://") {
 		audience = workerURL
 	}
 	return workerURL, audience
@@ -567,12 +574,24 @@ func validateZIPWorkerConfig(cfg Config) error {
 	if workerURL == "" && audience == "" {
 		return nil
 	}
-	if workerURL == "" || audience == "" {
+	if workerURL == "" {
 		return errors.New("ZIP_WORKER_URL and ZIP_WORKER_AUDIENCE must be configured together")
 	}
 	parsed, err := url.ParseRequestURI(workerURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" {
+		return errors.New("ZIP_WORKER_URL must be a valid URL")
+	}
+	if cfg.SelfHosted && workerURL == "http://zip-worker:8080" {
+		if audience != "" {
+			return errors.New("ZIP_WORKER_AUDIENCE must be empty for the self-hosted internal ZIP Worker")
+		}
+		return nil
+	}
+	if parsed.Scheme != "https" {
 		return errors.New("ZIP_WORKER_URL must be an HTTPS URL")
+	}
+	if audience == "" {
+		return errors.New("ZIP_WORKER_URL and ZIP_WORKER_AUDIENCE must be configured together")
 	}
 	audienceURL, err := url.ParseRequestURI(audience)
 	if err != nil || audienceURL.Scheme != "https" || audienceURL.Host == "" {
@@ -633,10 +652,10 @@ func validateGmailAutomationConfig(cfg Config) error {
 		if cfg.GmailPollInterval < time.Minute || cfg.GmailPollInterval > 24*time.Hour {
 			return errors.New("GMAIL_POLL_INTERVAL must be between 1m and 24h when GMAIL_DELIVERY_MODE=poll")
 		}
-		// Keep every local run below the existing five-minute durable sync lease,
-		// so another process cannot claim an expired lease while it still runs.
-		if cfg.GmailPollTimeout < 30*time.Second || cfg.GmailPollTimeout > 4*time.Minute {
-			return errors.New("GMAIL_POLL_TIMEOUT must be between 30s and 4m when GMAIL_DELIVERY_MODE=poll")
+		// Keep every local run below the durable sync lease, so another process
+		// cannot claim an expired lease while it still runs.
+		if cfg.GmailPollTimeout < 30*time.Second || cfg.GmailPollTimeout > maxGmailPollTimeout {
+			return errors.New("GMAIL_POLL_TIMEOUT must be between 30s and 14m when GMAIL_DELIVERY_MODE=poll")
 		}
 	}
 	key, err := base64.RawStdEncoding.DecodeString(cfg.GmailTokenEncryptionKey)
@@ -649,8 +668,8 @@ func validateGmailAutomationConfig(cfg Config) error {
 	if cfg.GmailSyncLookbackDays < 1 || cfg.GmailSyncLookbackDays > 365 {
 		return errors.New("GMAIL_SYNC_LOOKBACK_DAYS must be between 1 and 365")
 	}
-	if cfg.GmailZipTimeoutSeconds < 1 || cfg.GmailZipTimeoutSeconds > 120 {
-		return errors.New("GMAIL_ZIP_TIMEOUT_SECONDS must be between 1 and 120")
+	if cfg.GmailZipTimeoutSeconds < 1 || cfg.GmailZipTimeoutSeconds > maxGmailZIPTimeoutSeconds {
+		return errors.New("GMAIL_ZIP_TIMEOUT_SECONDS must be between 1 and 840")
 	}
 	return nil
 }

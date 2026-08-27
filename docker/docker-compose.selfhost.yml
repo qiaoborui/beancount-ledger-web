@@ -41,6 +41,8 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      zip-worker:
+        condition: service_healthy
     environment:
       <<: *database-env
       PORT: "3000"
@@ -61,7 +63,7 @@ services:
       # the remaining Gmail values empty to keep the integration disabled.
       GMAIL_DELIVERY_MODE: "${GMAIL_DELIVERY_MODE:-poll}"
       GMAIL_POLL_INTERVAL: "${GMAIL_POLL_INTERVAL:-2m}"
-      GMAIL_POLL_TIMEOUT: "${GMAIL_POLL_TIMEOUT:-4m}"
+      GMAIL_POLL_TIMEOUT: "${GMAIL_POLL_TIMEOUT:-14m}"
       GMAIL_CLIENT_ID: "${GMAIL_CLIENT_ID:-}"
       GMAIL_CLIENT_SECRET: "${GMAIL_CLIENT_SECRET:-}"
       GMAIL_OAUTH_REDIRECT_URL: "${GMAIL_OAUTH_REDIRECT_URL:-}"
@@ -73,7 +75,9 @@ services:
       GMAIL_TOKEN_ENCRYPTION_KEY: "${GMAIL_TOKEN_ENCRYPTION_KEY:-}"
       GMAIL_SYNC_LOOKBACK_DAYS: "${GMAIL_SYNC_LOOKBACK_DAYS:-30}"
       GMAIL_ZIP_PASSWORDS: "${GMAIL_ZIP_PASSWORDS:-}"
-      GMAIL_ZIP_TIMEOUT_SECONDS: "${GMAIL_ZIP_TIMEOUT_SECONDS:-20}"
+      GMAIL_ZIP_TIMEOUT_SECONDS: "${GMAIL_ZIP_TIMEOUT_SECONDS:-840}"
+      ZIP_WORKER_URL: "http://zip-worker:8080"
+      ZIP_WORKER_AUDIENCE: ""
       CRON_SECRET: "${CRON_SECRET:-}"
       CRON_OIDC_AUDIENCE: "${CRON_OIDC_AUDIENCE:-}"
       CRON_OIDC_SERVICE_ACCOUNT: "${CRON_OIDC_SERVICE_ACCOUNT:-}"
@@ -81,6 +85,28 @@ services:
       - "3000"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  zip-worker:
+    image: ${SELFHOST_ZIP_WORKER_IMAGE:-beancount-ledger-selfhost-zip-worker:local}
+    pull_policy: ${SELFHOST_APP_PULL_POLICY:-build}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: zip-worker
+      args:
+        VCS_REF: "${SELFHOST_VCS_REF:-local}"
+    command: ["/app/zip-worker"]
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      ZIP_WORKERS: "${ZIP_WORKERS:-8}"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 12

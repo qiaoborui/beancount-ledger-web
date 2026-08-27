@@ -84,7 +84,31 @@ func TestZIPWorkerClientUsesIdentityAudienceAndReturnsPassword(t *testing.T) {
 	}
 }
 
-func TestExtractImportZIPUsesWorkerAfterNumericSearch(t *testing.T) {
+func TestZIPWorkerClientUsesPlainHTTPForInternalWorker(t *testing.T) {
+	archive := []byte("encrypted archive")
+	worker := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writeZIPWorkerJSON(writer, http.StatusOK, zipWorkerResponse{Password: "00000A"})
+	}))
+	defer worker.Close()
+
+	originalClientFactory := newZIPWorkerHTTPClient
+	newZIPWorkerHTTPClient = func(context.Context, string) (*http.Client, error) {
+		t.Fatal("identity client must not be created for the internal worker")
+		return nil, nil
+	}
+	t.Cleanup(func() { newZIPWorkerHTTPClient = originalClientFactory })
+
+	server := &Server{cfg: Config{SelfHosted: true, ZIPWorkerURL: worker.URL}}
+	password, err := server.searchZIPWorkerPassword(context.Background(), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if password != "00000A" {
+		t.Fatalf("password=%q", password)
+	}
+}
+
+func TestExtractImportZIPUsesWorkerForUpperAlnumPassword(t *testing.T) {
 	archive := encryptedStoredZIP(t, "statement.csv", []byte("date,amount\n2026-07-01,88.00\n"), "00000A")
 	called := false
 	upload, password, err := extractImportZIPWithUpperAlnumSearch(context.Background(), archive, nil, func(_ context.Context, received []byte) (string, error) {
@@ -102,17 +126,17 @@ func TestExtractImportZIPUsesWorkerAfterNumericSearch(t *testing.T) {
 	}
 }
 
-func TestExtractImportZIPUsesNumericBeforeWorker(t *testing.T) {
+func TestExtractImportZIPDelegatesNumericPasswordToWorker(t *testing.T) {
 	archive := encryptedStoredZIP(t, "statement.csv", []byte("date,amount\n2026-07-01,88.00\n"), "000001")
 	called := false
 	upload, password, err := extractImportZIPWithUpperAlnumSearch(context.Background(), archive, nil, func(context.Context, []byte) (string, error) {
 		called = true
-		return "00000A", nil
+		return "000001", nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called || password != "000001" || upload.Filename != "statement.csv" || !strings.Contains(string(upload.Content), "88.00") {
+	if !called || password != "000001" || upload.Filename != "statement.csv" || !strings.Contains(string(upload.Content), "88.00") {
 		t.Fatalf("called=%v password=%q upload=%#v", called, password, upload)
 	}
 }

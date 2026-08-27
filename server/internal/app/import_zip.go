@@ -73,6 +73,17 @@ func extractImportZIPWithUpperAlnumSearch(ctx context.Context, archive []byte, p
 			return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
 		}
 	}
+	if upperAlnumSearch != nil {
+		password, err := upperAlnumSearch(ctx, archive)
+		if err != nil {
+			return importUpload{}, "", fmt.Errorf("ZIP Worker 密码搜索失败: %w", err)
+		}
+		plain, found := decryptZipEntryWithPassword(entry, []byte(password))
+		if !found {
+			return importUpload{}, "", errors.New("ZIP Worker 返回的密码未通过压缩包校验")
+		}
+		return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
+	}
 	if err := acquireImportZIPSearch(ctx); err != nil {
 		return importUpload{}, "", fmt.Errorf("压缩包密码搜索超时: %w", err)
 	}
@@ -84,17 +95,6 @@ func extractImportZIPWithUpperAlnumSearch(ctx context.Context, archive []byte, p
 	}
 	if err := ctx.Err(); err != nil {
 		return importUpload{}, "", fmt.Errorf("压缩包密码搜索超时: %w", err)
-	}
-	if upperAlnumSearch != nil {
-		password, err = upperAlnumSearch(ctx, archive)
-		if err != nil {
-			return importUpload{}, "", fmt.Errorf("ZIP Worker 密码搜索失败: %w", err)
-		}
-		plain, found = decryptZipEntryWithPassword(entry, []byte(password))
-		if !found {
-			return importUpload{}, "", errors.New("ZIP Worker 返回的密码未通过压缩包校验")
-		}
-		return importUpload{Filename: safeArchiveFilename(string(entry.name)), Content: plain}, password, nil
 	}
 	password, plain, found = searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, true, workers)
 	if !found {
@@ -117,7 +117,7 @@ func CrackUpperAlnumZIPPassword(ctx context.Context, archive []byte, workers int
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	password, _, found := searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, true, workers)
+	password, _, found := searchZipPasswords(ctx, entry, zipUpperAlnumAlphabet, false, workers)
 	if found {
 		return password, nil
 	}
