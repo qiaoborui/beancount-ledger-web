@@ -8,8 +8,16 @@ describe("AppShell Agent route", () => {
   it("uses an uninterrupted workspace for the Agent route", () => {
     expect(source).toContain('const isAgentRoute = isActivePath(pathname, "/agent");');
     expect(source).toContain('isAgentRoute ? "p-0" : "px-3 py-4"');
-    expect(source).toContain("!isAgentRoute && <button");
+    expect(source).toContain("!isAgentRoute && !isEditorRoute && <button");
     expect(source).not.toContain('isAgentRoute ? "hidden md:inline-flex" : "inline-flex"');
+    expect(source).toContain("!isAgentRoute && <nav");
+  });
+});
+
+describe("AppShell Editor route", () => {
+  it("keeps the global quick-action button out of the editor workbench", () => {
+    expect(source).toContain('const isEditorRoute = isActivePath(pathname, "/editor");');
+    expect(source).toContain("!isAgentRoute && !isEditorRoute && <button");
     expect(source).toContain("!isAgentRoute && <nav");
   });
 });
