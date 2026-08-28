@@ -311,7 +311,8 @@ prove one emitted digest can be pulled without `docker login` before enabling
 deployment.
 
 Use a default-branch ruleset to require pull requests with zero required
-approving reviews and to prevent force pushes/deletion. Keep conversation
+approving reviews and to prevent force pushes/deletion. Leave code-owner,
+last-push, and unattributed-change approvals disabled. Keep conversation
 resolution and the stable `CI / Gate` status check in classic branch
 protection. The workflow remains inert while repository variable
 `SELFHOST_DEPLOY_ENABLED` is unset. Only after the host, Headscale policy,
