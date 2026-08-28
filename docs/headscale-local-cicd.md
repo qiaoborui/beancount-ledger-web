@@ -310,9 +310,10 @@ still unset and the deploy job is skipped. Set their visibility to public and
 prove one emitted digest can be pulled without `docker login` before enabling
 deployment.
 
-Protect `main` with pull requests and zero required approving reviews,
-conversation resolution, no force pushes/deletion, and the stable `CI / Gate`
-status check. The workflow remains inert while repository variable
+Use a default-branch ruleset to require pull requests with zero required
+approving reviews and to prevent force pushes/deletion. Keep conversation
+resolution and the stable `CI / Gate` status check in classic branch
+protection. The workflow remains inert while repository variable
 `SELFHOST_DEPLOY_ENABLED` is unset. Only after the host, Headscale policy,
 environment protections, secrets, variables, and public GHCR visibility are
 ready, perform the final explicit activation:
