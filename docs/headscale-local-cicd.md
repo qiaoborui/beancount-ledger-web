@@ -1,7 +1,7 @@
 # Local self-hosted CI/CD over Headscale
 
 This deployment builds immutable application images on GitHub-hosted runners,
-then gives one approved job temporary TCP/6247 access to the Docker host over
+then gives the deployment job temporary TCP/6247 access to the Docker host over
 Headscale. The privileged deploy job does not check out repository code and
 cannot open a normal shell, read the ledger, read application credentials, or
 access the Docker socket.
@@ -240,9 +240,8 @@ not do either before confirmation.
 Create `local-selfhost-production` with these settings:
 
 - selected deployment branch: `main`
-- required reviewer: `qiaoborui`
+- no required reviewers
 - administrator bypass disabled
-- self-review allowed because this repository currently has one maintainer
 
 Environment secrets:
 
@@ -311,9 +310,11 @@ still unset and the deploy job is skipped. Set their visibility to public and
 prove one emitted digest can be pulled without `docker login` before enabling
 deployment.
 
-Protect `main` with pull requests, one approval, stale-approval dismissal,
-conversation resolution, no force pushes/deletion, and the stable `CI / Gate`
-status check. The workflow remains inert while repository variable
+Use a default-branch ruleset to require pull requests with zero required
+approving reviews and to prevent force pushes/deletion. Leave code-owner,
+last-push, and unattributed-change approvals disabled. Keep conversation
+resolution and the stable `CI / Gate` status check in classic branch
+protection. The workflow remains inert while repository variable
 `SELFHOST_DEPLOY_ENABLED` is unset. Only after the host, Headscale policy,
 environment protections, secrets, variables, and public GHCR visibility are
 ready, perform the final explicit activation:
@@ -393,7 +394,7 @@ reconciliation before reopening traffic.
 
 ## First deployment verification
 
-After the approved workflow reports success, verify the promoted SHA, all five
+After the workflow reports success, verify the promoted SHA, all five
 runtime labels, health, and absence of an unfinished transaction:
 
 ```bash
@@ -421,8 +422,8 @@ curl --resolve beancount.mesh.arpa:443:127.0.0.1 \
 Run `headscale nodes list` on the Headscale server as the final network check.
 
 Perform the one-level rollback command above before normal use, repeat these
-health checks against the bootstrap release, then dispatch and approve the same
-`main` SHA again. Only the second healthy digest promotion proves both forward
+health checks against the bootstrap release, then dispatch the same `main` SHA
+again. Only the second healthy digest promotion proves both forward
 deployment and recovery. Confirm that nodes whose names begin with
 `gha-ledger-` are absent or expired after each job. Policy tests must prove
 that `tag:ci-deploy` can reach only `100.64.0.5:6247`; separately preserve every
