@@ -17,6 +17,7 @@ let package = Package(
             path: "Sources",
             exclude: [
                 "AccountsView.swift",
+                "AnalysisViews.swift",
                 "DesignSystem.swift",
                 "LedgerMobileApp.swift",
                 "MoreView.swift",

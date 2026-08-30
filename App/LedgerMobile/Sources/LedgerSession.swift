@@ -301,6 +301,56 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func analysisResource(_ kind: LedgerAnalysisResourceKind) async throws -> LedgerAnalysisResource {
+        guard phase == .ready, let serverURL else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let generation = requestGeneration
+        let range = selectedRange
+        do {
+            let resource: LedgerAnalysisResource
+            switch kind {
+            case .dashboard:
+                resource = .dashboard(
+                    try await api.dashboard(
+                        baseURL: serverURL,
+                        start: range.start,
+                        end: range.queryEndExclusive
+                    )
+                )
+            case .incomeStatement:
+                resource = .incomeStatement(
+                    try await api.incomeStatement(
+                        baseURL: serverURL,
+                        start: range.start,
+                        end: range.queryEndExclusive
+                    )
+                )
+            case .investments:
+                resource = .investments(try await api.investments(baseURL: serverURL))
+            }
+            guard generation == requestGeneration,
+                  self.serverURL == serverURL,
+                  phase == .ready else {
+                throw CancellationError()
+            }
+            return resource
+        } catch let error as LedgerAPIError {
+            if case let .server(status, _) = error,
+               status == 423,
+               generation == requestGeneration,
+               self.serverURL == serverURL,
+               phase == .ready {
+                setLocallyLocked(true, for: serverURL)
+                clearSensitiveCookie(for: serverURL)
+                ledger = nil
+                amountsVisible = false
+                phase = .locked(authenticated: true)
+            }
+            throw error
+        }
+    }
+
     func presentRangePicker() {
         draftRange = selectedRange
         rangePickerPresented = true
@@ -506,7 +556,7 @@ final class LedgerSession: ObservableObject {
         let payload = try await api.bootstrap(
             baseURL: serverURL,
             start: targetRange.start,
-            end: targetRange.end,
+            end: targetRange.queryEndExclusive,
             today: LedgerDateRange.today()
         )
         guard generation == requestGeneration else { return }

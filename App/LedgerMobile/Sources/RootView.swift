@@ -348,6 +348,10 @@ private struct LoginView: View {
 
 enum LedgerDestination: String, CaseIterable, Hashable {
     case overview
+    case dashboard
+    case netWorth
+    case incomeStatement
+    case investments
     case transactions
     case accounts
     case settings
@@ -355,6 +359,10 @@ enum LedgerDestination: String, CaseIterable, Hashable {
     var title: String {
         switch self {
         case .overview: "财务概览"
+        case .dashboard: "仪表盘"
+        case .netWorth: "净资产"
+        case .incomeStatement: "损益"
+        case .investments: "投资"
         case .transactions: "交易账本"
         case .accounts: "账户"
         case .settings: "设置"
@@ -364,6 +372,10 @@ enum LedgerDestination: String, CaseIterable, Hashable {
     var systemImage: String {
         switch self {
         case .overview: "house"
+        case .dashboard: "rectangle.3.group"
+        case .netWorth: "chart.line.uptrend.xyaxis"
+        case .incomeStatement: "sum"
+        case .investments: "chart.pie"
         case .transactions: "list.bullet"
         case .accounts: "book.closed"
         case .settings: "gearshape"
@@ -382,6 +394,20 @@ private struct MainTabView: View {
         )
     }
 
+    private var compactSelection: Binding<LedgerDestination> {
+        Binding(
+            get: {
+                switch LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview {
+                case .overview, .transactions, .accounts, .settings:
+                    return LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview
+                case .dashboard, .netWorth, .incomeStatement, .investments:
+                    return .settings
+                }
+            },
+            set: { session.primaryDestinationID = $0.rawValue }
+        )
+    }
+
     var body: some View {
         if horizontalSizeClass == .regular {
             LedgerRegularShell(selection: selection)
@@ -391,7 +417,7 @@ private struct MainTabView: View {
     }
 
     private var compactTabs: some View {
-        TabView(selection: selection) {
+        TabView(selection: compactSelection) {
             OverviewView()
                 .tabItem { Label("概览", systemImage: "house") }
                 .tag(LedgerDestination.overview)
@@ -427,6 +453,14 @@ private struct LedgerRegularShell: View {
                 switch selection {
                 case .overview:
                     OverviewView()
+                case .dashboard:
+                    LedgerAnalysisView(kind: .dashboard, showsAppBar: true)
+                case .netWorth:
+                    LedgerAnalysisView(kind: .netWorth, showsAppBar: true)
+                case .incomeStatement:
+                    LedgerAnalysisView(kind: .incomeStatement, showsAppBar: true)
+                case .investments:
+                    LedgerAnalysisView(kind: .investments, showsAppBar: true)
                 case .transactions:
                     TransactionsView()
                 case .accounts:

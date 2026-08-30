@@ -139,14 +139,14 @@ final class APIClientTests: XCTestCase {
                 item.value.map { (item.name, $0) }
             })
             XCTAssertEqual(components.path, "/api/ledger/bootstrap")
-            XCTAssertEqual(query, ["start": "2026-08-01", "end": "2026-08-31", "today": "2026-08-30"])
+            XCTAssertEqual(query, ["start": "2026-08-01", "end": "2026-09-01", "today": "2026-08-30"])
             return Self.response(for: request, body: LedgerModelsTests.bootstrapJSON)
         }
 
         let payload = try await makeClient().bootstrap(
             baseURL: URL(string: "https://ledger.example.com")!,
             start: "2026-08-01",
-            end: "2026-08-31",
+            end: "2026-09-01",
             today: "2026-08-30"
         )
         XCTAssertEqual(payload.transactions.count, 2)
@@ -170,6 +170,98 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(detail.label, "日常账户")
         XCTAssertEqual(detail.currentBalance, 1_235_000)
         XCTAssertEqual(detail.rows.first?.transaction.payee, "海底捞")
+    }
+
+    func testDashboardAddsRangeQueryAndDecodesAnalytics() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
+            XCTAssertEqual(components.path, "/api/ledger/dashboard")
+            XCTAssertEqual(
+                components.queryItems,
+                [
+                    URLQueryItem(name: "start", value: "2026-08-01"),
+                    URLQueryItem(name: "end", value: "2026-09-01"),
+                ]
+            )
+            XCTAssertEqual(request.httpMethod, "GET")
+            return Self.response(for: request, body: Self.dashboardJSON)
+        }
+
+        let dashboard = try await makeClient().dashboard(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            start: "2026-08-01",
+            end: "2026-09-01"
+        )
+
+        XCTAssertEqual(dashboard.kpis.netWorth, 1_414_910_466)
+        XCTAssertEqual(dashboard.cashflowSeries.first?.income, 5_050_000)
+        XCTAssertEqual(dashboard.categorySeries.first?.label, "居住")
+        XCTAssertEqual(dashboard.anomalies.first?.payee, "城市书房")
+    }
+
+    func testIncomeStatementAddsRangeQueryAndDecodesHierarchy() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
+            XCTAssertEqual(components.path, "/api/ledger/income-statement")
+            XCTAssertEqual(
+                components.queryItems,
+                [
+                    URLQueryItem(name: "start", value: "2026-08-01"),
+                    URLQueryItem(name: "end", value: "2026-09-01"),
+                ]
+            )
+            return Self.response(for: request, body: Self.incomeStatementJSON)
+        }
+
+        let statement = try await makeClient().incomeStatement(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            start: "2026-08-01",
+            end: "2026-09-01"
+        )
+
+        XCTAssertEqual(statement.netIncome, 4_494_820)
+        XCTAssertEqual(statement.expense.first?.children.first?.label, "房租")
+        XCTAssertEqual(statement.expense.first?.children.first?.depth, 1)
+    }
+
+    func testInvestmentsUsesExpectedEndpointAndPreservesMissingValuation() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/investments")
+            XCTAssertNil(request.url?.query)
+            XCTAssertEqual(request.httpMethod, "GET")
+            return Self.response(for: request, body: Self.investmentsJSON)
+        }
+
+        let investments = try await makeClient().investments(
+            baseURL: URL(string: "https://ledger.example.com")!
+        )
+
+        XCTAssertEqual(investments.totalMarketValueCny, 67_850_000)
+        XCTAssertEqual(investments.holdings.first?.commodity, "VT")
+        XCTAssertNil(investments.holdings.last?.totalMarketValueCny)
+        XCTAssertNil(investments.realizedPnlCny)
+    }
+
+    func testInvestmentsDecodesEmptyLedgerNullCollections() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/investments")
+            return Self.response(
+                for: request,
+                body: #"{"totalMarketValueCny":0,"holdings":null,"positions":null}"#
+            )
+        }
+
+        let investments = try await makeClient().investments(
+            baseURL: URL(string: "https://ledger.example.com")!
+        )
+
+        XCTAssertEqual(investments.totalMarketValueCny, 0)
+        XCTAssertEqual(investments.holdings, [])
+        XCTAssertEqual(investments.positions, [])
     }
 
     func testServerErrorSurfacesMessage() async {
@@ -223,6 +315,46 @@ final class APIClientTests: XCTestCase {
         }
         return data
     }
+
+    private static let dashboardJSON = #"""
+    {
+      "start":"2026-08-01",
+      "end":"2026-09-01",
+      "currency":"CNY",
+      "kpis":{"assets":1415200366,"liabilities":289900,"netWorth":1414910466,"income":5050000,"expense":555180,"net":4494820,"savingsRate":0.8901},
+      "netWorthSeries":[{"date":"2026-08","assets":1415200366,"liabilities":289900,"netWorth":1414910466}],
+      "cashflowSeries":[{"month":"08","income":5050000,"expense":555180,"net":4494820}],
+      "categorySeries":[{"account":"Expenses:Housing","alias":"居住","label":"居住","total":380000,"values":[]}],
+      "topPayees":[{"payee":"房屋租金","amount":380000,"txCount":1}],
+      "topPaymentAccounts":[{"account":"Assets:Bank:Daily","alias":"日常账户","label":"日常账户","amount":380000,"txCount":1}],
+      "anomalies":[{"date":"2026-08-28","payee":"城市书房","narration":"年度阅读计划","account":"Expenses:Education:Books","amount":32800,"source":"transactions/2026/08.bean:88"}]
+    }
+    """#
+
+    private static let incomeStatementJSON = #"""
+    {
+      "start":"2026-08-01",
+      "end":"2026-09-01",
+      "income":[{"account":"Income:Salary","alias":"工资","label":"工资","amount":5050000,"children":[],"depth":0,"txCount":1}],
+      "expense":[{"account":"Expenses:Housing","alias":"居住","label":"居住","amount":380000,"children":[{"account":"Expenses:Housing:Rent","alias":"房租","label":"房租","amount":380000,"children":[],"depth":1,"txCount":1}],"depth":0,"txCount":1}],
+      "totalIncome":5050000,
+      "totalExpense":555180,
+      "netIncome":4494820,
+      "valuationCurrency":"CNY"
+    }
+    """#
+
+    private static let investmentsJSON = #"""
+    {
+      "totalMarketValueCny":67850000,
+      "holdings":[
+        {"commodity":"VT","commodityName":"全球股票指数","totalQuantity":823.47,"averageCost":108.34,"totalCostValueCny":58270000,"totalMarketValueCny":67850000,"accountCount":2},
+        {"commodity":"PRIVATE","commodityName":"未上市权益","totalQuantity":10,"accountCount":1}
+      ],
+      "positions":[],
+      "updatedAt":"2026-08-30T16:00:00Z"
+    }
+    """#
 }
 
 private final class MockURLProtocol: URLProtocol, @unchecked Sendable {

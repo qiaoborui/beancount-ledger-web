@@ -307,6 +307,7 @@ struct AmountLabel: View {
     var font: Font = .system(size: 15, weight: .semibold)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
+    var showSign = false
 
     var body: some View {
         amountText
@@ -314,7 +315,11 @@ struct AmountLabel: View {
             .foregroundStyle(color)
             .contentTransition(.opacity)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: session.amountsVisible)
-            .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : "金额已隐藏")
+            .accessibilityLabel(
+                session.amountsVisible
+                    ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign)
+                    : prefix.isEmpty ? "金额已隐藏" : prefix + "金额已隐藏"
+            )
     }
 
     @ViewBuilder
@@ -322,18 +327,18 @@ struct AmountLabel: View {
         if session.amountsVisible {
             switch displayMode {
             case .full:
-                Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency))
+                Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign))
                     .fixedSize(horizontal: true, vertical: false)
             case .adaptive:
                 ViewThatFits(in: .horizontal) {
-                    Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency))
+                    Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign))
                         .fixedSize(horizontal: true, vertical: false)
-                    Text(prefix + MoneyText.formatCompact(minorUnits: minorUnits, currency: currency))
+                    Text(prefix + MoneyText.formatCompact(minorUnits: minorUnits, currency: currency, showSign: showSign))
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
         } else {
-            Text("••••••")
+            Text(prefix + "••••••")
                 .fixedSize(horizontal: true, vertical: false)
         }
     }
