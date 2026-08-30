@@ -131,7 +131,7 @@ func TestApplicationMaintenanceModeDoesNotStartBackgroundWork(t *testing.T) {
 	}
 }
 
-func TestMaintenanceModeOnlyAllowsHealthAndReadiness(t *testing.T) {
+func TestMaintenanceModeAllowsHealthReadinessAndAssociationMetadata(t *testing.T) {
 	router := gin.New()
 	router.Use(maintenanceModeGuard(true))
 	called := false
@@ -146,7 +146,12 @@ func TestMaintenanceModeOnlyAllowsHealthAndReadiness(t *testing.T) {
 		t.Fatalf("blocked status=%d called=%v body=%s", blocked.Code, called, blocked.Body.String())
 	}
 
-	for _, path := range []string{"/api/health", "/api/ready"} {
+	for _, path := range []string{
+		"/api/health",
+		"/api/ready",
+		"/.well-known/webauthn",
+		"/.well-known/apple-app-site-association",
+	} {
 		called = false
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))

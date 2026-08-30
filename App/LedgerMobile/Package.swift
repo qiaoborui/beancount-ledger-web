@@ -1,0 +1,36 @@
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "LedgerMobileCore",
+    platforms: [
+        .macOS(.v13),
+        .iOS(.v17),
+    ],
+    products: [
+        .library(name: "LedgerMobile", targets: ["LedgerMobile"]),
+    ],
+    targets: [
+        .target(
+            name: "LedgerMobile",
+            path: "Sources",
+            exclude: [
+                "AccountsView.swift",
+                "DesignSystem.swift",
+                "LedgerMobileApp.swift",
+                "OverviewView.swift",
+                "RootView.swift",
+                "SettingsView.swift",
+                "TimeRangePicker.swift",
+                "TransactionViews.swift",
+            ],
+            sources: ["APIClient.swift", "BiometricUnlockService.swift", "LedgerModels.swift", "LedgerSession.swift", "PasskeyAuthenticationService.swift"]
+        ),
+        .testTarget(
+            name: "LedgerMobileTests",
+            dependencies: ["LedgerMobile"],
+            path: "Tests"
+        ),
+    ]
+)

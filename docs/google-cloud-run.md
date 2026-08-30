@@ -423,6 +423,14 @@ Verify the generated `run.app` URL:
 Passkey verification follows after the production domain is mapped because the
 RP ID remains the existing domain.
 
+The native iOS client pins its passkey relying party to
+`beancount.borry.org`. Keep `WEBAUTHN_RP_ID=beancount.borry.org`, include
+`https://beancount.borry.org` in `WEBAUTHN_PUBLIC_ORIGIN`, and verify
+`https://beancount.borry.org/.well-known/apple-app-site-association` returns
+status 200 without a redirect. The response must retain the app identifier
+`H92F889YBH.com.qiaoborui.ledger.mobile` and an `application/json` content
+type.
+
 ## Private ledger indexer workflow
 
 The hosted indexer belongs in the private ledger repository, not in this public
