@@ -18,6 +18,7 @@ let package = Package(
             exclude: [
                 "AccountsView.swift",
                 "AnalysisViews.swift",
+                "BQLQueryView.swift",
                 "DesignSystem.swift",
                 "LedgerMobileApp.swift",
                 "MoreView.swift",
@@ -28,7 +29,7 @@ let package = Package(
                 "TimeRangePicker.swift",
                 "TransactionViews.swift",
             ],
-            sources: ["APIClient.swift", "BiometricUnlockService.swift", "LedgerModels.swift", "LedgerSession.swift", "PasskeyAuthenticationService.swift"]
+            sources: ["APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "LedgerModels.swift", "LedgerSession.swift", "PasskeyAuthenticationService.swift"]
         ),
         .testTarget(
             name: "LedgerMobileTests",

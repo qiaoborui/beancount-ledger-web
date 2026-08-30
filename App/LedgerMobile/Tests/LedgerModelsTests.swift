@@ -152,6 +152,72 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(july.queryEndExclusive, "2026-08-01")
     }
 
+    func testBQLDynamicCellsDecodeAllJSONShapesAndNullCollections() throws {
+        let json = #"""
+        {
+          "columns":null,
+          "rows":[[null,true,12.5,"text",["a",2],{"tag":"food"}]],
+          "query":"SELECT * FROM transactions",
+          "warnings":null,
+          "valuationCurrency":"CNY",
+          "limit":100,
+          "rowCount":1
+        }
+        """#
+        let result = try JSONDecoder().decode(BQLResult.self, from: Data(json.utf8))
+
+        XCTAssertEqual(result.columns, [])
+        XCTAssertEqual(result.warnings, [])
+        XCTAssertEqual(
+            result.rows[0],
+            [.null, .bool(true), .number(12.5), .string("text"), .array([.string("a"), .number(2)]), .object(["tag": .string("food")])]
+        )
+    }
+
+    func testBQLStatementSplitterKeepsQuotedSemicolonsAndEscapes() {
+        let raw = "SELECT payee FROM transactions WHERE narration = '午餐;咖啡'; SELECT account FROM postings WHERE account = \"Assets:\\\"Daily\";"
+
+        XCTAssertEqual(
+            BQLStatements.split(raw),
+            [
+                "SELECT payee FROM transactions WHERE narration = '午餐;咖啡'",
+                "SELECT account FROM postings WHERE account = \"Assets:\\\"Daily\"",
+            ]
+        )
+    }
+
+    func testBQLHistoryMergePreservesChangesMadeWhileLoading() {
+        let original = Self.bqlHistoryRecord(id: "existing", title: "旧标题", lastRunAt: "2026-08-01T00:00:00Z")
+        let stale = Self.bqlHistoryRecord(id: "existing", title: "旧标题", lastRunAt: "2026-08-01T00:00:00Z")
+        let renamed = Self.bqlHistoryRecord(id: "existing", title: "新标题", lastRunAt: "2026-08-01T00:00:00Z")
+        let saved = Self.bqlHistoryRecord(id: "saved", title: "刚保存", lastRunAt: "2026-08-02T00:00:00Z")
+
+        let merged = BQLHistoryMerge.reconcile(
+            loaded: [
+                stale,
+                Self.bqlHistoryRecord(id: "existing", title: "重复旧标题", lastRunAt: "2026-08-01T00:00:00Z"),
+                Self.bqlHistoryRecord(id: "deleted", title: "待删除", lastRunAt: "2026-07-31T00:00:00Z"),
+            ],
+            snapshot: [original, Self.bqlHistoryRecord(id: "deleted", title: "待删除", lastRunAt: "2026-07-31T00:00:00Z")],
+            current: [renamed, saved]
+        )
+
+        XCTAssertEqual(Set(merged.map(\.id)), ["existing", "saved"])
+        XCTAssertEqual(merged.first(where: { $0.id == "existing" })?.title, "新标题")
+    }
+
+    private static func bqlHistoryRecord(id: String, title: String, lastRunAt: String) -> BQLHistoryRecord {
+        BQLHistoryRecord(
+            id: id,
+            query: "SELECT * FROM transactions",
+            title: title,
+            titleSource: "manual",
+            createdAt: "2026-08-01T00:00:00Z",
+            lastRunAt: lastRunAt,
+            runCount: 1
+        )
+    }
+
     static let bootstrapJSON = #"""
     {
       "start": "2026-08-01",

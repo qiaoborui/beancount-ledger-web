@@ -80,6 +80,12 @@ protocol LedgerAPI: Sendable {
     func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard
     func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary
+    func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult
+    func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord]
+    func saveBQLHistory(baseURL: URL, query: String) async throws -> BQLHistoryRecord
+    func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord
+    func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord
+    func deleteBQLHistory(baseURL: URL, id: String) async throws
     func lock(baseURL: URL) async throws
     func logout(baseURL: URL) async throws
 }
@@ -95,6 +101,30 @@ extension LedgerAPI {
 
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持投资分析")
+    }
+
+    func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询")
+    }
+
+    func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord] {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+    }
+
+    func saveBQLHistory(baseURL: URL, query: String) async throws -> BQLHistoryRecord {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+    }
+
+    func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+    }
+
+    func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+    }
+
+    func deleteBQLHistory(baseURL: URL, id: String) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
     }
 }
 
@@ -210,6 +240,55 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         try await get(baseURL: baseURL, path: "/api/ledger/investments")
     }
 
+    func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/bql",
+            method: "POST",
+            body: BQLRequest(query: query, valuationCurrency: valuationCurrency)
+        )
+    }
+
+    func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord] {
+        let response: BQLHistoryResponse = try await get(baseURL: baseURL, path: "/api/ledger/bql-history")
+        return response.records
+    }
+
+    func saveBQLHistory(baseURL: URL, query: String) async throws -> BQLHistoryRecord {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/bql-history",
+            method: "POST",
+            body: BQLHistorySaveRequest(query: query)
+        )
+    }
+
+    func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/bql-history/\(id)/title",
+            method: "POST",
+            body: Optional<String>.none
+        )
+    }
+
+    func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/bql-history/\(id)",
+            method: "PATCH",
+            body: BQLHistoryRenameRequest(title: title)
+        )
+    }
+
+    func deleteBQLHistory(baseURL: URL, id: String) async throws {
+        try await sendWithoutResponse(
+            baseURL: baseURL,
+            path: "/api/ledger/bql-history/\(id)",
+            method: "DELETE"
+        )
+    }
+
     func lock(baseURL: URL) async throws {
         let _: EmptySuccess = try await send(baseURL: baseURL, path: "/api/auth/lock", method: "POST", body: Optional<String>.none)
     }
@@ -257,7 +336,24 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return try await self.request(request)
     }
 
+    private func sendWithoutResponse(baseURL: URL, path: String, method: String) async throws {
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.httpMethod = method
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        _ = try await responseData(for: request)
+    }
+
     private func request<Response: Decodable>(_ request: URLRequest) async throws -> Response {
+        let data = try await responseData(for: request)
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            throw LedgerAPIError.decoding(error.localizedDescription)
+        }
+    }
+
+    private func responseData(for request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
@@ -278,12 +374,7 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             let message = payload?.error ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
             throw LedgerAPIError.server(status: http.statusCode, message: message)
         }
-
-        do {
-            return try decoder.decode(Response.self, from: data)
-        } catch {
-            throw LedgerAPIError.decoding(error.localizedDescription)
-        }
+        return data
     }
 }
 
