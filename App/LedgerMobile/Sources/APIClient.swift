@@ -77,8 +77,25 @@ protocol LedgerAPI: Sendable {
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws
     func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail
+    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard
+    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement
+    func investments(baseURL: URL) async throws -> LedgerInvestmentSummary
     func lock(baseURL: URL) async throws
     func logout(baseURL: URL) async throws
+}
+
+extension LedgerAPI {
+    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持仪表盘")
+    }
+
+    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持损益分析")
+    }
+
+    func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持投资分析")
+    }
 }
 
 struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
@@ -181,6 +198,18 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return try await self.request(request)
     }
 
+    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+        try await rangedGet(baseURL: baseURL, path: "/api/ledger/dashboard", start: start, end: end)
+    }
+
+    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+        try await rangedGet(baseURL: baseURL, path: "/api/ledger/income-statement", start: start, end: end)
+    }
+
+    func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
+        try await get(baseURL: baseURL, path: "/api/ledger/investments")
+    }
+
     func lock(baseURL: URL) async throws {
         let _: EmptySuccess = try await send(baseURL: baseURL, path: "/api/auth/lock", method: "POST", body: Optional<String>.none)
     }
@@ -191,6 +220,20 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
 
     private func get<Response: Decodable>(baseURL: URL, path: String) async throws -> Response {
         var request = URLRequest(url: baseURL.appending(path: path))
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await self.request(request)
+    }
+
+    private func rangedGet<Response: Decodable>(baseURL: URL, path: String, start: String, end: String) async throws -> Response {
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "start", value: start),
+            URLQueryItem(name: "end", value: end),
+        ]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")

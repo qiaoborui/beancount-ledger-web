@@ -12,6 +12,10 @@ authentication and privacy lock.
   transaction detail.
 - Browse grouped account balances, account details, related transactions, and
   running balances.
+- Review Dashboard KPIs, cashflow trends, spending structure, and anomalous
+  transactions for the selected date range.
+- Track net worth history, browse hierarchical income and expense statements,
+  and inspect investment holdings, market values, costs, and returns.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
@@ -28,8 +32,8 @@ authentication and privacy lock.
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next read-only milestone adds Dashboard, net worth, income statement, and
-investment views. Ledger writes remain a later phase with a separate
+The next read-only milestone adds Agent conversations, BQL queries, and
+currency analysis. Ledger writes remain a later phase with a separate
 preview-and-confirmation design.
 
 ## Generate and build

@@ -50,6 +50,18 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         SafePreviewLedgerData.accountDetail(account: account)
     }
 
+    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+        SafePreviewLedgerData.dashboard(start: start, end: end)
+    }
+
+    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+        SafePreviewLedgerData.incomeStatement(start: start, end: end)
+    }
+
+    func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
+        SafePreviewLedgerData.investments
+    }
+
     func lock(baseURL: URL) async throws {}
     func logout(baseURL: URL) async throws {}
 }
@@ -137,6 +149,87 @@ private enum SafePreviewLedgerData {
             rows: rows
         )
     }
+
+    static func dashboard(start: String, end: String) -> LedgerDashboard {
+        LedgerDashboard(
+            start: start,
+            end: end,
+            currency: "CNY",
+            kpis: LedgerDashboardKPI(
+                assets: 1_415_200_366,
+                liabilities: 289_900,
+                netWorth: 1_414_910_466,
+                income: 5_050_000,
+                expense: 555_180,
+                net: 4_494_820,
+                savingsRate: 0.8901
+            ),
+            netWorthSeries: [
+                LedgerNetWorthPoint(date: "2026-03", assets: 1_218_400_000, liabilities: 342_800, netWorth: 1_218_057_200),
+                LedgerNetWorthPoint(date: "2026-04", assets: 1_267_900_000, liabilities: 318_600, netWorth: 1_267_581_400),
+                LedgerNetWorthPoint(date: "2026-05", assets: 1_301_500_000, liabilities: 301_200, netWorth: 1_301_198_800),
+                LedgerNetWorthPoint(date: "2026-06", assets: 1_344_700_000, liabilities: 295_700, netWorth: 1_344_404_300),
+                LedgerNetWorthPoint(date: "2026-07", assets: 1_376_800_000, liabilities: 310_400, netWorth: 1_376_489_600),
+                LedgerNetWorthPoint(date: "2026-08", assets: 1_415_200_366, liabilities: 289_900, netWorth: 1_414_910_466),
+            ],
+            cashflowSeries: [
+                LedgerCashflowPoint(month: "03", income: 4_820_000, expense: 1_138_000, net: 3_682_000),
+                LedgerCashflowPoint(month: "04", income: 5_080_000, expense: 1_246_000, net: 3_834_000),
+                LedgerCashflowPoint(month: "05", income: 4_960_000, expense: 932_000, net: 4_028_000),
+                LedgerCashflowPoint(month: "06", income: 5_160_000, expense: 1_328_000, net: 3_832_000),
+                LedgerCashflowPoint(month: "08", income: 5_050_000, expense: 555_180, net: 4_494_820),
+            ],
+            categorySeries: [
+                LedgerCategorySeries(account: "Expenses:Housing", alias: "居住", label: "居住", total: 380_000, values: []),
+                LedgerCategorySeries(account: "Expenses:Education", alias: "教育", label: "教育", total: 32_800, values: []),
+                LedgerCategorySeries(account: "Expenses:Food", alias: "餐饮", label: "餐饮", total: 84_780, values: []),
+                LedgerCategorySeries(account: "Expenses:Travel", alias: "出行", label: "出行", total: 57_600, values: []),
+            ],
+            topPayees: [
+                LedgerPayeeAnalytics(payee: "房屋租金", amount: 380_000, txCount: 1),
+                LedgerPayeeAnalytics(payee: "云端出行", amount: 57_600, txCount: 1),
+            ],
+            topPaymentAccounts: [
+                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: 445_780, txCount: 5),
+            ],
+            anomalies: [
+                LedgerDashboardAnomaly(date: "2026-08-28", payee: "城市书房", narration: "年度阅读计划", account: "Expenses:Education:Books", amount: 32_800, source: "transactions/2026/08.bean:88"),
+            ]
+        )
+    }
+
+    static func incomeStatement(start: String, end: String) -> LedgerIncomeStatement {
+        LedgerIncomeStatement(
+            start: start,
+            end: end,
+            income: [
+                LedgerIncomeNode(account: "Income:Salary", alias: "工资", label: "工资", amount: 4_800_000, children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Income:Reimbursement", alias: "报销", label: "报销", amount: 250_000, children: [], depth: 0, txCount: 1),
+            ],
+            expense: [
+                LedgerIncomeNode(account: "Expenses:Housing", alias: "居住", label: "居住", amount: 380_000, children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Food", alias: "餐饮", label: "餐饮", amount: 84_780, children: [], depth: 0, txCount: 3),
+                LedgerIncomeNode(account: "Expenses:Travel", alias: "出行", label: "出行", amount: 57_600, children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Education", alias: "教育", label: "教育", amount: 32_800, children: [], depth: 0, txCount: 1),
+            ],
+            totalIncome: 5_050_000,
+            totalExpense: 555_180,
+            netIncome: 4_494_820,
+            valuationCurrency: "CNY"
+        )
+    }
+
+    static let investments = LedgerInvestmentSummary(
+        totalMarketValueCny: 123_456_789,
+        realizedPnlCny: 286_400,
+        holdings: [
+            LedgerInvestmentHolding(commodity: "VT", commodityName: "全球股票指数", totalQuantity: 823.47, averageCost: 108.34, totalCostValueCny: 58_270_000, totalMarketValueCny: 67_850_000, accountCount: 2, realizedPnlCny: 186_400),
+            LedgerInvestmentHolding(commodity: "BND", commodityName: "全球债券指数", totalQuantity: 695.18, averageCost: 71.42, totalCostValueCny: 35_480_000, totalMarketValueCny: 38_760_000, accountCount: 1, realizedPnlCny: 100_000),
+            LedgerInvestmentHolding(commodity: "GLD", commodityName: "黄金", totalQuantity: 12.36, averageCost: 181.20, totalCostValueCny: 15_920_000, totalMarketValueCny: 16_846_789, accountCount: 1, realizedPnlCny: nil),
+        ],
+        positions: [],
+        updatedAt: "2026-08-30T16:00:00Z"
+    )
 
     private static func transaction(
         date: String,

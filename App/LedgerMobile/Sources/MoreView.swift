@@ -14,7 +14,7 @@ struct MoreView: View {
                     VStack(alignment: .leading, spacing: LedgerSpacing.xl) {
                         LedgerPageIntro(
                             title: "更多",
-                            detail: "管理设备安全、隐私锁定和服务器连接。",
+                            detail: "查看财务分析，管理设备安全和服务器连接。",
                             meta: nil
                         ) {
                             EmptyView()
@@ -37,6 +37,32 @@ struct MoreView: View {
                                     )
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, LedgerSpacing.lg)
+
+                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                            Text("财务分析")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 2)
+
+                            LedgerPanel {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(LedgerAnalysisKind.allCases.enumerated()), id: \.element) { index, kind in
+                                        NavigationLink {
+                                            LedgerAnalysisView(kind: kind)
+                                        } label: {
+                                            MoreNavigationRow(icon: kind.systemImage, title: kind.title, detail: kind.detail)
+                                        }
+                                        .buttonStyle(PressScaleButtonStyle())
+                                        .accessibilityIdentifier("more-analysis-\(kind.rawValue)")
+
+                                        if index < LedgerAnalysisKind.allCases.count - 1 {
+                                            Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+                                        }
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, LedgerSpacing.lg)

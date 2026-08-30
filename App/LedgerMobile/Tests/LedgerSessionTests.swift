@@ -39,7 +39,7 @@ final class LedgerSessionTests: XCTestCase {
 
         let requests = await api.bootstrapRequests()
         XCTAssertEqual(requests.last?.start, "2026-07-01")
-        XCTAssertEqual(requests.last?.end, "2026-07-31")
+        XCTAssertEqual(requests.last?.end, "2026-08-01")
         XCTAssertEqual(session.selectedRange, july)
     }
 
@@ -354,6 +354,94 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertNil(store.credential)
     }
 
+    func testAnalysisResourcesLoadOnlySelectedSourceForCurrentRange() async throws {
+        let suiteName = "ledger-mobile-analysis-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let july = LedgerDateRange.month(year: 2026, month: 7)
+        await session.applyRange(july)
+
+        let dashboardResource = try await session.analysisResource(.dashboard)
+        guard case let .dashboard(dashboard) = dashboardResource else {
+            return XCTFail("Expected dashboard resource")
+        }
+        XCTAssertEqual(dashboard.start, "2026-07-01")
+        XCTAssertEqual(dashboard.end, "2026-08-01")
+        var calls = await api.callCounts()
+        XCTAssertEqual(calls.dashboard, 1)
+        XCTAssertEqual(calls.incomeStatement, 0)
+        XCTAssertEqual(calls.investments, 0)
+
+        let incomeResource = try await session.analysisResource(.incomeStatement)
+        guard case let .incomeStatement(incomeStatement) = incomeResource else {
+            return XCTFail("Expected income statement resource")
+        }
+        XCTAssertEqual(incomeStatement.start, "2026-07-01")
+        XCTAssertEqual(incomeStatement.end, "2026-08-01")
+
+        _ = try await session.analysisResource(.investments)
+        calls = await api.callCounts()
+        XCTAssertEqual(calls.dashboard, 1)
+        XCTAssertEqual(calls.incomeStatement, 1)
+        XCTAssertEqual(calls.investments, 1)
+    }
+
+    func testAnalysisSensitiveLockClearsLoadedLedger() async {
+        let suiteName = "ledger-mobile-analysis-lock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload, analysisErrorStatus: 423)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        do {
+            _ = try await session.analysisResource(.dashboard)
+            XCTFail("Expected sensitive lock response")
+        } catch let error as LedgerAPIError {
+            guard case let .server(status, _) = error else {
+                return XCTFail("Unexpected API error: \(error)")
+            }
+            XCTAssertEqual(status, 423)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
+    func testLateAnalysisLockCannotChangeLoggedOutSession() async throws {
+        let suiteName = "ledger-mobile-analysis-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            analysisErrorStatus: 423,
+            analysisDelayNanoseconds: 100_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let analysisRequest = Task { try await session.analysisResource(.dashboard) }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        session.logout()
+        _ = try? await analysisRequest.value
+
+        XCTAssertEqual(session.phase, .locked(authenticated: false))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -383,6 +471,9 @@ private actor SessionMockAPI: LedgerAPI {
         let passkeyStatus: Int
         let passkeyOptions: Int
         let passkeyVerify: Int
+        let dashboard: Int
+        let incomeStatement: Int
+        let investments: Int
     }
 
     enum Failure: Error {
@@ -396,6 +487,8 @@ private actor SessionMockAPI: LedgerAPI {
     let lockShouldFail: Bool
     let accountDetailErrorStatus: Int?
     let accountDetailDelayNanoseconds: UInt64
+    let analysisErrorStatus: Int?
+    let analysisDelayNanoseconds: UInt64
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
@@ -405,6 +498,9 @@ private actor SessionMockAPI: LedgerAPI {
     private var passkeyStatusCalls = 0
     private var passkeyOptionsCalls = 0
     private var passkeyVerifyCalls = 0
+    private var dashboardCalls = 0
+    private var incomeStatementCalls = 0
+    private var investmentsCalls = 0
     private var requests: [BootstrapRequest] = []
 
     init(
@@ -417,7 +513,9 @@ private actor SessionMockAPI: LedgerAPI {
         payload: LedgerBootstrap,
         lockShouldFail: Bool = false,
         accountDetailErrorStatus: Int? = nil,
-        accountDetailDelayNanoseconds: UInt64 = 0
+        accountDetailDelayNanoseconds: UInt64 = 0,
+        analysisErrorStatus: Int? = nil,
+        analysisDelayNanoseconds: UInt64 = 0
     ) {
         self.healthStatus = healthStatus
         currentAuthStatus = authStatus
@@ -426,6 +524,8 @@ private actor SessionMockAPI: LedgerAPI {
         self.lockShouldFail = lockShouldFail
         self.accountDetailErrorStatus = accountDetailErrorStatus
         self.accountDetailDelayNanoseconds = accountDetailDelayNanoseconds
+        self.analysisErrorStatus = analysisErrorStatus
+        self.analysisDelayNanoseconds = analysisDelayNanoseconds
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -496,6 +596,58 @@ private actor SessionMockAPI: LedgerAPI {
         )
     }
 
+    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+        dashboardCalls += 1
+        try await waitForAnalysisResponse()
+        return LedgerDashboard(
+            start: start,
+            end: end,
+            currency: "CNY",
+            kpis: LedgerDashboardKPI(
+                assets: 100_000,
+                liabilities: 20_000,
+                netWorth: 80_000,
+                income: 50_000,
+                expense: 10_000,
+                net: 40_000,
+                savingsRate: 0.8
+            ),
+            netWorthSeries: [],
+            cashflowSeries: [],
+            categorySeries: [],
+            topPayees: [],
+            topPaymentAccounts: [],
+            anomalies: []
+        )
+    }
+
+    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+        incomeStatementCalls += 1
+        try await waitForAnalysisResponse()
+        return LedgerIncomeStatement(
+            start: start,
+            end: end,
+            income: [],
+            expense: [],
+            totalIncome: 50_000,
+            totalExpense: 10_000,
+            netIncome: 40_000,
+            valuationCurrency: "CNY"
+        )
+    }
+
+    func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
+        investmentsCalls += 1
+        try await waitForAnalysisResponse()
+        return LedgerInvestmentSummary(
+            totalMarketValueCny: 25_000,
+            realizedPnlCny: nil,
+            holdings: [],
+            positions: [],
+            updatedAt: nil
+        )
+    }
+
     func lock(baseURL: URL) async throws {
         if lockShouldFail { throw Failure.lock }
     }
@@ -511,12 +663,24 @@ private actor SessionMockAPI: LedgerAPI {
             quickUnlockRevoke: quickUnlockRevokeCalls,
             passkeyStatus: passkeyStatusCalls,
             passkeyOptions: passkeyOptionsCalls,
-            passkeyVerify: passkeyVerifyCalls
+            passkeyVerify: passkeyVerifyCalls,
+            dashboard: dashboardCalls,
+            incomeStatement: incomeStatementCalls,
+            investments: investmentsCalls
         )
     }
 
     func bootstrapRequests() -> [BootstrapRequest] {
         requests
+    }
+
+    private func waitForAnalysisResponse() async throws {
+        if analysisDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: analysisDelayNanoseconds)
+        }
+        if let analysisErrorStatus {
+            throw LedgerAPIError.server(status: analysisErrorStatus, message: "Sensitive data locked")
+        }
     }
 }
 

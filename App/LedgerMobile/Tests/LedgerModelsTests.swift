@@ -148,6 +148,8 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(july.end, "2026-07-31")
         XCTAssertEqual(september.start, "2026-09-01")
         XCTAssertEqual(september.end, "2026-09-30")
+        XCTAssertEqual(august.queryEndExclusive, "2026-09-01")
+        XCTAssertEqual(july.queryEndExclusive, "2026-08-01")
     }
 
     static let bootstrapJSON = #"""

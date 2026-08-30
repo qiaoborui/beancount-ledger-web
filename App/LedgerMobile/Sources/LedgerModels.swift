@@ -101,6 +101,14 @@ struct LedgerDateRange: Equatable, Sendable {
     var startDate: Date { Self.parse(start) ?? Date() }
     var endDate: Date { Self.parse(end) ?? startDate }
 
+    var queryEndExclusive: String {
+        guard let endDate = Self.parse(end),
+              let nextDay = Self.calendar.date(byAdding: .day, value: 1, to: endDate) else {
+            return end
+        }
+        return Self.format(nextDay)
+    }
+
     static func today(now: Date = Date()) -> String {
         format(now)
     }
@@ -430,6 +438,183 @@ struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
         case balance
         case transaction = "txn"
     }
+}
+
+enum LedgerAnalysisResourceKind: Equatable, Sendable {
+    case dashboard
+    case incomeStatement
+    case investments
+}
+
+enum LedgerAnalysisResource: Equatable, Sendable {
+    case dashboard(LedgerDashboard)
+    case incomeStatement(LedgerIncomeStatement)
+    case investments(LedgerInvestmentSummary)
+}
+
+struct LedgerDashboard: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let currency: String
+    let kpis: LedgerDashboardKPI
+    let netWorthSeries: [LedgerNetWorthPoint]
+    let cashflowSeries: [LedgerCashflowPoint]
+    let categorySeries: [LedgerCategorySeries]
+    let topPayees: [LedgerPayeeAnalytics]
+    let topPaymentAccounts: [LedgerAccountAnalytics]
+    let anomalies: [LedgerDashboardAnomaly]
+}
+
+struct LedgerDashboardKPI: Decodable, Equatable, Sendable {
+    let assets: Int
+    let liabilities: Int
+    let netWorth: Int
+    let income: Int
+    let expense: Int
+    let net: Int
+    let savingsRate: Double?
+}
+
+struct LedgerNetWorthPoint: Decodable, Equatable, Identifiable, Sendable {
+    let date: String
+    let assets: Int
+    let liabilities: Int
+    let netWorth: Int
+    var id: String { date }
+}
+
+struct LedgerCashflowPoint: Decodable, Equatable, Identifiable, Sendable {
+    let month: String
+    let income: Int
+    let expense: Int
+    let net: Int
+    var id: String { month }
+}
+
+struct LedgerSeriesPoint: Decodable, Equatable, Identifiable, Sendable {
+    let month: String
+    let value: Int
+    var id: String { month }
+}
+
+struct LedgerCategorySeries: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let alias: String?
+    let label: String
+    let total: Int
+    let values: [LedgerSeriesPoint]
+    var id: String { account }
+}
+
+struct LedgerPayeeAnalytics: Decodable, Equatable, Identifiable, Sendable {
+    let payee: String
+    let amount: Int
+    let txCount: Int
+    var id: String { payee }
+}
+
+struct LedgerAccountAnalytics: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let alias: String?
+    let label: String
+    let amount: Int
+    let txCount: Int
+    var id: String { account }
+}
+
+struct LedgerDashboardAnomaly: Decodable, Equatable, Identifiable, Sendable {
+    let date: String
+    let payee: String
+    let narration: String
+    let account: String
+    let amount: Int
+    let source: String
+    var id: String { "\(date):\(source):\(account)" }
+}
+
+struct LedgerIncomeStatement: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let income: [LedgerIncomeNode]
+    let expense: [LedgerIncomeNode]
+    let totalIncome: Int
+    let totalExpense: Int
+    let netIncome: Int
+    let valuationCurrency: String
+}
+
+struct LedgerIncomeNode: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let alias: String?
+    let label: String
+    let amount: Int
+    let children: [LedgerIncomeNode]
+    let depth: Int
+    let txCount: Int
+    var id: String { account }
+}
+
+struct LedgerInvestmentSummary: Decodable, Equatable, Sendable {
+    let totalMarketValueCny: Int
+    let realizedPnlCny: Int?
+    let holdings: [LedgerInvestmentHolding]
+    let positions: [LedgerInvestmentPosition]
+    let updatedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case totalMarketValueCny
+        case realizedPnlCny
+        case holdings
+        case positions
+        case updatedAt
+    }
+
+    init(
+        totalMarketValueCny: Int,
+        realizedPnlCny: Int?,
+        holdings: [LedgerInvestmentHolding],
+        positions: [LedgerInvestmentPosition],
+        updatedAt: String?
+    ) {
+        self.totalMarketValueCny = totalMarketValueCny
+        self.realizedPnlCny = realizedPnlCny
+        self.holdings = holdings
+        self.positions = positions
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalMarketValueCny = try container.decode(Int.self, forKey: .totalMarketValueCny)
+        realizedPnlCny = try container.decodeIfPresent(Int.self, forKey: .realizedPnlCny)
+        holdings = try container.decodeIfPresent([LedgerInvestmentHolding].self, forKey: .holdings) ?? []
+        positions = try container.decodeIfPresent([LedgerInvestmentPosition].self, forKey: .positions) ?? []
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
+}
+
+struct LedgerInvestmentHolding: Decodable, Equatable, Identifiable, Sendable {
+    let commodity: String
+    let commodityName: String
+    let totalQuantity: Double
+    let averageCost: Double?
+    let totalCostValueCny: Int?
+    let totalMarketValueCny: Int?
+    let accountCount: Int
+    let realizedPnlCny: Int?
+    var id: String { commodity }
+}
+
+struct LedgerInvestmentPosition: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let accountLabel: String
+    let commodity: String
+    let commodityName: String
+    let quantity: Double
+    let costValueCny: Int?
+    let marketValueCny: Int?
+    let realizedPnlCny: Int?
+    var id: String { "\(account):\(commodity)" }
 }
 
 enum TransactionKind: Equatable {

@@ -11,10 +11,10 @@ behavior.
 | Transactions | bootstrap, `GET /api/ledger/transactions` | List, search, type/account filters, detail | Read | P0 |
 | Accounts | bootstrap, `GET /api/ledger/accounts/detail` | Grouped balances, detail, related transactions | Read | P0 |
 | Settings and privacy | auth, passkey, quick unlock | Passkey login, Face ID/Touch ID, lock interval, sessions | Device/auth | P0 |
-| Dashboard | `GET /api/ledger/dashboard` | Planned | Read | P1 |
-| Net worth | bootstrap and balance history data | Planned | Read | P1 |
-| Income statement | `GET /api/ledger/income-statement` | Planned | Read | P1 |
-| Investments | `GET /api/ledger/investments` | Planned | Read | P1 |
+| Dashboard | `GET /api/ledger/dashboard` | KPIs, cashflow trend, spending rank, anomalies | Read | P1 |
+| Net worth | dashboard balance history data | Position metrics, trend, recent observations | Read | P1 |
+| Income statement | `GET /api/ledger/income-statement` | Period totals and hierarchical income/expense rows | Read | P1 |
+| Investments | `GET /api/ledger/investments` | Market value, realized P&L, holding cost and return | Read | P1 |
 | Agent | `POST /api/ai/agent/turn`, session timeline | Planned | Read and write tools | P2 |
 | Query | `POST /api/ledger/bql`, BQL history | Planned | Read | P2 |
 | Currencies | bootstrap balances and valuation data | Planned | Read | P2 |
