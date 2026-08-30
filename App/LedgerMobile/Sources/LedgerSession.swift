@@ -351,6 +351,47 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func runBQL(query: String) async throws -> BQLResult {
+        let currency = ledger?.valuationCurrency ?? "CNY"
+        return try await performSensitiveRequest { api, serverURL in
+            try await api.runBQL(
+                baseURL: serverURL,
+                query: query,
+                valuationCurrency: currency
+            )
+        }
+    }
+
+    func loadBQLHistory() async throws -> [BQLHistoryRecord] {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.bqlHistory(baseURL: serverURL)
+        }
+    }
+
+    func saveBQLHistory(query: String) async throws -> BQLHistoryRecord {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.saveBQLHistory(baseURL: serverURL, query: query)
+        }
+    }
+
+    func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.generateBQLHistoryTitle(baseURL: serverURL, id: id)
+        }
+    }
+
+    func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.renameBQLHistory(baseURL: serverURL, id: id, title: title)
+        }
+    }
+
+    func deleteBQLHistory(id: String) async throws {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.deleteBQLHistory(baseURL: serverURL, id: id)
+        }
+    }
+
     func presentRangePicker() {
         draftRange = selectedRange
         rangePickerPresented = true
@@ -571,6 +612,43 @@ final class LedgerSession: ObservableObject {
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready
+    }
+
+    private func performSensitiveRequest<Value: Sendable>(
+        _ operation: @Sendable (any LedgerAPI, URL) async throws -> Value
+    ) async throws -> Value {
+        guard phase == .ready, let serverURL else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let generation = requestGeneration
+        do {
+            let value = try await operation(api, serverURL)
+            guard generation == requestGeneration,
+                  self.serverURL == serverURL,
+                  phase == .ready else {
+                throw CancellationError()
+            }
+            return value
+        } catch let error as LedgerAPIError {
+            if case let .server(status, _) = error,
+               status == 401 || status == 423,
+               generation == requestGeneration,
+               self.serverURL == serverURL,
+               phase == .ready {
+                ledger = nil
+                amountsVisible = false
+                if status == 401 {
+                    clearAuthenticationCookies(for: serverURL)
+                    setLocallyLocked(false, for: serverURL)
+                    phase = .locked(authenticated: false)
+                } else {
+                    clearSensitiveCookie(for: serverURL)
+                    setLocallyLocked(true, for: serverURL)
+                    phase = .locked(authenticated: true)
+                }
+            }
+            throw error
+        }
     }
 
     @discardableResult

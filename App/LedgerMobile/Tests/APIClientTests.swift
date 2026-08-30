@@ -264,6 +264,73 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(investments.positions, [])
     }
 
+    func testBQLRunSendsCurrencyAndDecodesDynamicRows() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/bql")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try Self.bodyData(from: request)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(json["query"], "SELECT month, sum(value) AS total FROM postings GROUP BY month")
+            XCTAssertEqual(json["valuationCurrency"], "CNY")
+            return Self.response(for: request, body: Self.bqlResultJSON)
+        }
+
+        let result = try await makeClient().runBQL(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            query: "SELECT month, sum(value) AS total FROM postings GROUP BY month",
+            valuationCurrency: "CNY"
+        )
+
+        XCTAssertEqual(result.rowCount, 2)
+        XCTAssertEqual(result.rows[0], [.string("2026-08"), .number(555_180)])
+        XCTAssertEqual(result.warnings, ["结果已限制为 100 行"])
+    }
+
+    func testBQLHistoryUsesAllServerEndpointsIncludingNoContentDelete() async throws {
+        var requestIndex = 0
+        MockURLProtocol.requestHandler = { request in
+            requestIndex += 1
+            switch requestIndex {
+            case 1:
+                XCTAssertEqual(request.url?.path, "/api/ledger/bql-history")
+                XCTAssertEqual(request.httpMethod, "GET")
+                return Self.response(for: request, body: #"{"records":[\#(Self.bqlHistoryRecordJSON)]}"#)
+            case 2:
+                XCTAssertEqual(request.url?.path, "/api/ledger/bql-history")
+                XCTAssertEqual(request.httpMethod, "POST")
+                let body = try Self.bodyData(from: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                XCTAssertEqual(json["query"], "SELECT * FROM transactions")
+                return Self.response(for: request, body: Self.bqlHistoryRecordJSON)
+            case 3:
+                XCTAssertEqual(request.url?.path, "/api/ledger/bql-history/history-1/title")
+                XCTAssertEqual(request.httpMethod, "POST")
+                return Self.response(for: request, body: Self.bqlHistoryRecordJSON)
+            case 4:
+                XCTAssertEqual(request.url?.path, "/api/ledger/bql-history/history-1")
+                XCTAssertEqual(request.httpMethod, "PATCH")
+                let body = try Self.bodyData(from: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                XCTAssertEqual(json["title"], "最近交易")
+                return Self.response(for: request, body: Self.bqlHistoryRecordJSON)
+            default:
+                XCTAssertEqual(request.url?.path, "/api/ledger/bql-history/history-1")
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                return Self.response(for: request, status: 204, body: "")
+            }
+        }
+
+        let client = makeClient()
+        let baseURL = URL(string: "https://ledger.example.com")!
+        let history = try await client.bqlHistory(baseURL: baseURL)
+        XCTAssertEqual(history.count, 1)
+        _ = try await client.saveBQLHistory(baseURL: baseURL, query: "SELECT * FROM transactions")
+        _ = try await client.generateBQLHistoryTitle(baseURL: baseURL, id: "history-1")
+        _ = try await client.renameBQLHistory(baseURL: baseURL, id: "history-1", title: "最近交易")
+        try await client.deleteBQLHistory(baseURL: baseURL, id: "history-1")
+        XCTAssertEqual(requestIndex, 5)
+    }
+
     func testServerErrorSurfacesMessage() async {
         MockURLProtocol.requestHandler = { request in
             Self.response(for: request, status: 401, body: #"{"error":"Invalid password"}"#)
@@ -355,6 +422,20 @@ final class APIClientTests: XCTestCase {
       "updatedAt":"2026-08-30T16:00:00Z"
     }
     """#
+
+    private static let bqlResultJSON = #"""
+    {
+      "columns":[{"name":"month","type":"date"},{"name":"total","type":"money"}],
+      "rows":[["2026-08",555180],["2026-07",482300]],
+      "query":"SELECT month, sum(value) AS total FROM postings GROUP BY month",
+      "warnings":["结果已限制为 100 行"],
+      "valuationCurrency":"CNY",
+      "limit":100,
+      "rowCount":2
+    }
+    """#
+
+    private static let bqlHistoryRecordJSON = #"{"id":"history-1","query":"SELECT * FROM transactions","title":"最近交易","titleSource":"manual","createdAt":"2026-08-30T12:00:00Z","lastRunAt":"2026-08-30T12:30:00Z","runCount":2}"#
 }
 
 private final class MockURLProtocol: URLProtocol, @unchecked Sendable {

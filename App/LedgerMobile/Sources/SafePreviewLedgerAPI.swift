@@ -16,6 +16,8 @@ extension LedgerSession {
 
 #if DEBUG
 private actor SafePreviewLedgerAPI: LedgerAPI {
+    private var history: [BQLHistoryRecord] = []
+
     func health(baseURL: URL) async throws -> HealthStatus {
         HealthStatus(apiVersion: 1, capabilities: ["full-backend", "cookie-auth"])
     }
@@ -60,6 +62,71 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
 
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
         SafePreviewLedgerData.investments
+    }
+
+    func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult {
+        SafePreviewLedgerData.bqlResult(query: query, valuationCurrency: valuationCurrency)
+    }
+
+    func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord] {
+        history
+    }
+
+    func saveBQLHistory(baseURL: URL, query: String) async throws -> BQLHistoryRecord {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let existing = history.first { $0.query == query }
+        let record = BQLHistoryRecord(
+            id: existing?.id ?? "safe-preview-history",
+            query: query,
+            title: existing?.title ?? "月度分类支出",
+            titleSource: existing?.titleSource ?? "fallback",
+            createdAt: existing?.createdAt ?? now,
+            lastRunAt: now,
+            runCount: (existing?.runCount ?? 0) + 1
+        )
+        history.removeAll { $0.id == record.id }
+        history.insert(record, at: 0)
+        return record
+    }
+
+    func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord {
+        guard let index = history.firstIndex(where: { $0.id == id }) else {
+            throw LedgerAPIError.server(status: 404, message: "Query history not found")
+        }
+        let current = history[index]
+        let updated = BQLHistoryRecord(
+            id: current.id,
+            query: current.query,
+            title: "月度分类支出",
+            titleSource: "ai",
+            createdAt: current.createdAt,
+            lastRunAt: current.lastRunAt,
+            runCount: current.runCount
+        )
+        history[index] = updated
+        return updated
+    }
+
+    func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord {
+        guard let index = history.firstIndex(where: { $0.id == id }) else {
+            throw LedgerAPIError.server(status: 404, message: "Query history not found")
+        }
+        let current = history[index]
+        let updated = BQLHistoryRecord(
+            id: current.id,
+            query: current.query,
+            title: title,
+            titleSource: "manual",
+            createdAt: current.createdAt,
+            lastRunAt: current.lastRunAt,
+            runCount: current.runCount
+        )
+        history[index] = updated
+        return updated
+    }
+
+    func deleteBQLHistory(baseURL: URL, id: String) async throws {
+        history.removeAll { $0.id == id }
     }
 
     func lock(baseURL: URL) async throws {}
@@ -230,6 +297,27 @@ private enum SafePreviewLedgerData {
         positions: [],
         updatedAt: "2026-08-30T16:00:00Z"
     )
+
+    static func bqlResult(query: String, valuationCurrency: String) -> BQLResult {
+        BQLResult(
+            columns: [
+                BQLColumn(name: "month", type: "date"),
+                BQLColumn(name: "account", type: "string"),
+                BQLColumn(name: "total", type: "money"),
+            ],
+            rows: [
+                [.string("2026-08"), .string("Expenses:Housing:Rent"), .number(380_000)],
+                [.string("2026-08"), .string("Expenses:Food:Groceries"), .number(61_180)],
+                [.string("2026-08"), .string("Expenses:Travel:Transport"), .number(57_600)],
+                [.string("2026-08"), .string("Expenses:Education:Books"), .number(32_800)],
+            ],
+            query: query,
+            warnings: ["安全预览使用确定性示例数据"],
+            valuationCurrency: valuationCurrency,
+            limit: 100,
+            rowCount: 4
+        )
+    }
 
     private static func transaction(
         date: String,

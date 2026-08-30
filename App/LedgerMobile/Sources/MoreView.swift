@@ -42,6 +42,28 @@ struct MoreView: View {
                         .padding(.horizontal, LedgerSpacing.lg)
 
                         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                            Text("账本工具")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 2)
+
+                            LedgerPanel {
+                                NavigationLink {
+                                    BQLQueryView()
+                                } label: {
+                                    MoreNavigationRow(
+                                        icon: "cylinder.split.1x2",
+                                        title: "BQL 查询",
+                                        detail: "高级筛选、聚合分析与查询历史"
+                                    )
+                                }
+                                .buttonStyle(PressScaleButtonStyle())
+                                .accessibilityIdentifier("more-query")
+                            }
+                        }
+                        .padding(.horizontal, LedgerSpacing.lg)
+
+                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
                             Text("财务分析")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.secondary)

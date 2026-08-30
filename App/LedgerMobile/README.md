@@ -16,6 +16,8 @@ authentication and privacy lock.
   transactions for the selected date range.
 - Track net worth history, browse hierarchical income and expense statements,
   and inspect investment holdings, market values, costs, and returns.
+- Run one or more read-only BQL statements, switch numeric results between
+  table, bar, pie, and line views, and manage server-synced query history.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
@@ -32,8 +34,8 @@ authentication and privacy lock.
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next read-only milestone adds Agent conversations, BQL queries, and
-currency analysis. Ledger writes remain a later phase with a separate
+The next read-only milestone adds Agent conversations and currency analysis.
+Ledger writes remain a later phase with a separate
 preview-and-confirmation design.
 
 ## Generate and build
@@ -58,8 +60,8 @@ Run the portable model and session tests with `swift test` from this directory.
 
 `--safe-preview` is compiled only into Debug builds. It skips account login and
 loads deterministic example data containing long account names, large amounts,
-all transaction filters, and account history. It cannot activate in a Release
-build.
+all transaction filters, account history, and BQL table/chart results. It
+cannot activate in a Release build.
 
 Generate the Xcode project, then run the responsive UI suite against an iPhone
 and an iPad simulator:

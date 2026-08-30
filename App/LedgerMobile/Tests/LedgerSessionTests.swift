@@ -442,6 +442,66 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testBQLUsesLedgerCurrencyAndReturnsDynamicRows() async throws {
+        let suiteName = "ledger-mobile-bql-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let result = try await session.runBQL(query: "SELECT month, sum(value) AS total FROM postings GROUP BY month")
+
+        XCTAssertEqual(result.rowCount, 1)
+        XCTAssertEqual(result.rows.first, [.string("2026-08"), .number(125_000)])
+        let requests = await api.bqlRequests()
+        XCTAssertEqual(requests.first?.query, "SELECT month, sum(value) AS total FROM postings GROUP BY month")
+        XCTAssertEqual(requests.first?.valuationCurrency, "CNY")
+    }
+
+    func testBQLSensitiveLockClearsLoadedLedger() async {
+        let suiteName = "ledger-mobile-bql-lock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload, bqlErrorStatus: 423)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        _ = try? await session.runBQL(query: "SELECT * FROM transactions")
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
+    func testLateBQLLockCannotChangeLoggedOutSession() async throws {
+        let suiteName = "ledger-mobile-bql-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bqlErrorStatus: 423,
+            bqlDelayNanoseconds: 100_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let request = Task { try await session.runBQL(query: "SELECT * FROM transactions") }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        session.logout()
+        _ = try? await request.value
+
+        XCTAssertEqual(session.phase, .locked(authenticated: false))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -461,6 +521,11 @@ private actor SessionMockAPI: LedgerAPI {
         let today: String
     }
 
+    struct BQLCall: Equatable, Sendable {
+        let query: String
+        let valuationCurrency: String
+    }
+
     struct CallCounts: Sendable {
         let authStatus: Int
         let login: Int
@@ -474,6 +539,7 @@ private actor SessionMockAPI: LedgerAPI {
         let dashboard: Int
         let incomeStatement: Int
         let investments: Int
+        let bql: Int
     }
 
     enum Failure: Error {
@@ -489,6 +555,8 @@ private actor SessionMockAPI: LedgerAPI {
     let accountDetailDelayNanoseconds: UInt64
     let analysisErrorStatus: Int?
     let analysisDelayNanoseconds: UInt64
+    let bqlErrorStatus: Int?
+    let bqlDelayNanoseconds: UInt64
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
@@ -501,7 +569,9 @@ private actor SessionMockAPI: LedgerAPI {
     private var dashboardCalls = 0
     private var incomeStatementCalls = 0
     private var investmentsCalls = 0
+    private var bqlCalls = 0
     private var requests: [BootstrapRequest] = []
+    private var requestedBQL: [BQLCall] = []
 
     init(
         healthStatus: HealthStatus = HealthStatus(
@@ -515,7 +585,9 @@ private actor SessionMockAPI: LedgerAPI {
         accountDetailErrorStatus: Int? = nil,
         accountDetailDelayNanoseconds: UInt64 = 0,
         analysisErrorStatus: Int? = nil,
-        analysisDelayNanoseconds: UInt64 = 0
+        analysisDelayNanoseconds: UInt64 = 0,
+        bqlErrorStatus: Int? = nil,
+        bqlDelayNanoseconds: UInt64 = 0
     ) {
         self.healthStatus = healthStatus
         currentAuthStatus = authStatus
@@ -526,6 +598,8 @@ private actor SessionMockAPI: LedgerAPI {
         self.accountDetailDelayNanoseconds = accountDetailDelayNanoseconds
         self.analysisErrorStatus = analysisErrorStatus
         self.analysisDelayNanoseconds = analysisDelayNanoseconds
+        self.bqlErrorStatus = bqlErrorStatus
+        self.bqlDelayNanoseconds = bqlDelayNanoseconds
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -648,6 +722,25 @@ private actor SessionMockAPI: LedgerAPI {
         )
     }
 
+    func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult {
+        bqlCalls += 1
+        requestedBQL.append(BQLCall(query: query, valuationCurrency: valuationCurrency))
+        if bqlDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: bqlDelayNanoseconds)
+        }
+        if let bqlErrorStatus {
+            throw LedgerAPIError.server(status: bqlErrorStatus, message: "Sensitive data locked")
+        }
+        return BQLResult(
+            columns: [BQLColumn(name: "month", type: "date"), BQLColumn(name: "total", type: "money")],
+            rows: [[.string("2026-08"), .number(125_000)]],
+            query: query,
+            valuationCurrency: valuationCurrency,
+            limit: 100,
+            rowCount: 1
+        )
+    }
+
     func lock(baseURL: URL) async throws {
         if lockShouldFail { throw Failure.lock }
     }
@@ -666,12 +759,17 @@ private actor SessionMockAPI: LedgerAPI {
             passkeyVerify: passkeyVerifyCalls,
             dashboard: dashboardCalls,
             incomeStatement: incomeStatementCalls,
-            investments: investmentsCalls
+            investments: investmentsCalls,
+            bql: bqlCalls
         )
     }
 
     func bootstrapRequests() -> [BootstrapRequest] {
         requests
+    }
+
+    func bqlRequests() -> [BQLCall] {
+        requestedBQL
     }
 
     private func waitForAnalysisResponse() async throws {

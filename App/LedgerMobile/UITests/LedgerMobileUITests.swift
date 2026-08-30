@@ -69,16 +69,26 @@ final class LedgerMobileUITests: XCTestCase {
                 verifiesPrivacy: true
             )
 
+            let queryEntry = app.buttons["more-query"]
+            for _ in 0..<3 where !queryEntry.isHittable {
+                app.swipeDown()
+            }
+            waitUntilHittable(queryEntry)
+            queryEntry.tap()
+            exerciseBQL(capturePrefix: "12")
+
             app.buttons["设置, Face ID、自动锁定、服务器与会话"].tap()
         } else {
             openRegularAnalysis(identifier: "sidebar-dashboard", kind: "dashboard", captureName: "07-dashboard")
             openRegularAnalysis(identifier: "sidebar-netWorth", kind: "netWorth", captureName: "08-net-worth")
             openRegularAnalysis(identifier: "sidebar-incomeStatement", kind: "incomeStatement", captureName: "09-income-statement")
             openRegularAnalysis(identifier: "sidebar-investments", kind: "investments", captureName: "10-investments")
+            app.buttons["sidebar-query"].tap()
+            exerciseBQL(capturePrefix: "11")
             app.buttons["sidebar-settings"].tap()
         }
         XCTAssertTrue(app.staticTexts["设备安全"].waitForExistence(timeout: 3))
-        capture(isPad ? "11-settings" : "12-settings")
+        capture(isPad ? "14-settings" : "15-settings")
     }
 
     private func openDestination(compact: String, regular: String) {
@@ -120,12 +130,67 @@ final class LedgerMobileUITests: XCTestCase {
         waitUntilHittable(app.buttons["more-analysis-dashboard"])
     }
 
+    private func exerciseBQL(capturePrefix: String) {
+        XCTAssertTrue(app.scrollViews["bql-workbench"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.textViews["bql-editor"].exists)
+        XCTAssertTrue(app.buttons["bql-run-all"].exists)
+        capture("\(capturePrefix)-bql-editor")
+
+        app.buttons["bql-run-all"].tap()
+        let workbench = app.scrollViews["bql-workbench"]
+        let result = app.descendants(matching: .any)["bql-result-1"]
+        for _ in 0..<5 where !result.exists {
+            workbench.swipeUp()
+        }
+        XCTAssertTrue(result.waitForExistence(timeout: 4))
+        let firstAmount = app.staticTexts["3,800.00"]
+        XCTAssertTrue(firstAmount.waitForExistence(timeout: 3))
+        revealAboveTabBar(firstAmount, in: workbench)
+        capture("\(capturePrefix)-bql-table")
+
+        let pieButton = app.buttons["饼图"]
+        pieButton.tap()
+        XCTAssertTrue(pieButton.isSelected)
+        workbench.swipeUp()
+        capture("\(capturePrefix)-bql-chart")
+
+        if !isPad {
+            for _ in 0..<5 {
+                workbench.swipeDown()
+            }
+            let historyMenu = app.buttons["bql-history-menu-safe-preview-history"]
+            XCTAssertTrue(historyMenu.waitForExistence(timeout: 3))
+            historyMenu.tap()
+            app.buttons["重命名"].tap()
+            XCTAssertTrue(app.alerts["重命名查询"].waitForExistence(timeout: 3))
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertFalse(app.alerts["重命名查询"].waitForExistence(timeout: 1))
+        }
+
+        if app.tabBars.firstMatch.exists {
+            let backButton = app.navigationBars["BQL 查询"].buttons.firstMatch
+            waitUntilHittable(backButton)
+            backButton.tap()
+            XCTAssertTrue(app.staticTexts["当前客户端"].waitForExistence(timeout: 3))
+        }
+    }
+
     private func waitUntilHittable(_ element: XCUIElement) {
         let expectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == true AND hittable == true"),
             object: element
         )
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
+    }
+
+    private func revealAboveTabBar(_ element: XCUIElement, in scrollView: XCUIElement) {
+        guard app.tabBars.firstMatch.exists else { return }
+        let obscuredEdge = app.tabBars.firstMatch.frame.minY - 12
+        for _ in 0..<4 where element.frame.maxY > obscuredEdge {
+            scrollView.swipeUp()
+        }
+        XCTAssertLessThanOrEqual(element.frame.maxY, obscuredEdge)
     }
 
     private func capture(_ name: String) {

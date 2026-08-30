@@ -16,7 +16,7 @@ behavior.
 | Income statement | `GET /api/ledger/income-statement` | Period totals and hierarchical income/expense rows | Read | P1 |
 | Investments | `GET /api/ledger/investments` | Market value, realized P&L, holding cost and return | Read | P1 |
 | Agent | `POST /api/ai/agent/turn`, session timeline | Planned | Read and write tools | P2 |
-| Query | `POST /api/ledger/bql`, BQL history | Planned | Read | P2 |
+| Query | `POST /api/ledger/bql`, BQL history | Multi-statement editor, examples, table/chart results, warnings, history rename/run/delete | Read plus runtime history | P2 |
 | Currencies | bootstrap balances and valuation data | Planned | Read | P2 |
 | Imports | `/api/ledger/imports/*` | Planned after read-only parity | Write with preview | P3 |
 | Reconcile | `GET/POST /api/ledger/reconciliation` | Planned after read-only parity | Write with preview | P3 |
@@ -28,5 +28,7 @@ Navigation parity:
 - iPhone uses Overview, Transactions, Accounts, and More as the stable shell.
 - iPad uses `NavigationSplitView`; destinations move into the sidebar as each
   native screen becomes functional.
+- BQL is available from iPhone More and as a first-class iPad sidebar
+  destination. Money result columns follow the global privacy toggle.
 - Write features retain the web app's preview, validation, confirmation, and
   rollback boundaries.
