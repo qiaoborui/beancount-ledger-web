@@ -2,7 +2,7 @@
 	{$CADDY_TLS_DIRECTIVE:}
 	encode zstd gzip
 
-	@api path /api/* /.well-known/webauthn
+	@api path /api/* /.well-known/webauthn /.well-known/apple-app-site-association
 	handle @api {
 		reverse_proxy server:3000
 	}

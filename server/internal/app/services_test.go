@@ -156,6 +156,37 @@ func TestPasskeyOptionsSupportConfiguredRelatedOrigins(t *testing.T) {
 	}
 }
 
+func TestAppleAppSiteAssociation(t *testing.T) {
+	cfg := testLedger(t)
+	router := testRouter(t, cfg)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/apple-app-site-association", nil)
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("aasa=%d body=%s", res.Code, res.Body.String())
+	}
+	if contentType := res.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("content type = %q", contentType)
+	}
+	const expected = `{"webcredentials":{"apps":["H92F889YBH.com.qiaoborui.ledger.mobile"]}}`
+	if res.Body.String() != expected {
+		t.Fatalf("aasa body = %q, want %q", res.Body.String(), expected)
+	}
+	var body struct {
+		WebCredentials struct {
+			Apps []string `json:"apps"`
+		} `json:"webcredentials"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.WebCredentials.Apps) != 1 || body.WebCredentials.Apps[0] != ledgerMobileAppID {
+		t.Fatalf("unexpected aasa body: %#v", body)
+	}
+}
+
 func TestPasskeyLoginOptionsUseStoredCredentials(t *testing.T) {
 	cfg := testLedger(t)
 	t.Setenv("APP_PASSWORD", "secret")

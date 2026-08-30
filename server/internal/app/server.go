@@ -52,6 +52,7 @@ func newRouter(cfg Config, server *Server) *gin.Engine {
 	logger := server.loggerOr()
 	router.Use(requestLoggingMiddleware(logger), recoveryMiddleware(logger), corsMiddleware(), sameOriginMiddleware(), maintenanceModeGuard(cfg.MaintenanceMode), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
+	router.GET("/.well-known/apple-app-site-association", server.appleAppSiteAssociation)
 	mcpHandler := server.mcpHandler()
 	router.Any("/mcp", func(c *gin.Context) {
 		if !server.limiter.Check(c, "agent.mcp", 600, 5*time.Minute) {
@@ -74,7 +75,12 @@ func newRouter(cfg Config, server *Server) *gin.Engine {
 
 func maintenanceModeGuard(enabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !enabled || (c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/api/health" || c.Request.URL.Path == "/api/ready")) {
+		path := c.Request.URL.Path
+		allowedRead := path == "/api/health" ||
+			path == "/api/ready" ||
+			path == "/.well-known/webauthn" ||
+			path == "/.well-known/apple-app-site-association"
+		if !enabled || (c.Request.Method == http.MethodGet && allowedRead) {
 			c.Next()
 			return
 		}

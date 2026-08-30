@@ -8,6 +8,14 @@ web/out/
 web/dist/
 web/tsconfig.tsbuildinfo
 
+# Native iOS build
+App/LedgerMobile/.build/
+App/LedgerMobile/DerivedData/
+App/LedgerMobile/.swiftpm/
+App/LedgerMobile/LedgerMobile.xcodeproj/
+**/xcuserdata/
+*.xcuserstate
+
 # Go build
 server/ledger-web
 

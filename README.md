@@ -13,6 +13,8 @@ for browsing, reviewing, and safely updating it.
 - Review imports from supported payment statements before committing them
 - Use password login, passkeys on secure origins, and optional web push
 - Run entirely on your own Docker host, or use the hosted GitHub-backed setup
+- Read the current month, transactions, and account balances from the native
+  iPhone client
 
 ## Screenshots
 
@@ -79,6 +81,7 @@ restores, image updates, and the full configuration reference.
 cd server && go test ./... && go build ./cmd/...
 cd agent && uv sync --frozen --python 3.12 && uv run pytest
 cd web && pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
+cd App/LedgerMobile && xcodegen generate && swift test
 ```
 
 Use the ledgers in `examples/` for local development and tests. Keep your real
@@ -93,6 +96,7 @@ ledger, secrets, imports, and runtime data outside this repository.
 - [Ledger layout](docs/ledger-layout.md)
 - [Privacy](docs/privacy.md)
 - [Backend architecture](docs/backend-architecture.md)
+- [Native iOS client](App/LedgerMobile/README.md)
 
 ## License
 
