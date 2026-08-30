@@ -3,17 +3,20 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    var showsAppBar = true
 
     var body: some View {
         VStack(spacing: 0) {
-            LedgerAppBar {
-                PrivacyToolbarButton()
+            if showsAppBar {
+                LedgerAppBar {
+                    PrivacyToolbarButton()
+                }
             }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: LedgerSpacing.xl) {
                     LedgerPageIntro(
-                        title: "设置",
+                        title: showsAppBar ? "设置" : "设备与会话",
                         detail: "管理这台设备的解锁方式、隐私锁定和服务器连接。",
                         meta: nil
                     ) {
@@ -126,6 +129,18 @@ struct SettingsView: View {
             .refreshable { await session.refresh() }
         }
         .background(LedgerPalette.canvas)
+        .navigationTitle(showsAppBar ? "" : "设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
+        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            if !showsAppBar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    PrivacyToolbarButton()
+                }
+            }
+        }
     }
 
     private var biometricDetail: String {

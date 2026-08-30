@@ -115,6 +115,20 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(income.minorUnits, 400_000)
     }
 
+    func testTransactionFilterMatchesWordsKindAccountAndTags() throws {
+        let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(Self.bootstrapJSON.utf8))
+        let expense = payload.transactions[0]
+        let income = payload.transactions[1]
+
+        XCTAssertTrue(LedgerTransactionFilter(query: "海底 晚餐").matches(expense))
+        XCTAssertTrue(LedgerTransactionFilter(query: "#dining").matches(expense))
+        XCTAssertFalse(LedgerTransactionFilter(query: "不存在").matches(expense))
+        XCTAssertTrue(LedgerTransactionFilter(kind: .expense).matches(expense))
+        XCTAssertFalse(LedgerTransactionFilter(kind: .income).matches(expense))
+        XCTAssertTrue(LedgerTransactionFilter(account: "Assets:Bank:Daily").matches(income))
+        XCTAssertFalse(LedgerTransactionFilter(account: "Liabilities:CreditCard:Visa").matches(income))
+    }
+
     func testCompactMoneyUsesChineseAndInternationalUnits() {
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 999_999, currency: "CNY"), "¥9,999.99")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 1_234_567, currency: "CNY"), "¥1.2w")
@@ -169,6 +183,37 @@ final class LedgerModelsTests: XCTestCase {
       ],
       "valuationCurrency": "CNY",
       "sensitiveUnlocked": true
+    }
+    """#
+
+    static let accountDetailJSON = #"""
+    {
+      "account": "Assets:Bank:Daily",
+      "label": "日常账户",
+      "alias": "日常账户/银行卡",
+      "group": "cash",
+      "active": true,
+      "currency": "CNY",
+      "currentBalance": 1235000,
+      "rows": [
+        {
+          "date": "2026-08-20",
+          "payee": "海底捞",
+          "narration": "晚餐",
+          "change": -8500,
+          "balance": 1235000,
+          "txn": {
+            "date": "2026-08-20",
+            "payee": "海底捞",
+            "narration": "晚餐",
+            "postings": [
+              { "account": "Expenses:Food:Dining", "amount": 8500, "currency": "CNY" },
+              { "account": "Assets:Bank:Daily", "amount": -8500, "currency": "CNY" }
+            ],
+            "source": { "file": "transactions/2026/08.bean", "line": 18 }
+          }
+        }
+      ]
     }
     """#
 }

@@ -29,7 +29,7 @@ struct RootView: View {
     }
 }
 
-private struct PrivacyCover: View {
+struct PrivacyCover: View {
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             LedgerBrandMark(size: 48)
@@ -401,8 +401,8 @@ private struct MainTabView: View {
             AccountsView()
                 .tabItem { Label("账户", systemImage: "book.closed") }
                 .tag(LedgerDestination.accounts)
-            SettingsView()
-                .tabItem { Label("设置", systemImage: "gearshape") }
+            MoreView()
+                .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
         }
         .toolbarBackground(LedgerPalette.panel, for: .tabBar)
@@ -412,14 +412,17 @@ private struct MainTabView: View {
 
 private struct LedgerRegularShell: View {
     @Binding var selection: LedgerDestination
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             LedgerSidebar(selection: $selection)
-
-            Divider()
-                .overlay(LedgerPalette.line)
-
+                .navigationSplitViewColumnWidth(
+                    min: LedgerLayout.sidebarWidth,
+                    ideal: LedgerLayout.sidebarWidth,
+                    max: 260
+                )
+        } detail: {
             Group {
                 switch selection {
                 case .overview:
@@ -434,6 +437,9 @@ private struct LedgerRegularShell: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .navigationSplitViewStyle(.balanced)
+        .id(selection)
+        .environment(\.ledgerSidebarVisibility, $columnVisibility)
         .background(LedgerPalette.canvas)
     }
 }
@@ -483,8 +489,9 @@ private struct LedgerSidebar: View {
                     Rectangle().fill(LedgerPalette.line).frame(height: 1)
                 }
         }
-        .frame(width: LedgerLayout.sidebarWidth)
+        .frame(minWidth: LedgerLayout.sidebarWidth)
         .background(LedgerPalette.panel.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private func sidebarButton(_ destination: LedgerDestination) -> some View {
@@ -509,6 +516,7 @@ private struct LedgerSidebar: View {
             .contentShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier("sidebar-\(destination.rawValue)")
     }
 }
 

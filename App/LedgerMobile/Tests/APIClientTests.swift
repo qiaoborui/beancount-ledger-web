@@ -152,6 +152,26 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(payload.transactions.count, 2)
     }
 
+    func testAccountDetailEncodesAccountAndDecodesRows() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
+            XCTAssertEqual(components.path, "/api/ledger/accounts/detail")
+            XCTAssertEqual(components.queryItems, [URLQueryItem(name: "account", value: "Assets:Bank:Daily")])
+            XCTAssertEqual(request.httpMethod, "GET")
+            return Self.response(for: request, body: LedgerModelsTests.accountDetailJSON)
+        }
+
+        let detail = try await makeClient().accountDetail(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            account: "Assets:Bank:Daily"
+        )
+        XCTAssertEqual(detail.label, "日常账户")
+        XCTAssertEqual(detail.currentBalance, 1_235_000)
+        XCTAssertEqual(detail.rows.first?.transaction.payee, "海底捞")
+    }
+
     func testServerErrorSurfacesMessage() async {
         MockURLProtocol.requestHandler = { request in
             Self.response(for: request, status: 401, body: #"{"error":"Invalid password"}"#)

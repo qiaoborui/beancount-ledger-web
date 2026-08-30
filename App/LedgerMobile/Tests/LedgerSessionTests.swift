@@ -60,6 +60,60 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testAccountDetailSensitiveLockClearsLoadedLedger() async {
+        let suiteName = "ledger-mobile-account-detail-lock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload, accountDetailErrorStatus: 423)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+
+        do {
+            _ = try await session.accountDetail(for: "Assets:Bank:Daily")
+            XCTFail("Expected sensitive lock response")
+        } catch let error as LedgerAPIError {
+            guard case let .server(status, _) = error else {
+                return XCTFail("Unexpected API error: \(error)")
+            }
+            XCTAssertEqual(status, 423)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
+    func testLateAccountDetailLockCannotChangeLoggedOutSession() async throws {
+        let suiteName = "ledger-mobile-account-detail-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            accountDetailErrorStatus: 423,
+            accountDetailDelayNanoseconds: 100_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let detailRequest = Task {
+            try await session.accountDetail(for: "Assets:Bank:Daily")
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        session.logout()
+        _ = try? await detailRequest.value
+
+        XCTAssertEqual(session.phase, .locked(authenticated: false))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
     func testIncompatibleServerDoesNotExposeLoginOrPersistOrigin() async {
         let suiteName = "ledger-mobile-incompatible-server-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -340,6 +394,8 @@ private actor SessionMockAPI: LedgerAPI {
     let currentPasskeyStatus: PasskeyStatus
     let payload: LedgerBootstrap
     let lockShouldFail: Bool
+    let accountDetailErrorStatus: Int?
+    let accountDetailDelayNanoseconds: UInt64
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
@@ -359,13 +415,17 @@ private actor SessionMockAPI: LedgerAPI {
         authStatus: AuthStatus = AuthStatus(authenticated: true, sensitiveUnlocked: true, authDisabled: false),
         passkeyStatus: PasskeyStatus = PasskeyStatus(registered: false, count: 0),
         payload: LedgerBootstrap,
-        lockShouldFail: Bool = false
+        lockShouldFail: Bool = false,
+        accountDetailErrorStatus: Int? = nil,
+        accountDetailDelayNanoseconds: UInt64 = 0
     ) {
         self.healthStatus = healthStatus
         currentAuthStatus = authStatus
         currentPasskeyStatus = passkeyStatus
         self.payload = payload
         self.lockShouldFail = lockShouldFail
+        self.accountDetailErrorStatus = accountDetailErrorStatus
+        self.accountDetailDelayNanoseconds = accountDetailDelayNanoseconds
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -415,6 +475,25 @@ private actor SessionMockAPI: LedgerAPI {
         bootstrapCalls += 1
         requests.append(BootstrapRequest(start: start, end: end, today: today))
         return payload
+    }
+
+    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
+        if accountDetailDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: accountDetailDelayNanoseconds)
+        }
+        if let accountDetailErrorStatus {
+            throw LedgerAPIError.server(status: accountDetailErrorStatus, message: "Sensitive data locked")
+        }
+        return LedgerAccountDetail(
+            account: account,
+            label: account,
+            alias: nil,
+            group: "asset",
+            active: true,
+            currency: "CNY",
+            currentBalance: 0,
+            rows: []
+        )
     }
 
     func lock(baseURL: URL) async throws {

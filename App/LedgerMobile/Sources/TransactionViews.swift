@@ -45,6 +45,25 @@ struct TransactionRow: View {
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var filters = LedgerTransactionFilter()
+    @State private var filterPresented = false
+
+    private var transactions: [LedgerTransaction] {
+        session.ledger?.transactions ?? []
+    }
+
+    private var filteredTransactions: [LedgerTransaction] {
+        transactions.filter(filters.matches)
+    }
+
+    private var availableAccounts: [String] {
+        Array(Set(transactions.flatMap { $0.postings.map(\.account) }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var activeStructuredFilterCount: Int {
+        (filters.kind == .all ? 0 : 1) + (filters.account == nil ? 0 : 1)
+    }
 
     var body: some View {
         NavigationStack {
@@ -58,18 +77,43 @@ struct TransactionsView: View {
                         LazyVStack(spacing: 0) {
                             LedgerPageIntro(
                                 title: "\(session.selectedRange.displayTitle)流水",
-                                detail: "按日期浏览所选范围的交易与分录来源。",
+                                detail: "搜索收付款对象、说明、账户和标签。",
                                 meta: "\(ledger.transactions.count) 笔"
                             ) {
-                                EmptyView()
+                                LedgerToolbarButton(
+                                    action: { filterPresented = true },
+                                    accessibilityLabel: "筛选交易"
+                                ) {
+                                    ZStack(alignment: .topTrailing) {
+                                        Image(systemName: "line.3.horizontal.decrease")
+                                        if activeStructuredFilterCount > 0 {
+                                            Text("\(activeStructuredFilterCount)")
+                                                .font(.system(size: 8, weight: .bold).monospacedDigit())
+                                                .foregroundStyle(LedgerPalette.onBrand)
+                                                .frame(width: 15, height: 15)
+                                                .background(LedgerPalette.cobalt)
+                                                .clipShape(Circle())
+                                                .offset(x: 8, y: -7)
+                                        }
+                                    }
+                                }
                             }
 
                             LedgerTimeRangeControl()
                             .padding(.horizontal, LedgerSpacing.lg)
                             .padding(.bottom, LedgerSpacing.md)
 
+                            TransactionSearchField(text: $filters.query)
+                                .padding(.horizontal, LedgerSpacing.lg)
+                                .padding(.bottom, LedgerSpacing.md)
+
+                            if filters.kind != .all || filters.account != nil {
+                                TransactionFilterChips(filters: $filters)
+                                    .padding(.bottom, LedgerSpacing.md)
+                            }
+
                             HStack {
-                                Text("\(ledger.transactions.count) / \(ledger.transactions.count) 笔")
+                                Text("\(filteredTransactions.count) / \(ledger.transactions.count) 笔")
                                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                                     .foregroundStyle(LedgerPalette.secondary)
                                     .padding(.horizontal, 10)
@@ -87,17 +131,35 @@ struct TransactionsView: View {
                                     .padding(.bottom, LedgerSpacing.md)
                             }
 
-                            LazyVStack(spacing: 10) {
-                                ForEach(ledger.transactions) { transaction in
-                                    NavigationLink {
-                                        TransactionDetailView(transaction: transaction)
-                                    } label: {
-                                        TransactionCard(transaction: transaction)
+                            Group {
+                                if filteredTransactions.isEmpty {
+                                    VStack(spacing: LedgerSpacing.md) {
+                                        Image(systemName: "magnifyingglass")
+                                            .font(.system(size: 20, weight: .medium))
+                                            .foregroundStyle(LedgerPalette.cobalt)
+                                        Text("没有匹配的交易")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(LedgerPalette.ink)
+                                        Text("调整关键词、交易类型或账户筛选。")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(LedgerPalette.secondary)
                                     }
-                                    .buttonStyle(PressScaleButtonStyle())
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 56)
+                                } else {
+                                    LazyVStack(spacing: 10) {
+                                        ForEach(filteredTransactions) { transaction in
+                                            NavigationLink {
+                                                TransactionDetailView(transaction: transaction)
+                                            } label: {
+                                                TransactionCard(transaction: transaction)
+                                            }
+                                            .buttonStyle(PressScaleButtonStyle())
+                                        }
+                                    }
+                                    .padding(.horizontal, LedgerSpacing.lg)
                                 }
                             }
-                            .padding(.horizontal, LedgerSpacing.lg)
                             .padding(
                                 .bottom,
                                 horizontalSizeClass == .regular
@@ -119,7 +181,157 @@ struct TransactionsView: View {
             }
             .background(LedgerPalette.canvas)
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $filterPresented) {
+                TransactionFilterSheet(
+                    kind: $filters.kind,
+                    account: $filters.account,
+                    accounts: availableAccounts,
+                    onDone: { filterPresented = false }
+                )
+                .ledgerPrivacyProtectedSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
+    }
+}
+
+private struct TransactionSearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: LedgerSpacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(LedgerPalette.secondary)
+            TextField("搜索交易、账户或标签", text: $text)
+                .font(.system(size: 14))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .padding(.leading, LedgerSpacing.md)
+        .padding(.trailing, text.isEmpty ? LedgerSpacing.md : LedgerSpacing.xs)
+        .frame(minHeight: 44)
+        .background(LedgerPalette.panel)
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
+                .stroke(LedgerPalette.line, lineWidth: 1)
+        }
+    }
+}
+
+private struct TransactionFilterChips: View {
+    @Binding var filters: LedgerTransactionFilter
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: LedgerSpacing.sm) {
+                if filters.kind != .all {
+                    filterChip(title: filters.kind.title) {
+                        filters.kind = .all
+                    }
+                }
+                if let account = filters.account {
+                    filterChip(title: account.split(separator: ":").last.map(String.init) ?? account) {
+                        filters.account = nil
+                    }
+                }
+                Button("清除筛选") {
+                    filters.kind = .all
+                    filters.account = nil
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(LedgerPalette.cobalt)
+                .frame(minHeight: 32)
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, LedgerSpacing.lg)
+        }
+    }
+
+    private func filterChip(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .lineLimit(1)
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(LedgerPalette.olive)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 32)
+            .background(LedgerPalette.tag)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("移除筛选：\(title)")
+    }
+}
+
+private struct TransactionFilterSheet: View {
+    @Binding var kind: TransactionKindFilter
+    @Binding var account: String?
+    let accounts: [String]
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("交易类型") {
+                    Picker("交易类型", selection: $kind) {
+                        ForEach(TransactionKindFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                Section("账户") {
+                    Picker("账户", selection: $account) {
+                        Text("全部账户").tag(Optional<String>.none)
+                        ForEach(accounts, id: \.self) { value in
+                            Text(value).tag(Optional(value))
+                        }
+                    }
+                }
+
+                if kind != .all || account != nil {
+                    Section {
+                        Button("重置筛选", role: .destructive) {
+                            kind = .all
+                            account = nil
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(LedgerPalette.canvas)
+            .navigationTitle("筛选交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成", action: onDone)
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .tint(LedgerPalette.cobalt)
     }
 }
 

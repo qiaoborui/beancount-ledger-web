@@ -76,6 +76,7 @@ protocol LedgerAPI: Sendable {
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws
     func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap
+    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail
     func lock(baseURL: URL) async throws
     func logout(baseURL: URL) async throws
 }
@@ -166,6 +167,20 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return try await request(URLRequest(url: url))
     }
 
+    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/api/ledger/accounts/detail"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "account", value: account)]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await self.request(request)
+    }
+
     func lock(baseURL: URL) async throws {
         let _: EmptySuccess = try await send(baseURL: baseURL, path: "/api/auth/lock", method: "POST", body: Optional<String>.none)
     }
@@ -204,6 +219,10 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw LedgerAPIError.transport(error.localizedDescription)
         }

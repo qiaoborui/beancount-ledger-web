@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct LedgerMobileApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var session = LedgerSession()
+    @StateObject private var session = LedgerSession.appSession()
 
     var body: some Scene {
         WindowGroup {

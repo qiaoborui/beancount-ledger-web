@@ -79,6 +79,7 @@ struct LedgerBrandMark: View {
 
 struct LedgerAppBar<Trailing: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.ledgerSidebarVisibility) private var sidebarVisibility
     @ViewBuilder let trailing: Trailing
 
     var body: some View {
@@ -93,6 +94,15 @@ struct LedgerAppBar<Trailing: View>: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
+            } else if let sidebarVisibility {
+                LedgerToolbarButton(
+                    action: {
+                        sidebarVisibility.wrappedValue = isSidebarHidden ? .all : .detailOnly
+                    },
+                    accessibilityLabel: isSidebarHidden ? "展开侧边栏" : "收起侧边栏"
+                ) {
+                    Image(systemName: "sidebar.left")
+                }
             }
             Spacer(minLength: LedgerSpacing.sm)
             trailing
@@ -104,6 +114,21 @@ struct LedgerAppBar<Trailing: View>: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(LedgerPalette.line).frame(height: 1)
         }
+    }
+
+    private var isSidebarHidden: Bool {
+        sidebarVisibility?.wrappedValue == .detailOnly
+    }
+}
+
+private struct LedgerSidebarVisibilityKey: EnvironmentKey {
+    static let defaultValue: Binding<NavigationSplitViewVisibility>? = nil
+}
+
+extension EnvironmentValues {
+    var ledgerSidebarVisibility: Binding<NavigationSplitViewVisibility>? {
+        get { self[LedgerSidebarVisibilityKey.self] }
+        set { self[LedgerSidebarVisibilityKey.self] = newValue }
     }
 }
 
@@ -124,6 +149,25 @@ private struct LedgerAdaptivePageWidth: ViewModifier {
 extension View {
     func ledgerAdaptivePageWidth() -> some View {
         modifier(LedgerAdaptivePageWidth())
+    }
+
+    func ledgerPrivacyProtectedSheet() -> some View {
+        modifier(LedgerPrivacyProtectedSheet())
+    }
+}
+
+private struct LedgerPrivacyProtectedSheet: ViewModifier {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+            if scenePhase != .active || session.privacyShielded {
+                PrivacyCover()
+                    .zIndex(1)
+            }
+        }
     }
 }
 

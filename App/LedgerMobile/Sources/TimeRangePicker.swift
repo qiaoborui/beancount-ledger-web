@@ -73,6 +73,7 @@ struct LedgerTimeRangeControl: View {
         }
         .sheet(isPresented: sheetBinding) {
             LedgerTimeRangeSheet()
+                .ledgerPrivacyProtectedSheet()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
