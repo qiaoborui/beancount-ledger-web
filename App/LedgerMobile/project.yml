@@ -47,6 +47,7 @@ targets:
     scheme:
       testTargets:
         - LedgerMobileTests
+        - LedgerMobileUITests
 
   LedgerMobileTests:
     type: bundle.unit-test
@@ -58,4 +59,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  LedgerMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: LedgerMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.uitests
         GENERATE_INFOPLIST_FILE: YES

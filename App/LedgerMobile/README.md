@@ -8,7 +8,10 @@ authentication and privacy lock.
 
 - Verify a compatible Ledger Web HTTPS origin before accepting a password.
 - Restore the Cookie session and read the current month's overview.
-- Browse transactions, transaction details, and account balances.
+- Search and filter transactions by keyword, type, and account, then open the
+  transaction detail.
+- Browse grouped account balances, account details, related transactions, and
+  running balances.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
@@ -20,10 +23,13 @@ authentication and privacy lock.
 - Choose an automatic lock interval per server: immediately, 1, 5, 15, or 30
   minutes. App Switcher snapshots remain covered as soon as the app leaves the
   foreground.
-- Open Settings from the fourth iPhone tab or the bottom of the iPad sidebar.
+- Open More and Settings from the fourth iPhone tab or the bottom of the iPad
+  sidebar. The iPad shell supports collapsing and restoring its sidebar.
+- Exercise the responsive iPhone and iPad layouts with safe deterministic data
+  through the Debug-only visual QA mode.
 
-The next read-only milestone adds search, account details, and device-level
-visual/accessibility QA. Ledger writes remain a later phase with a separate
+The next read-only milestone adds Dashboard, net worth, income statement, and
+investment views. Ledger writes remain a later phase with a separate
 preview-and-confirmation design.
 
 ## Generate and build
@@ -43,6 +49,35 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 ```
 
 Run the portable model and session tests with `swift test` from this directory.
+
+## Visual QA
+
+`--safe-preview` is compiled only into Debug builds. It skips account login and
+loads deterministic example data containing long account names, large amounts,
+all transaction filters, and account history. It cannot activate in a Release
+build.
+
+Generate the Xcode project, then run the responsive UI suite against an iPhone
+and an iPad simulator:
+
+```bash
+cd App/LedgerMobile
+xcodegen generate
+
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild test \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
+    -only-testing:LedgerMobileUITests
+
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild test \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -destination 'platform=iOS Simulator,name=iPad Pro 11-inch (M5),OS=27.0' \
+    -only-testing:LedgerMobileUITests
+```
 
 The app requires iOS 17 or later and an HTTPS Beancount Ledger Web origin.
 Enter the origin only, for example `https://ledger.example.com`. The password

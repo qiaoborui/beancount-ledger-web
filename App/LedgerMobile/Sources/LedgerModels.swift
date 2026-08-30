@@ -401,10 +401,106 @@ struct LedgerAccount: Decodable, Equatable {
     let active: Bool
 }
 
+struct LedgerAccountDetail: Decodable, Equatable {
+    let account: String
+    let label: String
+    let alias: String?
+    let group: String
+    let active: Bool
+    let currency: String
+    let currentBalance: Int
+    let rows: [LedgerAccountDetailRow]
+}
+
+struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
+    let date: String
+    let payee: String
+    let narration: String
+    let change: Int
+    let balance: Int
+    let transaction: LedgerTransaction
+
+    var id: String { transaction.id }
+
+    private enum CodingKeys: String, CodingKey {
+        case date
+        case payee
+        case narration
+        case change
+        case balance
+        case transaction = "txn"
+    }
+}
+
 enum TransactionKind: Equatable {
     case expense
     case income
     case transfer
+}
+
+enum TransactionKindFilter: String, CaseIterable, Equatable, Identifiable, Sendable {
+    case all
+    case expense
+    case income
+    case transfer
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .expense: "支出"
+        case .income: "收入"
+        case .transfer: "转账"
+        }
+    }
+}
+
+struct LedgerTransactionFilter: Equatable, Sendable {
+    var query = ""
+    var kind = TransactionKindFilter.all
+    var account: String?
+
+    var isActive: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || kind != .all
+            || account != nil
+    }
+
+    func matches(_ transaction: LedgerTransaction) -> Bool {
+        let presentation = TransactionPresentation(transaction: transaction)
+        switch kind {
+        case .all:
+            break
+        case .expense where presentation.kind != .expense:
+            return false
+        case .income where presentation.kind != .income:
+            return false
+        case .transfer where presentation.kind != .transfer:
+            return false
+        default:
+            break
+        }
+
+        if let account, !transaction.postings.contains(where: { $0.account == account }) {
+            return false
+        }
+
+        let words = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(whereSeparator: \Character.isWhitespace)
+        guard !words.isEmpty else { return true }
+
+        let searchable = ([
+            transaction.date,
+            transaction.payee,
+            transaction.narration,
+        ] + transaction.postings.map(\.account) + (transaction.tags ?? []).map { "#\($0)" })
+            .joined(separator: " ")
+            .lowercased()
+        return words.allSatisfy(searchable.contains)
+    }
 }
 
 struct TransactionPresentation: Equatable {

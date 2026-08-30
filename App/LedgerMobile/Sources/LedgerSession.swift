@@ -272,6 +272,35 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func accountDetail(for account: String) async throws -> LedgerAccountDetail {
+        guard phase == .ready, let serverURL else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let generation = requestGeneration
+        do {
+            let detail = try await api.accountDetail(baseURL: serverURL, account: account)
+            guard generation == requestGeneration,
+                  self.serverURL == serverURL,
+                  phase == .ready else {
+                throw CancellationError()
+            }
+            return detail
+        } catch let error as LedgerAPIError {
+            if case let .server(status, _) = error,
+               status == 423,
+               generation == requestGeneration,
+               self.serverURL == serverURL,
+               phase == .ready {
+                setLocallyLocked(true, for: serverURL)
+                clearSensitiveCookie(for: serverURL)
+                ledger = nil
+                amountsVisible = false
+                phase = .locked(authenticated: true)
+            }
+            throw error
+        }
+    }
+
     func presentRangePicker() {
         draftRange = selectedRange
         rangePickerPresented = true

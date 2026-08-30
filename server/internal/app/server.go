@@ -205,8 +205,8 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledgerRead60s.GET("/entries", s.ledgerEntries)
 	ledgerRead60s.GET("/balances", s.balances)
 	ledgerRead60s.GET("/investments", s.investments)
-	ledgerRead60s.GET("/accounts/detail", s.accountDetail)
 	ledgerRead60s.GET("/account-status", s.accountStatus)
+	ledger.GET("/accounts/detail", noStore(), s.accountDetail)
 
 	ledgerRead300s := ledger.Group("", cacheControl(300))
 	ledgerRead300s.GET("/accounts", s.accounts)

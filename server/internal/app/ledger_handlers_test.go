@@ -21,6 +21,9 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("account detail status=%d body=%s", res.Code, res.Body.String())
 	}
+	if got := res.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("account detail Cache-Control=%q", got)
+	}
 	var body struct {
 		Account        string             `json:"account"`
 		Label          string             `json:"label"`
