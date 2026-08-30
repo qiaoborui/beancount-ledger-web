@@ -44,6 +44,27 @@ compose() {
     "$@"
 }
 
+pull_image_with_retry() {
+  local image="$1"
+  local attempt=1
+  local max_attempts=4
+  local retry_delay_seconds=2
+
+  while true; do
+    if timeout --foreground 300 docker pull "$image"; then
+      return 0
+    fi
+    if (( attempt >= max_attempts )); then
+      echo "image pull failed after ${max_attempts} attempts: ${image}" >&2
+      return 1
+    fi
+    log "image pull attempt ${attempt} failed; retrying in ${retry_delay_seconds}s"
+    sleep "$retry_delay_seconds"
+    attempt=$((attempt + 1))
+    retry_delay_seconds=$((retry_delay_seconds * 2))
+  done
+}
+
 quiesce_application() {
   local release_env="$1"
   local service container_id container_ids state
@@ -738,15 +759,15 @@ wait_for_healthy_service "$current_env" database
 
 for component in server indexer agent frontend zip_worker; do
   log "pulling immutable ${component} image"
-  timeout --foreground 300 docker pull "${images[$component]}"
+  pull_image_with_retry "${images[$component]}"
   revision="$(timeout --foreground 30 docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${images[$component]}")"
   if [[ "$revision" != "$sha" ]]; then
     echo "${component} image revision ${revision} does not match ${sha}" >&2
     exit 1
   fi
 done
-timeout --foreground 300 docker pull "$postgres_image"
-timeout --foreground 300 docker pull "$caddy_image"
+pull_image_with_retry "$postgres_image"
+pull_image_with_retry "$caddy_image"
 
 jq -n \
   --arg phase pre-backup \

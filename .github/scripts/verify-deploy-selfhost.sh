@@ -60,6 +60,12 @@ if ! grep -Fq 'compose "$release_env" up -d --no-build database zip-worker serve
   echo "active releases must start and verify the internal ZIP Worker" >&2
   exit 1
 fi
+if ! grep -Fq 'pull_image_with_retry()' scripts/selfhost/beancount-ledger-deploy-run \
+  || [[ "$(grep -Fc 'pull_image_with_retry "' scripts/selfhost/beancount-ledger-deploy-run)" -ne 3 ]] \
+  || grep -Fq 'timeout --foreground 300 docker pull "${images[$component]}"' scripts/selfhost/beancount-ledger-deploy-run; then
+  echo "immutable image pulls must use bounded retries before deployment starts" >&2
+  exit 1
+fi
 
 if grep -Eq 'runs-on:[[:space:]]*\[?self-hosted|runs-on:[[:space:]]*mibook' "$workflow"; then
   echo "local production deployment must not run on a self-hosted runner" >&2
