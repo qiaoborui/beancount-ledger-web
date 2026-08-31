@@ -42,31 +42,21 @@ enum LedgerWidgetSnapshotBuilder {
         )
     }
 
-    private static let importProviders: [(id: String, label: String)] = [
-        ("alipay", "支付宝"),
-        ("alipay-small-purse", "小荷包"),
-        ("wechat", "微信支付"),
-        ("cmb", "招行信用卡"),
-        ("ccb-credit", "建行信用卡"),
-        ("hsbchk-credit", "汇丰香港信用卡"),
-        ("cmb-checking", "招行储蓄卡"),
-    ]
-
     private static func importSnapshots(
         from documents: [LedgerImportDocument]
     ) -> [LedgerWidgetImportSnapshot] {
-        let labels = Dictionary(uniqueKeysWithValues: importProviders.map { ($0.id, $0.label) })
         var latest: [String: LedgerImportDocument] = [:]
         for document in documents {
-            guard let provider = document.provider, labels[provider] != nil else { continue }
+            guard let provider = document.provider,
+                  LedgerImportProvider.provider(provider) != nil else { continue }
             if let current = latest[provider], !isLater(document, than: current) { continue }
             latest[provider] = document
         }
-        return importProviders.compactMap { provider in
+        return LedgerImportProvider.all.compactMap { provider in
             guard let document = latest[provider.id] else { return nil }
             return LedgerWidgetImportSnapshot(
                 provider: provider.id,
-                label: provider.label,
+                label: provider.compactLabel,
                 coverageStart: document.dateStart,
                 coverageEnd: document.dateEnd
             )

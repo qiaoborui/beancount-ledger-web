@@ -194,6 +194,102 @@ final class LedgerMobileUITests: XCTestCase {
         capture("currency-selected-visible")
     }
 
+    func testImportHistoryShowsProviderFreshnessAndArchivedFiles() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            let entry = app.buttons["sidebar-imports"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            entry.tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+
+        let content = app.scrollViews["import-history-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["渠道状态"].exists)
+        XCTAssertTrue(app.staticTexts["支付宝"].exists)
+        XCTAssertTrue(app.staticTexts["微信支付"].exists)
+        XCTAssertTrue(app.staticTexts["招商银行信用卡"].exists)
+        XCTAssertTrue(app.buttons["import-select-file"].exists)
+
+        let archivedFile = app.staticTexts["alipay-2026-08.csv"]
+        for _ in 0..<5 where !archivedFile.exists { content.swipeUp() }
+        XCTAssertTrue(archivedFile.exists)
+
+        let safetyNotice = app.staticTexts["预览确认后写入"]
+        for _ in 0..<3 where !safetyNotice.exists { content.swipeUp() }
+        XCTAssertTrue(safetyNotice.exists)
+        capture("import-history")
+    }
+
+    func testNativeImportPreviewSelectionAndCommitFlow() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            let entry = app.buttons["sidebar-imports"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            entry.tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+
+        XCTAssertTrue(app.navigationBars["导入账单"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.scrollViews["native-import-preparation"].exists)
+        XCTAssertTrue(app.staticTexts["wechat-2026-08.xlsx"].exists)
+        capture("import-flow-01-preparation")
+
+        app.buttons["import-generate-preview"].tap()
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["已选择 2 / 2"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["跳过 1"].exists)
+
+        let toggle = app.buttons["import-entry-toggle-safe-import-1"]
+        XCTAssertTrue(toggle.exists)
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].waitForExistence(timeout: 3))
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["已选择 2 / 2"].waitForExistence(timeout: 3))
+
+        app.buttons["import-entry-safe-import-1"].tap()
+        XCTAssertTrue(app.staticTexts["分类账户"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Expenses:Education:Books"].exists)
+        capture("import-flow-02-review")
+
+        app.buttons["写入 2 条交易"].tap()
+        let confirmation = app.alerts["确认写入账本？"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 3))
+        confirmation.buttons["写入 2 条交易"].tap()
+
+        XCTAssertTrue(app.scrollViews["native-import-complete"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["已写入 2 条交易"].exists)
+        XCTAssertTrue(app.staticTexts["归档位置"].exists)
+        capture("import-flow-03-complete")
+
+        app.buttons["完成"].tap()
+        let history = app.scrollViews["import-history-content"]
+        XCTAssertTrue(history.waitForExistence(timeout: 4))
+        let newArchive = app.staticTexts["2026-08-01_2026-08-30-wechat-safe-preview.xlsx"]
+        for _ in 0..<5 where !newArchive.exists { history.swipeUp() }
+        XCTAssertTrue(newArchive.waitForExistence(timeout: 4))
+    }
+
     func testChartAxesPreserveTimeSpacingAndTouchShowsSelections() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
@@ -286,13 +382,21 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
 
-        app.tabBars.buttons["更多"].tap()
-        waitUntilHittable(app.buttons["more-analysis-dashboard"])
-        app.buttons["more-analysis-dashboard"].tap()
+        if isPad {
+            waitUntilHittable(app.buttons["sidebar-dashboard"])
+            app.buttons["sidebar-dashboard"].tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            waitUntilHittable(app.buttons["more-analysis-dashboard"])
+            app.buttons["more-analysis-dashboard"].tap()
+        }
 
         let content = app.scrollViews["analysis-content-dashboard"]
         XCTAssertTrue(content.waitForExistence(timeout: 4))
-        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "仪表盘")).count, 1)
+        XCTAssertEqual(
+            app.staticTexts.matching(NSPredicate(format: "label == %@", "仪表盘")).count,
+            isPad ? 2 : 1
+        )
 
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.tap()
         XCTAssertTrue(app.navigationBars["时间范围"].waitForExistence(timeout: 3))
