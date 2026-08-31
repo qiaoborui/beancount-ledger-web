@@ -69,6 +69,82 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(payload.accountSections.map(\.title), ["现金与支付", "信用账户"])
         XCTAssertEqual(payload.accountSections.first?.rows.first?.label, "日常账户")
         XCTAssertEqual(payload.transactions.first?.source.gitSHA, "abc123")
+        XCTAssertEqual(payload.commodities, ["CNY", "USD"])
+        XCTAssertEqual(payload.prices.first, LedgerPrice(date: "2026-08-20", currency: "USD", amount: 713, quoteCurrency: "CNY"))
+    }
+
+    func testCurrencyAnalysisMatchesWebDirectInverseBridgeAndMissingRates() {
+        let prices = [
+            LedgerPrice(date: "2026-07-31", currency: "USD", amount: 720, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2026-08-29", currency: "USD", amount: 713, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2026-07-31", currency: "EUR", amount: 780, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2026-08-29", currency: "EUR", amount: 776, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2026-08-29", currency: "QQQ", amount: 41_825, quoteCurrency: "USD"),
+        ]
+
+        let direct = CurrencyAnalysis.latestRate(currency: "USD", targetCurrency: "CNY", prices: prices)
+        XCTAssertEqual(direct?.source, .direct)
+        XCTAssertEqual(direct?.rate ?? 0, 7.13, accuracy: 0.000_001)
+
+        let inverse = CurrencyAnalysis.latestRate(currency: "CNY", targetCurrency: "USD", prices: prices)
+        XCTAssertEqual(inverse?.source, .inverse)
+        XCTAssertEqual(inverse?.rate ?? 0, 1 / 7.13, accuracy: 0.000_001)
+
+        let bridge = CurrencyAnalysis.latestRate(currency: "EUR", targetCurrency: "USD", prices: prices)
+        XCTAssertEqual(bridge?.source, .bridge)
+        XCTAssertEqual(bridge?.rate ?? 0, 7.76 / 7.13, accuracy: 0.000_001)
+        XCTAssertNil(CurrencyAnalysis.latestRate(currency: "GBP", targetCurrency: "USD", prices: prices))
+
+        let history = CurrencyAnalysis.rateHistory(currency: "EUR", targetCurrency: "USD", prices: prices)
+        XCTAssertEqual(history.map(\.date), ["2026-07-31", "2026-08-29"])
+        XCTAssertEqual(history.last?.rate ?? 0, 7.76 / 7.13, accuracy: 0.000_001)
+
+        let universe = CurrencyAnalysis.currencyUniverse(
+            commodities: ["CNY", "USD", "EUR", "GBP", "QQQ"],
+            prices: prices,
+            balances: [],
+            accounts: [],
+            valuationCurrency: "USD"
+        )
+        XCTAssertEqual(universe.first, "USD")
+        XCTAssertTrue(universe.contains("GBP"))
+        XCTAssertFalse(universe.contains("QQQ"))
+    }
+
+    func testCurrencyHistorySamplesLedgerPriceDatesAndBoundsSeriesToNinetyPoints() {
+        var prices = (1...200).map { index in
+            LedgerPrice(
+                date: String(format: "2026-%03d", index),
+                currency: "QQQ",
+                amount: 40_000 + index,
+                quoteCurrency: "USD"
+            )
+        }
+        prices.append(contentsOf: [
+            LedgerPrice(date: "2025-07-31", currency: "USD", amount: 720, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2025-07-31", currency: "EUR", amount: 780, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2025-08-31", currency: "USD", amount: 713, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2025-08-31", currency: "EUR", amount: 776, quoteCurrency: "CNY"),
+        ])
+
+        let bridgeHistory = CurrencyAnalysis.rateHistory(
+            currency: "EUR",
+            targetCurrency: "USD",
+            prices: prices
+        )
+        XCTAssertEqual(bridgeHistory.count, 90)
+        XCTAssertEqual(bridgeHistory.first?.date, "2026-111")
+        XCTAssertEqual(bridgeHistory.last?.date, "2026-200")
+        XCTAssertEqual(bridgeHistory.first?.rate ?? 0, 7.76 / 7.13, accuracy: 0.000_001)
+        XCTAssertEqual(bridgeHistory.last?.rate ?? 0, 7.76 / 7.13, accuracy: 0.000_001)
+
+        let baseHistory = CurrencyAnalysis.rateHistory(
+            currency: "USD",
+            targetCurrency: "USD",
+            prices: prices
+        )
+        XCTAssertEqual(baseHistory.count, 90)
+        XCTAssertEqual(baseHistory.last?.date, "2026-200")
     }
 
     func testTransactionIdentityIncludesSourceLocationForDuplicateHashes() throws {
@@ -248,6 +324,10 @@ final class LedgerModelsTests: XCTestCase {
       "accounts": [
         { "account": "Assets:Bank:Daily", "openDate": "2024-01-01", "closeDate": null, "currency": "CNY", "alias": "日常账户/银行卡", "label": "日常账户", "group": "cash", "active": true },
         { "account": "Liabilities:CreditCard:Visa", "openDate": "2024-01-01", "closeDate": null, "currency": "CNY", "alias": "Visa", "label": "Visa", "group": "credit", "active": true }
+      ],
+      "commodities": ["CNY", "USD"],
+      "prices": [
+        { "date": "2026-08-20", "currency": "USD", "amount": 713, "quoteCurrency": "CNY" }
       ],
       "valuationCurrency": "CNY",
       "sensitiveUnlocked": true

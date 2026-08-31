@@ -363,6 +363,7 @@ final class LedgerSessionTests: XCTestCase {
         let api = SessionMockAPI(payload: Self.payload)
         let session = LedgerSession(api: api, defaults: defaults)
         await session.resume()
+        await session.setValuationCurrency("USD")
         let july = LedgerDateRange.month(year: 2026, month: 7)
         await session.applyRange(july)
 
@@ -372,6 +373,7 @@ final class LedgerSessionTests: XCTestCase {
         }
         XCTAssertEqual(dashboard.start, "2026-07-01")
         XCTAssertEqual(dashboard.end, "2026-08-01")
+        XCTAssertEqual(dashboard.currency, "USD")
         var calls = await api.callCounts()
         XCTAssertEqual(calls.dashboard, 1)
         XCTAssertEqual(calls.incomeStatement, 0)
@@ -383,6 +385,7 @@ final class LedgerSessionTests: XCTestCase {
         }
         XCTAssertEqual(incomeStatement.start, "2026-07-01")
         XCTAssertEqual(incomeStatement.end, "2026-08-01")
+        XCTAssertEqual(incomeStatement.valuationCurrency, "USD")
 
         _ = try await session.analysisResource(.investments)
         calls = await api.callCounts()
@@ -502,6 +505,116 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testValuationCurrencyReloadsAndPersistsPerServerOrigin() async throws {
+        let suiteName = "ledger-mobile-currency-persistence-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await session.setValuationCurrency("usd")
+
+        XCTAssertEqual(session.ledger?.valuationCurrency, "USD")
+        XCTAssertFalse(session.isValuationCurrencyLoading)
+        XCTAssertEqual((defaults.dictionary(forKey: "ledger.mobile.valuation-currencies") as? [String: String])?["https://ledger.example.com"], "USD")
+
+        let restored = LedgerSession(api: api, defaults: defaults)
+        await restored.resume()
+        let requests = await api.bootstrapRequests()
+        XCTAssertEqual(requests.last?.valuationCurrency, "USD")
+        XCTAssertEqual(restored.ledger?.valuationCurrency, "USD")
+    }
+
+    func testLatestValuationCurrencySelectionWinsSlowResponseRace() async throws {
+        let suiteName = "ledger-mobile-currency-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bootstrapDelays: ["USD": 100_000_000, "EUR": 10_000_000]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let slow = Task { await session.setValuationCurrency("USD") }
+        try await Task.sleep(nanoseconds: 5_000_000)
+        let latest = Task { await session.setValuationCurrency("EUR") }
+        await slow.value
+        await latest.value
+
+        XCTAssertEqual(session.ledger?.valuationCurrency, "EUR")
+        XCTAssertFalse(session.isValuationCurrencyLoading)
+    }
+
+    func testRangeLoadPreventsCurrencyChangeFromInvalidatingItsLoadingState() async throws {
+        let suiteName = "ledger-mobile-range-currency-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bootstrapDelaysByStart: ["2026-07-01": 100_000_000]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let july = LedgerDateRange.month(year: 2026, month: 7)
+        let rangeLoad = Task { await session.applyRange(july) }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        await session.setValuationCurrency("USD")
+        await rangeLoad.value
+
+        XCTAssertEqual(session.selectedRange, july)
+        XCTAssertEqual(session.ledger?.valuationCurrency, "CNY")
+        XCTAssertFalse(session.isRangeLoading)
+        XCTAssertFalse(session.isValuationCurrencyLoading)
+    }
+
+    func testBackgroundLockClearsInFlightValuationCurrencyLoadingState() async throws {
+        let suiteName = "ledger-mobile-background-currency-race-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bootstrapDelays: ["USD": 100_000_000]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        session.setLockInterval(.immediately)
+
+        let currencyLoad = Task { await session.setValuationCurrency("USD") }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        session.updateActivity(isActive: false)
+        await currencyLoad.value
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.isValuationCurrencyLoading)
+    }
+
+    func testValuationCurrencySensitiveLockClearsLoadedLedger() async throws {
+        let suiteName = "ledger-mobile-currency-lock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload, bootstrapErrorStatuses: ["USD": 423])
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await session.setValuationCurrency("USD")
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -519,6 +632,7 @@ private actor SessionMockAPI: LedgerAPI {
         let start: String
         let end: String
         let today: String
+        let valuationCurrency: String
     }
 
     struct BQLCall: Equatable, Sendable {
@@ -557,6 +671,9 @@ private actor SessionMockAPI: LedgerAPI {
     let analysisDelayNanoseconds: UInt64
     let bqlErrorStatus: Int?
     let bqlDelayNanoseconds: UInt64
+    let bootstrapDelays: [String: UInt64]
+    let bootstrapDelaysByStart: [String: UInt64]
+    let bootstrapErrorStatuses: [String: Int]
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
@@ -587,7 +704,10 @@ private actor SessionMockAPI: LedgerAPI {
         analysisErrorStatus: Int? = nil,
         analysisDelayNanoseconds: UInt64 = 0,
         bqlErrorStatus: Int? = nil,
-        bqlDelayNanoseconds: UInt64 = 0
+        bqlDelayNanoseconds: UInt64 = 0,
+        bootstrapDelays: [String: UInt64] = [:],
+        bootstrapDelaysByStart: [String: UInt64] = [:],
+        bootstrapErrorStatuses: [String: Int] = [:]
     ) {
         self.healthStatus = healthStatus
         currentAuthStatus = authStatus
@@ -600,6 +720,9 @@ private actor SessionMockAPI: LedgerAPI {
         self.analysisDelayNanoseconds = analysisDelayNanoseconds
         self.bqlErrorStatus = bqlErrorStatus
         self.bqlDelayNanoseconds = bqlDelayNanoseconds
+        self.bootstrapDelays = bootstrapDelays
+        self.bootstrapDelaysByStart = bootstrapDelaysByStart
+        self.bootstrapErrorStatuses = bootstrapErrorStatuses
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -645,10 +768,47 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockRevokeCalls += 1
     }
 
-    func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap {
+    func bootstrap(
+        baseURL: URL,
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap {
         bootstrapCalls += 1
-        requests.append(BootstrapRequest(start: start, end: end, today: today))
-        return payload
+        requests.append(BootstrapRequest(
+            start: start,
+            end: end,
+            today: today,
+            valuationCurrency: valuationCurrency
+        ))
+        if let delay = bootstrapDelays[valuationCurrency], delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+        if let delay = bootstrapDelaysByStart[start], delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+        if let status = bootstrapErrorStatuses[valuationCurrency] {
+            throw LedgerAPIError.server(status: status, message: "Sensitive data locked")
+        }
+        if valuationCurrency == payload.valuationCurrency { return payload }
+        return LedgerBootstrap(
+            start: payload.start,
+            end: payload.end,
+            summary: LedgerSummary(
+                currency: valuationCurrency,
+                income: payload.summary.income,
+                expense: payload.summary.expense,
+                net: payload.summary.net
+            ),
+            accountBalances: payload.accountBalances,
+            transactions: payload.transactions,
+            accounts: payload.accounts,
+            commodities: payload.commodities,
+            prices: payload.prices,
+            valuationCurrency: valuationCurrency,
+            sensitiveUnlocked: payload.sensitiveUnlocked
+        )
     }
 
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
@@ -670,13 +830,18 @@ private actor SessionMockAPI: LedgerAPI {
         )
     }
 
-    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+    func dashboard(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerDashboard {
         dashboardCalls += 1
         try await waitForAnalysisResponse()
         return LedgerDashboard(
             start: start,
             end: end,
-            currency: "CNY",
+            currency: valuationCurrency,
             kpis: LedgerDashboardKPI(
                 assets: 100_000,
                 liabilities: 20_000,
@@ -695,7 +860,12 @@ private actor SessionMockAPI: LedgerAPI {
         )
     }
 
-    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+    func incomeStatement(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerIncomeStatement {
         incomeStatementCalls += 1
         try await waitForAnalysisResponse()
         return LedgerIncomeStatement(
@@ -706,7 +876,7 @@ private actor SessionMockAPI: LedgerAPI {
             totalIncome: 50_000,
             totalExpense: 10_000,
             netIncome: 40_000,
-            valuationCurrency: "CNY"
+            valuationCurrency: valuationCurrency
         )
     }
 

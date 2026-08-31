@@ -75,10 +75,16 @@ protocol LedgerAPI: Sendable {
     func registerQuickUnlock(baseURL: URL, deviceName: String) async throws -> QuickUnlockCredential
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws
-    func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap
+    func bootstrap(
+        baseURL: URL,
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail
-    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard
-    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement
+    func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
+    func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary
     func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult
     func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord]
@@ -91,11 +97,11 @@ protocol LedgerAPI: Sendable {
 }
 
 extension LedgerAPI {
-    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
+    func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持仪表盘")
     }
 
-    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
+    func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持损益分析")
     }
 
@@ -203,12 +209,19 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         )
     }
 
-    func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap {
+    func bootstrap(
+        baseURL: URL,
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap {
         var components = URLComponents(url: baseURL.appending(path: "/api/ledger/bootstrap"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "start", value: start),
             URLQueryItem(name: "end", value: end),
             URLQueryItem(name: "today", value: today),
+            URLQueryItem(name: "valuationCurrency", value: valuationCurrency),
         ]
         guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
         return try await request(URLRequest(url: url))
@@ -228,12 +241,24 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return try await self.request(request)
     }
 
-    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
-        try await rangedGet(baseURL: baseURL, path: "/api/ledger/dashboard", start: start, end: end)
+    func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
+        try await rangedGet(
+            baseURL: baseURL,
+            path: "/api/ledger/dashboard",
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
     }
 
-    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
-        try await rangedGet(baseURL: baseURL, path: "/api/ledger/income-statement", start: start, end: end)
+    func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement {
+        try await rangedGet(
+            baseURL: baseURL,
+            path: "/api/ledger/income-statement",
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
     }
 
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
@@ -305,11 +330,18 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return try await self.request(request)
     }
 
-    private func rangedGet<Response: Decodable>(baseURL: URL, path: String, start: String, end: String) async throws -> Response {
+    private func rangedGet<Response: Decodable>(
+        baseURL: URL,
+        path: String,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> Response {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "start", value: start),
             URLQueryItem(name: "end", value: end),
+            URLQueryItem(name: "valuationCurrency", value: valuationCurrency),
         ]
         guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
         var request = URLRequest(url: url)

@@ -6,6 +6,7 @@ extension LedgerSession {
         if processInfo.arguments.contains("--safe-preview") {
             let suiteName = "ledger-mobile-safe-preview"
             let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+            defaults.removePersistentDomain(forName: suiteName)
             defaults.set("https://preview.ledger.invalid", forKey: "ledger.mobile.server-origin")
             return LedgerSession(api: SafePreviewLedgerAPI(), defaults: defaults)
         }
@@ -44,20 +45,26 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws {}
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws {}
 
-    func bootstrap(baseURL: URL, start: String, end: String, today: String) async throws -> LedgerBootstrap {
-        SafePreviewLedgerData.bootstrap(start: start, end: end)
+    func bootstrap(
+        baseURL: URL,
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap {
+        SafePreviewLedgerData.bootstrap(start: start, end: end, valuationCurrency: valuationCurrency)
     }
 
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
         SafePreviewLedgerData.accountDetail(account: account)
     }
 
-    func dashboard(baseURL: URL, start: String, end: String) async throws -> LedgerDashboard {
-        SafePreviewLedgerData.dashboard(start: start, end: end)
+    func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
+        SafePreviewLedgerData.dashboard(start: start, end: end, valuationCurrency: valuationCurrency)
     }
 
-    func incomeStatement(baseURL: URL, start: String, end: String) async throws -> LedgerIncomeStatement {
-        SafePreviewLedgerData.incomeStatement(start: start, end: end)
+    func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement {
+        SafePreviewLedgerData.incomeStatement(start: start, end: end, valuationCurrency: valuationCurrency)
     }
 
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
@@ -134,6 +141,36 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
 }
 
 private enum SafePreviewLedgerData {
+    static let commodities = ["CNY", "USD", "EUR", "HKD", "GBP", "JPY", "QQQ"]
+
+    static let prices = [
+        LedgerPrice(date: "2026-03-31", currency: "USD", amount: 726, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-04-30", currency: "USD", amount: 721, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-05-31", currency: "USD", amount: 718, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-06-30", currency: "USD", amount: 716, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-07-31", currency: "USD", amount: 714, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-08-29", currency: "USD", amount: 713, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-03-31", currency: "EUR", amount: 781, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-04-30", currency: "EUR", amount: 789, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-05-31", currency: "EUR", amount: 785, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-06-30", currency: "EUR", amount: 779, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-07-31", currency: "EUR", amount: 774, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-08-29", currency: "EUR", amount: 776, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-03-31", currency: "HKD", amount: 93, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-04-30", currency: "HKD", amount: 92, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-05-31", currency: "HKD", amount: 92, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-06-30", currency: "HKD", amount: 91, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-07-31", currency: "HKD", amount: 91, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-08-29", currency: "HKD", amount: 91, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-03-31", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-04-30", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-05-31", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-06-30", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-07-31", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-08-29", currency: "JPY", amount: 5, quoteCurrency: "CNY"),
+        LedgerPrice(date: "2026-08-29", currency: "QQQ", amount: 41_825, quoteCurrency: "USD"),
+    ]
+
     static let accounts = [
         LedgerAccount(account: "Assets:Bank:Daily", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "日常账户", label: "日常账户", group: "cash", active: true),
         LedgerAccount(account: "Assets:Bank:FamilyEducationReserve", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "家庭长期储备与教育基金（含海外留学与应急资金）", label: "家庭长期储备与教育基金", group: "wealth", active: true),
@@ -163,24 +200,46 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14),
     ]
 
-    static func bootstrap(start: String, end: String) -> LedgerBootstrap {
+    static func bootstrap(start: String, end: String, valuationCurrency rawValuationCurrency: String) -> LedgerBootstrap {
+        let requested = rawValuationCurrency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let valuationCurrency = commodities.contains(requested) ? requested : "CNY"
         let visible = transactions.filter { $0.date >= start && $0.date <= end }
-        let income = visible.reduce(0) { total, transaction in
+        let incomeCNY = visible.reduce(0) { total, transaction in
             total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + abs($1.amount) }
         }
-        let expense = visible.reduce(0) { total, transaction in
+        let expenseCNY = visible.reduce(0) { total, transaction in
             total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + abs($1.amount) }
+        }
+        let income = converted(incomeCNY, from: "CNY", to: valuationCurrency) ?? 0
+        let expense = converted(expenseCNY, from: "CNY", to: valuationCurrency) ?? 0
+        let valuedBalances = balances.map { balance in
+            let valuation = converted(balance.amount, from: balance.currency, to: valuationCurrency)
+            return AccountBalance(
+                account: balance.account,
+                currency: balance.currency,
+                amount: balance.amount,
+                valuationCurrency: valuationCurrency,
+                valuation: valuation ?? 0,
+                valuationMissing: valuation == nil
+            )
         }
         return LedgerBootstrap(
             start: start,
             end: end,
-            summary: LedgerSummary(currency: "CNY", income: income, expense: expense, net: income - expense),
-            accountBalances: balances,
+            summary: LedgerSummary(currency: valuationCurrency, income: income, expense: expense, net: income - expense),
+            accountBalances: valuedBalances,
             transactions: visible,
             accounts: accounts,
-            valuationCurrency: "CNY",
+            commodities: commodities,
+            prices: prices,
+            valuationCurrency: valuationCurrency,
             sensitiveUnlocked: true
         )
+    }
+
+    private static func converted(_ amount: Int, from currency: String, to valuationCurrency: String) -> Int? {
+        CurrencyAnalysis.latestRate(currency: currency, targetCurrency: valuationCurrency, prices: prices)
+            .map { Int((Double(amount) * $0.rate).rounded()) }
     }
 
     static func accountDetail(account: String) -> LedgerAccountDetail {
@@ -217,73 +276,84 @@ private enum SafePreviewLedgerData {
         )
     }
 
-    static func dashboard(start: String, end: String) -> LedgerDashboard {
-        LedgerDashboard(
+    static func dashboard(start: String, end: String, valuationCurrency rawValuationCurrency: String) -> LedgerDashboard {
+        let valuationCurrency = normalizedValuationCurrency(rawValuationCurrency)
+        let fx = CurrencyAnalysis.latestRate(currency: "CNY", targetCurrency: valuationCurrency, prices: prices)?.rate ?? 0
+        func value(_ amount: Int) -> Int { Int((Double(amount) * fx).rounded()) }
+        return LedgerDashboard(
             start: start,
             end: end,
-            currency: "CNY",
+            currency: valuationCurrency,
             kpis: LedgerDashboardKPI(
-                assets: 1_415_200_366,
-                liabilities: 289_900,
-                netWorth: 1_414_910_466,
-                income: 5_050_000,
-                expense: 555_180,
-                net: 4_494_820,
+                assets: value(1_415_200_366),
+                liabilities: value(289_900),
+                netWorth: value(1_414_910_466),
+                income: value(5_050_000),
+                expense: value(555_180),
+                net: value(4_494_820),
                 savingsRate: 0.8901
             ),
             netWorthSeries: [
-                LedgerNetWorthPoint(date: "2026-03", assets: 1_218_400_000, liabilities: 342_800, netWorth: 1_218_057_200),
-                LedgerNetWorthPoint(date: "2026-04", assets: 1_267_900_000, liabilities: 318_600, netWorth: 1_267_581_400),
-                LedgerNetWorthPoint(date: "2026-05", assets: 1_301_500_000, liabilities: 301_200, netWorth: 1_301_198_800),
-                LedgerNetWorthPoint(date: "2026-06", assets: 1_344_700_000, liabilities: 295_700, netWorth: 1_344_404_300),
-                LedgerNetWorthPoint(date: "2026-07", assets: 1_376_800_000, liabilities: 310_400, netWorth: 1_376_489_600),
-                LedgerNetWorthPoint(date: "2026-08", assets: 1_415_200_366, liabilities: 289_900, netWorth: 1_414_910_466),
+                LedgerNetWorthPoint(date: "2026-03", assets: value(1_218_400_000), liabilities: value(342_800), netWorth: value(1_218_057_200)),
+                LedgerNetWorthPoint(date: "2026-04", assets: value(1_267_900_000), liabilities: value(318_600), netWorth: value(1_267_581_400)),
+                LedgerNetWorthPoint(date: "2026-05", assets: value(1_301_500_000), liabilities: value(301_200), netWorth: value(1_301_198_800)),
+                LedgerNetWorthPoint(date: "2026-06", assets: value(1_344_700_000), liabilities: value(295_700), netWorth: value(1_344_404_300)),
+                LedgerNetWorthPoint(date: "2026-07", assets: value(1_376_800_000), liabilities: value(310_400), netWorth: value(1_376_489_600)),
+                LedgerNetWorthPoint(date: "2026-08", assets: value(1_415_200_366), liabilities: value(289_900), netWorth: value(1_414_910_466)),
             ],
             cashflowSeries: [
-                LedgerCashflowPoint(month: "03", income: 4_820_000, expense: 1_138_000, net: 3_682_000),
-                LedgerCashflowPoint(month: "04", income: 5_080_000, expense: 1_246_000, net: 3_834_000),
-                LedgerCashflowPoint(month: "05", income: 4_960_000, expense: 932_000, net: 4_028_000),
-                LedgerCashflowPoint(month: "06", income: 5_160_000, expense: 1_328_000, net: 3_832_000),
-                LedgerCashflowPoint(month: "08", income: 5_050_000, expense: 555_180, net: 4_494_820),
+                LedgerCashflowPoint(month: "03", income: value(4_820_000), expense: value(1_138_000), net: value(3_682_000)),
+                LedgerCashflowPoint(month: "04", income: value(5_080_000), expense: value(1_246_000), net: value(3_834_000)),
+                LedgerCashflowPoint(month: "05", income: value(4_960_000), expense: value(932_000), net: value(4_028_000)),
+                LedgerCashflowPoint(month: "06", income: value(5_160_000), expense: value(1_328_000), net: value(3_832_000)),
+                LedgerCashflowPoint(month: "08", income: value(5_050_000), expense: value(555_180), net: value(4_494_820)),
             ],
             categorySeries: [
-                LedgerCategorySeries(account: "Expenses:Housing", alias: "居住", label: "居住", total: 380_000, values: []),
-                LedgerCategorySeries(account: "Expenses:Education", alias: "教育", label: "教育", total: 32_800, values: []),
-                LedgerCategorySeries(account: "Expenses:Food", alias: "餐饮", label: "餐饮", total: 84_780, values: []),
-                LedgerCategorySeries(account: "Expenses:Travel", alias: "出行", label: "出行", total: 57_600, values: []),
+                LedgerCategorySeries(account: "Expenses:Housing", alias: "居住", label: "居住", total: value(380_000), values: []),
+                LedgerCategorySeries(account: "Expenses:Education", alias: "教育", label: "教育", total: value(32_800), values: []),
+                LedgerCategorySeries(account: "Expenses:Food", alias: "餐饮", label: "餐饮", total: value(84_780), values: []),
+                LedgerCategorySeries(account: "Expenses:Travel", alias: "出行", label: "出行", total: value(57_600), values: []),
             ],
             topPayees: [
-                LedgerPayeeAnalytics(payee: "房屋租金", amount: 380_000, txCount: 1),
-                LedgerPayeeAnalytics(payee: "云端出行", amount: 57_600, txCount: 1),
+                LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1),
+                LedgerPayeeAnalytics(payee: "云端出行", amount: value(57_600), txCount: 1),
             ],
             topPaymentAccounts: [
-                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: 445_780, txCount: 5),
+                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: value(445_780), txCount: 5),
             ],
             anomalies: [
-                LedgerDashboardAnomaly(date: "2026-08-28", payee: "城市书房", narration: "年度阅读计划", account: "Expenses:Education:Books", amount: 32_800, source: "transactions/2026/08.bean:88"),
+                LedgerDashboardAnomaly(date: "2026-08-28", payee: "城市书房", narration: "年度阅读计划", account: "Expenses:Education:Books", amount: value(32_800), source: "transactions/2026/08.bean:88"),
             ]
         )
     }
 
-    static func incomeStatement(start: String, end: String) -> LedgerIncomeStatement {
-        LedgerIncomeStatement(
+    static func incomeStatement(start: String, end: String, valuationCurrency rawValuationCurrency: String) -> LedgerIncomeStatement {
+        let valuationCurrency = normalizedValuationCurrency(rawValuationCurrency)
+        let fx = CurrencyAnalysis.latestRate(currency: "CNY", targetCurrency: valuationCurrency, prices: prices)?.rate ?? 0
+        func value(_ amount: Int) -> Int { Int((Double(amount) * fx).rounded()) }
+        return LedgerIncomeStatement(
             start: start,
             end: end,
             income: [
-                LedgerIncomeNode(account: "Income:Salary", alias: "工资", label: "工资", amount: 4_800_000, children: [], depth: 0, txCount: 1),
-                LedgerIncomeNode(account: "Income:Reimbursement", alias: "报销", label: "报销", amount: 250_000, children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Income:Salary", alias: "工资", label: "工资", amount: value(4_800_000), children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Income:Reimbursement", alias: "报销", label: "报销", amount: value(250_000), children: [], depth: 0, txCount: 1),
             ],
             expense: [
-                LedgerIncomeNode(account: "Expenses:Housing", alias: "居住", label: "居住", amount: 380_000, children: [], depth: 0, txCount: 1),
-                LedgerIncomeNode(account: "Expenses:Food", alias: "餐饮", label: "餐饮", amount: 84_780, children: [], depth: 0, txCount: 3),
-                LedgerIncomeNode(account: "Expenses:Travel", alias: "出行", label: "出行", amount: 57_600, children: [], depth: 0, txCount: 1),
-                LedgerIncomeNode(account: "Expenses:Education", alias: "教育", label: "教育", amount: 32_800, children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Housing", alias: "居住", label: "居住", amount: value(380_000), children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Food", alias: "餐饮", label: "餐饮", amount: value(84_780), children: [], depth: 0, txCount: 3),
+                LedgerIncomeNode(account: "Expenses:Travel", alias: "出行", label: "出行", amount: value(57_600), children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Education", alias: "教育", label: "教育", amount: value(32_800), children: [], depth: 0, txCount: 1),
             ],
-            totalIncome: 5_050_000,
-            totalExpense: 555_180,
-            netIncome: 4_494_820,
-            valuationCurrency: "CNY"
+            totalIncome: value(5_050_000),
+            totalExpense: value(555_180),
+            netIncome: value(4_494_820),
+            valuationCurrency: valuationCurrency
         )
+    }
+
+    private static func normalizedValuationCurrency(_ raw: String) -> String {
+        let requested = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return commodities.contains(requested) ? requested : "CNY"
     }
 
     static let investments = LedgerInvestmentSummary(

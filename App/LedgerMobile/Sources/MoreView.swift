@@ -48,17 +48,33 @@ struct MoreView: View {
                                 .padding(.horizontal, 2)
 
                             LedgerPanel {
-                                NavigationLink {
-                                    BQLQueryView()
-                                } label: {
-                                    MoreNavigationRow(
-                                        icon: "cylinder.split.1x2",
-                                        title: "BQL 查询",
-                                        detail: "高级筛选、聚合分析与查询历史"
-                                    )
+                                VStack(spacing: 0) {
+                                    NavigationLink {
+                                        CurrencyAnalysisView()
+                                    } label: {
+                                        MoreNavigationRow(
+                                            icon: "coloncurrencysign",
+                                            title: "货币与汇率",
+                                            detail: "估值货币、汇率来源与近期变化"
+                                        )
+                                    }
+                                    .buttonStyle(PressScaleButtonStyle())
+                                    .accessibilityIdentifier("more-currencies")
+
+                                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+
+                                    NavigationLink {
+                                        BQLQueryView()
+                                    } label: {
+                                        MoreNavigationRow(
+                                            icon: "cylinder.split.1x2",
+                                            title: "BQL 查询",
+                                            detail: "高级筛选、聚合分析与查询历史"
+                                        )
+                                    }
+                                    .buttonStyle(PressScaleButtonStyle())
+                                    .accessibilityIdentifier("more-query")
                                 }
-                                .buttonStyle(PressScaleButtonStyle())
-                                .accessibilityIdentifier("more-query")
                             }
                         }
                         .padding(.horizontal, LedgerSpacing.lg)

@@ -42,8 +42,12 @@ targets:
         PRODUCT_MODULE_NAME: LedgerMobile
         DEVELOPMENT_TEAM: H92F889YBH
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_ENTITLEMENTS: Supporting/LedgerMobile.entitlements
         ENABLE_PREVIEWS: YES
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
+        Release:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
     scheme:
       testTargets:
         - LedgerMobileTests

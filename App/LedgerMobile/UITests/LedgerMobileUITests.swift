@@ -58,6 +58,9 @@ final class LedgerMobileUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["当前客户端"].waitForExistence(timeout: 3))
             capture("07-more")
 
+            app.buttons["more-currencies"].tap()
+            exerciseCurrencies(capturePrefix: "08")
+
             openCompactAnalysis(identifier: "more-analysis-dashboard", kind: "dashboard", title: "仪表盘", captureName: "08-dashboard")
             openCompactAnalysis(identifier: "more-analysis-netWorth", kind: "netWorth", title: "净资产", captureName: "09-net-worth")
             openCompactAnalysis(identifier: "more-analysis-incomeStatement", kind: "incomeStatement", title: "损益", captureName: "10-income-statement")
@@ -79,6 +82,8 @@ final class LedgerMobileUITests: XCTestCase {
 
             app.buttons["设置, Face ID、自动锁定、服务器与会话"].tap()
         } else {
+            app.buttons["sidebar-currencies"].tap()
+            exerciseCurrencies(capturePrefix: "07")
             openRegularAnalysis(identifier: "sidebar-dashboard", kind: "dashboard", captureName: "07-dashboard")
             openRegularAnalysis(identifier: "sidebar-netWorth", kind: "netWorth", captureName: "08-net-worth")
             openRegularAnalysis(identifier: "sidebar-incomeStatement", kind: "incomeStatement", captureName: "09-income-statement")
@@ -89,6 +94,63 @@ final class LedgerMobileUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["设备安全"].waitForExistence(timeout: 3))
         capture(isPad ? "14-settings" : "15-settings")
+    }
+
+    func testCurrencySwitchKeepsSelectedCurrencyVisible() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            let entry = app.buttons["sidebar-currencies"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            entry.tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-currencies"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            entry.tap()
+        }
+        XCTAssertTrue(app.scrollViews["currency-analysis-content"].waitForExistence(timeout: 3))
+
+        let usd = app.buttons["valuation-currency-USD"]
+        XCTAssertTrue(usd.exists)
+        usd.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: usd)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
+        XCTAssertTrue(usd.isHittable)
+        XCTAssertGreaterThanOrEqual(usd.frame.minX, 16)
+        capture("currency-selected-visible")
+    }
+
+    private func exerciseCurrencies(capturePrefix: String) {
+        let content = app.scrollViews["currency-analysis-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.descendants(matching: .any)["currency-missing-rate-warning"].exists)
+        capture("\(capturePrefix)-currencies-cny")
+
+        let usd = app.buttons["valuation-currency-USD"]
+        XCTAssertTrue(usd.exists)
+        usd.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: usd)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
+        capture("\(capturePrefix)-currencies-usd")
+
+        let usdRow = app.descendants(matching: .any)["currency-rate-USD"]
+        for _ in 0..<3 where !usdRow.exists {
+            content.swipeUp()
+        }
+        XCTAssertTrue(usdRow.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["currency-sparkline-USD"].exists)
+
+        if app.tabBars.firstMatch.exists {
+            let backButton = app.navigationBars["货币与汇率"].buttons.firstMatch
+            waitUntilHittable(backButton)
+            backButton.tap()
+            XCTAssertTrue(app.staticTexts["当前客户端"].waitForExistence(timeout: 3))
+        }
     }
 
     private func openDestination(compact: String, regular: String) {
