@@ -203,6 +203,11 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-08-09", payee: "房屋租金", narration: "八月房租", postings: [("Expenses:Housing:Rent", 380_000, "CNY"), ("Assets:Bank:Daily", -380_000, "CNY")], line: 29),
         transaction(date: "2026-08-06", payee: "差旅报销", narration: "七月差旅", postings: [("Assets:Bank:Daily", 250_000, "CNY"), ("Income:Reimbursement", -250_000, "CNY")], line: 21, tags: ["报销"]),
         transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14),
+        transaction(date: "2026-07-12", payee: "教育储备", narration: "暑期计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_580_000, "CNY"), ("Assets:Bank:Daily", -1_580_000, "CNY")], line: 118),
+        transaction(date: "2026-06-18", payee: "教育储备", narration: "家庭奖金转入", postings: [("Assets:Bank:FamilyEducationReserve", 2_360_000, "CNY"), ("Assets:Bank:Daily", -2_360_000, "CNY")], line: 96),
+        transaction(date: "2026-05-09", payee: "教育储备", narration: "五月定期转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_260_000, "CNY"), ("Assets:Bank:Daily", -1_260_000, "CNY")], line: 73),
+        transaction(date: "2026-04-16", payee: "教育储备", narration: "春季计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_880_000, "CNY"), ("Assets:Bank:Daily", -1_880_000, "CNY")], line: 51),
+        transaction(date: "2026-03-08", payee: "教育储备", narration: "年度储备启动", postings: [("Assets:Bank:FamilyEducationReserve", 3_420_000, "CNY"), ("Assets:Bank:Daily", -3_420_000, "CNY")], line: 27),
     ]
 
     static func bootstrap(

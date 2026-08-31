@@ -563,6 +563,54 @@ struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
     }
 }
 
+struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable {
+    let date: String
+    let balance: Int
+
+    var id: String { date }
+}
+
+extension LedgerAccountDetail {
+    var balanceTrend: [LedgerAccountBalanceTrendPoint] {
+        var closingBalanceByDate: [String: Int] = [:]
+        for row in rows {
+            closingBalanceByDate[row.date] = row.balance
+        }
+        return closingBalanceByDate
+            .map { LedgerAccountBalanceTrendPoint(date: $0.key, balance: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    func balanceTrend(maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
+        let points = balanceTrend
+        guard points.count > maxPoints else { return points }
+        guard maxPoints >= 2, let first = points.first, let last = points.last else {
+            return Array(points.prefix(max(0, maxPoints)))
+        }
+        if maxPoints == 2 { return [first, last] }
+        if maxPoints == 3 { return [first, points[points.count / 2], last] }
+
+        let interior = Array(points.dropFirst().dropLast())
+        let bucketCount = max(1, (maxPoints - 2) / 2)
+        let bucketSize = Int(ceil(Double(interior.count) / Double(bucketCount)))
+        var sampled = [first]
+
+        for lowerBound in stride(from: 0, to: interior.count, by: bucketSize) {
+            let upperBound = min(lowerBound + bucketSize, interior.count)
+            let bucket = interior[lowerBound..<upperBound]
+            guard let minimum = bucket.min(by: { $0.balance < $1.balance }),
+                  let maximum = bucket.max(by: { $0.balance < $1.balance }) else { continue }
+            sampled.append(minimum)
+            if maximum.id != minimum.id {
+                sampled.append(maximum)
+            }
+        }
+
+        sampled.append(last)
+        return sampled.sorted { $0.date < $1.date }
+    }
+}
+
 enum LedgerAnalysisResourceKind: Equatable, Sendable {
     case dashboard
     case incomeStatement
@@ -1062,6 +1110,33 @@ struct AccountBalanceSection: Identifiable, Equatable {
     let id: String
     let title: String
     let rows: [AccountBalanceRow]
+}
+
+enum AccountBalanceCategory: String, CaseIterable, Equatable, Identifiable {
+    case all
+    case assets
+    case liabilities
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .assets: "资产"
+        case .liabilities: "负债"
+        }
+    }
+
+    func includes(_ row: AccountBalanceRow) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .assets:
+            row.account.hasPrefix("Assets:")
+        case .liabilities:
+            row.account.hasPrefix("Liabilities:")
+        }
+    }
 }
 
 extension LedgerBootstrap {
