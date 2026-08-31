@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum LedgerPalette {
-    static let canvas = Color.dynamic(light: 0xF0F4F9, dark: 0x020407)
-    static let panel = Color.dynamic(light: 0xFCFEFF, dark: 0x070A10)
+    static let canvas = Color.dynamic(light: 0xF6F7F9, dark: 0x020407)
+    static let panel = Color.dynamic(light: 0xFFFFFF, dark: 0x070A10)
     static let raised = Color.dynamic(light: 0xE4EBF4, dark: 0x0E141C)
     static let tag = Color.dynamic(light: 0xDDE7F5, dark: 0x0C1827)
     static let ink = Color.dynamic(light: 0x0C1219, dark: 0xE8EBF1)
@@ -194,11 +194,17 @@ struct LedgerToolbarButton<Label: View>: View {
     }
 }
 
+enum LedgerPageIntroStyle: Equatable {
+    case surface
+    case inline
+}
+
 struct LedgerPageIntro<Action: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let title: String
     var detail: String?
     var meta: String?
+    var style: LedgerPageIntroStyle = .surface
     @ViewBuilder let action: Action
 
     var body: some View {
@@ -225,9 +231,13 @@ struct LedgerPageIntro<Action: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             action
         }
-        .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-        .padding(.vertical, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-        .background(horizontalSizeClass == .regular ? Color.clear : LedgerPalette.panel)
+        .padding(.horizontal, usesCompactSurface ? LedgerSpacing.lg : 0)
+        .padding(.vertical, usesCompactSurface ? LedgerSpacing.lg : 0)
+        .background(usesCompactSurface ? LedgerPalette.panel : Color.clear)
+    }
+
+    private var usesCompactSurface: Bool {
+        horizontalSizeClass != .regular && style == .surface
     }
 }
 
@@ -328,6 +338,9 @@ struct AmountLabel: View {
             switch displayMode {
             case .full:
                 Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign))
+                    .fixedSize(horizontal: true, vertical: false)
+            case .compact:
+                Text(prefix + MoneyText.formatCompact(minorUnits: minorUnits, currency: currency, showSign: showSign))
                     .fixedSize(horizontal: true, vertical: false)
             case .adaptive:
                 ViewThatFits(in: .horizontal) {

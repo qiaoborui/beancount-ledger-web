@@ -340,6 +340,7 @@ struct LedgerBootstrap: Decodable {
     let start: String
     let end: String
     let summary: LedgerSummary
+    let comparisons: LedgerPeriodComparisons?
     let accountBalances: [AccountBalance]
     let transactions: [LedgerTransaction]
     let accounts: [LedgerAccount]
@@ -352,6 +353,7 @@ struct LedgerBootstrap: Decodable {
         case start
         case end
         case summary
+        case comparisons
         case accountBalances
         case transactions
         case accounts
@@ -365,6 +367,7 @@ struct LedgerBootstrap: Decodable {
         start: String,
         end: String,
         summary: LedgerSummary,
+        comparisons: LedgerPeriodComparisons? = nil,
         accountBalances: [AccountBalance],
         transactions: [LedgerTransaction],
         accounts: [LedgerAccount],
@@ -376,6 +379,7 @@ struct LedgerBootstrap: Decodable {
         self.start = start
         self.end = end
         self.summary = summary
+        self.comparisons = comparisons
         self.accountBalances = accountBalances
         self.transactions = transactions
         self.accounts = accounts
@@ -390,6 +394,7 @@ struct LedgerBootstrap: Decodable {
         start = try container.decode(String.self, forKey: .start)
         end = try container.decode(String.self, forKey: .end)
         summary = try container.decode(LedgerSummary.self, forKey: .summary)
+        comparisons = try container.decodeIfPresent(LedgerPeriodComparisons.self, forKey: .comparisons)
         accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
@@ -405,6 +410,31 @@ struct LedgerSummary: Decodable, Equatable {
     let income: Int
     let expense: Int
     let net: Int
+}
+
+struct LedgerComparisonDateRange: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+}
+
+struct LedgerPeriodComparison: Decodable, Equatable, Sendable {
+    let currentRange: LedgerComparisonDateRange
+    let baselineRange: LedgerComparisonDateRange
+    let current: Int?
+    let baseline: Int?
+    let delta: Int?
+    let percentage: Double?
+}
+
+struct LedgerMetricPeriodComparisons: Decodable, Equatable, Sendable {
+    let monthOverMonth: LedgerPeriodComparison
+    let yearOverYear: LedgerPeriodComparison
+}
+
+struct LedgerPeriodComparisons: Decodable, Equatable, Sendable {
+    let income: LedgerMetricPeriodComparisons
+    let expense: LedgerMetricPeriodComparisons
+    let totalAssets: LedgerMetricPeriodComparisons?
 }
 
 struct LedgerTransaction: Decodable, Identifiable, Equatable {
@@ -503,6 +533,195 @@ enum LedgerAnalysisResource: Equatable, Sendable {
     case dashboard(LedgerDashboard)
     case incomeStatement(LedgerIncomeStatement)
     case investments(LedgerInvestmentSummary)
+}
+
+struct LedgerChartAxisPoint: Equatable, Sendable {
+    let label: String
+    let shortLabel: String
+    let position: Double
+}
+
+struct LedgerChartAxis: Equatable, Sendable {
+    let points: [LedgerChartAxisPoint]
+    let usesTimeScale: Bool
+
+    init(labels: [String], referenceLabel: String? = nil) {
+        let reference = referenceLabel.flatMap { Self.explicitDate(from: $0) }
+        var inferredYear = reference.map { Self.calendar.component(.year, from: $0) }
+        var previousMonthDay: Int?
+        var parsed: [(date: Date, shortLabel: String)] = []
+
+        for label in labels {
+            guard var value = Self.parsedLabel(label, inferredYear: inferredYear) else {
+                points = labels.enumerated().map {
+                    LedgerChartAxisPoint(label: $0.element, shortLabel: $0.element, position: Double($0.offset))
+                }
+                usesTimeScale = false
+                return
+            }
+
+            if !value.hasExplicitYear,
+               let previousMonthDay,
+               value.monthDay < previousMonthDay,
+               let year = inferredYear,
+               let rolled = Self.parsedLabel(label, inferredYear: year + 1) {
+                inferredYear = year + 1
+                value = rolled
+            }
+            if value.hasExplicitYear {
+                inferredYear = Self.calendar.component(.year, from: value.date)
+            }
+            previousMonthDay = value.monthDay
+            parsed.append((value.date, value.shortLabel))
+        }
+
+        points = zip(labels, parsed).map { label, value in
+            LedgerChartAxisPoint(
+                label: label,
+                shortLabel: value.shortLabel,
+                position: value.date.timeIntervalSince1970
+            )
+        }
+        usesTimeScale = !points.isEmpty
+    }
+
+    var domain: ClosedRange<Double> {
+        guard let lower = points.map(\.position).min(),
+              let upper = points.map(\.position).max() else {
+            return 0...1
+        }
+        if lower == upper {
+            let padding = usesTimeScale ? 12 * 60 * 60 : 0.5
+            return (lower - padding)...(upper + padding)
+        }
+        let padding = usesTimeScale ? max((upper - lower) * 0.05, 12 * 60 * 60) : 0.5
+        return (lower - padding)...(upper + padding)
+    }
+
+    func position(at index: Int) -> Double {
+        points.indices.contains(index) ? points[index].position : Double(index)
+    }
+
+    func nearestIndex(to position: Double) -> Int? {
+        points.indices.min { left, right in
+            abs(points[left].position - position) < abs(points[right].position - position)
+        }
+    }
+
+    func shortLabel(nearestTo position: Double) -> String {
+        nearestIndex(to: position).map { points[$0].shortLabel } ?? ""
+    }
+
+    func tickPositions(maxCount: Int) -> [Double] {
+        guard maxCount > 0, !points.isEmpty else { return [] }
+        guard points.count > maxCount, maxCount > 1 else {
+            return points.prefix(maxCount).map(\.position)
+        }
+        let last = Double(points.count - 1)
+        return (0..<maxCount).map { offset in
+            let index = Int((Double(offset) * last / Double(maxCount - 1)).rounded())
+            return points[index].position
+        }
+    }
+
+    private struct ParsedLabel {
+        let date: Date
+        let shortLabel: String
+        let monthDay: Int
+        let hasExplicitYear: Bool
+    }
+
+    private static var calendar: Calendar {
+        var value = Calendar(identifier: .gregorian)
+        value.locale = Locale(identifier: "en_US_POSIX")
+        value.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return value
+    }
+
+    private static func explicitDate(from label: String) -> Date? {
+        let first = label.split(separator: "~", maxSplits: 1).first.map(String.init) ?? label
+        let parts = first.split(separator: "-").map(String.init)
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return nil
+        }
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
+    }
+
+    private static func parsedLabel(_ label: String, inferredYear: Int?) -> ParsedLabel? {
+        let first = label.split(separator: "~", maxSplits: 1).first.map(String.init) ?? label
+
+        if let quarterMarker = first.range(of: "-Q"),
+           let year = Int(first[..<quarterMarker.lowerBound]),
+           let quarter = Int(first[quarterMarker.upperBound...]),
+           (1...4).contains(quarter) {
+            let month = (quarter - 1) * 3 + 1
+            return makeParsed(year: year, month: month, day: 1, shortLabel: "Q\(quarter)", explicitYear: true)
+        }
+
+        let parts = first.split(separator: "-").compactMap { Int($0) }
+        switch parts.count {
+        case 3:
+            return makeParsed(
+                year: parts[0],
+                month: parts[1],
+                day: parts[2],
+                shortLabel: "\(parts[1])/\(parts[2])",
+                explicitYear: true
+            )
+        case 2 where first.split(separator: "-").first?.count == 4:
+            return makeParsed(
+                year: parts[0],
+                month: parts[1],
+                day: 1,
+                shortLabel: "\(parts[1])月",
+                explicitYear: true
+            )
+        case 2:
+            guard let inferredYear else { return nil }
+            return makeParsed(
+                year: inferredYear,
+                month: parts[0],
+                day: parts[1],
+                shortLabel: "\(parts[0])/\(parts[1])",
+                explicitYear: false
+            )
+        case 1:
+            guard let inferredYear, (1...12).contains(parts[0]) else { return nil }
+            return makeParsed(
+                year: inferredYear,
+                month: parts[0],
+                day: 1,
+                shortLabel: "\(parts[0])月",
+                explicitYear: false
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func makeParsed(
+        year: Int,
+        month: Int,
+        day: Int,
+        shortLabel: String,
+        explicitYear: Bool
+    ) -> ParsedLabel? {
+        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+              calendar.component(.year, from: date) == year,
+              calendar.component(.month, from: date) == month,
+              calendar.component(.day, from: date) == day else {
+            return nil
+        }
+        return ParsedLabel(
+            date: date,
+            shortLabel: shortLabel,
+            monthDay: month * 100 + day,
+            hasExplicitYear: explicitYear
+        )
+    }
 }
 
 struct LedgerDashboard: Decodable, Equatable, Sendable {
@@ -894,6 +1113,7 @@ enum MoneyText {
     enum DisplayMode {
         case full
         case adaptive
+        case compact
     }
 
     static func format(minorUnits: Int, currency: String, showSign: Bool = false) -> String {

@@ -75,32 +75,39 @@ struct TransactionsView: View {
                 if let ledger = session.ledger, !ledger.transactions.isEmpty {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            LedgerPageIntro(
-                                title: "\(session.selectedRange.displayTitle)流水",
-                                detail: "搜索收付款对象、说明、账户和标签。",
-                                meta: "\(ledger.transactions.count) 笔"
-                            ) {
-                                LedgerToolbarButton(
-                                    action: { filterPresented = true },
-                                    accessibilityLabel: "筛选交易"
+                            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                                LedgerPageIntro(
+                                    title: "\(session.selectedRange.displayTitle)流水",
+                                    detail: "搜索收付款对象、说明、账户和标签。",
+                                    meta: "\(ledger.transactions.count) 笔",
+                                    style: .inline
                                 ) {
-                                    ZStack(alignment: .topTrailing) {
-                                        Image(systemName: "line.3.horizontal.decrease")
-                                        if activeStructuredFilterCount > 0 {
-                                            Text("\(activeStructuredFilterCount)")
-                                                .font(.system(size: 8, weight: .bold).monospacedDigit())
-                                                .foregroundStyle(LedgerPalette.onBrand)
-                                                .frame(width: 15, height: 15)
-                                                .background(LedgerPalette.cobalt)
-                                                .clipShape(Circle())
-                                                .offset(x: 8, y: -7)
+                                    LedgerToolbarButton(
+                                        action: { filterPresented = true },
+                                        accessibilityLabel: "筛选交易"
+                                    ) {
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(systemName: "line.3.horizontal.decrease")
+                                            if activeStructuredFilterCount > 0 {
+                                                Text("\(activeStructuredFilterCount)")
+                                                    .font(.system(size: 8, weight: .bold).monospacedDigit())
+                                                    .foregroundStyle(LedgerPalette.onBrand)
+                                                    .frame(width: 15, height: 15)
+                                                    .background(LedgerPalette.cobalt)
+                                                    .clipShape(Circle())
+                                                    .offset(x: 8, y: -7)
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            LedgerTimeRangeControl()
-                            .padding(.horizontal, LedgerSpacing.lg)
+                                LedgerTimeRangeControl()
+                            }
+                            .padding(LedgerSpacing.lg)
+                            .background(LedgerPalette.panel)
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(LedgerPalette.line).frame(height: 1)
+                            }
                             .padding(.bottom, LedgerSpacing.md)
 
                             TransactionSearchField(text: $filters.query)
@@ -411,10 +418,12 @@ struct TransactionDetailView: View {
                         .font(.system(size: 23, weight: .semibold))
                         .tracking(-0.45)
                         .foregroundStyle(LedgerPalette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !presentation.subtitle.isEmpty {
                         Text(presentation.subtitle)
                             .font(.system(size: 13))
                             .foregroundStyle(LedgerPalette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     AmountLabel(
                         minorUnits: presentation.minorUnits,
@@ -443,12 +452,15 @@ struct TransactionDetailView: View {
                                 Text(posting.account)
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(LedgerPalette.warm)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 AmountLabel(
                                     minorUnits: posting.amount,
                                     currency: posting.currency ?? presentation.currency,
                                     font: .system(size: 12, weight: .semibold)
                                 )
+                                .layoutPriority(1)
                             }
                             .padding(.vertical, LedgerSpacing.md)
 
@@ -482,6 +494,7 @@ struct TransactionDetailView: View {
                         Text(transaction.source.file)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(LedgerPalette.warm)
+                            .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                         Text("第 \(transaction.source.line) 行")
                             .font(.system(size: 11).monospacedDigit())
@@ -497,11 +510,6 @@ struct TransactionDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                PrivacyToolbarButton()
-            }
-        }
     }
 }
 

@@ -590,6 +590,7 @@ private struct BQLResultPanel: View {
                     Text("结果 \(index + 1)")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
+                        .accessibilityIdentifier("bql-result-\(index + 1)")
                     Text(run.query.replacingOccurrences(of: "\n", with: " "))
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
@@ -655,7 +656,6 @@ private struct BQLResultPanel: View {
             RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.line, lineWidth: 1)
         }
-        .accessibilityIdentifier("bql-result-\(index + 1)")
     }
 
     private var resultModeButtons: some View {
@@ -841,10 +841,24 @@ private struct BQLChartModel {
     let canLine: Bool
 
     init?(_ result: BQLResult) {
-        guard let valueIndex = result.columns.firstIndex(where: \.isNumeric),
-              let labelIndex = result.columns.indices.first(where: {
-                  $0 != valueIndex && !result.columns[$0].isNumeric
-              }) else {
+        guard let valueIndex = result.columns.firstIndex(where: \.isNumeric) else {
+            return nil
+        }
+        let labelCandidates = result.columns.indices.filter {
+            $0 != valueIndex && !result.columns[$0].isNumeric
+        }
+        guard let labelIndex = labelCandidates.max(by: { left, right in
+            let leftCount = Set(result.rows.compactMap { row in
+                row.indices.contains(left) ? row[left].plainText : nil
+            }.filter { !$0.isEmpty }).count
+            let rightCount = Set(result.rows.compactMap { row in
+                row.indices.contains(right) ? row[right].plainText : nil
+            }.filter { !$0.isEmpty }).count
+            if leftCount == rightCount {
+                return !result.columns[left].isTimeDimension && result.columns[right].isTimeDimension
+            }
+            return leftCount < rightCount
+        }) else {
             return nil
         }
         let values = result.rows.enumerated().compactMap { index, row -> BQLChartDatum? in
@@ -865,7 +879,7 @@ private struct BQLChartModel {
         labelColumn = result.columns[labelIndex]
         valueColumn = result.columns[valueIndex]
         data = values
-        canLine = labelColumn.isTimeDimension
+        canLine = labelColumn.isTimeDimension && Set(values.map(\.label)).count > 1
     }
 }
 
@@ -875,11 +889,21 @@ private struct BQLResultChart: View {
     let model: BQLChartModel
     let kind: BQLResultViewKind
 
+    @State private var selectedID: Int?
+
     private var visibleData: [BQLChartDatum] {
         if kind == .pie {
             return Array(model.data.filter { $0.value > 0 }.prefix(12))
         }
         return Array(model.data.prefix(80))
+    }
+
+    private var axis: LedgerChartAxis {
+        LedgerChartAxis(labels: visibleData.map(\.label), referenceLabel: visibleData.first?.label)
+    }
+
+    private var selectedDatum: BQLChartDatum? {
+        selectedID.flatMap { id in visibleData.first { $0.id == id } }
     }
 
     var body: some View {
@@ -895,7 +919,13 @@ private struct BQLResultChart: View {
             .frame(maxWidth: .infinity, minHeight: 230)
             .accessibilityLabel("金额已隐藏")
         } else {
-            chart
+            ZStack(alignment: .topTrailing) {
+                chart
+                    .accessibilityLabel("BQL \(kind.title)图，可点按或拖动查看数据")
+                if let selectedDatum {
+                    chartSelectionLabel(selectedDatum)
+                }
+            }
                 .frame(height: 250)
                 .padding(LedgerSpacing.lg)
         }
@@ -905,44 +935,65 @@ private struct BQLResultChart: View {
     private var chart: some View {
         switch kind {
         case .bar:
-            Chart(visibleData) { item in
+            Chart(Array(visibleData.enumerated()), id: \.element.id) { index, item in
                 BarMark(
-                    x: .value(model.labelColumn.name, item.label),
+                    x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
                 .foregroundStyle(LedgerPalette.cobalt)
                 .cornerRadius(3)
+                .opacity(selectedID == nil || selectedID == item.id ? 1 : 0.34)
+
+                if selectedID == item.id {
+                    RuleMark(x: .value("选中项目", axis.position(at: index)))
+                        .foregroundStyle(LedgerPalette.lineStrong)
+                }
             }
-            .chartXAxis(.hidden)
+            .chartXScale(domain: axis.domain)
+            .chartXAxis { chartXAxisMarks }
             .chartYAxis { chartAxisMarks }
+            .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .accessibilityIdentifier("bql-bar-chart")
         case .line:
-            Chart(visibleData) { item in
+            Chart(Array(visibleData.enumerated()), id: \.element.id) { index, item in
                 LineMark(
-                    x: .value(model.labelColumn.name, item.label),
+                    x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
                 .foregroundStyle(LedgerPalette.cobalt)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 PointMark(
-                    x: .value(model.labelColumn.name, item.label),
+                    x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
-                .foregroundStyle(LedgerPalette.gold)
-                .symbolSize(18)
+                .foregroundStyle(selectedID == item.id ? LedgerPalette.cobalt : LedgerPalette.gold)
+                .symbolSize(selectedID == item.id ? 48 : 18)
+
+                if selectedID == item.id {
+                    RuleMark(x: .value("选中项目", axis.position(at: index)))
+                        .foregroundStyle(LedgerPalette.lineStrong)
+                }
             }
-            .chartXAxis(.hidden)
+            .chartXScale(domain: axis.domain)
+            .chartXAxis { chartXAxisMarks }
             .chartYAxis { chartAxisMarks }
+            .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .accessibilityIdentifier("bql-line-chart")
         case .pie:
             Chart(visibleData) { item in
                 SectorMark(
                     angle: .value(model.valueColumn.name, displayValue(item.value)),
                     innerRadius: .ratio(0.5),
+                    outerRadius: .ratio(selectedID == item.id ? 1 : 0.92),
                     angularInset: 1
                 )
                 .cornerRadius(2)
                 .foregroundStyle(BQLChartColors.color(item.id))
+                .opacity(selectedID == nil || selectedID == item.id ? 1 : 0.42)
             }
             .chartLegend(.hidden)
+            .chartOverlay { proxy in pieSelectionOverlay(proxy: proxy) }
+            .accessibilityIdentifier("bql-pie-chart")
         case .table:
             EmptyView()
         }
@@ -950,6 +1001,121 @@ private struct BQLResultChart: View {
 
     private func displayValue(_ value: Double) -> Double {
         model.valueColumn.type == "money" ? value / 100 : value
+    }
+
+    private func datum(atAngle angle: Double?) -> BQLChartDatum? {
+        guard let angle else { return nil }
+        var upperBound = 0.0
+        for item in visibleData {
+            upperBound += max(displayValue(item.value), 0)
+            if angle <= upperBound { return item }
+        }
+        return visibleData.last
+    }
+
+    private func selectionOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let frame = geometry[plotFrame]
+                            let x = value.location.x - frame.minX
+                            guard x >= 0, x <= frame.width,
+                                  let position: Double = proxy.value(atX: x),
+                                  let index = axis.nearestIndex(to: position),
+                                  visibleData.indices.contains(index) else { return }
+                            selectedID = visibleData[index].id
+                        }
+                )
+        }
+    }
+
+    private func pieSelectionOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let frame = geometry[plotFrame]
+                            guard frame.contains(value.location) else { return }
+
+                            let offsetX = value.location.x - frame.midX
+                            let offsetY = value.location.y - frame.midY
+                            var radians = atan2(offsetX, -offsetY)
+                            if radians < 0 { radians += 2 * .pi }
+
+                            let total = visibleData.reduce(0) {
+                                $0 + max(displayValue($1.value), 0)
+                            }
+                            guard total > 0 else { return }
+                            selectedID = datum(atAngle: radians / (2 * .pi) * total)?.id
+                        }
+                )
+        }
+    }
+
+    private func chartSelectionLabel(_ item: BQLChartDatum) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(item.label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(LedgerPalette.secondary)
+                .lineLimit(1)
+            Text(selectionValue(item.value))
+                .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                .foregroundStyle(LedgerPalette.ink)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(LedgerPalette.panel.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous)
+                .stroke(LedgerPalette.line, lineWidth: 1)
+        }
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("bql-chart-selection")
+    }
+
+    private func selectionValue(_ value: Double) -> String {
+        if model.valueColumn.type == "money" {
+            return "\(model.valueColumn.name)  \(BQLNumberText.money(value))"
+        }
+        return "\(model.valueColumn.name)  \(BQLNumberText.number(value))"
+    }
+
+    @AxisContentBuilder
+    private var chartXAxisMarks: some AxisContent {
+        AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 5)) { value in
+            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                .foregroundStyle(LedgerPalette.line)
+            AxisTick().foregroundStyle(LedgerPalette.lineStrong)
+            AxisValueLabel(collisionResolution: .disabled) {
+                if let position = value.as(Double.self),
+                   let index = axis.nearestIndex(to: position),
+                   visibleData.indices.contains(index) {
+                    Text(compactAxisLabel(visibleData[index].label))
+                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 58)
+                }
+            }
+        }
+    }
+
+    private func compactAxisLabel(_ label: String) -> String {
+        if axis.usesTimeScale {
+            let position = axis.points.first(where: { $0.label == label })?.position ?? 0
+            return axis.shortLabel(nearestTo: position)
+        }
+        return label.split(separator: ":").last.map(String.init) ?? label
     }
 
     @AxisContentBuilder

@@ -52,7 +52,12 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         today: String,
         valuationCurrency: String
     ) async throws -> LedgerBootstrap {
-        SafePreviewLedgerData.bootstrap(start: start, end: end, valuationCurrency: valuationCurrency)
+        SafePreviewLedgerData.bootstrap(
+            start: start,
+            end: end,
+            today: today,
+            valuationCurrency: valuationCurrency
+        )
     }
 
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
@@ -200,10 +205,15 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14),
     ]
 
-    static func bootstrap(start: String, end: String, valuationCurrency rawValuationCurrency: String) -> LedgerBootstrap {
+    static func bootstrap(
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency rawValuationCurrency: String
+    ) -> LedgerBootstrap {
         let requested = rawValuationCurrency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let valuationCurrency = commodities.contains(requested) ? requested : "CNY"
-        let visible = transactions.filter { $0.date >= start && $0.date <= end }
+        let visible = transactions.filter { $0.date >= start && $0.date < end }
         let incomeCNY = visible.reduce(0) { total, transaction in
             total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + abs($1.amount) }
         }
@@ -212,6 +222,15 @@ private enum SafePreviewLedgerData {
         }
         let income = converted(incomeCNY, from: "CNY", to: valuationCurrency) ?? 0
         let expense = converted(expenseCNY, from: "CNY", to: valuationCurrency) ?? 0
+        let comparisons = periodComparisons(
+            start: start,
+            end: end,
+            today: today,
+            valuationCurrency: valuationCurrency,
+            income: income,
+            expense: expense,
+            currentAvailable: !visible.isEmpty
+        )
         let valuedBalances = balances.map { balance in
             let valuation = converted(balance.amount, from: balance.currency, to: valuationCurrency)
             return AccountBalance(
@@ -227,6 +246,7 @@ private enum SafePreviewLedgerData {
             start: start,
             end: end,
             summary: LedgerSummary(currency: valuationCurrency, income: income, expense: expense, net: income - expense),
+            comparisons: comparisons,
             accountBalances: valuedBalances,
             transactions: visible,
             accounts: accounts,
@@ -235,6 +255,132 @@ private enum SafePreviewLedgerData {
             valuationCurrency: valuationCurrency,
             sensitiveUnlocked: true
         )
+    }
+
+    private static func periodComparisons(
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String,
+        income: Int,
+        expense: Int,
+        currentAvailable: Bool
+    ) -> LedgerPeriodComparisons? {
+        guard let startDate = previewDate(start),
+              previewCalendar.component(.day, from: startDate) == 1,
+              let expectedEnd = previewCalendar.date(byAdding: .month, value: 1, to: startDate),
+              previewDateString(expectedEnd) == end,
+              let exclusiveEnd = previewDate(end),
+              let fullCurrentEnd = previewCalendar.date(byAdding: .day, value: -1, to: exclusiveEnd),
+              let monthStart = previewCalendar.date(byAdding: .month, value: -1, to: startDate),
+              let yearStart = previewCalendar.date(byAdding: .year, value: -1, to: startDate) else {
+            return nil
+        }
+
+        let todayDate = previewDate(today)
+        let currentEnd: Date
+        if let todayDate, todayDate >= startDate, todayDate < exclusiveEnd {
+            currentEnd = todayDate
+        } else {
+            currentEnd = fullCurrentEnd
+        }
+        let correspondingDay = previewCalendar.component(.day, from: currentEnd)
+        let currentRange = LedgerComparisonDateRange(start: start, end: previewDateString(currentEnd))
+        let monthRange = comparisonRange(start: monthStart, correspondingDay: correspondingDay)
+        let yearRange = comparisonRange(start: yearStart, correspondingDay: correspondingDay)
+
+        func value(_ amount: Int) -> Int {
+            converted(amount, from: "CNY", to: valuationCurrency) ?? 0
+        }
+
+        func comparison(
+            current: Int?,
+            baseline: Int?,
+            baselineRange: LedgerComparisonDateRange
+        ) -> LedgerPeriodComparison {
+            let delta = current.flatMap { currentValue in
+                baseline.map { currentValue - $0 }
+            }
+            let percentage = delta.flatMap { deltaValue in
+                baseline.flatMap { baselineValue in
+                    baselineValue == 0 ? nil : Double(deltaValue) / Double(abs(baselineValue))
+                }
+            }
+            return LedgerPeriodComparison(
+                currentRange: currentRange,
+                baselineRange: baselineRange,
+                current: current,
+                baseline: baseline,
+                delta: delta,
+                percentage: percentage
+            )
+        }
+
+        let currentIncome = currentAvailable ? income : nil
+        let currentExpense = currentAvailable ? expense : nil
+        let knownAugust = start == "2026-08-01"
+
+        return LedgerPeriodComparisons(
+            income: LedgerMetricPeriodComparisons(
+                monthOverMonth: comparison(
+                    current: currentIncome,
+                    baseline: knownAugust ? value(4_820_000) : nil,
+                    baselineRange: monthRange
+                ),
+                yearOverYear: comparison(
+                    current: currentIncome,
+                    baseline: knownAugust ? value(4_450_000) : nil,
+                    baselineRange: yearRange
+                )
+            ),
+            expense: LedgerMetricPeriodComparisons(
+                monthOverMonth: comparison(
+                    current: currentExpense,
+                    baseline: knownAugust ? value(628_000) : nil,
+                    baselineRange: monthRange
+                ),
+                yearOverYear: comparison(
+                    current: currentExpense,
+                    baseline: knownAugust ? value(610_000) : nil,
+                    baselineRange: yearRange
+                )
+            ),
+            totalAssets: nil
+        )
+    }
+
+    private static func comparisonRange(
+        start: Date,
+        correspondingDay: Int
+    ) -> LedgerComparisonDateRange {
+        let lastDay = previewCalendar.range(of: .day, in: .month, for: start)?.count ?? correspondingDay
+        let endDay = min(correspondingDay, lastDay)
+        let end = previewCalendar.date(bySetting: .day, value: endDay, of: start) ?? start
+        return LedgerComparisonDateRange(start: previewDateString(start), end: previewDateString(end))
+    }
+
+    private static var previewCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return calendar
+    }
+
+    private static func previewDate(_ raw: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = previewCalendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = previewCalendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: raw)
+    }
+
+    private static func previewDateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = previewCalendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = previewCalendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func converted(_ amount: Int, from currency: String, to valuationCurrency: String) -> Int? {

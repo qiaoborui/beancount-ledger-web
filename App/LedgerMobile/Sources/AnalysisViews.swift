@@ -102,48 +102,77 @@ struct LedgerAnalysisView: View {
         .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
-            }
-        }
         .task(id: requestKey) { await load() }
     }
 
     @ViewBuilder
     private func content(_ resource: LedgerAnalysisResource) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                LedgerPageIntro(
-                    title: kind.title,
-                    detail: kind.detail,
-                    meta: session.selectedRange.displayTitle
-                ) { EmptyView() }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(analysisTopID)
+                    analysisHeader
 
-                if let errorMessage {
-                    StatusBanner(message: errorMessage) { self.errorMessage = nil }
-                }
-
-                switch resource {
-                case let .dashboard(data):
-                    if kind == .netWorth {
-                        NetWorthAnalysisContent(data: data)
-                    } else {
-                        DashboardAnalysisContent(data: data)
+                    if let errorMessage {
+                        StatusBanner(message: errorMessage) { self.errorMessage = nil }
                     }
-                case let .incomeStatement(data):
-                    IncomeStatementAnalysisContent(data: data)
-                case let .investments(data):
-                    InvestmentsAnalysisContent(data: data)
+
+                    switch resource {
+                    case let .dashboard(data):
+                        if kind == .netWorth {
+                            NetWorthAnalysisContent(data: data)
+                        } else {
+                            DashboardAnalysisContent(data: data)
+                        }
+                    case let .incomeStatement(data):
+                        IncomeStatementAnalysisContent(data: data)
+                    case let .investments(data):
+                        InvestmentsAnalysisContent(data: data)
+                    }
                 }
+                .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
+                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
+                .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
+                .ledgerAdaptivePageWidth()
             }
-            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
-            .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
-            .ledgerAdaptivePageWidth()
+            .id(kind)
+            .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
+            .refreshable { await load(replacingContent: false) }
+            .onAppear {
+                proxy.scrollTo(analysisTopID, anchor: .top)
+            }
         }
-        .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
-        .refreshable { await load(replacingContent: false) }
+    }
+
+    private var analysisTopID: String { "analysis-top-\(kind.rawValue)" }
+
+    @ViewBuilder
+    private var analysisHeader: some View {
+        if horizontalSizeClass == .regular {
+            HStack(alignment: .bottom, spacing: LedgerSpacing.xl) {
+                analysisIntro
+                LedgerTimeRangeControl()
+                    .frame(width: 420)
+            }
+        } else if showsAppBar {
+            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                analysisIntro
+                LedgerTimeRangeControl()
+            }
+        } else {
+            LedgerTimeRangeControl()
+        }
+    }
+
+    private var analysisIntro: some View {
+        LedgerPageIntro(
+            title: kind.title,
+            detail: kind.detail,
+            meta: session.selectedRange.metricScope,
+            style: .inline
+        ) { EmptyView() }
     }
 
     private func load(replacingContent: Bool = true) async {
@@ -185,22 +214,11 @@ private struct DashboardAnalysisContent: View {
                 if data.cashflowSeries.isEmpty {
                     AnalysisEmptyContent(icon: "chart.xyaxis.line", message: "所选范围暂无现金流趋势")
                 } else {
-                    Chart(data.cashflowSeries) { point in
-                        LineMark(x: .value("月份", point.month), y: .value("收入", point.income), series: .value("系列", "收入"))
-                            .foregroundStyle(LedgerPalette.income)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                        LineMark(x: .value("月份", point.month), y: .value("支出", point.expense), series: .value("系列", "支出"))
-                            .foregroundStyle(LedgerPalette.expense)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                    }
-                    .chartYAxis(.hidden)
-                    .frame(height: 190)
-                    .accessibilityLabel("现金流趋势图")
-
-                    AnalysisChartLegend(items: [
-                        ("收入", LedgerPalette.income),
-                        ("支出", LedgerPalette.expense),
-                    ])
+                    CashflowTrendChart(
+                        points: data.cashflowSeries,
+                        currency: data.currency,
+                        referenceLabel: data.start
+                    )
                 }
             }
 
@@ -243,19 +261,11 @@ private struct NetWorthAnalysisContent: View {
                 if data.netWorthSeries.isEmpty {
                     AnalysisEmptyContent(icon: "chart.line.uptrend.xyaxis", message: "所选范围暂无净资产趋势")
                 } else {
-                    Chart(data.netWorthSeries) { point in
-                        AreaMark(x: .value("日期", point.date), y: .value("净资产", point.netWorth))
-                            .foregroundStyle(LedgerPalette.cobalt.opacity(0.12))
-                        LineMark(x: .value("日期", point.date), y: .value("净资产", point.netWorth))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                            .lineStyle(StrokeStyle(lineWidth: 2.4))
-                        PointMark(x: .value("日期", point.date), y: .value("净资产", point.netWorth))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                            .symbolSize(18)
-                    }
-                    .chartYAxis(.hidden)
-                    .frame(height: 220)
-                    .accessibilityLabel("净资产走势图")
+                    NetWorthTrendChart(
+                        points: data.netWorthSeries,
+                        currency: data.currency,
+                        referenceLabel: data.start
+                    )
                 }
             }
 
@@ -268,6 +278,244 @@ private struct NetWorthAnalysisContent: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct CashflowTrendChart: View {
+    let points: [LedgerCashflowPoint]
+    let currency: String
+    let referenceLabel: String
+
+    @State private var selectedIndex: Int?
+
+    private var axis: LedgerChartAxis {
+        LedgerChartAxis(labels: points.map(\.month), referenceLabel: referenceLabel)
+    }
+
+    private var selectedPoint: LedgerCashflowPoint? {
+        selectedIndex.flatMap { points.indices.contains($0) ? points[$0] : nil }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+            ZStack(alignment: .topTrailing) {
+                Chart {
+                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                        let x = axis.position(at: index)
+                        LineMark(
+                            x: .value("月份", x),
+                            y: .value("收入", point.income),
+                            series: .value("系列", "收入")
+                        )
+                        .foregroundStyle(LedgerPalette.income)
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                        LineMark(
+                            x: .value("月份", x),
+                            y: .value("支出", point.expense),
+                            series: .value("系列", "支出")
+                        )
+                        .foregroundStyle(LedgerPalette.expense)
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    }
+
+                    if let selectedIndex, points.indices.contains(selectedIndex) {
+                        let point = points[selectedIndex]
+                        let x = axis.position(at: selectedIndex)
+                        RuleMark(x: .value("选中日期", x))
+                            .foregroundStyle(LedgerPalette.lineStrong)
+                        PointMark(x: .value("选中收入", x), y: .value("收入", point.income))
+                            .foregroundStyle(LedgerPalette.income)
+                            .symbolSize(44)
+                        PointMark(x: .value("选中支出", x), y: .value("支出", point.expense))
+                            .foregroundStyle(LedgerPalette.expense)
+                            .symbolSize(44)
+                    }
+                }
+                .chartXScale(domain: axis.domain)
+                .chartXAxis { xAxisMarks(axis) }
+                .chartYAxis(.hidden)
+                .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .accessibilityLabel("现金流趋势图，可点按或拖动查看数据")
+                .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
+                .accessibilityIdentifier("cashflow-trend-chart")
+
+                if let selectedPoint {
+                    CashflowSelectionLabel(point: selectedPoint, currency: currency)
+                }
+            }
+            .frame(height: 190)
+
+            AnalysisChartLegend(items: [
+                ("收入", LedgerPalette.income),
+                ("支出", LedgerPalette.expense),
+            ])
+        }
+    }
+
+    @AxisContentBuilder
+    private func xAxisMarks(_ axis: LedgerChartAxis) -> some AxisContent {
+        AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 5)) { value in
+            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                .foregroundStyle(LedgerPalette.line)
+            AxisTick().foregroundStyle(LedgerPalette.lineStrong)
+            AxisValueLabel(collisionResolution: .disabled) {
+                if let position = value.as(Double.self) {
+                    Text(axis.shortLabel(nearestTo: position))
+                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+            }
+        }
+    }
+
+    private func selectionOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let frame = geometry[plotFrame]
+                            let x = value.location.x - frame.minX
+                            guard x >= 0, x <= frame.width,
+                                  let position: Double = proxy.value(atX: x) else { return }
+                            selectedIndex = axis.nearestIndex(to: position)
+                        }
+                )
+        }
+    }
+}
+
+private struct CashflowSelectionLabel: View {
+    let point: LedgerCashflowPoint
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(point.month)
+                .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                .foregroundStyle(LedgerPalette.secondary)
+            HStack(spacing: 4) {
+                Circle().fill(LedgerPalette.income).frame(width: 6, height: 6)
+                AmountLabel(minorUnits: point.income, currency: currency, font: .system(size: 10, weight: .semibold), color: LedgerPalette.ink)
+            }
+            HStack(spacing: 4) {
+                Circle().fill(LedgerPalette.expense).frame(width: 6, height: 6)
+                AmountLabel(minorUnits: point.expense, currency: currency, font: .system(size: 10, weight: .semibold), color: LedgerPalette.ink)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(LedgerPalette.panel.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous)
+                .stroke(LedgerPalette.line, lineWidth: 1)
+        }
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("cashflow-chart-selection")
+    }
+}
+
+private struct NetWorthTrendChart: View {
+    let points: [LedgerNetWorthPoint]
+    let currency: String
+    let referenceLabel: String
+
+    @State private var selectedIndex: Int?
+
+    private var axis: LedgerChartAxis {
+        LedgerChartAxis(labels: points.map(\.date), referenceLabel: referenceLabel)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Chart {
+                ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                    let x = axis.position(at: index)
+                    AreaMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
+                        .foregroundStyle(LedgerPalette.cobalt.opacity(0.12))
+                    LineMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                    PointMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .symbolSize(18)
+                }
+
+                if let selectedIndex, points.indices.contains(selectedIndex) {
+                    let point = points[selectedIndex]
+                    let x = axis.position(at: selectedIndex)
+                    RuleMark(x: .value("选中日期", x))
+                        .foregroundStyle(LedgerPalette.lineStrong)
+                    PointMark(x: .value("选中日期", x), y: .value("选中净资产", point.netWorth))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .symbolSize(48)
+                }
+            }
+            .chartXScale(domain: axis.domain)
+            .chartXAxis {
+                AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 5)) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                        .foregroundStyle(LedgerPalette.line)
+                    AxisTick().foregroundStyle(LedgerPalette.lineStrong)
+                    AxisValueLabel(collisionResolution: .disabled) {
+                        if let position = value.as(Double.self) {
+                            Text(axis.shortLabel(nearestTo: position))
+                                .font(.system(size: 9, weight: .medium).monospacedDigit())
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis(.hidden)
+            .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
+            .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
+            .accessibilityIdentifier("net-worth-trend-chart")
+
+            if let selectedIndex, points.indices.contains(selectedIndex) {
+                let point = points[selectedIndex]
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(point.date)
+                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(LedgerPalette.secondary)
+                    AmountLabel(minorUnits: point.netWorth, currency: currency, font: .system(size: 10, weight: .semibold), color: LedgerPalette.ink)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(LedgerPalette.panel.opacity(0.96))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous)
+                        .stroke(LedgerPalette.line, lineWidth: 1)
+                }
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("net-worth-chart-selection")
+            }
+        }
+        .frame(height: 220)
+    }
+
+    private func selectionOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let frame = geometry[plotFrame]
+                            let x = value.location.x - frame.minX
+                            guard x >= 0, x <= frame.width,
+                                  let position: Double = proxy.value(atX: x) else { return }
+                            selectedIndex = axis.nearestIndex(to: position)
+                        }
+                )
         }
     }
 }
@@ -348,6 +596,11 @@ private struct AnalysisMetricGrid: View {
     let metrics: [AnalysisMetric]
     let currency: String
 
+    private let compactColumns = [
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1),
+    ]
+
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
@@ -356,14 +609,19 @@ private struct AnalysisMetricGrid: View {
                         AnalysisMetricCell(metric: metrics[index], currency: currency)
                     }
                 }
-            } else {
+            } else if metrics.count == 3 {
                 VStack(spacing: 1) {
-                    ForEach(compactRows.indices, id: \.self) { rowIndex in
-                        HStack(spacing: 1) {
-                            ForEach(compactRows[rowIndex], id: \.self) { metricIndex in
-                                AnalysisMetricCell(metric: metrics[metricIndex], currency: currency)
-                            }
+                    AnalysisMetricCell(metric: metrics[0], currency: currency)
+                    LazyVGrid(columns: compactColumns, spacing: 1) {
+                        ForEach(1 ..< metrics.count, id: \.self) { index in
+                            AnalysisMetricCell(metric: metrics[index], currency: currency)
                         }
+                    }
+                }
+            } else {
+                LazyVGrid(columns: compactColumns, spacing: 1) {
+                    ForEach(metrics.indices, id: \.self) { index in
+                        AnalysisMetricCell(metric: metrics[index], currency: currency)
                     }
                 }
             }
@@ -372,15 +630,11 @@ private struct AnalysisMetricGrid: View {
         .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous).stroke(LedgerPalette.line, lineWidth: 1) }
     }
 
-    private var compactRows: [[Int]] {
-        if metrics.count == 3 { return [[0], [1, 2]] }
-        return stride(from: 0, to: metrics.count, by: 2).map { start in
-            Array(start ..< min(start + 2, metrics.count))
-        }
-    }
 }
 
 private struct AnalysisMetricCell: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let metric: AnalysisMetric
     let currency: String
 
@@ -394,10 +648,12 @@ private struct AnalysisMetricCell: View {
                     minorUnits: amount,
                     currency: currency,
                     font: .system(size: 20, weight: .semibold),
-                    color: metric.color
+                    color: metric.color,
+                    displayMode: horizontalSizeClass == .regular ? .adaptive : .compact
                 )
                 .tracking(-0.4)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(metric.placeholder)
                     .font(.system(size: 14, weight: .semibold))
@@ -408,6 +664,7 @@ private struct AnalysisMetricCell: View {
         .padding(LedgerSpacing.lg)
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .background(LedgerPalette.panel)
+        .accessibilityIdentifier("analysis-metric-\(metric.title)")
     }
 }
 

@@ -28,7 +28,7 @@ struct LedgerTimeRangeControl: View {
                     Image(systemName: "calendar")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(LedgerPalette.cobalt)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 32, height: 32)
                         .background(LedgerPalette.tag)
                         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
 
@@ -55,7 +55,7 @@ struct LedgerTimeRangeControl: View {
                     }
                 }
                 .padding(.horizontal, LedgerSpacing.md)
-                .frame(maxWidth: .infinity, minHeight: 60)
+                .frame(maxWidth: .infinity, minHeight: 56)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressScaleButtonStyle())
@@ -66,9 +66,9 @@ struct LedgerTimeRangeControl: View {
             stepButton(direction: 1, systemImage: "chevron.right", label: "下一周期")
         }
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
                 .stroke(LedgerPalette.line, lineWidth: 1)
         }
         .sheet(isPresented: sheetBinding) {
@@ -82,7 +82,7 @@ struct LedgerTimeRangeControl: View {
     private var verticalDivider: some View {
         Rectangle()
             .fill(LedgerPalette.line)
-            .frame(width: 1, height: 60)
+            .frame(width: 1, height: 56)
     }
 
     private func stepButton(direction: Int, systemImage: String, label: String) -> some View {
@@ -92,7 +92,7 @@ struct LedgerTimeRangeControl: View {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 44, height: 60)
+                .frame(width: 44, height: 56)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
