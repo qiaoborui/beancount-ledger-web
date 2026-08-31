@@ -82,6 +82,13 @@ protocol LedgerAPI: Sendable {
         today: String,
         valuationCurrency: String
     ) async throws -> LedgerBootstrap
+    func homeReport(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerHomeReport
+    func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
     func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
@@ -97,6 +104,19 @@ protocol LedgerAPI: Sendable {
 }
 
 extension LedgerAPI {
+    func homeReport(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerHomeReport {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持首页消费报告")
+    }
+
+    func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持导入记录")
+    }
+
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持仪表盘")
     }
@@ -225,6 +245,29 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         ]
         guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
         return try await request(URLRequest(url: url))
+    }
+
+    func homeReport(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerHomeReport {
+        try await rangedGet(
+            baseURL: baseURL,
+            path: "/api/ledger/home-report",
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
+    }
+
+    func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
+        let response: LedgerImportDocumentsResponse = try await get(
+            baseURL: baseURL,
+            path: "/api/ledger/imports/documents"
+        )
+        return response.documents
     }
 
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {

@@ -158,6 +158,57 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(payload.transactions.count, 2)
     }
 
+    func testHomeReportUsesCurrentMonthAndDecodesExpenseOnlySurface() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
+            XCTAssertEqual(components.path, "/api/ledger/home-report")
+            XCTAssertEqual(
+                components.queryItems,
+                [
+                    URLQueryItem(name: "start", value: "2026-08-01"),
+                    URLQueryItem(name: "end", value: "2026-09-01"),
+                    URLQueryItem(name: "valuationCurrency", value: "CNY"),
+                ]
+            )
+            return Self.response(for: request, body: Self.homeReportJSON)
+        }
+
+        let report = try await makeClient().homeReport(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            start: "2026-08-01",
+            end: "2026-09-01",
+            valuationCurrency: "CNY"
+        )
+
+        XCTAssertEqual(report.current.kpis.expense, 555_180)
+        XCTAssertEqual(report.current.kpis.transactionCount, 9)
+        XCTAssertEqual(report.previous.kpis.expense, 635_200)
+        XCTAssertEqual(report.current.categorySeries.first?.label, "居住")
+        XCTAssertEqual(report.dailyExpenseSeries.last?.amount, 32_800)
+    }
+
+    func testImportDocumentsUsesReadOnlyHistoryEndpoint() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/imports/documents")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return Self.response(
+                for: request,
+                body: #"{"documents":[{"path":"transactions/2026/documents/imports/private.csv","name":"private.csv","year":"2026","ext":".csv","provider":"alipay","dateStart":"2026-08-01","dateEnd":"2026-08-28","size":1024,"modTime":"2026-08-29T08:00:00Z"}]}"#
+            )
+        }
+
+        let documents = try await makeClient().importDocuments(
+            baseURL: URL(string: "https://ledger.example.com")!
+        )
+
+        XCTAssertEqual(documents.count, 1)
+        XCTAssertEqual(documents.first?.provider, "alipay")
+        XCTAssertEqual(documents.first?.dateEnd, "2026-08-28")
+        XCTAssertEqual(documents.first?.modTime, "2026-08-29T08:00:00Z")
+    }
+
     func testAccountDetailEncodesAccountAndDecodesRows() async throws {
         MockURLProtocol.requestHandler = { request in
             let components = try XCTUnwrap(
@@ -405,6 +456,34 @@ final class APIClientTests: XCTestCase {
       "topPayees":[{"payee":"房屋租金","amount":380000,"txCount":1}],
       "topPaymentAccounts":[{"account":"Assets:Bank:Daily","alias":"日常账户","label":"日常账户","amount":380000,"txCount":1}],
       "anomalies":[{"date":"2026-08-28","payee":"城市书房","narration":"年度阅读计划","account":"Expenses:Education:Books","amount":32800,"source":"transactions/2026/08.bean:88"}]
+    }
+    """#
+
+    private static let homeReportJSON = #"""
+    {
+      "start":"2026-08-01",
+      "end":"2026-09-01",
+      "previousStart":"2025-08-01",
+      "previousEnd":"2025-09-01",
+      "currency":"CNY",
+      "current":{
+        "kpis":{"income":5050000,"expense":555180,"net":4494820,"transactionCount":9,"savingsRate":0.8901},
+        "cashflowSeries":[],
+        "categorySeries":[{"account":"Expenses:Housing","alias":"居住","label":"居住","total":380000,"values":[]}]
+      },
+      "previous":{
+        "kpis":{"income":4800000,"expense":635200,"net":4164800,"transactionCount":12,"savingsRate":0.8677},
+        "cashflowSeries":[],
+        "categorySeries":[]
+      },
+      "budget":{"configured":false,"amount":0,"currency":"CNY"},
+      "dailyExpenseSeries":[
+        {"date":"2026-08-09","weekday":"周日","amount":380000,"txCount":1},
+        {"date":"2026-08-28","weekday":"周五","amount":32800,"txCount":1}
+      ],
+      "accountBalanceSeries":[],
+      "topPaymentAccounts":[],
+      "generatedAt":"2026-08-31T05:30:00Z"
     }
     """#
 

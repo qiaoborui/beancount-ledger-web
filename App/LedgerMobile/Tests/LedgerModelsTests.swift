@@ -76,6 +76,96 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(payload.transactions.first?.source.gitSHA, "abc123")
         XCTAssertEqual(payload.commodities, ["CNY", "USD"])
         XCTAssertEqual(payload.prices.first, LedgerPrice(date: "2026-08-20", currency: "USD", amount: 713, quoteCurrency: "CNY"))
+
+        let rows = payload.accountSections.flatMap(\.rows)
+        XCTAssertEqual(rows.filter(AccountBalanceCategory.assets.includes).map(\.account), ["Assets:Bank:Daily"])
+        XCTAssertEqual(rows.filter(AccountBalanceCategory.liabilities.includes).map(\.account), ["Liabilities:CreditCard:Visa"])
+    }
+
+    func testAccountBalanceTrendSortsDatesAndKeepsDailyClosingBalance() throws {
+        let decoded = try JSONDecoder().decode(
+            LedgerAccountDetail.self,
+            from: Data(Self.accountDetailJSON.utf8)
+        )
+        let transaction = try XCTUnwrap(decoded.rows.first?.transaction)
+        let detail = LedgerAccountDetail(
+            account: decoded.account,
+            label: decoded.label,
+            alias: decoded.alias,
+            group: decoded.group,
+            active: decoded.active,
+            currency: decoded.currency,
+            currentBalance: 140_000,
+            rows: [
+                LedgerAccountDetailRow(
+                    date: "2026-08-20",
+                    payee: "第一次变动",
+                    narration: "",
+                    change: 20_000,
+                    balance: 120_000,
+                    transaction: transaction
+                ),
+                LedgerAccountDetailRow(
+                    date: "2026-08-01",
+                    payee: "期初变动",
+                    narration: "",
+                    change: 10_000,
+                    balance: 100_000,
+                    transaction: transaction
+                ),
+                LedgerAccountDetailRow(
+                    date: "2026-08-20",
+                    payee: "当日收盘",
+                    narration: "",
+                    change: 20_000,
+                    balance: 140_000,
+                    transaction: transaction
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            detail.balanceTrend,
+            [
+                LedgerAccountBalanceTrendPoint(date: "2026-08-01", balance: 100_000),
+                LedgerAccountBalanceTrendPoint(date: "2026-08-20", balance: 140_000),
+            ]
+        )
+    }
+
+    func testAccountBalanceTrendDownsamplesLongHistoryAndKeepsExtrema() throws {
+        let decoded = try JSONDecoder().decode(
+            LedgerAccountDetail.self,
+            from: Data(Self.accountDetailJSON.utf8)
+        )
+        let transaction = try XCTUnwrap(decoded.rows.first?.transaction)
+        let balances = [100, 120, 40, 130, 90, 110, 180, 105, 140, 160]
+        let detail = LedgerAccountDetail(
+            account: decoded.account,
+            label: decoded.label,
+            alias: decoded.alias,
+            group: decoded.group,
+            active: decoded.active,
+            currency: decoded.currency,
+            currentBalance: 160,
+            rows: balances.enumerated().map { index, balance in
+                LedgerAccountDetailRow(
+                    date: String(format: "2026-01-%02d", index + 1),
+                    payee: "趋势测试",
+                    narration: "",
+                    change: 0,
+                    balance: balance,
+                    transaction: transaction
+                )
+            }
+        )
+
+        let sampled = detail.balanceTrend(maxPoints: 6)
+        XCTAssertLessThanOrEqual(sampled.count, 6)
+        XCTAssertEqual(sampled.first?.balance, 100)
+        XCTAssertEqual(sampled.last?.balance, 160)
+        XCTAssertTrue(sampled.contains { $0.balance == 40 })
+        XCTAssertTrue(sampled.contains { $0.balance == 180 })
     }
 
     func testCurrencyAnalysisMatchesWebDirectInverseBridgeAndMissingRates() {
@@ -216,6 +306,9 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 12_345_678_900, currency: "CNY"), "¥1.2亿")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 1_234_567, currency: "USD"), "$12.3k")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: -1_234_567, currency: "CNY"), "-¥1.2w")
+        XCTAssertEqual(MoneyText.formatWidget(minorUnits: 555_180, currency: "CNY"), "¥5,552")
+        XCTAssertEqual(MoneyText.formatWidget(minorUnits: 1_234_567, currency: "CNY"), "¥1.2w")
+        XCTAssertEqual(MoneyText.magnitude(.min), .max)
     }
 
     func testMonthRangeShiftKeepsInclusiveCalendarBounds() {

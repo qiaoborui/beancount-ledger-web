@@ -437,6 +437,46 @@ struct LedgerPeriodComparisons: Decodable, Equatable, Sendable {
     let totalAssets: LedgerMetricPeriodComparisons?
 }
 
+struct LedgerHomeReport: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let currency: String
+    let current: LedgerHomeReportPeriod
+    let previous: LedgerHomeReportPeriod
+    let dailyExpenseSeries: [LedgerDailyExpense]
+    let generatedAt: String
+}
+
+struct LedgerHomeReportPeriod: Decodable, Equatable, Sendable {
+    let kpis: LedgerHomeReportExpenseKPI
+    let categorySeries: [LedgerCategorySeries]
+}
+
+struct LedgerHomeReportExpenseKPI: Decodable, Equatable, Sendable {
+    let expense: Int
+    let transactionCount: Int
+}
+
+struct LedgerDailyExpense: Decodable, Equatable, Identifiable, Sendable {
+    let date: String
+    let weekday: String
+    let amount: Int
+    let txCount: Int
+
+    var id: String { date }
+}
+
+struct LedgerImportDocumentsResponse: Decodable, Equatable, Sendable {
+    let documents: [LedgerImportDocument]
+}
+
+struct LedgerImportDocument: Decodable, Equatable, Sendable {
+    let provider: String?
+    let dateStart: String?
+    let dateEnd: String?
+    let modTime: String
+}
+
 struct LedgerTransaction: Decodable, Identifiable, Equatable {
     let date: String
     let payee: String
@@ -520,6 +560,54 @@ struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
         case change
         case balance
         case transaction = "txn"
+    }
+}
+
+struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable {
+    let date: String
+    let balance: Int
+
+    var id: String { date }
+}
+
+extension LedgerAccountDetail {
+    var balanceTrend: [LedgerAccountBalanceTrendPoint] {
+        var closingBalanceByDate: [String: Int] = [:]
+        for row in rows {
+            closingBalanceByDate[row.date] = row.balance
+        }
+        return closingBalanceByDate
+            .map { LedgerAccountBalanceTrendPoint(date: $0.key, balance: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    func balanceTrend(maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
+        let points = balanceTrend
+        guard points.count > maxPoints else { return points }
+        guard maxPoints >= 2, let first = points.first, let last = points.last else {
+            return Array(points.prefix(max(0, maxPoints)))
+        }
+        if maxPoints == 2 { return [first, last] }
+        if maxPoints == 3 { return [first, points[points.count / 2], last] }
+
+        let interior = Array(points.dropFirst().dropLast())
+        let bucketCount = max(1, (maxPoints - 2) / 2)
+        let bucketSize = Int(ceil(Double(interior.count) / Double(bucketCount)))
+        var sampled = [first]
+
+        for lowerBound in stride(from: 0, to: interior.count, by: bucketSize) {
+            let upperBound = min(lowerBound + bucketSize, interior.count)
+            let bucket = interior[lowerBound..<upperBound]
+            guard let minimum = bucket.min(by: { $0.balance < $1.balance }),
+                  let maximum = bucket.max(by: { $0.balance < $1.balance }) else { continue }
+            sampled.append(minimum)
+            if maximum.id != minimum.id {
+                sampled.append(maximum)
+            }
+        }
+
+        sampled.append(last)
+        return sampled.sorted { $0.date < $1.date }
     }
 }
 
@@ -1024,6 +1112,33 @@ struct AccountBalanceSection: Identifiable, Equatable {
     let rows: [AccountBalanceRow]
 }
 
+enum AccountBalanceCategory: String, CaseIterable, Equatable, Identifiable {
+    case all
+    case assets
+    case liabilities
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .assets: "资产"
+        case .liabilities: "负债"
+        }
+    }
+
+    func includes(_ row: AccountBalanceRow) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .assets:
+            row.account.hasPrefix("Assets:")
+        case .liabilities:
+            row.account.hasPrefix("Liabilities:")
+        }
+    }
+}
+
 extension LedgerBootstrap {
     var balanceSheetTotals: BalanceSheetTotals {
         let valid = accountBalances.filter { !($0.valuationMissing ?? false) }
@@ -1106,85 +1221,6 @@ extension LedgerAccount {
         }
         if !label.isEmpty { return label }
         return account.split(separator: ":").last.map(String.init) ?? account
-    }
-}
-
-enum MoneyText {
-    enum DisplayMode {
-        case full
-        case adaptive
-        case compact
-    }
-
-    static func format(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency.isEmpty ? "CNY" : currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.usesGroupingSeparator = true
-        if showSign {
-            formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
-        }
-        let value = NSDecimalNumber(value: Double(minorUnits) / 100)
-        return formatter.string(from: value) ?? "\(currency) \(value)"
-    }
-
-    static func formatCompact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
-        let currencyCode = currency.isEmpty ? "CNY" : currency
-        let value = Double(minorUnits) / 100
-        let absoluteValue = abs(value)
-        let unit: (divisor: Double, suffix: String)?
-
-        if currencyCode == "CNY" {
-            if absoluteValue >= 100_000_000 {
-                unit = (100_000_000, "亿")
-            } else if absoluteValue >= 10_000 {
-                unit = (10_000, "w")
-            } else {
-                unit = nil
-            }
-        } else if absoluteValue >= 1_000_000_000 {
-            unit = (1_000_000_000, "B")
-        } else if absoluteValue >= 1_000_000 {
-            unit = (1_000_000, "M")
-        } else if absoluteValue >= 1_000 {
-            unit = (1_000, "k")
-        } else {
-            unit = nil
-        }
-
-        guard let unit else {
-            return format(minorUnits: minorUnits, currency: currencyCode, showSign: showSign)
-        }
-
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 1
-        formatter.roundingMode = .halfUp
-        let compactValue = absoluteValue / unit.divisor
-        let number = formatter.string(from: NSNumber(value: compactValue)) ?? String(format: "%.1f", compactValue)
-        let sign = value < 0 ? "-" : showSign ? "+" : ""
-        return "\(sign)\(currencySymbol(for: currencyCode))\(number)\(unit.suffix)"
-    }
-
-    private static func currencySymbol(for currency: String) -> String {
-        let commonSymbols = [
-            "CNY": "¥",
-            "USD": "$",
-            "EUR": "€",
-            "GBP": "£",
-            "JPY": "¥",
-            "HKD": "HK$",
-        ]
-        if let symbol = commonSymbols[currency] { return symbol }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        let symbol = formatter.currencySymbol ?? currency
-        return symbol == currency ? "\(currency) " : symbol
     }
 }
 

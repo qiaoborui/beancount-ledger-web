@@ -991,11 +991,16 @@ func AccountDetailFromSorted(account string, sortedTxns []Transaction) []Account
 	}
 	var rows []relevant
 	for _, txn := range sortedTxns {
+		var change int
+		matched := false
 		for _, posting := range txn.Postings {
 			if posting.Account == account {
-				rows = append(rows, relevant{txn: txn, change: posting.Amount})
-				break
+				change += posting.Amount
+				matched = true
 			}
+		}
+		if matched {
+			rows = append(rows, relevant{txn: txn, change: change})
 		}
 	}
 	var balance int

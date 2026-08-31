@@ -30,6 +30,36 @@ func TestAccountServiceDetail(t *testing.T) {
 	}
 }
 
+func TestAccountDetailFromSortedAggregatesRepeatedAccountPostings(t *testing.T) {
+	rows := AccountDetailFromSorted("Assets:Cash", []Transaction{
+		{
+			Date: "2026-01-01",
+			Postings: []Posting{
+				{Account: "Assets:Cash", Amount: 10_000, Currency: "CNY"},
+				{Account: "Expenses:Food", Amount: -15_000, Currency: "CNY"},
+				{Account: "Assets:Cash", Amount: 5_000, Currency: "CNY"},
+			},
+		},
+		{
+			Date: "2026-01-02",
+			Postings: []Posting{
+				{Account: "Assets:Cash", Amount: -2_000, Currency: "CNY"},
+				{Account: "Expenses:Food", Amount: 2_000, Currency: "CNY"},
+			},
+		},
+	})
+
+	if len(rows) != 2 {
+		t.Fatalf("rows = %#v, want 2", rows)
+	}
+	if rows[0].Change != 15_000 || rows[0].Balance != 15_000 {
+		t.Fatalf("first row = %#v, want aggregated change and balance 15000", rows[0])
+	}
+	if rows[1].Change != -2_000 || rows[1].Balance != 13_000 {
+		t.Fatalf("second row = %#v, want closing balance 13000", rows[1])
+	}
+}
+
 func TestAccountServiceAppendDefaultsCurrency(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

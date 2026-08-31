@@ -73,9 +73,26 @@ final class LedgerMobileUITests: XCTestCase {
         openDestination(compact: "账户", regular: "账户")
         let longAccount = app.staticTexts["家庭长期储备与教育基金（含海外留学与应急资金）"]
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
+
+        app.buttons["account-filter-liabilities"].tap()
+        XCTAssertTrue(longAccount.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["信用卡"].waitForExistence(timeout: 3))
+        app.buttons["account-filter-assets"].tap()
+        XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
+
+        let wealthGroup = app.buttons["account-group-wealth"]
+        XCTAssertTrue(wealthGroup.exists)
+        wealthGroup.tap()
+        XCTAssertTrue(longAccount.waitForNonExistence(timeout: 3))
+        wealthGroup.tap()
+        XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
         capture("05-accounts")
         longAccount.tap()
         XCTAssertTrue(app.staticTexts["当前余额"].waitForExistence(timeout: 3))
+        let accountTrend = app.descendants(matching: .any)["account-balance-trend-chart"]
+        XCTAssertTrue(accountTrend.waitForExistence(timeout: 3))
+        dragAcrossChart(accountTrend)
+        XCTAssertTrue(app.descendants(matching: .any)["account-balance-chart-selection"].waitForExistence(timeout: 3))
         capture("06-account-detail")
 
         if app.tabBars.firstMatch.exists {

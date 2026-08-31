@@ -11,6 +11,7 @@ behavior.
 | Transactions | bootstrap, `GET /api/ledger/transactions` | List, search, type/account filters, detail | Read | P0 |
 | Accounts | bootstrap, `GET /api/ledger/accounts/detail` | Grouped balances, detail, related transactions | Read | P0 |
 | Settings and privacy | auth, passkey, quick unlock | Face ID/Touch ID, lock interval, sessions; passkey implementation requires paid-team signing | Device/auth | P0 |
+| Home Screen widgets | `GET /api/ledger/home-report`, bootstrap, `GET /api/ledger/imports/documents` | Monthly expense overview, expense calendar, configurable asset/liability balance, and import-status widgets | Read-only snapshot | P0 |
 | Dashboard | `GET /api/ledger/dashboard` | KPIs, cashflow trend, spending rank, anomalies | Read | P1 |
 | Net worth | dashboard balance history data | Position metrics, trend, recent observations | Read | P1 |
 | Income statement | `GET /api/ledger/income-statement` | Period totals and hierarchical income/expense rows | Read | P1 |
@@ -18,7 +19,7 @@ behavior.
 | Agent | `POST /api/ai/agent/turn`, session timeline | Planned | Read and write tools | P2 |
 | Query | `POST /api/ledger/bql`, BQL history | Multi-statement editor, examples, table/chart results, warnings, history rename/run/delete | Read plus runtime history | P2 |
 | Currencies | bootstrap commodities, prices, balances and valuation data | Current, inverse and CNY-cross rates, 90-point trends, missing-rate warnings, persistent valuation currency | Read | P2 |
-| Imports | `/api/ledger/imports/*` | Planned after read-only parity | Write with preview | P3 |
+| Imports | `/api/ledger/imports/*` | Read-only history feeds the import-status widget; native preview and commit remain planned | Read history; write with preview later | P3 |
 | Reconcile | `GET/POST /api/ledger/reconciliation` | Planned after read-only parity | Write with preview | P3 |
 | Ledger editor | `/api/ledger/editor/*` | Planned last | Write | P3 |
 | Add, edit, reverse, delete transaction | `/api/ledger/append*`, `/api/ledger/transactions` | Planned after read-only parity | Write with confirmation | P3 |

@@ -615,6 +615,91 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testReadySessionPublishesWidgetSnapshotAndLogoutClearsIt() async {
+        let defaultsSuite = "ledger-mobile-widget-session-tests-\(UUID().uuidString)"
+        let widgetSuite = "ledger-mobile-widget-store-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite)
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            UserDefaults(suiteName: widgetSuite)?.removePersistentDomain(forName: widgetSuite)
+        }
+
+        let session = LedgerSession(
+            api: SessionMockAPI(
+                payload: Self.payload,
+                widgetReport: Self.widgetReport,
+                widgetImportDocuments: Self.widgetImportDocuments
+            ),
+            defaults: defaults,
+            widgetSnapshotStore: widgetStore
+        )
+        await session.resume()
+
+        XCTAssertEqual(widgetStore.load()?.expense.amount, 555_180)
+        XCTAssertEqual(widgetStore.load()?.expense.transactionCount, 9)
+        XCTAssertEqual(widgetStore.load()?.imports.first?.provider, "alipay")
+        XCTAssertEqual(widgetStore.load()?.imports.first?.latestCoverageDate, "2026-08-28")
+        XCTAssertNotNil(widgetStore.load()?.importsUpdatedAt)
+
+        session.logout()
+
+        XCTAssertNil(widgetStore.load())
+    }
+
+    func testImportHistoryFailurePreservesPreviousWidgetImportStatus() async throws {
+        let defaultsSuite = "ledger-mobile-widget-import-fallback-tests-\(UUID().uuidString)"
+        let widgetSuite = "ledger-mobile-widget-import-fallback-store-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite)
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            UserDefaults(suiteName: widgetSuite)?.removePersistentDomain(forName: widgetSuite)
+        }
+        let previous = LedgerWidgetSnapshot(
+            updatedAt: Date(timeIntervalSince1970: 1),
+            expense: LedgerWidgetExpenseSnapshot(
+                periodTitle: "2026年7月",
+                start: "2026-07-01",
+                end: "2026-08-01",
+                currency: "CNY",
+                amount: 1,
+                transactionCount: 1,
+                yearOverYearPercentage: nil,
+                categories: [],
+                dailySeries: []
+            ),
+            accounts: [],
+            imports: [
+                LedgerWidgetImportSnapshot(
+                    provider: "wechat",
+                    label: "微信支付",
+                    coverageStart: "2026-07-01",
+                    coverageEnd: "2026-07-31"
+                ),
+            ],
+            importsUpdatedAt: Date(timeIntervalSince1970: 2)
+        )
+        try widgetStore.save(previous)
+
+        let session = LedgerSession(
+            api: SessionMockAPI(
+                payload: Self.payload,
+                widgetReport: Self.widgetReport,
+                importDocumentsShouldFail: true
+            ),
+            defaults: defaults,
+            widgetSnapshotStore: widgetStore
+        )
+        await session.resume()
+
+        XCTAssertEqual(widgetStore.load()?.expense.amount, 555_180)
+        XCTAssertEqual(widgetStore.load()?.imports, previous.imports)
+        XCTAssertEqual(widgetStore.load()?.importsUpdatedAt, previous.importsUpdatedAt)
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -625,6 +710,31 @@ final class LedgerSessionTests: XCTestCase {
         valuationCurrency: "CNY",
         sensitiveUnlocked: true
     )
+
+    private static let widgetReport = LedgerHomeReport(
+        start: "2026-08-01",
+        end: "2026-09-01",
+        currency: "CNY",
+        current: LedgerHomeReportPeriod(
+            kpis: LedgerHomeReportExpenseKPI(expense: 555_180, transactionCount: 9),
+            categorySeries: []
+        ),
+        previous: LedgerHomeReportPeriod(
+            kpis: LedgerHomeReportExpenseKPI(expense: 635_200, transactionCount: 12),
+            categorySeries: []
+        ),
+        dailyExpenseSeries: [],
+        generatedAt: "2026-08-31T05:30:00Z"
+    )
+
+    private static let widgetImportDocuments = [
+        LedgerImportDocument(
+            provider: "alipay",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-28",
+            modTime: "2026-08-29T08:00:00Z"
+        ),
+    ]
 }
 
 private actor SessionMockAPI: LedgerAPI {
@@ -664,6 +774,9 @@ private actor SessionMockAPI: LedgerAPI {
     let currentAuthStatus: AuthStatus
     let currentPasskeyStatus: PasskeyStatus
     let payload: LedgerBootstrap
+    let widgetReport: LedgerHomeReport?
+    let widgetImportDocuments: [LedgerImportDocument]
+    let importDocumentsShouldFail: Bool
     let lockShouldFail: Bool
     let accountDetailErrorStatus: Int?
     let accountDetailDelayNanoseconds: UInt64
@@ -698,6 +811,9 @@ private actor SessionMockAPI: LedgerAPI {
         authStatus: AuthStatus = AuthStatus(authenticated: true, sensitiveUnlocked: true, authDisabled: false),
         passkeyStatus: PasskeyStatus = PasskeyStatus(registered: false, count: 0),
         payload: LedgerBootstrap,
+        widgetReport: LedgerHomeReport? = nil,
+        widgetImportDocuments: [LedgerImportDocument] = [],
+        importDocumentsShouldFail: Bool = false,
         lockShouldFail: Bool = false,
         accountDetailErrorStatus: Int? = nil,
         accountDetailDelayNanoseconds: UInt64 = 0,
@@ -713,6 +829,9 @@ private actor SessionMockAPI: LedgerAPI {
         currentAuthStatus = authStatus
         currentPasskeyStatus = passkeyStatus
         self.payload = payload
+        self.widgetReport = widgetReport
+        self.widgetImportDocuments = widgetImportDocuments
+        self.importDocumentsShouldFail = importDocumentsShouldFail
         self.lockShouldFail = lockShouldFail
         self.accountDetailErrorStatus = accountDetailErrorStatus
         self.accountDetailDelayNanoseconds = accountDetailDelayNanoseconds
@@ -809,6 +928,25 @@ private actor SessionMockAPI: LedgerAPI {
             valuationCurrency: valuationCurrency,
             sensitiveUnlocked: payload.sensitiveUnlocked
         )
+    }
+
+    func homeReport(
+        baseURL: URL,
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerHomeReport {
+        guard let widgetReport else {
+            throw LedgerAPIError.incompatibleServer("服务器暂不支持首页消费报告")
+        }
+        return widgetReport
+    }
+
+    func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
+        if importDocumentsShouldFail {
+            throw LedgerAPIError.transport("import history unavailable")
+        }
+        return widgetImportDocuments
     }
 
     func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {

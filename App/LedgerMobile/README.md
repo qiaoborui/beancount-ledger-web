@@ -24,6 +24,12 @@ authentication and privacy lock.
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
   `w`, `k`, `M`, `B`, and `亿` notation.
+- Add Home Screen widgets for current-month spending, a monthly expense
+  calendar, a user-selected asset or liability account, and per-channel import
+  recency. Widget snapshots contain expense analytics, account balances, and
+  reduced import metadata only; income, archived document names and paths,
+  cookies, passwords, and quick-unlock tokens stay out of the App Group
+  container.
 - Keep native Ledger passkey login ready for paid-team signing; Personal Team
   builds use password login and device-level biometric quick unlock.
 - Enable Face ID or Touch ID from Settings, then unlock with a server-revocable
@@ -36,8 +42,9 @@ authentication and privacy lock.
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next read-only milestone adds Agent conversations. Ledger writes remain a
-later phase with a separate preview-and-confirmation design.
+The next read-only milestones continue mobile web parity for financial review
+screens. Ledger writes remain a later phase with a separate
+preview-and-confirmation design.
 
 ## Generate and build
 
@@ -95,9 +102,10 @@ unlock stores only the server-issued device token under
 ## Native passkey deployment
 
 The checked-in Debug and Release configurations support installation with an
-Apple Personal Team. They omit Associated Domains, so password login and Face
-ID or Touch ID quick unlock remain available while native passkey login stays
-hidden.
+Apple Personal Team. They use `Supporting/LedgerMobilePersonal.entitlements`
+for the widget App Group and omit Associated Domains, so password login and
+Face ID or Touch ID quick unlock remain available while native passkey login
+stays hidden.
 
 Enabling native passkeys requires a paid Apple Developer team. Remove the
 `PERSONAL_TEAM_BUILD` condition, set `CODE_SIGN_ENTITLEMENTS` to
