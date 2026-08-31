@@ -17,6 +17,9 @@ final class LedgerMobileUITests: XCTestCase {
         app.launchArguments = ["--safe-preview"]
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["环比"].firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["同比"].firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["总资产"].exists)
         capture("01-overview")
 
         if isPad {
@@ -34,7 +37,21 @@ final class LedgerMobileUITests: XCTestCase {
         rangeButton.tap()
         XCTAssertTrue(app.navigationBars["时间范围"].waitForExistence(timeout: 3))
         capture("02-time-range")
-        app.buttons["取消"].tap()
+        app.buttons["本季度"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "应用 ")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["季度结论"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["环比"].firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["同比"].firstMatch.exists)
+
+        let quarterRangeButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")
+        ).firstMatch
+        quarterRangeButton.tap()
+        XCTAssertTrue(app.navigationBars["时间范围"].waitForExistence(timeout: 3))
+        app.buttons["本月"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "应用 ")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["月度结论"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["环比"].firstMatch.waitForExistence(timeout: 3))
 
         openDestination(compact: "交易", regular: "交易账本")
         XCTAssertTrue(app.textFields["搜索交易、账户或标签"].waitForExistence(timeout: 3))

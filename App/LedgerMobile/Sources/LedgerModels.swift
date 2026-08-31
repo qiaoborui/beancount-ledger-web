@@ -340,6 +340,7 @@ struct LedgerBootstrap: Decodable {
     let start: String
     let end: String
     let summary: LedgerSummary
+    let comparisons: LedgerPeriodComparisons?
     let accountBalances: [AccountBalance]
     let transactions: [LedgerTransaction]
     let accounts: [LedgerAccount]
@@ -352,6 +353,7 @@ struct LedgerBootstrap: Decodable {
         case start
         case end
         case summary
+        case comparisons
         case accountBalances
         case transactions
         case accounts
@@ -365,6 +367,7 @@ struct LedgerBootstrap: Decodable {
         start: String,
         end: String,
         summary: LedgerSummary,
+        comparisons: LedgerPeriodComparisons? = nil,
         accountBalances: [AccountBalance],
         transactions: [LedgerTransaction],
         accounts: [LedgerAccount],
@@ -376,6 +379,7 @@ struct LedgerBootstrap: Decodable {
         self.start = start
         self.end = end
         self.summary = summary
+        self.comparisons = comparisons
         self.accountBalances = accountBalances
         self.transactions = transactions
         self.accounts = accounts
@@ -390,6 +394,7 @@ struct LedgerBootstrap: Decodable {
         start = try container.decode(String.self, forKey: .start)
         end = try container.decode(String.self, forKey: .end)
         summary = try container.decode(LedgerSummary.self, forKey: .summary)
+        comparisons = try container.decodeIfPresent(LedgerPeriodComparisons.self, forKey: .comparisons)
         accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
@@ -405,6 +410,31 @@ struct LedgerSummary: Decodable, Equatable {
     let income: Int
     let expense: Int
     let net: Int
+}
+
+struct LedgerComparisonDateRange: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+}
+
+struct LedgerPeriodComparison: Decodable, Equatable, Sendable {
+    let currentRange: LedgerComparisonDateRange
+    let baselineRange: LedgerComparisonDateRange
+    let current: Int?
+    let baseline: Int?
+    let delta: Int?
+    let percentage: Double?
+}
+
+struct LedgerMetricPeriodComparisons: Decodable, Equatable, Sendable {
+    let monthOverMonth: LedgerPeriodComparison
+    let yearOverYear: LedgerPeriodComparison
+}
+
+struct LedgerPeriodComparisons: Decodable, Equatable, Sendable {
+    let income: LedgerMetricPeriodComparisons
+    let expense: LedgerMetricPeriodComparisons
+    let totalAssets: LedgerMetricPeriodComparisons?
 }
 
 struct LedgerTransaction: Decodable, Identifiable, Equatable {

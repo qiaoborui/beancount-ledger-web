@@ -62,6 +62,11 @@ final class LedgerModelsTests: XCTestCase {
         let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(Self.bootstrapJSON.utf8))
 
         XCTAssertEqual(payload.summary.net, 315_000)
+        XCTAssertEqual(payload.comparisons?.income.monthOverMonth.delta, 20_000)
+        XCTAssertEqual(payload.comparisons?.income.yearOverYear.percentage, 0.5)
+        XCTAssertEqual(payload.comparisons?.expense.monthOverMonth.delta, -1_000)
+        XCTAssertNil(payload.comparisons?.expense.yearOverYear.percentage)
+        XCTAssertNil(payload.comparisons?.totalAssets)
         XCTAssertEqual(
             payload.balanceSheetTotals,
             BalanceSheetTotals(assets: 1_235_000, liabilities: 235_000, netWorth: 1_000_000)
@@ -299,6 +304,33 @@ final class LedgerModelsTests: XCTestCase {
       "start": "2026-08-01",
       "end": "2026-08-31",
       "summary": { "currency": "CNY", "income": 400000, "expense": 85000, "net": 315000 },
+      "comparisons": {
+        "income": {
+          "monthOverMonth": {
+            "currentRange": { "start": "2026-08-01", "end": "2026-08-31" },
+            "baselineRange": { "start": "2026-07-01", "end": "2026-07-31" },
+            "current": 400000, "baseline": 380000, "delta": 20000, "percentage": 0.0526315789
+          },
+          "yearOverYear": {
+            "currentRange": { "start": "2026-08-01", "end": "2026-08-31" },
+            "baselineRange": { "start": "2025-08-01", "end": "2025-08-31" },
+            "current": 400000, "baseline": 266667, "delta": 133333, "percentage": 0.5
+          }
+        },
+        "expense": {
+          "monthOverMonth": {
+            "currentRange": { "start": "2026-08-01", "end": "2026-08-31" },
+            "baselineRange": { "start": "2026-07-01", "end": "2026-07-31" },
+            "current": 85000, "baseline": 86000, "delta": -1000, "percentage": -0.011627907
+          },
+          "yearOverYear": {
+            "currentRange": { "start": "2026-08-01", "end": "2026-08-31" },
+            "baselineRange": { "start": "2025-08-01", "end": "2025-08-31" },
+            "current": 85000, "baseline": 0, "delta": 85000, "percentage": null
+          }
+        },
+        "totalAssets": null
+      },
       "accountBalances": [
         { "account": "Assets:Bank:Daily", "currency": "CNY", "amount": 1235000, "valuationCurrency": "CNY", "valuation": 1235000 },
         { "account": "Liabilities:CreditCard:Visa", "currency": "CNY", "amount": -235000, "valuationCurrency": "CNY", "valuation": -235000 }
