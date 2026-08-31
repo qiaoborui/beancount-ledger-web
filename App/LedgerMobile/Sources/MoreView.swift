@@ -21,6 +21,32 @@ struct MoreView: View {
                         }
 
                         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                            Text("财务分析")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 2)
+
+                            LedgerPanel {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(LedgerAnalysisKind.allCases.enumerated()), id: \.element) { index, kind in
+                                        NavigationLink {
+                                            LedgerAnalysisView(kind: kind)
+                                        } label: {
+                                            MoreNavigationRow(icon: kind.systemImage, title: kind.title, detail: kind.detail)
+                                        }
+                                        .buttonStyle(PressScaleButtonStyle())
+                                        .accessibilityIdentifier("more-analysis-\(kind.rawValue)")
+
+                                        if index < LedgerAnalysisKind.allCases.count - 1 {
+                                            Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, LedgerSpacing.lg)
+
+                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
                             Text("管理")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.secondary)
@@ -74,32 +100,6 @@ struct MoreView: View {
                                     }
                                     .buttonStyle(PressScaleButtonStyle())
                                     .accessibilityIdentifier("more-query")
-                                }
-                            }
-                        }
-                        .padding(.horizontal, LedgerSpacing.lg)
-
-                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-                            Text("财务分析")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.secondary)
-                                .padding(.horizontal, 2)
-
-                            LedgerPanel {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(LedgerAnalysisKind.allCases.enumerated()), id: \.element) { index, kind in
-                                        NavigationLink {
-                                            LedgerAnalysisView(kind: kind)
-                                        } label: {
-                                            MoreNavigationRow(icon: kind.systemImage, title: kind.title, detail: kind.detail)
-                                        }
-                                        .buttonStyle(PressScaleButtonStyle())
-                                        .accessibilityIdentifier("more-analysis-\(kind.rawValue)")
-
-                                        if index < LedgerAnalysisKind.allCases.count - 1 {
-                                            Divider().overlay(LedgerPalette.line).padding(.leading, 64)
-                                        }
-                                    }
                                 }
                             }
                         }

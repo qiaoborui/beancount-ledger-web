@@ -26,10 +26,15 @@ struct OverviewView: View {
                                         .frame(width: 420)
                                 }
                             } else {
-                                overviewIntro
-
-                                LedgerTimeRangeControl()
-                                .padding(.horizontal, LedgerSpacing.lg)
+                                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                                    overviewIntro
+                                    LedgerTimeRangeControl()
+                                }
+                                .padding(LedgerSpacing.lg)
+                                .background(LedgerPalette.panel)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle().fill(LedgerPalette.line).frame(height: 1)
+                                }
                                 .padding(.bottom, LedgerSpacing.lg)
                             }
 
@@ -93,7 +98,8 @@ struct OverviewView: View {
         LedgerPageIntro(
             title: "财务概览",
             detail: "查看所选范围的结余、资产位置与最近流水。",
-            meta: session.selectedRange.metricScope
+            meta: session.selectedRange.metricScope,
+            style: .inline
         ) {
             EmptyView()
         }

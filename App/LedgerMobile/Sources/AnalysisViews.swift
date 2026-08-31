@@ -102,48 +102,77 @@ struct LedgerAnalysisView: View {
         .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
-            }
-        }
         .task(id: requestKey) { await load() }
     }
 
     @ViewBuilder
     private func content(_ resource: LedgerAnalysisResource) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                LedgerPageIntro(
-                    title: kind.title,
-                    detail: kind.detail,
-                    meta: session.selectedRange.displayTitle
-                ) { EmptyView() }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(analysisTopID)
+                    analysisHeader
 
-                if let errorMessage {
-                    StatusBanner(message: errorMessage) { self.errorMessage = nil }
-                }
-
-                switch resource {
-                case let .dashboard(data):
-                    if kind == .netWorth {
-                        NetWorthAnalysisContent(data: data)
-                    } else {
-                        DashboardAnalysisContent(data: data)
+                    if let errorMessage {
+                        StatusBanner(message: errorMessage) { self.errorMessage = nil }
                     }
-                case let .incomeStatement(data):
-                    IncomeStatementAnalysisContent(data: data)
-                case let .investments(data):
-                    InvestmentsAnalysisContent(data: data)
+
+                    switch resource {
+                    case let .dashboard(data):
+                        if kind == .netWorth {
+                            NetWorthAnalysisContent(data: data)
+                        } else {
+                            DashboardAnalysisContent(data: data)
+                        }
+                    case let .incomeStatement(data):
+                        IncomeStatementAnalysisContent(data: data)
+                    case let .investments(data):
+                        InvestmentsAnalysisContent(data: data)
+                    }
                 }
+                .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
+                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
+                .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
+                .ledgerAdaptivePageWidth()
             }
-            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
-            .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
-            .ledgerAdaptivePageWidth()
+            .id(kind)
+            .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
+            .refreshable { await load(replacingContent: false) }
+            .onAppear {
+                proxy.scrollTo(analysisTopID, anchor: .top)
+            }
         }
-        .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
-        .refreshable { await load(replacingContent: false) }
+    }
+
+    private var analysisTopID: String { "analysis-top-\(kind.rawValue)" }
+
+    @ViewBuilder
+    private var analysisHeader: some View {
+        if horizontalSizeClass == .regular {
+            HStack(alignment: .bottom, spacing: LedgerSpacing.xl) {
+                analysisIntro
+                LedgerTimeRangeControl()
+                    .frame(width: 420)
+            }
+        } else if showsAppBar {
+            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                analysisIntro
+                LedgerTimeRangeControl()
+            }
+        } else {
+            LedgerTimeRangeControl()
+        }
+    }
+
+    private var analysisIntro: some View {
+        LedgerPageIntro(
+            title: kind.title,
+            detail: kind.detail,
+            meta: session.selectedRange.metricScope,
+            style: .inline
+        ) { EmptyView() }
     }
 
     private func load(replacingContent: Bool = true) async {
@@ -348,6 +377,11 @@ private struct AnalysisMetricGrid: View {
     let metrics: [AnalysisMetric]
     let currency: String
 
+    private let compactColumns = [
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1),
+    ]
+
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
@@ -356,14 +390,19 @@ private struct AnalysisMetricGrid: View {
                         AnalysisMetricCell(metric: metrics[index], currency: currency)
                     }
                 }
-            } else {
+            } else if metrics.count == 3 {
                 VStack(spacing: 1) {
-                    ForEach(compactRows.indices, id: \.self) { rowIndex in
-                        HStack(spacing: 1) {
-                            ForEach(compactRows[rowIndex], id: \.self) { metricIndex in
-                                AnalysisMetricCell(metric: metrics[metricIndex], currency: currency)
-                            }
+                    AnalysisMetricCell(metric: metrics[0], currency: currency)
+                    LazyVGrid(columns: compactColumns, spacing: 1) {
+                        ForEach(1 ..< metrics.count, id: \.self) { index in
+                            AnalysisMetricCell(metric: metrics[index], currency: currency)
                         }
+                    }
+                }
+            } else {
+                LazyVGrid(columns: compactColumns, spacing: 1) {
+                    ForEach(metrics.indices, id: \.self) { index in
+                        AnalysisMetricCell(metric: metrics[index], currency: currency)
                     }
                 }
             }
@@ -372,15 +411,11 @@ private struct AnalysisMetricGrid: View {
         .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous).stroke(LedgerPalette.line, lineWidth: 1) }
     }
 
-    private var compactRows: [[Int]] {
-        if metrics.count == 3 { return [[0], [1, 2]] }
-        return stride(from: 0, to: metrics.count, by: 2).map { start in
-            Array(start ..< min(start + 2, metrics.count))
-        }
-    }
 }
 
 private struct AnalysisMetricCell: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let metric: AnalysisMetric
     let currency: String
 
@@ -394,10 +429,12 @@ private struct AnalysisMetricCell: View {
                     minorUnits: amount,
                     currency: currency,
                     font: .system(size: 20, weight: .semibold),
-                    color: metric.color
+                    color: metric.color,
+                    displayMode: horizontalSizeClass == .regular ? .adaptive : .compact
                 )
                 .tracking(-0.4)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(metric.placeholder)
                     .font(.system(size: 14, weight: .semibold))
@@ -408,6 +445,7 @@ private struct AnalysisMetricCell: View {
         .padding(LedgerSpacing.lg)
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .background(LedgerPalette.panel)
+        .accessibilityIdentifier("analysis-metric-\(metric.title)")
     }
 }
 

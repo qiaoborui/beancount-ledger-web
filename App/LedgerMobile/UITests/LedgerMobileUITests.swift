@@ -45,6 +45,14 @@ final class LedgerMobileUITests: XCTestCase {
         capture("04-transaction-filters")
         app.buttons["完成"].tap()
 
+        let firstTransaction = app.staticTexts["城市书房"].firstMatch
+        XCTAssertTrue(firstTransaction.waitForExistence(timeout: 3))
+        firstTransaction.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.navigationBars["交易详情"].buttons["隐藏金额"].exists)
+        capture("04b-transaction-detail")
+        app.navigationBars["交易详情"].buttons.firstMatch.tap()
+
         openDestination(compact: "账户", regular: "账户")
         let longAccount = app.staticTexts["家庭长期储备与教育基金（含海外留学与应急资金）"]
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
@@ -58,9 +66,6 @@ final class LedgerMobileUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["当前客户端"].waitForExistence(timeout: 3))
             capture("07-more")
 
-            app.buttons["more-currencies"].tap()
-            exerciseCurrencies(capturePrefix: "08")
-
             openCompactAnalysis(identifier: "more-analysis-dashboard", kind: "dashboard", title: "仪表盘", captureName: "08-dashboard")
             openCompactAnalysis(identifier: "more-analysis-netWorth", kind: "netWorth", title: "净资产", captureName: "09-net-worth")
             openCompactAnalysis(identifier: "more-analysis-incomeStatement", kind: "incomeStatement", title: "损益", captureName: "10-income-statement")
@@ -68,19 +73,31 @@ final class LedgerMobileUITests: XCTestCase {
                 identifier: "more-analysis-investments",
                 kind: "investments",
                 title: "投资",
-                captureName: "11-investments",
-                verifiesPrivacy: true
+                captureName: "11-investments"
             )
+
+            let currencyEntry = app.buttons["more-currencies"]
+            for _ in 0..<3 where !currencyEntry.isHittable {
+                app.swipeUp()
+            }
+            waitUntilHittable(currencyEntry)
+            currencyEntry.tap()
+            exerciseCurrencies(capturePrefix: "12")
 
             let queryEntry = app.buttons["more-query"]
             for _ in 0..<3 where !queryEntry.isHittable {
-                app.swipeDown()
+                app.swipeUp()
             }
             waitUntilHittable(queryEntry)
             queryEntry.tap()
-            exerciseBQL(capturePrefix: "12")
+            exerciseBQL(capturePrefix: "13")
 
-            app.buttons["设置, Face ID、自动锁定、服务器与会话"].tap()
+            let settingsEntry = app.buttons["设置, Face ID、自动锁定、服务器与会话"]
+            for _ in 0..<3 where !settingsEntry.isHittable {
+                app.swipeDown()
+            }
+            waitUntilHittable(settingsEntry)
+            settingsEntry.tap()
         } else {
             app.buttons["sidebar-currencies"].tap()
             exerciseCurrencies(capturePrefix: "07")
@@ -111,6 +128,10 @@ final class LedgerMobileUITests: XCTestCase {
             app.tabBars.buttons["更多"].tap()
             let entry = app.buttons["more-currencies"]
             XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            for _ in 0..<3 where !entry.isHittable {
+                app.swipeUp()
+            }
+            waitUntilHittable(entry)
             entry.tap()
         }
         XCTAssertTrue(app.scrollViews["currency-analysis-content"].waitForExistence(timeout: 3))
@@ -171,20 +192,15 @@ final class LedgerMobileUITests: XCTestCase {
         identifier: String,
         kind: String,
         title: String,
-        captureName: String,
-        verifiesPrivacy: Bool = false
+        captureName: String
     ) {
         let entry = app.buttons[identifier]
         waitUntilHittable(entry)
         entry.tap()
         XCTAssertTrue(app.scrollViews["analysis-content-\(kind)"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
+        XCTAssertFalse(app.navigationBars[title].buttons["隐藏金额"].exists)
         capture(captureName)
-        if verifiesPrivacy {
-            app.buttons["隐藏金额"].tap()
-            XCTAssertTrue(app.staticTexts["浮动 金额已隐藏"].waitForExistence(timeout: 3))
-            app.buttons["显示金额"].tap()
-            XCTAssertTrue(app.buttons["隐藏金额"].waitForExistence(timeout: 3))
-        }
         let backButton = app.navigationBars[title].buttons.firstMatch
         waitUntilHittable(backButton)
         backButton.tap()

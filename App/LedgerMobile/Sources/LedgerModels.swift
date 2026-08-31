@@ -894,6 +894,7 @@ enum MoneyText {
     enum DisplayMode {
         case full
         case adaptive
+        case compact
     }
 
     static func format(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
