@@ -139,7 +139,12 @@ final class APIClientTests: XCTestCase {
                 item.value.map { (item.name, $0) }
             })
             XCTAssertEqual(components.path, "/api/ledger/bootstrap")
-            XCTAssertEqual(query, ["start": "2026-08-01", "end": "2026-09-01", "today": "2026-08-30"])
+            XCTAssertEqual(query, [
+                "start": "2026-08-01",
+                "end": "2026-09-01",
+                "today": "2026-08-30",
+                "valuationCurrency": "USD",
+            ])
             return Self.response(for: request, body: LedgerModelsTests.bootstrapJSON)
         }
 
@@ -147,7 +152,8 @@ final class APIClientTests: XCTestCase {
             baseURL: URL(string: "https://ledger.example.com")!,
             start: "2026-08-01",
             end: "2026-09-01",
-            today: "2026-08-30"
+            today: "2026-08-30",
+            valuationCurrency: "USD"
         )
         XCTAssertEqual(payload.transactions.count, 2)
     }
@@ -183,6 +189,7 @@ final class APIClientTests: XCTestCase {
                 [
                     URLQueryItem(name: "start", value: "2026-08-01"),
                     URLQueryItem(name: "end", value: "2026-09-01"),
+                    URLQueryItem(name: "valuationCurrency", value: "USD"),
                 ]
             )
             XCTAssertEqual(request.httpMethod, "GET")
@@ -192,7 +199,8 @@ final class APIClientTests: XCTestCase {
         let dashboard = try await makeClient().dashboard(
             baseURL: URL(string: "https://ledger.example.com")!,
             start: "2026-08-01",
-            end: "2026-09-01"
+            end: "2026-09-01",
+            valuationCurrency: "USD"
         )
 
         XCTAssertEqual(dashboard.kpis.netWorth, 1_414_910_466)
@@ -212,6 +220,7 @@ final class APIClientTests: XCTestCase {
                 [
                     URLQueryItem(name: "start", value: "2026-08-01"),
                     URLQueryItem(name: "end", value: "2026-09-01"),
+                    URLQueryItem(name: "valuationCurrency", value: "USD"),
                 ]
             )
             return Self.response(for: request, body: Self.incomeStatementJSON)
@@ -220,7 +229,8 @@ final class APIClientTests: XCTestCase {
         let statement = try await makeClient().incomeStatement(
             baseURL: URL(string: "https://ledger.example.com")!,
             start: "2026-08-01",
-            end: "2026-09-01"
+            end: "2026-09-01",
+            valuationCurrency: "USD"
         )
 
         XCTAssertEqual(statement.netIncome, 4_494_820)

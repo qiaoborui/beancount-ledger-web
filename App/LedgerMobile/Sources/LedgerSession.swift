@@ -43,6 +43,7 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var selectedRange: LedgerDateRange
     @Published private(set) var draftRange: LedgerDateRange
     @Published private(set) var isRangeLoading = false
+    @Published private(set) var isValuationCurrencyLoading = false
     @Published var rangePickerPresented = false
     @Published private(set) var passkeyAvailable = false
     @Published private(set) var privacyShielded = true
@@ -58,6 +59,7 @@ final class LedgerSession: ObservableObject {
     private static let serverKey = "ledger.mobile.server-origin"
     private static let locallyLockedOriginsKey = "ledger.mobile.locally-locked-origins"
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
+    private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let sessionCookieName = "ledger_session"
     private static let sensitiveCookieName = "ledger_sensitive_until"
@@ -260,7 +262,7 @@ final class LedgerSession: ObservableObject {
     }
 
     func refresh() async {
-        guard let serverURL, !isRangeLoading else { return }
+        guard let serverURL, !isRangeLoading, !isValuationCurrencyLoading else { return }
         let generation = invalidateRequests()
         do {
             try await loadLedger(from: serverURL, showLoadingState: false, generation: generation)
@@ -269,6 +271,30 @@ final class LedgerSession: ObservableObject {
         } catch {
             guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func setValuationCurrency(_ rawCurrency: String) async {
+        guard let serverURL, phase == .ready, !isRangeLoading else { return }
+        let currency = rawCurrency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !currency.isEmpty, currency != ledger?.valuationCurrency else { return }
+
+        let generation = invalidateRequests()
+        isValuationCurrencyLoading = true
+        errorMessage = nil
+        do {
+            try await loadLedger(
+                from: serverURL,
+                showLoadingState: false,
+                generation: generation,
+                valuationCurrency: currency
+            )
+            guard generation == requestGeneration else { return }
+            isValuationCurrencyLoading = false
+        } catch {
+            guard generation == requestGeneration else { return }
+            isValuationCurrencyLoading = false
+            handleBootstrapSessionError(error, serverURL: serverURL)
         }
     }
 
@@ -307,6 +333,7 @@ final class LedgerSession: ObservableObject {
         }
         let generation = requestGeneration
         let range = selectedRange
+        let valuationCurrency = ledger?.valuationCurrency ?? storedValuationCurrency(for: serverURL)
         do {
             let resource: LedgerAnalysisResource
             switch kind {
@@ -315,7 +342,8 @@ final class LedgerSession: ObservableObject {
                     try await api.dashboard(
                         baseURL: serverURL,
                         start: range.start,
-                        end: range.queryEndExclusive
+                        end: range.queryEndExclusive,
+                        valuationCurrency: valuationCurrency
                     )
                 )
             case .incomeStatement:
@@ -323,7 +351,8 @@ final class LedgerSession: ObservableObject {
                     try await api.incomeStatement(
                         baseURL: serverURL,
                         start: range.start,
-                        end: range.queryEndExclusive
+                        end: range.queryEndExclusive,
+                        valuationCurrency: valuationCurrency
                     )
                 )
             case .investments:
@@ -426,7 +455,7 @@ final class LedgerSession: ObservableObject {
     }
 
     func applyRange(_ range: LedgerDateRange) async {
-        guard let serverURL, phase == .ready, !isRangeLoading else { return }
+        guard let serverURL, phase == .ready, !isRangeLoading, !isValuationCurrencyLoading else { return }
         let generation = invalidateRequests()
         isRangeLoading = true
         errorMessage = nil
@@ -450,6 +479,7 @@ final class LedgerSession: ObservableObject {
         guard let serverURL else { return }
         let generation = invalidateRequests()
         isRangeLoading = false
+        isValuationCurrencyLoading = false
         rangePickerPresented = false
         setLocallyLocked(true, for: serverURL)
         clearBackgroundDate(for: serverURL)
@@ -478,6 +508,7 @@ final class LedgerSession: ObservableObject {
         password = ""
         amountsVisible = false
         isRangeLoading = false
+        isValuationCurrencyLoading = false
         rangePickerPresented = false
         privacyShielded = false
         phase = .locked(authenticated: false)
@@ -503,6 +534,7 @@ final class LedgerSession: ObservableObject {
         selectedRange = initialRange
         draftRange = initialRange
         isRangeLoading = false
+        isValuationCurrencyLoading = false
         rangePickerPresented = false
         passkeyAvailable = false
         lockInterval = .fiveMinutes
@@ -590,15 +622,18 @@ final class LedgerSession: ObservableObject {
         from serverURL: URL,
         showLoadingState: Bool = true,
         generation: Int,
-        range: LedgerDateRange? = nil
+        range: LedgerDateRange? = nil,
+        valuationCurrency: String? = nil
     ) async throws {
         if showLoadingState { phase = .loading }
         let targetRange = range ?? selectedRange
+        let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: serverURL)
         let payload = try await api.bootstrap(
             baseURL: serverURL,
             start: targetRange.start,
             end: targetRange.queryEndExclusive,
-            today: LedgerDateRange.today()
+            today: LedgerDateRange.today(),
+            valuationCurrency: targetCurrency
         )
         guard generation == requestGeneration else { return }
         guard payload.sensitiveUnlocked else {
@@ -608,10 +643,44 @@ final class LedgerSession: ObservableObject {
             return
         }
         ledger = payload
+        storeValuationCurrency(payload.valuationCurrency, for: serverURL)
         selectedRange = targetRange
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready
+    }
+
+    private func handleBootstrapSessionError(_ error: Error, serverURL: URL) {
+        errorMessage = error.localizedDescription
+        guard let apiError = error as? LedgerAPIError,
+              case let .server(status, _) = apiError,
+              status == 401 || status == 423 else { return }
+        ledger = nil
+        amountsVisible = false
+        if status == 401 {
+            clearAuthenticationCookies(for: serverURL)
+            setLocallyLocked(false, for: serverURL)
+            phase = .locked(authenticated: false)
+        } else {
+            clearSensitiveCookie(for: serverURL)
+            setLocallyLocked(true, for: serverURL)
+            phase = .locked(authenticated: true)
+        }
+    }
+
+    private func storedValuationCurrency(for serverURL: URL) -> String {
+        let currencies = defaults.dictionary(forKey: Self.valuationCurrenciesKey) as? [String: String]
+        let stored = currencies?[serverURL.absoluteString]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let stored, !stored.isEmpty { return stored }
+        return "CNY"
+    }
+
+    private func storeValuationCurrency(_ currency: String, for serverURL: URL) {
+        let normalized = currency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalized.isEmpty else { return }
+        var currencies = defaults.dictionary(forKey: Self.valuationCurrenciesKey) as? [String: String] ?? [:]
+        currencies[serverURL.absoluteString] = normalized
+        defaults.set(currencies, forKey: Self.valuationCurrenciesKey)
     }
 
     private func performSensitiveRequest<Value: Sendable>(
@@ -699,9 +768,18 @@ final class LedgerSession: ObservableObject {
     }
 
     private func isTrustedNativePasskeyOrigin(_ serverURL: URL) -> Bool {
-        serverURL.scheme?.lowercased() == "https"
+        nativePasskeyEnabled
+            && serverURL.scheme?.lowercased() == "https"
             && serverURL.host?.lowercased() == Self.passkeyRelyingPartyID
             && serverURL.port == nil
+    }
+
+    private var nativePasskeyEnabled: Bool {
+#if PERSONAL_TEAM_BUILD
+        false
+#else
+        true
+#endif
     }
 
     private func recordBackgroundDate(for serverURL: URL, now: Date = Date()) {
@@ -731,6 +809,7 @@ final class LedgerSession: ObservableObject {
         ledger = nil
         amountsVisible = false
         isRangeLoading = false
+        isValuationCurrencyLoading = false
         rangePickerPresented = false
         phase = .locked(authenticated: true)
     }

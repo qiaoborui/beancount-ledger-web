@@ -59,6 +59,7 @@ struct LedgerAnalysisView: View {
             kind: kind,
             start: session.selectedRange.start,
             end: session.selectedRange.end,
+            valuationCurrency: session.ledger?.valuationCurrency ?? "CNY",
             reloadToken: reloadToken
         )
     }
@@ -164,6 +165,7 @@ private struct AnalysisRequestKey: Hashable {
     let kind: LedgerAnalysisKind
     let start: String
     let end: String
+    let valuationCurrency: String
     let reloadToken: Int
 }
 

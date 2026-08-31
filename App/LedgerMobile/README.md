@@ -18,12 +18,14 @@ authentication and privacy lock.
   and inspect investment holdings, market values, costs, and returns.
 - Run one or more read-only BQL statements, switch numeric results between
   table, bar, pie, and line views, and manage server-synced query history.
+- Inspect direct, inverse, and CNY-bridged exchange rates, review recent price
+  history, and switch the valuation currency used across overview and analysis.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
   `w`, `k`, `M`, `B`, and `亿` notation.
-- Use an existing Ledger passkey as the primary account login on iPhone and
-  iPad, with password fallback.
+- Keep native Ledger passkey login ready for paid-team signing; Personal Team
+  builds use password login and device-level biometric quick unlock.
 - Enable Face ID or Touch ID from Settings, then unlock with a server-revocable
   device token protected by the system Keychain.
 - Choose an automatic lock interval per server: immediately, 1, 5, 15, or 30
@@ -34,9 +36,8 @@ authentication and privacy lock.
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next read-only milestone adds Agent conversations and currency analysis.
-Ledger writes remain a later phase with a separate
-preview-and-confirmation design.
+The next read-only milestone adds Agent conversations. Ledger writes remain a
+later phase with a separate preview-and-confirmation design.
 
 ## Generate and build
 
@@ -93,9 +94,15 @@ unlock stores only the server-issued device token under
 
 ## Native passkey deployment
 
-The checked-in signing configuration uses Team ID `H92F889YBH`, bundle ID
-`com.qiaoborui.ledger.mobile`, and the Associated Domain
-`webcredentials:beancount.borry.org`. The production server must meet all of
+The checked-in Debug and Release configurations support installation with an
+Apple Personal Team. They omit Associated Domains, so password login and Face
+ID or Touch ID quick unlock remain available while native passkey login stays
+hidden.
+
+Enabling native passkeys requires a paid Apple Developer team. Remove the
+`PERSONAL_TEAM_BUILD` condition, set `CODE_SIGN_ENTITLEMENTS` to
+`Supporting/LedgerMobile.entitlements`, and use Team ID `H92F889YBH` with bundle
+ID `com.qiaoborui.ledger.mobile`. The production server must then meet all of
 these requirements:
 
 - Serve `/.well-known/apple-app-site-association` over HTTPS with status 200,

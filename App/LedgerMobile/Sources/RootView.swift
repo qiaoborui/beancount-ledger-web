@@ -352,6 +352,7 @@ enum LedgerDestination: String, CaseIterable, Hashable {
     case netWorth
     case incomeStatement
     case investments
+    case currencies
     case query
     case transactions
     case accounts
@@ -364,6 +365,7 @@ enum LedgerDestination: String, CaseIterable, Hashable {
         case .netWorth: "净资产"
         case .incomeStatement: "损益"
         case .investments: "投资"
+        case .currencies: "货币与汇率"
         case .query: "查询"
         case .transactions: "交易账本"
         case .accounts: "账户"
@@ -378,6 +380,7 @@ enum LedgerDestination: String, CaseIterable, Hashable {
         case .netWorth: "chart.line.uptrend.xyaxis"
         case .incomeStatement: "sum"
         case .investments: "chart.pie"
+        case .currencies: "coloncurrencysign"
         case .query: "cylinder.split.1x2"
         case .transactions: "list.bullet"
         case .accounts: "book.closed"
@@ -403,7 +406,7 @@ private struct MainTabView: View {
                 switch LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview {
                 case .overview, .transactions, .accounts, .settings:
                     return LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview
-                case .dashboard, .netWorth, .incomeStatement, .investments, .query:
+                case .dashboard, .netWorth, .incomeStatement, .investments, .currencies, .query:
                     return .settings
                 }
             },
@@ -464,6 +467,8 @@ private struct LedgerRegularShell: View {
                     LedgerAnalysisView(kind: .incomeStatement, showsAppBar: true)
                 case .investments:
                     LedgerAnalysisView(kind: .investments, showsAppBar: true)
+                case .currencies:
+                    CurrencyAnalysisView(showsAppBar: true)
                 case .query:
                     BQLQueryView(showsAppBar: true)
                 case .transactions:

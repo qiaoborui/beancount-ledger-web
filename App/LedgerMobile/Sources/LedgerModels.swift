@@ -343,8 +343,61 @@ struct LedgerBootstrap: Decodable {
     let accountBalances: [AccountBalance]
     let transactions: [LedgerTransaction]
     let accounts: [LedgerAccount]
+    let commodities: [String]
+    let prices: [LedgerPrice]
     let valuationCurrency: String
     let sensitiveUnlocked: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case start
+        case end
+        case summary
+        case accountBalances
+        case transactions
+        case accounts
+        case commodities
+        case prices
+        case valuationCurrency
+        case sensitiveUnlocked
+    }
+
+    init(
+        start: String,
+        end: String,
+        summary: LedgerSummary,
+        accountBalances: [AccountBalance],
+        transactions: [LedgerTransaction],
+        accounts: [LedgerAccount],
+        commodities: [String] = [],
+        prices: [LedgerPrice] = [],
+        valuationCurrency: String,
+        sensitiveUnlocked: Bool
+    ) {
+        self.start = start
+        self.end = end
+        self.summary = summary
+        self.accountBalances = accountBalances
+        self.transactions = transactions
+        self.accounts = accounts
+        self.commodities = commodities
+        self.prices = prices
+        self.valuationCurrency = valuationCurrency
+        self.sensitiveUnlocked = sensitiveUnlocked
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        start = try container.decode(String.self, forKey: .start)
+        end = try container.decode(String.self, forKey: .end)
+        summary = try container.decode(LedgerSummary.self, forKey: .summary)
+        accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
+        transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
+        accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
+        commodities = try container.decodeIfPresent([String].self, forKey: .commodities) ?? []
+        prices = try container.decodeIfPresent([LedgerPrice].self, forKey: .prices) ?? []
+        valuationCurrency = try container.decode(String.self, forKey: .valuationCurrency)
+        sensitiveUnlocked = try container.decode(Bool.self, forKey: .sensitiveUnlocked)
+    }
 }
 
 struct LedgerSummary: Decodable, Equatable {
