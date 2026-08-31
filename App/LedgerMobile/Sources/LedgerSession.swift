@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 enum LedgerLockInterval: Int, CaseIterable, Equatable, Sendable, Identifiable {
     case immediately = 0
@@ -53,6 +56,7 @@ final class LedgerSession: ObservableObject {
     private let api: any LedgerAPI
     private let biometricStore: any BiometricCredentialStore
     private let passkeyAuthenticator: any PasskeyAuthenticating
+    private let widgetSnapshotStore: LedgerWidgetSnapshotStore
     private let defaults: UserDefaults
     private var applicationActive = true
     private var requestGeneration = 0
@@ -68,7 +72,8 @@ final class LedgerSession: ObservableObject {
         api: (any LedgerAPI)? = nil,
         defaults: UserDefaults = .standard,
         biometricStore: (any BiometricCredentialStore)? = nil,
-        passkeyAuthenticator: (any PasskeyAuthenticating)? = nil
+        passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
+        widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared
     ) {
         let initialRange = LedgerDateRange.current(.month)
         selectedRange = initialRange
@@ -76,6 +81,7 @@ final class LedgerSession: ObservableObject {
         self.defaults = defaults
         self.biometricStore = biometricStore ?? SystemBiometricCredentialStore()
         self.passkeyAuthenticator = passkeyAuthenticator ?? SystemPasskeyAuthenticationService()
+        self.widgetSnapshotStore = widgetSnapshotStore
 
         if let api {
             self.api = api
@@ -501,6 +507,7 @@ final class LedgerSession: ObservableObject {
     func logout() {
         guard let serverURL else { return }
         _ = invalidateRequests()
+        clearWidgetSnapshot()
         clearAuthenticationCookies(for: serverURL)
         setLocallyLocked(false, for: serverURL)
         clearBackgroundDate(for: serverURL)
@@ -517,6 +524,7 @@ final class LedgerSession: ObservableObject {
     func changeServer() {
         let previousServerURL = serverURL
         _ = invalidateRequests()
+        clearWidgetSnapshot()
         if let previousServerURL {
             biometricStore.deleteCredential(for: previousServerURL)
             clearAuthenticationCookies(for: previousServerURL)
@@ -569,6 +577,18 @@ final class LedgerSession: ObservableObject {
 
     func toggleAmounts() {
         amountsVisible.toggle()
+    }
+
+    func openWidgetURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "ledger" else { return }
+        switch url.host?.lowercased() {
+        case "accounts":
+            primaryDestinationID = "accounts"
+        case "overview":
+            primaryDestinationID = "overview"
+        default:
+            break
+        }
     }
 
     func dismissError() {
@@ -648,6 +668,63 @@ final class LedgerSession: ObservableObject {
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready
+        await publishWidgetSnapshot(
+            ledger: payload,
+            serverURL: serverURL,
+            valuationCurrency: payload.valuationCurrency,
+            generation: generation
+        )
+    }
+
+    private func publishWidgetSnapshot(
+        ledger: LedgerBootstrap,
+        serverURL: URL,
+        valuationCurrency: String,
+        generation: Int
+    ) async {
+        let month = LedgerDateRange.current(.month)
+        async let reportRequest: LedgerHomeReport? = try? await api.homeReport(
+            baseURL: serverURL,
+            start: month.start,
+            end: month.queryEndExclusive,
+            valuationCurrency: valuationCurrency
+        )
+        async let importDocumentsRequest: [LedgerImportDocument]? = try? await api.importDocuments(
+            baseURL: serverURL
+        )
+        let (report, importDocuments) = await (reportRequest, importDocumentsRequest)
+        guard let report, generation == requestGeneration, self.serverURL == serverURL else {
+            return
+        }
+        let freshSnapshot = LedgerWidgetSnapshotBuilder.make(
+            report: report,
+            ledger: ledger,
+            importDocuments: importDocuments ?? [],
+            importsUpdatedAt: importDocuments == nil ? nil : Date()
+        )
+        let snapshot: LedgerWidgetSnapshot
+        if importDocuments == nil, let previous = widgetSnapshotStore.load() {
+            snapshot = LedgerWidgetSnapshot(
+                updatedAt: freshSnapshot.updatedAt,
+                expense: freshSnapshot.expense,
+                accounts: freshSnapshot.accounts,
+                imports: previous.imports,
+                importsUpdatedAt: previous.importsUpdatedAt
+            )
+        } else {
+            snapshot = freshSnapshot
+        }
+        guard (try? widgetSnapshotStore.save(snapshot)) != nil else { return }
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
+    private func clearWidgetSnapshot() {
+        widgetSnapshotStore.clear()
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
     }
 
     private func handleBootstrapSessionError(_ error: Error, serverURL: URL) {

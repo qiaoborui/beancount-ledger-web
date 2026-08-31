@@ -437,6 +437,46 @@ struct LedgerPeriodComparisons: Decodable, Equatable, Sendable {
     let totalAssets: LedgerMetricPeriodComparisons?
 }
 
+struct LedgerHomeReport: Decodable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let currency: String
+    let current: LedgerHomeReportPeriod
+    let previous: LedgerHomeReportPeriod
+    let dailyExpenseSeries: [LedgerDailyExpense]
+    let generatedAt: String
+}
+
+struct LedgerHomeReportPeriod: Decodable, Equatable, Sendable {
+    let kpis: LedgerHomeReportExpenseKPI
+    let categorySeries: [LedgerCategorySeries]
+}
+
+struct LedgerHomeReportExpenseKPI: Decodable, Equatable, Sendable {
+    let expense: Int
+    let transactionCount: Int
+}
+
+struct LedgerDailyExpense: Decodable, Equatable, Identifiable, Sendable {
+    let date: String
+    let weekday: String
+    let amount: Int
+    let txCount: Int
+
+    var id: String { date }
+}
+
+struct LedgerImportDocumentsResponse: Decodable, Equatable, Sendable {
+    let documents: [LedgerImportDocument]
+}
+
+struct LedgerImportDocument: Decodable, Equatable, Sendable {
+    let provider: String?
+    let dateStart: String?
+    let dateEnd: String?
+    let modTime: String
+}
+
 struct LedgerTransaction: Decodable, Identifiable, Equatable {
     let date: String
     let payee: String
@@ -1106,85 +1146,6 @@ extension LedgerAccount {
         }
         if !label.isEmpty { return label }
         return account.split(separator: ":").last.map(String.init) ?? account
-    }
-}
-
-enum MoneyText {
-    enum DisplayMode {
-        case full
-        case adaptive
-        case compact
-    }
-
-    static func format(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency.isEmpty ? "CNY" : currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.usesGroupingSeparator = true
-        if showSign {
-            formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
-        }
-        let value = NSDecimalNumber(value: Double(minorUnits) / 100)
-        return formatter.string(from: value) ?? "\(currency) \(value)"
-    }
-
-    static func formatCompact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
-        let currencyCode = currency.isEmpty ? "CNY" : currency
-        let value = Double(minorUnits) / 100
-        let absoluteValue = abs(value)
-        let unit: (divisor: Double, suffix: String)?
-
-        if currencyCode == "CNY" {
-            if absoluteValue >= 100_000_000 {
-                unit = (100_000_000, "亿")
-            } else if absoluteValue >= 10_000 {
-                unit = (10_000, "w")
-            } else {
-                unit = nil
-            }
-        } else if absoluteValue >= 1_000_000_000 {
-            unit = (1_000_000_000, "B")
-        } else if absoluteValue >= 1_000_000 {
-            unit = (1_000_000, "M")
-        } else if absoluteValue >= 1_000 {
-            unit = (1_000, "k")
-        } else {
-            unit = nil
-        }
-
-        guard let unit else {
-            return format(minorUnits: minorUnits, currency: currencyCode, showSign: showSign)
-        }
-
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 1
-        formatter.roundingMode = .halfUp
-        let compactValue = absoluteValue / unit.divisor
-        let number = formatter.string(from: NSNumber(value: compactValue)) ?? String(format: "%.1f", compactValue)
-        let sign = value < 0 ? "-" : showSign ? "+" : ""
-        return "\(sign)\(currencySymbol(for: currencyCode))\(number)\(unit.suffix)"
-    }
-
-    private static func currencySymbol(for currency: String) -> String {
-        let commonSymbols = [
-            "CNY": "¥",
-            "USD": "$",
-            "EUR": "€",
-            "GBP": "£",
-            "JPY": "¥",
-            "HKD": "HK$",
-        ]
-        if let symbol = commonSymbols[currency] { return symbol }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        let symbol = formatter.currencySymbol ?? currency
-        return symbol == currency ? "\(currency) " : symbol
     }
 }
 

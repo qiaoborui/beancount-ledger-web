@@ -216,6 +216,9 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 12_345_678_900, currency: "CNY"), "¥1.2亿")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 1_234_567, currency: "USD"), "$12.3k")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: -1_234_567, currency: "CNY"), "-¥1.2w")
+        XCTAssertEqual(MoneyText.formatWidget(minorUnits: 555_180, currency: "CNY"), "¥5,552")
+        XCTAssertEqual(MoneyText.formatWidget(minorUnits: 1_234_567, currency: "CNY"), "¥1.2w")
+        XCTAssertEqual(MoneyText.magnitude(.min), .max)
     }
 
     func testMonthRangeShiftKeepsInclusiveCalendarBounds() {
