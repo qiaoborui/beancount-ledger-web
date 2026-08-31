@@ -80,6 +80,16 @@ final class LedgerModelsTests: XCTestCase {
         let rows = payload.accountSections.flatMap(\.rows)
         XCTAssertEqual(rows.filter(AccountBalanceCategory.assets.includes).map(\.account), ["Assets:Bank:Daily"])
         XCTAssertEqual(rows.filter(AccountBalanceCategory.liabilities.includes).map(\.account), ["Liabilities:CreditCard:Visa"])
+        XCTAssertEqual(rows.first(where: { $0.account == "Assets:Bank:Daily" })?.openingValuation, 1_243_500)
+        XCTAssertEqual(rows.first(where: { $0.account == "Assets:Bank:Daily" })?.closingValuation, 1_235_000)
+        XCTAssertEqual(rows.first(where: { $0.account == "Assets:Bank:Daily" })?.periodValuationChange, -8_500)
+        XCTAssertTrue(rows.allSatisfy(\.periodBalancesAvailable))
+
+        let legacyRows = payload.accountSections(periodBalancesAvailable: false).flatMap(\.rows)
+        let daily = try XCTUnwrap(legacyRows.first(where: { $0.account == "Assets:Bank:Daily" }))
+        XCTAssertFalse(daily.periodBalancesAvailable)
+        XCTAssertEqual(daily.closingValuation, daily.valuation)
+        XCTAssertEqual(daily.periodValuationChange, 0)
     }
 
     func testAccountBalanceTrendSortsDatesAndKeepsDailyClosingBalance() throws {
@@ -166,6 +176,23 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(sampled.last?.balance, 160)
         XCTAssertTrue(sampled.contains { $0.balance == 40 })
         XCTAssertTrue(sampled.contains { $0.balance == 180 })
+    }
+
+    func testAccountBalanceTrendIncludesSelectedRangeBoundaries() throws {
+        let decoded = try JSONDecoder().decode(
+            LedgerAccountDetail.self,
+            from: Data(Self.accountDetailJSON.utf8)
+        )
+        let range = LedgerDateRange(start: "2026-08-01", end: "2026-08-31", preset: .month)
+
+        XCTAssertEqual(
+            decoded.balanceTrend(in: range, maxPoints: 180),
+            [
+                LedgerAccountBalanceTrendPoint(date: "2026-08-01", balance: 1_243_500),
+                LedgerAccountBalanceTrendPoint(date: "2026-08-20", balance: 1_235_000),
+                LedgerAccountBalanceTrendPoint(date: "2026-08-31", balance: 1_235_000),
+            ]
+        )
     }
 
     func testCurrencyAnalysisMatchesWebDirectInverseBridgeAndMissingRates() {
@@ -271,6 +298,16 @@ final class LedgerModelsTests: XCTestCase {
         )
         XCTAssertThrowsError(
             try HealthStatus(apiVersion: 1, capabilities: ["cookie-auth"]).validateForMobileClient()
+        )
+        XCTAssertTrue(
+            HealthStatus(
+                apiVersion: 1,
+                capabilities: ["cookie-auth", "full-backend", HealthStatus.accountPeriodBalancesCapability]
+            ).supportsAccountPeriodBalances
+        )
+        XCTAssertFalse(
+            HealthStatus(apiVersion: 1, capabilities: ["cookie-auth", "full-backend"])
+                .supportsAccountPeriodBalances
         )
     }
 
@@ -425,8 +462,8 @@ final class LedgerModelsTests: XCTestCase {
         "totalAssets": null
       },
       "accountBalances": [
-        { "account": "Assets:Bank:Daily", "currency": "CNY", "amount": 1235000, "valuationCurrency": "CNY", "valuation": 1235000 },
-        { "account": "Liabilities:CreditCard:Visa", "currency": "CNY", "amount": -235000, "valuationCurrency": "CNY", "valuation": -235000 }
+        { "account": "Assets:Bank:Daily", "currency": "CNY", "amount": 1235000, "valuationCurrency": "CNY", "valuation": 1235000, "openingAmount": 1243500, "closingAmount": 1235000, "periodChange": -8500, "openingValuation": 1243500, "closingValuation": 1235000, "periodValuationChange": -8500, "periodAvailable": true },
+        { "account": "Liabilities:CreditCard:Visa", "currency": "CNY", "amount": -235000, "valuationCurrency": "CNY", "valuation": -235000, "openingAmount": -226500, "closingAmount": -235000, "periodChange": -8500, "openingValuation": -226500, "closingValuation": -235000, "periodValuationChange": -8500, "periodAvailable": true }
       ],
       "transactions": [
         {
@@ -468,6 +505,11 @@ final class LedgerModelsTests: XCTestCase {
       "active": true,
       "currency": "CNY",
       "currentBalance": 1235000,
+      "start": "2026-08-01",
+      "end": "2026-09-01",
+      "openingBalance": 1243500,
+      "closingBalance": 1235000,
+      "periodChange": -8500,
       "rows": [
         {
           "date": "2026-08-20",

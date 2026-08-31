@@ -66,11 +66,20 @@ struct CurrencyAnalysisView: View {
     ) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                LedgerPageIntro(
-                    title: "货币与汇率",
-                    detail: "查看账本货币之间的当前汇率、价格来源与近期变化。",
-                    meta: snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录"
-                ) { EmptyView() }
+                if showsAppBar {
+                    LedgerPageIntro(
+                        title: "货币与汇率",
+                        detail: "查看账本货币之间的当前汇率、价格来源与近期变化。",
+                        meta: snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录"
+                    ) { EmptyView() }
+                } else {
+                    LedgerPageContext(
+                        detail: "查看账本货币之间的当前汇率、价格来源与近期变化。",
+                        meta: snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录"
+                    )
+                }
+
+                LedgerTimeRangeControl()
 
                 valuationPicker(currencies: snapshot.currencies, selected: ledger.valuationCurrency)
 
@@ -97,7 +106,7 @@ struct CurrencyAnalysisView: View {
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
+            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }

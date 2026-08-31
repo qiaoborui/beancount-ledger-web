@@ -67,7 +67,9 @@ struct LedgerAnalysisView: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsAppBar {
-                LedgerAppBar { PrivacyToolbarButton() }
+                LedgerAppBar {
+                    PrivacyToolbarButton()
+                }
             }
 
             Group {
@@ -102,7 +104,9 @@ struct LedgerAnalysisView: View {
         .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .task(id: requestKey) { await load() }
+        .task(id: requestKey) {
+            await load(replacingContent: resource == nil)
+        }
     }
 
     @ViewBuilder
@@ -133,7 +137,7 @@ struct LedgerAnalysisView: View {
                     }
                 }
                 .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
+                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
                 .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
                 .ledgerAdaptivePageWidth()
             }
@@ -156,23 +160,29 @@ struct LedgerAnalysisView: View {
                 LedgerTimeRangeControl()
                     .frame(width: 420)
             }
-        } else if showsAppBar {
+        } else {
             VStack(alignment: .leading, spacing: LedgerSpacing.md) {
                 analysisIntro
                 LedgerTimeRangeControl()
             }
-        } else {
-            LedgerTimeRangeControl()
         }
     }
 
+    @ViewBuilder
     private var analysisIntro: some View {
-        LedgerPageIntro(
-            title: kind.title,
-            detail: kind.detail,
-            meta: session.selectedRange.metricScope,
-            style: .inline
-        ) { EmptyView() }
+        if showsAppBar {
+            LedgerPageIntro(
+                title: kind.title,
+                detail: kind.detail,
+                meta: session.selectedRange.metricScope,
+                style: .inline
+            ) { EmptyView() }
+        } else {
+            LedgerPageContext(
+                detail: kind.detail,
+                meta: session.selectedRange.metricScope
+            )
+        }
     }
 
     private func load(replacingContent: Bool = true) async {

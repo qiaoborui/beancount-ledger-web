@@ -10,10 +10,7 @@ struct OverviewView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 LedgerAppBar {
-                    HStack(spacing: LedgerSpacing.sm) {
-                        PrivacyToolbarButton()
-                        SessionMenu()
-                    }
+                    PrivacyToolbarButton()
                 }
 
                 if let ledger = session.ledger {
@@ -95,42 +92,6 @@ struct OverviewView: View {
         ) {
             EmptyView()
         }
-    }
-}
-
-private struct SessionMenu: View {
-    @EnvironmentObject private var session: LedgerSession
-
-    var body: some View {
-        Menu {
-            Button {
-                Task { await session.lock() }
-            } label: {
-                Label("锁定金额", systemImage: "lock")
-            }
-            Button {
-                session.logout()
-            } label: {
-                Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-            }
-            Button {
-                session.changeServer()
-            } label: {
-                Label("更换服务器", systemImage: "server.rack")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 40, height: 40)
-                .background(LedgerPalette.canvas)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
-                        .stroke(LedgerPalette.line, lineWidth: 1)
-                }
-        }
-        .accessibilityLabel("更多")
     }
 }
 

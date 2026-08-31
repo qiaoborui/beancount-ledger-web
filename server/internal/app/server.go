@@ -292,7 +292,7 @@ func (s *Server) health(c *gin.Context) {
 	identity := gin.H{
 		"apiVersion":   1,
 		"clusterId":    ledgerClusterID(s.cfg),
-		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "ledger-mcp-2026-07-28", "passkey-management-v1", "agent-access-tokens-v2"},
+		"capabilities": []string{"full-backend", "cookie-auth", "ledger-version", "ledger-agent-v1", "ledger-mcp-2026-07-28", "passkey-management-v1", "agent-access-tokens-v2", "account-period-balances-v1"},
 	}
 	if len(s.moduleNames) > 0 {
 		identity["modules"] = append([]string(nil), s.moduleNames...)

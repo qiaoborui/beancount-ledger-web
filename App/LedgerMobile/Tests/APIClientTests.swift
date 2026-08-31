@@ -204,9 +204,124 @@ final class APIClientTests: XCTestCase {
         )
 
         XCTAssertEqual(documents.count, 1)
+        XCTAssertEqual(documents.first?.path, "transactions/2026/documents/imports/private.csv")
+        XCTAssertEqual(documents.first?.name, "private.csv")
+        XCTAssertEqual(documents.first?.year, "2026")
+        XCTAssertEqual(documents.first?.ext, ".csv")
         XCTAssertEqual(documents.first?.provider, "alipay")
         XCTAssertEqual(documents.first?.dateEnd, "2026-08-28")
+        XCTAssertEqual(documents.first?.size, 1024)
         XCTAssertEqual(documents.first?.modTime, "2026-08-29T08:00:00Z")
+    }
+
+    func testImportProvidersUsesExpectedEndpointAndDecodesMetadata() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/imports/providers")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return Self.response(
+                for: request,
+                body: #"{"providers":[{"id":"ccb-credit","label":"建设银行信用卡","detail":"邮件、PDF 或 CSV","extensions":[".eml",".pdf",".csv"],"accept":".eml / .pdf / .csv","engine":"native-ccb-credit"}]}"#
+            )
+        }
+
+        let providers = try await makeClient().importProviders(
+            baseURL: URL(string: "https://ledger.example.com")!
+        )
+
+        XCTAssertEqual(providers.count, 1)
+        XCTAssertEqual(providers.first?.id, "ccb-credit")
+        XCTAssertEqual(providers.first?.extensions, [".eml", ".pdf", ".csv"])
+        XCTAssertEqual(providers.first?.engine, "native-ccb-credit")
+    }
+
+    func testImportPreviewBuildsMultipartBodyAndSanitizesFilename() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/imports/preview")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+            XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary=LedgerMobile-"))
+            let boundary = try XCTUnwrap(contentType.components(separatedBy: "boundary=").last)
+            let body = String(decoding: try Self.bodyData(from: request), as: UTF8.self)
+            XCTAssertTrue(body.contains("--\(boundary)\r\n"))
+            XCTAssertTrue(body.contains("name=\"provider\"\r\n\r\nccb-credit\r\n"))
+            XCTAssertTrue(body.contains("name=\"alipayFundRounding\"\r\n\r\ntrue\r\n"))
+            XCTAssertTrue(body.contains("name=\"archivePassword\"\r\n\r\n password with spaces \r\n"))
+            XCTAssertTrue(body.contains("name=\"file\"; filename=\"statement'____name.zip\""))
+            XCTAssertTrue(body.contains("safe-bill-content"))
+            XCTAssertTrue(body.hasSuffix("\r\n--\(boundary)--\r\n"))
+            return Self.response(for: request, body: Self.importPreviewJSON)
+        }
+
+        let preview = try await makeClient().previewImport(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            file: LedgerImportSelectedFile(
+                name: "statement\"/\\\r\nname.zip",
+                data: Data("safe-bill-content".utf8)
+            ),
+            provider: "ccb-credit",
+            alipayFundRounding: true,
+            archivePassword: " password with spaces "
+        )
+
+        XCTAssertEqual(preview.importID, "preview-123")
+        XCTAssertEqual(preview.providerDetection.confidence, "high")
+        XCTAssertEqual(preview.entries.first?.orderID, "order-1")
+        XCTAssertEqual(preview.entries.first?.transactionType, "支出")
+        XCTAssertEqual(preview.skippedDuplicateCount, 1)
+    }
+
+    func testImportPreviewOmitsProviderAndPasswordForAutomaticCSV() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let body = String(decoding: try Self.bodyData(from: request), as: UTF8.self)
+            XCTAssertFalse(body.contains("name=\"provider\""))
+            XCTAssertFalse(body.contains("name=\"archivePassword\""))
+            XCTAssertTrue(body.contains("name=\"alipayFundRounding\"\r\n\r\nfalse\r\n"))
+            return Self.response(for: request, body: Self.importPreviewJSON)
+        }
+
+        _ = try await makeClient().previewImport(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            file: LedgerImportSelectedFile(name: "statement.csv", data: Data("bill".utf8)),
+            provider: nil,
+            alipayFundRounding: false,
+            archivePassword: "should-not-be-sent"
+        )
+    }
+
+    func testImportCommitSendsPreviewIdentityAndSelectedEntriesAsJSON() async throws {
+        let entry = Self.importEntry
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/imports/commit")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try Self.bodyData(from: request)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["importId"] as? String, "preview-123")
+            XCTAssertEqual(json["provider"] as? String, "wechat")
+            let entries = try XCTUnwrap(json["entries"] as? [[String: Any]])
+            XCTAssertEqual(entries.count, 1)
+            XCTAssertEqual(entries.first?["id"] as? String, "entry-1")
+            XCTAssertEqual(entries.first?["orderId"] as? String, "order-1")
+            XCTAssertEqual(entries.first?["txType"] as? String, "支出")
+            return Self.response(
+                for: request,
+                body: #"{"ok":true,"outputFile":"transactions/2026/imports/import.bean","includeFile":"transactions/2026/08.bean","documentFile":"transactions/2026/documents/imports/statement.xlsx","count":1,"readModelPending":false}"#
+            )
+        }
+
+        let result = try await makeClient().commitImport(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            request: LedgerImportCommitRequest(
+                importID: "preview-123",
+                provider: "wechat",
+                entries: [entry]
+            )
+        )
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.documentFile, "transactions/2026/documents/imports/statement.xlsx")
     }
 
     func testAccountDetailEncodesAccountAndDecodesRows() async throws {
@@ -215,17 +330,30 @@ final class APIClientTests: XCTestCase {
                 URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
             )
             XCTAssertEqual(components.path, "/api/ledger/accounts/detail")
-            XCTAssertEqual(components.queryItems, [URLQueryItem(name: "account", value: "Assets:Bank:Daily")])
+            XCTAssertEqual(
+                components.queryItems,
+                [
+                    URLQueryItem(name: "account", value: "Assets:Bank:Daily"),
+                    URLQueryItem(name: "currency", value: "CNY"),
+                    URLQueryItem(name: "start", value: "2026-08-01"),
+                    URLQueryItem(name: "end", value: "2026-09-01"),
+                ]
+            )
             XCTAssertEqual(request.httpMethod, "GET")
             return Self.response(for: request, body: LedgerModelsTests.accountDetailJSON)
         }
 
         let detail = try await makeClient().accountDetail(
             baseURL: URL(string: "https://ledger.example.com")!,
-            account: "Assets:Bank:Daily"
+            account: "Assets:Bank:Daily",
+            currency: "CNY",
+            start: "2026-08-01",
+            end: "2026-09-01"
         )
         XCTAssertEqual(detail.label, "日常账户")
         XCTAssertEqual(detail.currentBalance, 1_235_000)
+        XCTAssertEqual(detail.openingBalance, 1_243_500)
+        XCTAssertEqual(detail.closingBalance, 1_235_000)
         XCTAssertEqual(detail.rows.first?.transaction.payee, "海底捞")
     }
 
@@ -525,6 +653,67 @@ final class APIClientTests: XCTestCase {
     """#
 
     private static let bqlHistoryRecordJSON = #"{"id":"history-1","query":"SELECT * FROM transactions","title":"最近交易","titleSource":"manual","createdAt":"2026-08-30T12:00:00Z","lastRunAt":"2026-08-30T12:30:00Z","runCount":2}"#
+
+    private static let importEntry = LedgerImportEntry(
+        id: "entry-1",
+        date: "2026-08-30",
+        flag: "*",
+        payee: "青禾市场",
+        narration: "周末食材",
+        source: "wechat",
+        orderID: "order-1",
+        merchantID: nil,
+        payTime: "2026-08-30 11:42:00",
+        method: "银行卡",
+        transactionType: "支出",
+        status: "支付成功",
+        type: nil,
+        categoryAccount: "Expenses:Food:Groceries",
+        fundingAccount: "Liabilities:CreditCard",
+        amount: 186.8,
+        currency: "CNY",
+        metadata: ["orderId": "order-1"],
+        postings: [
+            LedgerImportPosting(
+                account: "Expenses:Food:Groceries",
+                amount: "186.80",
+                currency: "CNY",
+                priceKind: nil,
+                priceAmount: nil,
+                priceCurrency: nil
+            ),
+            LedgerImportPosting(
+                account: "Liabilities:CreditCard",
+                amount: "-186.80",
+                currency: "CNY",
+                priceKind: nil,
+                priceAmount: nil,
+                priceCurrency: nil
+            ),
+        ]
+    )
+
+    private static let importPreviewJSON = #"""
+    {
+      "importId":"preview-123",
+      "provider":"wechat",
+      "providerDetection":{"provider":"wechat","reason":"文件结构匹配","confidence":"high"},
+      "originalFilename":"statement.xlsx",
+      "dedupReport":"生成 2 条，跳过 1 条，待写入 1 条。",
+      "entries":[{
+        "id":"entry-1","date":"2026-08-30","flag":"*","payee":"青禾市场","narration":"周末食材",
+        "source":"wechat","orderId":"order-1","payTime":"2026-08-30 11:42:00","method":"银行卡","txType":"支出","status":"支付成功",
+        "categoryAccount":"Expenses:Food:Groceries","fundingAccount":"Liabilities:CreditCard","amount":186.8,"currency":"CNY",
+        "metadata":{"orderId":"order-1"},
+        "postings":[
+          {"account":"Expenses:Food:Groceries","amount":"186.80","currency":"CNY"},
+          {"account":"Liabilities:CreditCard","amount":"-186.80","currency":"CNY"}
+        ]
+      }],
+      "candidateCount":1,"rawRowCount":2,"filteredRowCount":2,"generatedCount":2,"excludedRowCount":0,"skippedDuplicateCount":1,
+      "dateStart":"2026-08-01","dateEnd":"2026-08-30","warnings":["已跳过 1 条重复交易。"]
+    }
+    """#
 }
 
 private final class MockURLProtocol: URLProtocol, @unchecked Sendable {

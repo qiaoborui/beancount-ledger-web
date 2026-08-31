@@ -17,7 +17,7 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 	router := testRouter(t, cfg)
 	cookies := loginCookies(t, router)
 
-	res := requestWithCookies(router, http.MethodGet, "/api/ledger/accounts/detail?account=Assets%3ACash", "", cookies)
+	res := requestWithCookies(router, http.MethodGet, "/api/ledger/accounts/detail?account=Assets%3ACash&currency=CNY&start=2026-05-02&end=2026-06-01", "", cookies)
 	if res.Code != http.StatusOK {
 		t.Fatalf("account detail status=%d body=%s", res.Code, res.Body.String())
 	}
@@ -32,6 +32,9 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 		Active         bool               `json:"active"`
 		Currency       string             `json:"currency"`
 		CurrentBalance int                `json:"currentBalance"`
+		OpeningBalance int                `json:"openingBalance"`
+		ClosingBalance int                `json:"closingBalance"`
+		PeriodChange   int                `json:"periodChange"`
 		Rows           []AccountDetailRow `json:"rows"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
@@ -43,7 +46,7 @@ func TestAccountDetailReturnsFrontendContract(t *testing.T) {
 	if body.Group != "cash" || !body.Active || body.Currency != "CNY" {
 		t.Fatalf("unexpected account metadata: %#v", body)
 	}
-	if body.CurrentBalance != 98800 || len(body.Rows) != 2 {
+	if body.CurrentBalance != 98800 || body.OpeningBalance != -1200 || body.ClosingBalance != 98800 || body.PeriodChange != 100000 || len(body.Rows) != 1 {
 		t.Fatalf("unexpected account detail rows or balance: %#v", body)
 	}
 }

@@ -76,6 +76,20 @@ struct MoreView: View {
                             LedgerPanel {
                                 VStack(spacing: 0) {
                                     NavigationLink {
+                                        ImportHistoryView()
+                                    } label: {
+                                        MoreNavigationRow(
+                                            icon: "tray.and.arrow.down",
+                                            title: "导入记录",
+                                            detail: "各渠道覆盖日期、更新状态与归档历史"
+                                        )
+                                    }
+                                    .buttonStyle(PressScaleButtonStyle())
+                                    .accessibilityIdentifier("more-imports")
+
+                                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+
+                                    NavigationLink {
                                         CurrencyAnalysisView()
                                     } label: {
                                         MoreNavigationRow(

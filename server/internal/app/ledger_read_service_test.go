@@ -192,6 +192,124 @@ func TestLedgerReadServiceBalancesFallsBackToCache(t *testing.T) {
 	}
 }
 
+func TestBuildLedgerBootstrapAccountBalancesReflectRange(t *testing.T) {
+	snapshot, err := NewLedgerCache(testLedger(t)).Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := BuildLedgerBootstrap(snapshot, "2026-05-02", "2026-06-01", true, "CNY", "2026-06-01")
+	var cash *AccountBalance
+	for index := range payload.AccountBalances {
+		if payload.AccountBalances[index].Account == "Assets:Cash" {
+			cash = &payload.AccountBalances[index]
+			break
+		}
+	}
+	if cash == nil {
+		t.Fatal("Assets:Cash period balance missing")
+	}
+	if cash.Amount != 98800 || cash.OpeningAmount != -1200 || cash.ClosingAmount != 98800 || cash.PeriodChange != 100000 {
+		t.Fatalf("cash period amounts = %#v", cash)
+	}
+	if cash.OpeningValuation != -1200 || cash.ClosingValuation != 98800 || cash.PeriodValuationChange != 100000 || cash.PeriodValuationMissing {
+		t.Fatalf("cash period valuations = %#v", cash)
+	}
+	if !cash.PeriodAvailable {
+		t.Fatalf("cash period projection is not marked available: %#v", cash)
+	}
+	for _, cached := range snapshot.AccountBalances {
+		if cached.OpeningAmount != 0 || cached.ClosingAmount != 0 || cached.PeriodChange != 0 ||
+			cached.OpeningValuation != 0 || cached.ClosingValuation != 0 || cached.PeriodValuationChange != 0 ||
+			cached.PeriodValuationMissing || cached.PeriodAvailable {
+			t.Fatalf("range query mutated cached account balance: %#v", cached)
+		}
+	}
+}
+
+func TestSnapshotAccountBalancesForRangeUsesBoundaryPricesAndKeepsHistoricalZeroAccounts(t *testing.T) {
+	snapshot := &LedgerSnapshot{
+		Transactions: []Transaction{
+			{
+				Date: "2026-04-01",
+				Postings: []Posting{
+					{Account: "Assets:Broker", Amount: 10000, Currency: "USD"},
+					{Account: "Equity:Opening", Amount: -10000, Currency: "USD"},
+					{Account: "Assets:Broker", Amount: 20000, Currency: "HKD"},
+					{Account: "Equity:Opening", Amount: -20000, Currency: "HKD"},
+				},
+			},
+			{
+				Date: "2026-07-01",
+				Postings: []Posting{
+					{Account: "Assets:Broker", Amount: -10000, Currency: "USD"},
+					{Account: "Equity:Closing", Amount: 10000, Currency: "USD"},
+					{Account: "Assets:Broker", Amount: -20000, Currency: "HKD"},
+					{Account: "Equity:Closing", Amount: 20000, Currency: "HKD"},
+				},
+			},
+		},
+		Prices: []Price{
+			{Date: "2026-04-30", Currency: "USD", Amount: 700, QuoteCurrency: "CNY"},
+			{Date: "2026-05-01", Currency: "USD", Amount: 800, QuoteCurrency: "CNY"},
+			{Date: "2026-04-30", Currency: "HKD", Amount: 90, QuoteCurrency: "CNY"},
+			{Date: "2026-05-01", Currency: "HKD", Amount: 92, QuoteCurrency: "CNY"},
+		},
+		AccountBalances: []AccountBalance{
+			{Account: "Assets:Broker", Currency: "USD", Amount: 0, ValuationCurrency: "CNY", Valuation: 0},
+			{Account: "Assets:Broker", Currency: "HKD", Amount: 0, ValuationCurrency: "CNY", Valuation: 0},
+		},
+	}
+
+	rows := snapshotAccountBalancesForRange(snapshot, "2026-05-01", "2026-06-01", "CNY")
+	if len(rows) != 2 {
+		t.Fatalf("period rows = %#v, want historical zero-balance account", rows)
+	}
+	var usd, hkd *AccountBalance
+	for index := range rows {
+		switch rows[index].Currency {
+		case "USD":
+			usd = &rows[index]
+		case "HKD":
+			hkd = &rows[index]
+		}
+	}
+	if usd == nil || hkd == nil {
+		t.Fatalf("multi-currency period rows = %#v", rows)
+	}
+	row := *usd
+	if row.Amount != 0 || row.OpeningAmount != 10000 || row.ClosingAmount != 10000 || row.PeriodChange != 0 {
+		t.Fatalf("period amounts = %#v", row)
+	}
+	if row.OpeningValuation != 70000 || row.ClosingValuation != 80000 || row.PeriodValuationChange != 10000 || row.PeriodValuationMissing {
+		t.Fatalf("boundary valuations = %#v", row)
+	}
+	if hkd.OpeningAmount != 20000 || hkd.ClosingAmount != 20000 || hkd.OpeningValuation != 18000 || hkd.ClosingValuation != 18400 {
+		t.Fatalf("secondary currency period row = %#v", *hkd)
+	}
+}
+
+func TestSnapshotAccountBalancesForRangeMarksMissingHistoricalPrices(t *testing.T) {
+	snapshot := &LedgerSnapshot{
+		Transactions: []Transaction{
+			{
+				Date: "2026-04-01",
+				Postings: []Posting{
+					{Account: "Assets:Broker", Amount: 10000, Currency: "USD"},
+					{Account: "Equity:Opening", Amount: -10000, Currency: "USD"},
+				},
+			},
+		},
+		AccountBalances: []AccountBalance{
+			{Account: "Assets:Broker", Currency: "USD", Amount: 10000, ValuationCurrency: "CNY", ValuationMissing: true},
+		},
+	}
+
+	rows := snapshotAccountBalancesForRange(snapshot, "2026-05-01", "2026-06-01", "CNY")
+	if len(rows) != 1 || !rows[0].PeriodValuationMissing {
+		t.Fatalf("missing historical valuation = %#v", rows)
+	}
+}
+
 func TestBuildLedgerTransactionsFromIndexedRangeRespectSensitiveUnlock(t *testing.T) {
 	txns := []Transaction{
 		{

@@ -1,7 +1,9 @@
 # LedgerMobile
 
-`LedgerMobile` is the native, read-only iOS client for Beancount Ledger Web.
-It connects to an existing HTTPS deployment and reuses the server's cookie
+`LedgerMobile` is the native iOS client for Beancount Ledger Web. Financial
+review remains read-only across the main app, while bill imports use the
+server's existing preview, validation, confirmation, and rollback boundary.
+The app connects to an existing HTTPS deployment and reuses the server's cookie
 authentication and privacy lock.
 
 ## Current scope
@@ -20,6 +22,11 @@ authentication and privacy lock.
   table, bar, pie, and line views, and manage server-synced query history.
 - Inspect direct, inverse, and CNY-bridged exchange rates, review recent price
   history, and switch the valuation currency used across overview and analysis.
+- Import CSV, Excel, PDF, EML/HTML, and ZIP bills through the system file picker,
+  review server-detected providers, duplicate warnings, and candidate entries,
+  then commit only the selected transactions. The native screen also shows each
+  channel's latest coverage date, update freshness, archived filename, archive
+  time, and file size.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
@@ -42,9 +49,8 @@ authentication and privacy lock.
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next read-only milestones continue mobile web parity for financial review
-screens. Ledger writes remain a later phase with a separate
-preview-and-confirmation design.
+The next milestones continue mobile web parity for financial review screens.
+Additional ledger writes retain a separate preview-and-confirmation design.
 
 ## Generate and build
 
@@ -64,12 +70,19 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 
 Run the portable model and session tests with `swift test` from this directory.
 
+Apple Silicon Mac can run the same iPad build through Designed for iPad. After
+`xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination
+in Xcode. Regenerating the project restores the intended iOS platform settings
+if Xcode's recommended-settings migration added a native macOS target locally.
+
 ## Visual QA
 
 `--safe-preview` is compiled only into Debug builds. It skips account login and
 loads deterministic example data containing long account names, large amounts,
-all transaction filters, account history, and BQL table/chart results. It
-cannot activate in a Release build.
+all transaction filters, account history, and BQL table/chart results. Add
+`--safe-import-flow` to open a simulated bill import with two candidate
+transactions and one duplicate. These arguments cannot activate in a Release
+build.
 
 Generate the Xcode project, then run the responsive UI suite against an iPhone
 and an iPad simulator:
