@@ -3,19 +3,6 @@ import SwiftUI
 struct LedgerTimeRangeControl: View {
     @EnvironmentObject private var session: LedgerSession
 
-    private var sheetBinding: Binding<Bool> {
-        Binding(
-            get: { session.rangePickerPresented },
-            set: { presented in
-                if presented {
-                    session.presentRangePicker()
-                } else {
-                    session.dismissRangePicker()
-                }
-            }
-        )
-    }
-
     var body: some View {
         HStack(spacing: 0) {
             stepButton(direction: -1, systemImage: "chevron.left", label: "上一周期")
@@ -71,12 +58,7 @@ struct LedgerTimeRangeControl: View {
             RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
                 .stroke(LedgerPalette.line, lineWidth: 1)
         }
-        .sheet(isPresented: sheetBinding) {
-            LedgerTimeRangeSheet()
-                .ledgerPrivacyProtectedSheet()
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
+        .accessibilityIdentifier("page-time-range")
     }
 
     private var verticalDivider: some View {
@@ -99,6 +81,38 @@ struct LedgerTimeRangeControl: View {
         .disabled(session.isRangeLoading || session.selectedRange.preset == .custom)
         .opacity(session.selectedRange.preset == .custom ? 0.35 : 1)
         .accessibilityLabel(label)
+    }
+}
+
+private struct LedgerTimeRangeSheetPresenter: ViewModifier {
+    @EnvironmentObject private var session: LedgerSession
+
+    private var sheetBinding: Binding<Bool> {
+        Binding(
+            get: { session.rangePickerPresented },
+            set: { presented in
+                if presented {
+                    session.presentRangePicker()
+                } else {
+                    session.dismissRangePicker()
+                }
+            }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: sheetBinding) {
+            LedgerTimeRangeSheet()
+                .ledgerPrivacyProtectedSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+extension View {
+    func ledgerTimeRangeSheet() -> some View {
+        modifier(LedgerTimeRangeSheetPresenter())
     }
 }
 

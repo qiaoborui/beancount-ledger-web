@@ -89,7 +89,7 @@ protocol LedgerAPI: Sendable {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
-    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail
+    func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
     func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary
@@ -270,12 +270,17 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         return response.documents
     }
 
-    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
+    func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
         var components = URLComponents(
             url: baseURL.appending(path: "/api/ledger/accounts/detail"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [URLQueryItem(name: "account", value: account)]
+        components?.queryItems = [
+            URLQueryItem(name: "account", value: account),
+            URLQueryItem(name: "currency", value: currency),
+            URLQueryItem(name: "start", value: start),
+            URLQueryItem(name: "end", value: end),
+        ]
         guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"

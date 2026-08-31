@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -591,6 +592,9 @@ func TestAPIRouteSmokeCoverage(t *testing.T) {
 	}
 	if healthBody.APIVersion != 1 || healthBody.ClusterID == "" || len(healthBody.Capabilities) == 0 || len(healthBody.Modules) == 0 {
 		t.Fatalf("health identity missing: %#v", healthBody)
+	}
+	if !slices.Contains(healthBody.Capabilities, "account-period-balances-v1") {
+		t.Fatalf("account period balance capability missing: %#v", healthBody.Capabilities)
 	}
 
 	badLogin := requestWithCookies(router, http.MethodPost, "/api/auth/login", `{"password":"bad"}`, nil)

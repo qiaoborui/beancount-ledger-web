@@ -26,6 +26,13 @@ enum LedgerLockInterval: Int, CaseIterable, Equatable, Sendable, Identifiable {
 @MainActor
 final class LedgerSession: ObservableObject {
     nonisolated static let passkeyRelyingPartyID = "beancount.borry.org"
+    nonisolated static var nativePasskeyEnabledForCurrentBuild: Bool {
+#if PERSONAL_TEAM_BUILD
+        false
+#else
+        true
+#endif
+    }
 
     enum Phase: Equatable {
         case configuration
@@ -47,6 +54,7 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var draftRange: LedgerDateRange
     @Published private(set) var isRangeLoading = false
     @Published private(set) var isValuationCurrencyLoading = false
+    @Published private(set) var accountPeriodBalancesAvailable = false
     @Published var rangePickerPresented = false
     @Published private(set) var passkeyAvailable = false
     @Published private(set) var privacyShielded = true
@@ -304,19 +312,32 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    func accountDetail(for account: String) async throws -> LedgerAccountDetail {
+    func accountDetail(for account: String, currency: String) async throws -> LedgerAccountDetail {
         guard phase == .ready, let serverURL else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
         let generation = requestGeneration
+        let range = selectedRange
         do {
-            let detail = try await api.accountDetail(baseURL: serverURL, account: account)
+            let detail = try await api.accountDetail(
+                baseURL: serverURL,
+                account: account,
+                currency: currency,
+                start: range.start,
+                end: range.queryEndExclusive
+            )
             guard generation == requestGeneration,
                   self.serverURL == serverURL,
                   phase == .ready else {
                 throw CancellationError()
             }
-            return detail
+            if accountPeriodBalancesAvailable && detail.hasPeriodBalances(start: range.start, end: range.queryEndExclusive) {
+                return detail
+            }
+            return detail.filteredForLegacyServer(
+                start: range.start,
+                endExclusive: range.queryEndExclusive
+            )
         } catch let error as LedgerAPIError {
             if case let .server(status, _) = error,
                status == 423,
@@ -545,6 +566,7 @@ final class LedgerSession: ObservableObject {
         isValuationCurrencyLoading = false
         rangePickerPresented = false
         passkeyAvailable = false
+        accountPeriodBalancesAvailable = false
         lockInterval = .fiveMinutes
         privacyShielded = false
         phase = .configuration
@@ -605,6 +627,7 @@ final class LedgerSession: ObservableObject {
                 ? try? await api.passkeyStatus(baseURL: serverURL)
                 : nil
             guard generation == requestGeneration else { return }
+            accountPeriodBalancesAvailable = health.supportsAccountPeriodBalances
             privacyShielded = !applicationActive
             if persistOrigin {
                 defaults.set(serverURL.absoluteString, forKey: Self.serverKey)
@@ -852,11 +875,7 @@ final class LedgerSession: ObservableObject {
     }
 
     private var nativePasskeyEnabled: Bool {
-#if PERSONAL_TEAM_BUILD
-        false
-#else
-        true
-#endif
+        Self.nativePasskeyEnabledForCurrentBuild
     }
 
     private func recordBackgroundDate(for serverURL: URL, now: Date = Date()) {

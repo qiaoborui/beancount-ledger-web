@@ -298,13 +298,17 @@ func (s *Server) accountDetail(c *gin.Context) {
 	if !requireSensitive(c) {
 		return
 	}
-	detail, err := s.accountService.Detail(c.Query("account"))
+	detail, err := s.accountService.Detail(c.Query("account"), c.Query("currency"), c.Query("start"), c.Query("end"))
 	if errors.Is(err, ErrAccountRequired) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "account is required"})
 		return
 	}
 	if errors.Is(err, ErrAccountNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+		return
+	}
+	if errors.Is(err, ErrAccountRange) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {

@@ -166,8 +166,14 @@ struct LedgerDateRange: Equatable, Sendable {
 }
 
 struct HealthStatus: Decodable, Equatable {
+    static let accountPeriodBalancesCapability = "account-period-balances-v1"
+
     let apiVersion: Int
     let capabilities: [String]
+
+    var supportsAccountPeriodBalances: Bool {
+        capabilities.contains(Self.accountPeriodBalancesCapability)
+    }
 
     func validateForMobileClient() throws {
         guard apiVersion == 1 else {
@@ -519,6 +525,14 @@ struct AccountBalance: Decodable, Equatable {
     let valuationCurrency: String
     let valuation: Int
     let valuationMissing: Bool?
+    var openingAmount: Int? = nil
+    var closingAmount: Int? = nil
+    var periodChange: Int? = nil
+    var openingValuation: Int? = nil
+    var closingValuation: Int? = nil
+    var periodValuationChange: Int? = nil
+    var periodValuationMissing: Bool? = nil
+    var periodAvailable: Bool? = nil
 }
 
 struct LedgerAccount: Decodable, Equatable {
@@ -541,6 +555,11 @@ struct LedgerAccountDetail: Decodable, Equatable {
     let currency: String
     let currentBalance: Int
     let rows: [LedgerAccountDetailRow]
+    var start: String? = nil
+    var end: String? = nil
+    var openingBalance: Int? = nil
+    var closingBalance: Int? = nil
+    var periodChange: Int? = nil
 }
 
 struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
@@ -567,10 +586,46 @@ struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable {
     let date: String
     let balance: Int
 
-    var id: String { date }
+    var id: String { "\(date):\(balance)" }
 }
 
 extension LedgerAccountDetail {
+    func hasPeriodBalances(start: String, end: String) -> Bool {
+        self.start == start && self.end == end && openingBalance != nil && closingBalance != nil && periodChange != nil
+    }
+
+    func filteredForLegacyServer(start: String, endExclusive: String) -> LedgerAccountDetail {
+        let orderedRows = rows.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.date == rhs.element.date {
+                    return lhs.offset < rhs.offset
+                }
+                return lhs.element.date < rhs.element.date
+            }
+            .map { $0.element }
+        let periodRows = orderedRows.filter { $0.date >= start && $0.date < endExclusive }
+        let opening = orderedRows.last(where: { $0.date < start })?.balance
+            ?? periodRows.first.map { $0.balance - $0.change }
+            ?? (orderedRows.isEmpty ? currentBalance : 0)
+        let closing = periodRows.last?.balance ?? opening
+
+        return LedgerAccountDetail(
+            account: account,
+            label: label,
+            alias: alias,
+            group: group,
+            active: active,
+            currency: currency,
+            currentBalance: currentBalance,
+            rows: periodRows,
+            start: start,
+            end: endExclusive,
+            openingBalance: opening,
+            closingBalance: closing,
+            periodChange: closing - opening
+        )
+    }
+
     var balanceTrend: [LedgerAccountBalanceTrendPoint] {
         var closingBalanceByDate: [String: Int] = [:]
         for row in rows {
@@ -582,7 +637,25 @@ extension LedgerAccountDetail {
     }
 
     func balanceTrend(maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
-        let points = balanceTrend
+        downsampledBalanceTrend(balanceTrend, maxPoints: maxPoints)
+    }
+
+    func balanceTrend(in range: LedgerDateRange, maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
+        let opening = openingBalance ?? rows.first.map { $0.balance - $0.change } ?? currentBalance
+        let closing = closingBalance ?? rows.last?.balance ?? opening
+        var points = [LedgerAccountBalanceTrendPoint(date: range.start, balance: opening)]
+        points.append(contentsOf: balanceTrend)
+        let closingPoint = LedgerAccountBalanceTrendPoint(date: range.end, balance: closing)
+        if points.last != closingPoint {
+            points.append(closingPoint)
+        }
+        return downsampledBalanceTrend(points, maxPoints: maxPoints)
+    }
+
+    private func downsampledBalanceTrend(
+        _ points: [LedgerAccountBalanceTrendPoint],
+        maxPoints: Int
+    ) -> [LedgerAccountBalanceTrendPoint] {
         guard points.count > maxPoints else { return points }
         guard maxPoints >= 2, let first = points.first, let last = points.last else {
             return Array(points.prefix(max(0, maxPoints)))
@@ -1102,6 +1175,14 @@ struct AccountBalanceRow: Identifiable, Equatable {
     let valuationCurrency: String
     let valuation: Int
     let valuationMissing: Bool
+    let periodBalancesAvailable: Bool
+    let openingNativeAmount: Int
+    let closingNativeAmount: Int
+    let periodNativeChange: Int
+    let openingValuation: Int
+    let closingValuation: Int
+    let periodValuationChange: Int
+    let periodValuationMissing: Bool
 
     var id: String { "\(account):\(nativeCurrency)" }
 }
@@ -1140,6 +1221,10 @@ enum AccountBalanceCategory: String, CaseIterable, Equatable, Identifiable {
 }
 
 extension LedgerBootstrap {
+    var periodAccountBalancesAvailable: Bool {
+        !accountBalances.isEmpty && accountBalances.allSatisfy { $0.periodAvailable == true }
+    }
+
     var balanceSheetTotals: BalanceSheetTotals {
         let valid = accountBalances.filter { !($0.valuationMissing ?? false) }
         let assets = valid
@@ -1152,6 +1237,10 @@ extension LedgerBootstrap {
     }
 
     var accountSections: [AccountBalanceSection] {
+        accountSections(periodBalancesAvailable: periodAccountBalancesAvailable)
+    }
+
+    func accountSections(periodBalancesAvailable: Bool) -> [AccountBalanceSection] {
         let accountIndex = accounts.reduce(into: [String: LedgerAccount]()) { index, account in
             index[account.account] = account
         }
@@ -1165,7 +1254,17 @@ extension LedgerBootstrap {
                 nativeAmount: balance.amount,
                 valuationCurrency: balance.valuationCurrency,
                 valuation: balance.valuation,
-                valuationMissing: balance.valuationMissing ?? false
+                valuationMissing: balance.valuationMissing ?? false,
+                periodBalancesAvailable: periodBalancesAvailable,
+                openingNativeAmount: periodBalancesAvailable ? (balance.openingAmount ?? balance.amount) : balance.amount,
+                closingNativeAmount: periodBalancesAvailable ? (balance.closingAmount ?? balance.amount) : balance.amount,
+                periodNativeChange: periodBalancesAvailable ? (balance.periodChange ?? 0) : 0,
+                openingValuation: periodBalancesAvailable ? (balance.openingValuation ?? balance.valuation) : balance.valuation,
+                closingValuation: periodBalancesAvailable ? (balance.closingValuation ?? balance.valuation) : balance.valuation,
+                periodValuationChange: periodBalancesAvailable ? (balance.periodValuationChange ?? 0) : 0,
+                periodValuationMissing: periodBalancesAvailable
+                    ? (balance.periodValuationMissing ?? (balance.valuationMissing ?? false))
+                    : (balance.valuationMissing ?? false)
             )
         }
 

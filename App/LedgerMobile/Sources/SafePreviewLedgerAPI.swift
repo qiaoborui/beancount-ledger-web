@@ -20,7 +20,10 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     private var history: [BQLHistoryRecord] = []
 
     func health(baseURL: URL) async throws -> HealthStatus {
-        HealthStatus(apiVersion: 1, capabilities: ["full-backend", "cookie-auth"])
+        HealthStatus(
+            apiVersion: 1,
+            capabilities: ["full-backend", "cookie-auth", HealthStatus.accountPeriodBalancesCapability]
+        )
     }
 
     func authStatus(baseURL: URL) async throws -> AuthStatus {
@@ -60,8 +63,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         )
     }
 
-    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
-        SafePreviewLedgerData.accountDetail(account: account)
+    func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
+        SafePreviewLedgerData.accountDetail(account: account, currency: currency, start: start, end: end)
     }
 
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
@@ -238,13 +241,31 @@ private enum SafePreviewLedgerData {
         )
         let valuedBalances = balances.map { balance in
             let valuation = converted(balance.amount, from: balance.currency, to: valuationCurrency)
+            let changes = transactions.flatMap { transaction in
+                transaction.postings
+                    .filter { $0.account == balance.account && ($0.currency ?? "CNY") == balance.currency }
+                    .map { (transaction.date, $0.amount) }
+            }
+            let baseAmount = balance.amount - changes.reduce(0) { $0 + $1.1 }
+            let openingAmount = baseAmount + changes.filter { $0.0 < start }.reduce(0) { $0 + $1.1 }
+            let closingAmount = baseAmount + changes.filter { $0.0 < end }.reduce(0) { $0 + $1.1 }
+            let openingValuation = converted(openingAmount, from: balance.currency, to: valuationCurrency)
+            let closingValuation = converted(closingAmount, from: balance.currency, to: valuationCurrency)
             return AccountBalance(
                 account: balance.account,
                 currency: balance.currency,
                 amount: balance.amount,
                 valuationCurrency: valuationCurrency,
                 valuation: valuation ?? 0,
-                valuationMissing: valuation == nil
+                valuationMissing: valuation == nil,
+                openingAmount: openingAmount,
+                closingAmount: closingAmount,
+                periodChange: closingAmount - openingAmount,
+                openingValuation: openingValuation ?? 0,
+                closingValuation: closingValuation ?? 0,
+                periodValuationChange: (closingValuation ?? 0) - (openingValuation ?? 0),
+                periodValuationMissing: openingValuation == nil || closingValuation == nil,
+                periodAvailable: true
             )
         }
         return LedgerBootstrap(
@@ -393,18 +414,20 @@ private enum SafePreviewLedgerData {
             .map { Int((Double(amount) * $0.rate).rounded()) }
     }
 
-    static func accountDetail(account: String) -> LedgerAccountDetail {
+    static func accountDetail(account: String, currency: String, start: String, end: String) -> LedgerAccountDetail {
         let metadata = accounts.first { $0.account == account }
-        let balance = balances.first { $0.account == account }
+        let balance = balances.first { $0.account == account && $0.currency == currency }
         let matching = transactions
             .sorted { $0.date < $1.date }
             .compactMap { transaction -> (LedgerTransaction, Int)? in
-                guard let posting = transaction.postings.first(where: { $0.account == account }) else { return nil }
+                guard let posting = transaction.postings.first(where: {
+                    $0.account == account && ($0.currency ?? "CNY") == currency
+                }) else { return nil }
                 return (transaction, posting.amount)
             }
         let currentBalance = balance?.amount ?? 0
         var runningBalance = currentBalance - matching.reduce(0) { $0 + $1.1 }
-        let rows = matching.map { transaction, change in
+        let allRows = matching.map { transaction, change in
             runningBalance += change
             return LedgerAccountDetailRow(
                 date: transaction.date,
@@ -415,15 +438,23 @@ private enum SafePreviewLedgerData {
                 transaction: transaction
             )
         }
+        let openingBalance = allRows.last(where: { $0.date < start })?.balance ?? 0
+        let closingBalance = allRows.last(where: { $0.date < end })?.balance ?? 0
+        let rows = allRows.filter { $0.date >= start && $0.date < end }
         return LedgerAccountDetail(
             account: account,
             label: metadata?.label ?? account,
             alias: metadata?.alias,
             group: metadata?.group ?? "asset",
             active: metadata?.active ?? true,
-            currency: balance?.currency ?? metadata?.currency ?? "CNY",
+            currency: currency,
             currentBalance: currentBalance,
-            rows: rows
+            rows: rows,
+            start: start,
+            end: end,
+            openingBalance: openingBalance,
+            closingBalance: closingBalance,
+            periodChange: closingBalance - openingBalance
         )
     }
 

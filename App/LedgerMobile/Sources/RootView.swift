@@ -415,11 +415,14 @@ private struct MainTabView: View {
     }
 
     var body: some View {
-        if horizontalSizeClass == .regular {
-            LedgerRegularShell(selection: selection)
-        } else {
-            compactTabs
+        Group {
+            if horizontalSizeClass == .regular {
+                LedgerRegularShell(selection: selection)
+            } else {
+                compactTabs
+            }
         }
+        .ledgerTimeRangeSheet()
     }
 
     private var compactTabs: some View {

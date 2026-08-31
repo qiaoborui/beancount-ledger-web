@@ -14,21 +14,39 @@ struct AccountsView: View {
                     PrivacyToolbarButton()
                 }
 
-                if let ledger = session.ledger, !ledger.accountSections.isEmpty {
+                if let ledger = session.ledger,
+                   !ledger.accountSections(
+                       periodBalancesAvailable: session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
+                   ).isEmpty {
+                    let periodBalancesAvailable = session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
+                    let sections = ledger.accountSections(
+                        periodBalancesAvailable: periodBalancesAvailable
+                    )
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            LedgerPageIntro(
-                                title: "账户",
-                                detail: "按资产类型查看余额，展开分类进入账户趋势与流水。",
-                                meta: "\(ledger.accountBalances.count) 个账户"
-                            ) {
-                                EmptyView()
+                            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                                LedgerPageIntro(
+                                    title: "账户",
+                                    detail: "按资产类型查看余额，展开分类进入账户趋势与流水。",
+                                    meta: "\(ledger.accountBalances.count) 个账户",
+                                    style: .inline
+                                ) {
+                                    EmptyView()
+                                }
+
+                                LedgerTimeRangeControl()
                             }
+                            .padding(LedgerSpacing.lg)
+                            .background(LedgerPalette.panel)
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(LedgerPalette.line).frame(height: 1)
+                            }
+                            .padding(.bottom, LedgerSpacing.md)
 
                             VStack(alignment: .leading, spacing: LedgerSpacing.md) {
                                 AccountCategoryPicker(
                                     selection: $selectedCategory,
-                                    rows: ledger.accountSections.flatMap(\.rows)
+                                    rows: sections.flatMap(\.rows)
                                 )
 
                                 if let error = session.errorMessage {
@@ -39,7 +57,7 @@ struct AccountsView: View {
                             .padding(.bottom, LedgerSpacing.lg)
 
                             LazyVStack(spacing: LedgerSpacing.md) {
-                                ForEach(filteredSections(in: ledger)) { section in
+                                ForEach(filteredSections(in: sections)) { section in
                                     AccountGroupPanel(
                                         section: section,
                                         valuationCurrency: ledger.valuationCurrency,
@@ -47,7 +65,7 @@ struct AccountsView: View {
                                     )
                                 }
 
-                                if filteredSections(in: ledger).isEmpty {
+                                if filteredSections(in: sections).isEmpty {
                                     EmptyLedgerState(
                                         icon: selectedCategory == .liabilities ? "creditcard" : "building.columns",
                                         title: "这个分类暂无账户",
@@ -81,8 +99,8 @@ struct AccountsView: View {
         }
     }
 
-    private func filteredSections(in ledger: LedgerBootstrap) -> [AccountBalanceSection] {
-        ledger.accountSections.compactMap { section in
+    private func filteredSections(in sections: [AccountBalanceSection]) -> [AccountBalanceSection] {
+        sections.compactMap { section in
             let rows = section.rows.filter(selectedCategory.includes)
             guard !rows.isEmpty else { return nil }
             return AccountBalanceSection(id: section.id, title: section.title, rows: rows)
@@ -145,8 +163,14 @@ private struct AccountGroupPanel: View {
 
     private var total: Int {
         section.rows
-            .filter { !$0.valuationMissing }
-            .reduce(0) { $0 + $1.valuation }
+            .filter {
+                $0.periodBalancesAvailable
+                    ? !$0.periodValuationMissing
+                    : !$0.valuationMissing
+            }
+            .reduce(0) {
+                $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation)
+            }
     }
 
     var body: some View {
@@ -175,6 +199,9 @@ private struct AccountGroupPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     VStack(alignment: .trailing, spacing: 4) {
+                        Text(section.rows.allSatisfy(\.periodBalancesAvailable) ? "期末总额" : "当前总额")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.secondary)
                         AmountLabel(
                             minorUnits: total,
                             currency: valuationCurrency,
@@ -200,7 +227,7 @@ private struct AccountGroupPanel: View {
 
                 ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
                     NavigationLink {
-                        AccountDetailView(account: row.account)
+                        AccountDetailView(account: row.account, currency: row.nativeCurrency)
                     } label: {
                         HStack(spacing: LedgerSpacing.sm) {
                             AccountRowView(row: row)
@@ -267,10 +294,21 @@ private enum AccountGroupSymbol {
 struct AccountDetailView: View {
     @EnvironmentObject private var session: LedgerSession
     let account: String
+    let currency: String
 
     @State private var detail: LedgerAccountDetail?
     @State private var errorMessage: String?
     @State private var reloadToken = 0
+
+    private var requestKey: AccountDetailRequestKey {
+        AccountDetailRequestKey(
+            account: account,
+            currency: currency,
+            start: session.selectedRange.start,
+            end: session.selectedRange.end,
+            reloadToken: reloadToken
+        )
+    }
 
     var body: some View {
         Group {
@@ -307,25 +345,21 @@ struct AccountDetailView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(detail?.label ?? "账户详情")
+        .navigationTitle(detail?.label ?? account.split(separator: ":").last.map(String.init) ?? account)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                PrivacyToolbarButton()
-            }
-        }
-        .task(id: reloadToken) {
-            await load()
+        .task(id: requestKey) {
+            await load(replacingContent: detail == nil)
         }
     }
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
         ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
-                AccountDetailHero(detail: detail)
+                AccountDetailHero(detail: detail, range: session.selectedRange)
+                LedgerTimeRangeControl()
 
                 if let errorMessage {
                     StatusBanner(message: errorMessage) {
@@ -333,7 +367,7 @@ struct AccountDetailView: View {
                     }
                 }
 
-                AccountBalanceTrendPanel(detail: detail)
+                AccountBalanceTrendPanel(detail: detail, range: session.selectedRange)
 
                 HStack(alignment: .firstTextBaseline) {
                     Text("账户流水")
@@ -386,7 +420,7 @@ struct AccountDetailView: View {
         }
         errorMessage = nil
         do {
-            let updatedDetail = try await session.accountDetail(for: account)
+            let updatedDetail = try await session.accountDetail(for: account, currency: currency)
             guard !Task.isCancelled else { return }
             detail = updatedDetail
         } catch is CancellationError {
@@ -397,8 +431,29 @@ struct AccountDetailView: View {
     }
 }
 
+private struct AccountDetailRequestKey: Hashable {
+    let account: String
+    let currency: String
+    let start: String
+    let end: String
+    let reloadToken: Int
+}
+
 private struct AccountDetailHero: View {
     let detail: LedgerAccountDetail
+    let range: LedgerDateRange
+
+    private var openingBalance: Int {
+        detail.openingBalance ?? detail.rows.first.map { $0.balance - $0.change } ?? detail.currentBalance
+    }
+
+    private var closingBalance: Int {
+        detail.closingBalance ?? detail.rows.last?.balance ?? openingBalance
+    }
+
+    private var periodChange: Int {
+        detail.periodChange ?? (closingBalance - openingBalance)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
@@ -411,11 +466,6 @@ private struct AccountDetailHero: View {
                     .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(detail.label)
-                        .font(.system(size: 22, weight: .semibold))
-                        .tracking(-0.4)
-                        .foregroundStyle(LedgerPalette.ink)
-                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: LedgerSpacing.sm) {
                         Text(AccountGroupSymbol.title(for: detail.group))
                         Text("·")
@@ -438,11 +488,11 @@ private struct AccountDetailHero: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(detail.account.hasPrefix("Liabilities:") ? "当前待还" : "当前余额")
+                Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(LedgerPalette.secondary)
                 AmountLabel(
-                    minorUnits: detail.currentBalance,
+                    minorUnits: closingBalance,
                     currency: detail.currency,
                     font: .system(size: 30, weight: .semibold),
                     color: detail.account.hasPrefix("Liabilities:")
@@ -451,6 +501,37 @@ private struct AccountDetailHero: View {
                 )
                 .tracking(-0.75)
                 .lineLimit(1)
+            }
+
+            HStack(spacing: LedgerSpacing.xl) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("期初余额")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    AmountLabel(
+                        minorUnits: openingBalance,
+                        currency: detail.currency,
+                        font: .system(size: 12, weight: .semibold),
+                        color: LedgerPalette.olive
+                    )
+                    .lineLimit(1)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("期间变化")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    AmountLabel(
+                        minorUnits: periodChange,
+                        currency: detail.currency,
+                        prefix: periodChange > 0 ? "+" : "",
+                        font: .system(size: 12, weight: .semibold),
+                        color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
+                    )
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -480,11 +561,12 @@ private struct AccountDetailHero: View {
 private struct AccountBalanceTrendPanel: View {
     @EnvironmentObject private var session: LedgerSession
     let detail: LedgerAccountDetail
+    let range: LedgerDateRange
 
     @State private var selectedIndex: Int?
 
     private var points: [LedgerAccountBalanceTrendPoint] {
-        detail.balanceTrend(maxPoints: 180)
+        detail.balanceTrend(in: range, maxPoints: 180)
     }
 
     private var axis: LedgerChartAxis {
@@ -492,8 +574,9 @@ private struct AccountBalanceTrendPanel: View {
     }
 
     private var periodChange: Int? {
-        guard let first = points.first, let last = points.last, first.id != last.id else { return nil }
-        return last.balance - first.balance
+        detail.periodChange ?? points.first.flatMap { first in
+            points.last.map { $0.balance - first.balance }
+        }
     }
 
     var body: some View {
@@ -654,11 +737,7 @@ private struct AccountBalanceTrendPanel: View {
     }
 
     private var rangeLabel: String {
-        guard let first = points.first?.date, let last = points.last?.date else {
-            return "暂无趋势数据"
-        }
-        if first == last { return first.replacingOccurrences(of: "-", with: "/") }
-        return "\(first.replacingOccurrences(of: "-", with: "/")) 至 \(last.replacingOccurrences(of: "-", with: "/"))"
+        "\(range.start.replacingOccurrences(of: "-", with: "/")) 至 \(range.end.replacingOccurrences(of: "-", with: "/"))"
     }
 
     private func selectionOverlay(proxy: ChartProxy) -> some View {
@@ -756,28 +835,66 @@ private struct AccountRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                if row.valuationMissing {
-                    Text("缺少汇率")
+                if row.periodBalancesAvailable && row.periodValuationMissing {
+                    Text("缺少期间汇率")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(LedgerPalette.risk)
                 } else {
-                    AmountLabel(
-                        minorUnits: row.valuation,
-                        currency: row.valuationCurrency,
-                        font: .system(size: 13, weight: .semibold)
-                    )
-                    .lineLimit(1)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(row.periodBalancesAvailable ? "期末" : "当前")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        AmountLabel(
+                            minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
+                            currency: row.valuationCurrency,
+                            font: .system(size: 13, weight: .semibold)
+                        )
+                        .lineLimit(1)
+                    }
+                }
+            }
+
+            if row.periodBalancesAvailable && !row.periodValuationMissing {
+                HStack(spacing: LedgerSpacing.lg) {
+                    HStack(spacing: 5) {
+                        Text("期初")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        AmountLabel(
+                            minorUnits: row.openingValuation,
+                            currency: row.valuationCurrency,
+                            font: .system(size: 10, weight: .medium),
+                            color: LedgerPalette.secondary
+                        )
+                        .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 5) {
+                        Text("变化")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        AmountLabel(
+                            minorUnits: row.periodValuationChange,
+                            currency: row.valuationCurrency,
+                            prefix: row.periodValuationChange > 0 ? "+" : "",
+                            font: .system(size: 10, weight: .semibold),
+                            color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
+                        )
+                        .lineLimit(1)
+                    }
                 }
             }
 
             if row.nativeCurrency != row.valuationCurrency {
-                HStack {
-                    Text("原币")
-                        .font(.system(size: 10, weight: .medium))
+                HStack(spacing: 5) {
+                    Text(row.periodBalancesAvailable ? "原币期末" : "原币余额")
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
-                    Spacer()
+                    Spacer(minLength: 0)
                     AmountLabel(
-                        minorUnits: row.nativeAmount,
+                        minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
                         currency: row.nativeCurrency,
                         font: .system(size: 10, weight: .medium),
                         color: LedgerPalette.secondary

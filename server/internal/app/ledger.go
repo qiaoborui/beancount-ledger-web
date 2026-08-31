@@ -74,12 +74,20 @@ type Price struct {
 }
 
 type AccountBalance struct {
-	Account           string `json:"account"`
-	Currency          string `json:"currency"`
-	Amount            int    `json:"amount"`
-	ValuationCurrency string `json:"valuationCurrency"`
-	Valuation         int    `json:"valuation"`
-	ValuationMissing  bool   `json:"valuationMissing,omitempty"`
+	Account                string `json:"account"`
+	Currency               string `json:"currency"`
+	Amount                 int    `json:"amount"`
+	ValuationCurrency      string `json:"valuationCurrency"`
+	Valuation              int    `json:"valuation"`
+	ValuationMissing       bool   `json:"valuationMissing,omitempty"`
+	OpeningAmount          int    `json:"openingAmount"`
+	ClosingAmount          int    `json:"closingAmount"`
+	PeriodChange           int    `json:"periodChange"`
+	OpeningValuation       int    `json:"openingValuation"`
+	ClosingValuation       int    `json:"closingValuation"`
+	PeriodValuationChange  int    `json:"periodValuationChange"`
+	PeriodValuationMissing bool   `json:"periodValuationMissing,omitempty"`
+	PeriodAvailable        bool   `json:"periodAvailable,omitempty"`
 }
 
 type Account struct {
@@ -985,6 +993,10 @@ func AccountDetail(account string, txns []Transaction) []AccountDetailRow {
 }
 
 func AccountDetailFromSorted(account string, sortedTxns []Transaction) []AccountDetailRow {
+	return AccountDetailFromSortedInCurrency(account, "", sortedTxns)
+}
+
+func AccountDetailFromSortedInCurrency(account, currency string, sortedTxns []Transaction) []AccountDetailRow {
 	type relevant struct {
 		txn    Transaction
 		change int
@@ -994,7 +1006,11 @@ func AccountDetailFromSorted(account string, sortedTxns []Transaction) []Account
 		var change int
 		matched := false
 		for _, posting := range txn.Postings {
-			if posting.Account == account {
+			postingCurrency := posting.Currency
+			if postingCurrency == "" {
+				postingCurrency = "CNY"
+			}
+			if posting.Account == account && (currency == "" || postingCurrency == currency) {
 				change += posting.Amount
 				matched = true
 			}

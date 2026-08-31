@@ -64,6 +64,11 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 
 Run the portable model and session tests with `swift test` from this directory.
 
+Apple Silicon Mac can run the same iPad build through Designed for iPad. After
+`xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination
+in Xcode. Regenerating the project restores the intended iOS platform settings
+if Xcode's recommended-settings migration added a native macOS target locally.
+
 ## Visual QA
 
 `--safe-preview` is compiled only into Debug builds. It skips account login and

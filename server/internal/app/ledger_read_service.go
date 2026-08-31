@@ -263,7 +263,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards, allNetWorthRows := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
+	accountBalances := snapshotAccountBalancesForRange(snapshot, start, end, valuationCurrency)
 	reconciliationRows := []ReconciliationRow{}
 	accountStatuses := []AccountStatus{}
 	investments := InvestmentSummary{}
@@ -319,7 +319,7 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 		Summary:            summary,
 		Comparisons:        buildLedgerPeriodComparisons(snapshot, start, end, unlocked, valuationCurrency, nil, false, today),
 		Balances:           statusMap(unlocked, snapshot.Balances),
-		AccountBalances:    statusAccountBalances(unlocked, snapshotAccountBalances(snapshot, valuationCurrency)),
+		AccountBalances:    statusAccountBalances(unlocked, snapshotAccountBalancesForRange(snapshot, start, end, valuationCurrency)),
 		NetWorthHistory:    []NetWorthPoint{},
 		MonthEndNetWorth:   []NetWorthPoint{},
 		NetWorthWindows:    nil,
@@ -342,7 +342,7 @@ func BuildLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bo
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards, allNetWorthRows := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
-	accountBalances := snapshotAccountBalances(snapshot, valuationCurrency)
+	accountBalances := snapshotAccountBalancesForRange(snapshot, start, end, valuationCurrency)
 	return SummaryQueryResult{
 		Start:             start,
 		End:               end,
@@ -465,6 +465,58 @@ func snapshotAccountBalances(snapshot *LedgerSnapshot, valuationCurrency string)
 		return snapshot.AccountBalances
 	}
 	return AccountBalanceRowsWithPriceIndex(snapshotRawBalances(snapshot), snapshotPriceIndex(snapshot), "", valuationCurrency)
+}
+
+func snapshotAccountBalancesForRange(snapshot *LedgerSnapshot, start, end, valuationCurrency string) []AccountBalance {
+	rows := append([]AccountBalance(nil), snapshotAccountBalances(snapshot, valuationCurrency)...)
+	openingBalances := accountBalancesBefore(snapshot.Transactions, start)
+	closingBalances := accountBalancesBefore(snapshot.Transactions, end)
+	priceIndex := snapshotPriceIndex(snapshot)
+	openingDate := previousDate(start)
+	closingDate := previousDate(end)
+
+	for index := range rows {
+		row := &rows[index]
+		openingAmount := openingBalances[row.Account][row.Currency]
+		closingAmount := closingBalances[row.Account][row.Currency]
+		openingValuation, openingOK := priceIndex.Valuation(openingAmount, row.Currency, valuationCurrency, openingDate)
+		closingValuation, closingOK := priceIndex.Valuation(closingAmount, row.Currency, valuationCurrency, closingDate)
+		if openingAmount == 0 {
+			openingValuation, openingOK = 0, true
+		}
+		if closingAmount == 0 {
+			closingValuation, closingOK = 0, true
+		}
+
+		row.OpeningAmount = openingAmount
+		row.ClosingAmount = closingAmount
+		row.PeriodChange = closingAmount - openingAmount
+		row.OpeningValuation = openingValuation
+		row.ClosingValuation = closingValuation
+		row.PeriodValuationChange = closingValuation - openingValuation
+		row.PeriodValuationMissing = !openingOK || !closingOK
+		row.PeriodAvailable = true
+	}
+	return rows
+}
+
+func accountBalancesBefore(transactions []Transaction, end string) map[string]map[string]int {
+	balances := map[string]map[string]int{}
+	for _, transaction := range transactions {
+		if end != "" && transaction.Date >= end {
+			continue
+		}
+		applyPostingsToBalances(balances, transaction.Postings)
+	}
+	return balances
+}
+
+func previousDate(value string) string {
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return value
+	}
+	return date.AddDate(0, 0, -1).Format("2006-01-02")
 }
 
 func scopedLedgerSummary(snapshot *LedgerSnapshot, start, end string, unlocked bool, valuationCurrency string) Summary {

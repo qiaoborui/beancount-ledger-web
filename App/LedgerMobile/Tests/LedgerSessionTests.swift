@@ -43,6 +43,98 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.selectedRange, july)
     }
 
+    func testAccountDetailUsesSelectedRange() async throws {
+        let suiteName = "ledger-mobile-account-range-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await session.applyRange(.month(year: 2026, month: 7))
+
+        _ = try await session.accountDetail(for: "Assets:Bank:Daily", currency: "CNY")
+
+        let request = await api.accountDetailRequests().last
+        XCTAssertEqual(request?.account, "Assets:Bank:Daily")
+        XCTAssertEqual(request?.currency, "CNY")
+        XCTAssertEqual(request?.start, "2026-07-01")
+        XCTAssertEqual(request?.end, "2026-08-01")
+    }
+
+    func testLegacyAccountDetailIsFilteredToSelectedRange() async throws {
+        let suiteName = "ledger-mobile-legacy-account-range-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let transaction = LedgerTransaction(
+            date: "2026-07-10",
+            payee: "测试",
+            narration: "",
+            tags: nil,
+            postings: [LedgerPosting(account: "Assets:Bank:Daily", amount: 300, currency: "CNY")],
+            source: TransactionSource(file: "transactions/2026/07.bean", line: 1, hash: nil, gitSHA: nil)
+        )
+        let legacyDetail = LedgerAccountDetail(
+            account: "Assets:Bank:Daily",
+            label: "日常账户",
+            alias: nil,
+            group: "cash",
+            active: true,
+            currency: "CNY",
+            currentBalance: 1_500,
+            rows: [
+                LedgerAccountDetailRow(
+                    date: "2026-06-30",
+                    payee: "期初前",
+                    narration: "",
+                    change: 1_000,
+                    balance: 1_000,
+                    transaction: transaction
+                ),
+                LedgerAccountDetailRow(
+                    date: "2026-07-10",
+                    payee: "期间内",
+                    narration: "",
+                    change: 300,
+                    balance: 1_300,
+                    transaction: transaction
+                ),
+                LedgerAccountDetailRow(
+                    date: "2026-08-01",
+                    payee: "期间后",
+                    narration: "",
+                    change: 200,
+                    balance: 1_500,
+                    transaction: transaction
+                ),
+            ]
+        )
+        let api = SessionMockAPI(
+            healthStatus: HealthStatus(
+                apiVersion: 1,
+                capabilities: ["full-backend", "cookie-auth", HealthStatus.accountPeriodBalancesCapability]
+            ),
+            payload: Self.payload,
+            accountDetailPayload: legacyDetail
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await session.applyRange(.month(year: 2026, month: 7))
+
+        let detail = try await session.accountDetail(for: "Assets:Bank:Daily", currency: "CNY")
+
+        XCTAssertTrue(session.accountPeriodBalancesAvailable)
+        XCTAssertEqual(detail.rows.map(\.date), ["2026-07-10"])
+        XCTAssertEqual(detail.openingBalance, 1_000)
+        XCTAssertEqual(detail.closingBalance, 1_300)
+        XCTAssertEqual(detail.periodChange, 300)
+        XCTAssertEqual(detail.start, "2026-07-01")
+        XCTAssertEqual(detail.end, "2026-08-01")
+    }
+
     func testLogoutClearsLoadedLedgerImmediately() async {
         let suiteName = "ledger-mobile-logout-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -72,7 +164,7 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .ready)
 
         do {
-            _ = try await session.accountDetail(for: "Assets:Bank:Daily")
+            _ = try await session.accountDetail(for: "Assets:Bank:Daily", currency: "CNY")
             XCTFail("Expected sensitive lock response")
         } catch let error as LedgerAPIError {
             guard case let .server(status, _) = error else {
@@ -103,7 +195,7 @@ final class LedgerSessionTests: XCTestCase {
         await session.resume()
 
         let detailRequest = Task {
-            try await session.accountDetail(for: "Assets:Bank:Daily")
+            try await session.accountDetail(for: "Assets:Bank:Daily", currency: "CNY")
         }
         try await Task.sleep(nanoseconds: 10_000_000)
         session.logout()
@@ -227,7 +319,8 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.quickUnlockRevoke, 1)
     }
 
-    func testPasskeyLoginVerifiesAssertionAndLoadsLedger() async {
+    func testPasskeyLoginVerifiesAssertionAndLoadsLedger() async throws {
+        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "个人团队构建未启用关联域名通行密钥")
         let suiteName = "ledger-mobile-passkey-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://beancount.borry.org", forKey: "ledger.mobile.server-origin")
@@ -260,7 +353,8 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.passkeyVerify, 1)
     }
 
-    func testPasskeyCancellationReturnsToPasswordFallback() async {
+    func testPasskeyCancellationReturnsToPasswordFallback() async throws {
+        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "个人团队构建未启用关联域名通行密钥")
         let suiteName = "ledger-mobile-passkey-cancel-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://beancount.borry.org", forKey: "ledger.mobile.server-origin")
@@ -750,6 +844,13 @@ private actor SessionMockAPI: LedgerAPI {
         let valuationCurrency: String
     }
 
+    struct AccountDetailCall: Equatable, Sendable {
+        let account: String
+        let currency: String
+        let start: String
+        let end: String
+    }
+
     struct CallCounts: Sendable {
         let authStatus: Int
         let login: Int
@@ -780,6 +881,7 @@ private actor SessionMockAPI: LedgerAPI {
     let lockShouldFail: Bool
     let accountDetailErrorStatus: Int?
     let accountDetailDelayNanoseconds: UInt64
+    let accountDetailPayload: LedgerAccountDetail?
     let analysisErrorStatus: Int?
     let analysisDelayNanoseconds: UInt64
     let bqlErrorStatus: Int?
@@ -802,11 +904,12 @@ private actor SessionMockAPI: LedgerAPI {
     private var bqlCalls = 0
     private var requests: [BootstrapRequest] = []
     private var requestedBQL: [BQLCall] = []
+    private var requestedAccountDetails: [AccountDetailCall] = []
 
     init(
         healthStatus: HealthStatus = HealthStatus(
             apiVersion: 1,
-            capabilities: ["full-backend", "cookie-auth"]
+            capabilities: ["full-backend", "cookie-auth", HealthStatus.accountPeriodBalancesCapability]
         ),
         authStatus: AuthStatus = AuthStatus(authenticated: true, sensitiveUnlocked: true, authDisabled: false),
         passkeyStatus: PasskeyStatus = PasskeyStatus(registered: false, count: 0),
@@ -817,6 +920,7 @@ private actor SessionMockAPI: LedgerAPI {
         lockShouldFail: Bool = false,
         accountDetailErrorStatus: Int? = nil,
         accountDetailDelayNanoseconds: UInt64 = 0,
+        accountDetailPayload: LedgerAccountDetail? = nil,
         analysisErrorStatus: Int? = nil,
         analysisDelayNanoseconds: UInt64 = 0,
         bqlErrorStatus: Int? = nil,
@@ -835,6 +939,7 @@ private actor SessionMockAPI: LedgerAPI {
         self.lockShouldFail = lockShouldFail
         self.accountDetailErrorStatus = accountDetailErrorStatus
         self.accountDetailDelayNanoseconds = accountDetailDelayNanoseconds
+        self.accountDetailPayload = accountDetailPayload
         self.analysisErrorStatus = analysisErrorStatus
         self.analysisDelayNanoseconds = analysisDelayNanoseconds
         self.bqlErrorStatus = bqlErrorStatus
@@ -949,12 +1054,16 @@ private actor SessionMockAPI: LedgerAPI {
         return widgetImportDocuments
     }
 
-    func accountDetail(baseURL: URL, account: String) async throws -> LedgerAccountDetail {
+    func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
+        requestedAccountDetails.append(AccountDetailCall(account: account, currency: currency, start: start, end: end))
         if accountDetailDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: accountDetailDelayNanoseconds)
         }
         if let accountDetailErrorStatus {
             throw LedgerAPIError.server(status: accountDetailErrorStatus, message: "Sensitive data locked")
+        }
+        if let accountDetailPayload {
+            return accountDetailPayload
         }
         return LedgerAccountDetail(
             account: account,
@@ -962,7 +1071,7 @@ private actor SessionMockAPI: LedgerAPI {
             alias: nil,
             group: "asset",
             active: true,
-            currency: "CNY",
+            currency: currency,
             currentBalance: 0,
             rows: []
         )
@@ -1078,6 +1187,10 @@ private actor SessionMockAPI: LedgerAPI {
 
     func bqlRequests() -> [BQLCall] {
         requestedBQL
+    }
+
+    func accountDetailRequests() -> [AccountDetailCall] {
+        requestedAccountDetails
     }
 
     private func waitForAnalysisResponse() async throws {

@@ -9,7 +9,7 @@ struct BQLQueryView: View {
             if showsAppBar {
                 LedgerAppBar { PrivacyToolbarButton() }
             }
-            BQLWorkbench()
+            BQLWorkbench(showsPageTitle: showsAppBar)
         }
         .background(LedgerPalette.canvas)
         .navigationTitle(showsAppBar ? "" : "BQL 查询")
@@ -43,6 +43,8 @@ private struct BQLWorkbench: View {
     @State private var mutationRecordID: String?
     @State private var runTask: Task<Void, Never>?
 
+    let showsPageTitle: Bool
+
     private var statements: [String] {
         BQLStatements.split(query)
     }
@@ -58,17 +60,27 @@ private struct BQLWorkbench: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                LedgerPageIntro(
-                    title: "BQL 查询",
-                    detail: "使用只读语句检索 postings 与 transactions，并复用服务器查询历史。",
-                    meta: runSummary
-                ) { EmptyView() }
+                if showsPageTitle {
+                    LedgerPageIntro(
+                        title: "BQL 查询",
+                        detail: "使用只读语句检索 postings 与 transactions，并复用服务器查询历史。",
+                        meta: runSummary
+                    ) { EmptyView() }
+                } else {
+                    LedgerPageContext(
+                        detail: "使用只读语句检索 postings 与 transactions，并复用服务器查询历史。",
+                        meta: runSummary
+                    )
+                }
+
+                LedgerTimeRangeControl()
 
                 queryAndHistory
 
                 resultsSection
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
+            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }

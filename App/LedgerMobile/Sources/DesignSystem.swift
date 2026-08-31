@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum LedgerPalette {
     static let canvas = Color.dynamic(light: 0xF6F7F9, dark: 0x020407)
@@ -238,6 +239,28 @@ struct LedgerPageIntro<Action: View>: View {
 
     private var usesCompactSurface: Bool {
         horizontalSizeClass != .regular && style == .surface
+    }
+}
+
+struct LedgerPageContext: View {
+    let detail: String
+    var meta: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(detail)
+                .font(.system(size: 13))
+                .foregroundStyle(LedgerPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let meta {
+                Text(meta)
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, LedgerSpacing.md)
     }
 }
 
