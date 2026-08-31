@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ImportHistoryView: View {
     @EnvironmentObject private var session: LedgerSession
@@ -11,6 +12,11 @@ struct ImportHistoryView: View {
     @State private var isLoading = true
     @State private var isRefreshing = false
     @State private var loadedAt: Date?
+    @State private var providers: [LedgerImportProviderInfo] = []
+    @State private var fileImporterPresented = false
+    @State private var activeImportFile: LedgerImportSelectedFile?
+    @State private var isReadingFile = false
+    @State private var debugImportFlowPresented = false
 
     private var statuses: [LedgerImportChannelStatus] {
         LedgerImportHistory.channelStatuses(documents: documents)
@@ -47,7 +53,24 @@ struct ImportHistoryView: View {
                 ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
             }
         }
-        .task { await load(replacingContent: true) }
+        .fileImporter(
+            isPresented: $fileImporterPresented,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            Task { await handleFileSelection(result) }
+        }
+        .sheet(item: $activeImportFile) { file in
+            NativeImportFlowView(file: file, providers: providers) { _ in
+                Task { await load(replacingContent: false) }
+            }
+            .environmentObject(session)
+        }
+        .task {
+            await load(replacingContent: true)
+            await loadProviders()
+            presentDebugImportFlowIfNeeded()
+        }
     }
 
     private var loadingState: some View {
@@ -89,10 +112,11 @@ struct ImportHistoryView: View {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
 
+                importSection
                 updateSummary
                 channelSection
                 historySection
-                readOnlyNotice
+                importSafetyNotice
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
             .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
@@ -109,16 +133,84 @@ struct ImportHistoryView: View {
         if showsAppBar {
             LedgerPageIntro(
                 title: "导入",
-                detail: "查看各个账单渠道的覆盖日期、更新状态和历史归档。",
+                detail: "导入新账单，查看各个渠道的覆盖日期、更新状态和历史归档。",
                 meta: loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查",
                 style: .inline
             ) { EmptyView() }
         } else {
             LedgerPageContext(
-                detail: "查看各个账单渠道的覆盖日期、更新状态和历史归档。",
+                detail: "导入新账单，查看各个渠道的覆盖日期、更新状态和历史归档。",
                 meta: loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查"
             )
         }
+    }
+
+    private var importSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            SectionHeading(title: "导入新账单", detail: "预览后确认写入")
+            LedgerPanel {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: LedgerSpacing.lg) {
+                        importFileLead
+                        importFileButton
+                    }
+
+                    VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                        importFileLead
+                        importFileButton
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(LedgerSpacing.lg)
+            }
+        }
+    }
+
+    private var importFileLead: some View {
+        HStack(alignment: .center, spacing: LedgerSpacing.md) {
+            Image(systemName: "doc.badge.plus")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(LedgerPalette.cobalt)
+                .frame(width: 44, height: 44)
+                .background(LedgerPalette.tag)
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("从“文件”选择账单")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                Text("支持 CSV、Excel、PDF、邮件和 ZIP，单个文件最大 10MB。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var importFileButton: some View {
+        Button {
+            fileImporterPresented = true
+        } label: {
+            Group {
+                if isReadingFile {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(LedgerPalette.onBrand)
+                } else {
+                    Text("选择文件")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(LedgerPalette.onBrand)
+            .padding(.horizontal, LedgerSpacing.md)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .background(LedgerPalette.cobalt)
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .disabled(isReadingFile)
+        .accessibilityIdentifier("import-select-file")
     }
 
     private var updateSummary: some View {
@@ -206,17 +298,17 @@ struct ImportHistoryView: View {
         }
     }
 
-    private var readOnlyNotice: some View {
+    private var importSafetyNotice: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
-            Image(systemName: "lock.shield")
+            Image(systemName: "checkmark.shield")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(LedgerPalette.cobalt)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 4) {
-                Text("原生只读页面")
+                Text("预览确认后写入")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
-                Text("账单上传、自动识别和写入核对继续在 Ledger Web 中完成。")
+                Text("服务端会先完成渠道识别、重复交易检查和账本验证，确认页会明确列出本次写入的交易。")
                     .font(.system(size: 11))
                     .foregroundStyle(LedgerPalette.secondary)
             }
@@ -225,6 +317,83 @@ struct ImportHistoryView: View {
         .padding(LedgerSpacing.lg)
         .background(LedgerPalette.tag.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+    }
+
+    private func loadProviders() async {
+        do {
+            let updated = try await session.importProviders()
+            guard !Task.isCancelled else { return }
+            providers = updated
+        } catch is CancellationError {
+            return
+        } catch {
+            providers = []
+        }
+    }
+
+    private func handleFileSelection(_ result: Result<[URL], Error>) async {
+        switch result {
+        case let .success(urls):
+            guard let url = urls.first else { return }
+            isReadingFile = true
+            errorMessage = nil
+            defer { isReadingFile = false }
+            do {
+                let file = try await Self.readImportFile(at: url, providers: providers)
+                guard !Task.isCancelled else { return }
+                activeImportFile = file
+            } catch is CancellationError {
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        case let .failure(error):
+            if (error as NSError).code != NSUserCancelledError {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private static func readImportFile(
+        at url: URL,
+        providers: [LedgerImportProviderInfo]
+    ) async throws -> LedgerImportSelectedFile {
+        let hasSecurityScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScope { url.stopAccessingSecurityScopedResource() }
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile != false else {
+                throw LedgerImportFileValidationError.notRegularFile
+            }
+            if let byteCount = values.fileSize {
+                try LedgerImportFileValidator.validate(
+                    name: url.lastPathComponent,
+                    byteCount: byteCount,
+                    providers: providers
+                )
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            try LedgerImportFileValidator.validate(
+                name: url.lastPathComponent,
+                byteCount: data.count,
+                providers: providers
+            )
+            return LedgerImportSelectedFile(name: url.lastPathComponent, data: data)
+        }.value
+    }
+
+    private func presentDebugImportFlowIfNeeded() {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("--safe-import-flow"),
+              !debugImportFlowPresented else { return }
+        debugImportFlowPresented = true
+        activeImportFile = LedgerImportSelectedFile(
+            name: "wechat-2026-08.xlsx",
+            data: Data("safe import preview".utf8)
+        )
+        #endif
     }
 
     private func load(replacingContent: Bool) async {

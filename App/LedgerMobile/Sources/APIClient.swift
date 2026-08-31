@@ -89,6 +89,18 @@ protocol LedgerAPI: Sendable {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
+    func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo]
+    func previewImport(
+        baseURL: URL,
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview
+    func commitImport(
+        baseURL: URL,
+        request: LedgerImportCommitRequest
+    ) async throws -> LedgerImportCommitResult
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
     func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
@@ -115,6 +127,27 @@ extension LedgerAPI {
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持导入记录")
+    }
+
+    func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+    }
+
+    func previewImport(
+        baseURL: URL,
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+    }
+
+    func commitImport(
+        baseURL: URL,
+        request: LedgerImportCommitRequest
+    ) async throws -> LedgerImportCommitResult {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
     }
 
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
@@ -268,6 +301,69 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/imports/documents"
         )
         return response.documents
+    }
+
+    func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
+        let response: LedgerImportProvidersResponse = try await get(
+            baseURL: baseURL,
+            path: "/api/ledger/imports/providers"
+        )
+        return response.providers
+    }
+
+    func previewImport(
+        baseURL: URL,
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        let boundary = "LedgerMobile-\(UUID().uuidString)"
+        var body = Data()
+        if let provider, !provider.isEmpty {
+            appendMultipartField(name: "provider", value: provider, boundary: boundary, to: &body)
+        }
+        appendMultipartField(
+            name: "alipayFundRounding",
+            value: alipayFundRounding ? "true" : "false",
+            boundary: boundary,
+            to: &body
+        )
+        if file.isZIP, !archivePassword.isEmpty {
+            appendMultipartField(
+                name: "archivePassword",
+                value: archivePassword,
+                boundary: boundary,
+                to: &body
+            )
+        }
+        body.appendUTF8("--\(boundary)\r\n")
+        body.appendUTF8(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"\(safeMultipartFilename(file.name))\"\r\n"
+        )
+        body.appendUTF8("Content-Type: application/octet-stream\r\n\r\n")
+        body.append(file.data)
+        body.appendUTF8("\r\n--\(boundary)--\r\n")
+
+        var request = URLRequest(url: baseURL.appending(path: "/api/ledger/imports/preview"))
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return try await self.request(request)
+    }
+
+    func commitImport(
+        baseURL: URL,
+        request: LedgerImportCommitRequest
+    ) async throws -> LedgerImportCommitResult {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/imports/commit",
+            method: "POST",
+            body: request
+        )
     }
 
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
@@ -424,6 +520,27 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         _ = try await responseData(for: request)
     }
 
+    private func appendMultipartField(
+        name: String,
+        value: String,
+        boundary: String,
+        to body: inout Data
+    ) {
+        body.appendUTF8("--\(boundary)\r\n")
+        body.appendUTF8("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+        body.appendUTF8(value)
+        body.appendUTF8("\r\n")
+    }
+
+    private func safeMultipartFilename(_ filename: String) -> String {
+        filename
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "\r", with: "_")
+            .replacingOccurrences(of: "\n", with: "_")
+    }
+
     private func request<Response: Decodable>(_ request: URLRequest) async throws -> Response {
         let data = try await responseData(for: request)
         do {
@@ -460,4 +577,14 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
 
 private struct EmptySuccess: Decodable {
     let ok: Bool
+}
+
+private struct LedgerImportProvidersResponse: Decodable {
+    let providers: [LedgerImportProviderInfo]
+}
+
+private extension Data {
+    mutating func appendUTF8(_ value: String) {
+        append(Data(value.utf8))
+    }
 }
