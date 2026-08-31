@@ -204,8 +204,13 @@ final class APIClientTests: XCTestCase {
         )
 
         XCTAssertEqual(documents.count, 1)
+        XCTAssertEqual(documents.first?.path, "transactions/2026/documents/imports/private.csv")
+        XCTAssertEqual(documents.first?.name, "private.csv")
+        XCTAssertEqual(documents.first?.year, "2026")
+        XCTAssertEqual(documents.first?.ext, ".csv")
         XCTAssertEqual(documents.first?.provider, "alipay")
         XCTAssertEqual(documents.first?.dateEnd, "2026-08-28")
+        XCTAssertEqual(documents.first?.size, 1024)
         XCTAssertEqual(documents.first?.modTime, "2026-08-29T08:00:00Z")
     }
 

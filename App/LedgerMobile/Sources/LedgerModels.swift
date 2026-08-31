@@ -476,11 +476,44 @@ struct LedgerImportDocumentsResponse: Decodable, Equatable, Sendable {
     let documents: [LedgerImportDocument]
 }
 
-struct LedgerImportDocument: Decodable, Equatable, Sendable {
+struct LedgerImportDocument: Decodable, Equatable, Identifiable, Sendable {
+    let path: String?
+    let name: String?
+    let year: String?
+    let ext: String?
     let provider: String?
     let dateStart: String?
     let dateEnd: String?
+    let size: Int?
     let modTime: String
+
+    init(
+        path: String? = nil,
+        name: String? = nil,
+        year: String? = nil,
+        ext: String? = nil,
+        provider: String?,
+        dateStart: String?,
+        dateEnd: String?,
+        size: Int? = nil,
+        modTime: String
+    ) {
+        self.path = path
+        self.name = name
+        self.year = year
+        self.ext = ext
+        self.provider = provider
+        self.dateStart = dateStart
+        self.dateEnd = dateEnd
+        self.size = size
+        self.modTime = modTime
+    }
+
+    var id: String {
+        path ?? [provider, dateStart, dateEnd, name, modTime]
+            .compactMap { $0 }
+            .joined(separator: ":")
+    }
 }
 
 struct LedgerTransaction: Decodable, Identifiable, Equatable {

@@ -20,6 +20,9 @@ authentication and privacy lock.
   table, bar, pie, and line views, and manage server-synced query history.
 - Inspect direct, inverse, and CNY-bridged exchange rates, review recent price
   history, and switch the valuation currency used across overview and analysis.
+- Review each supported bill channel's latest coverage date, update freshness,
+  archived filename, archive time, and file size from a native read-only import
+  history screen.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact

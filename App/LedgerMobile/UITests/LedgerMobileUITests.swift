@@ -194,6 +194,36 @@ final class LedgerMobileUITests: XCTestCase {
         capture("currency-selected-visible")
     }
 
+    func testImportHistoryShowsProviderFreshnessAndArchivedFiles() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            let entry = app.buttons["sidebar-imports"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 3))
+            entry.tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+
+        let content = app.scrollViews["import-history-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["渠道状态"].exists)
+        XCTAssertTrue(app.staticTexts["支付宝"].exists)
+        XCTAssertTrue(app.staticTexts["微信支付"].exists)
+        XCTAssertTrue(app.staticTexts["招商银行信用卡"].exists)
+        XCTAssertTrue(app.staticTexts["alipay-2026-08.csv"].exists)
+        XCTAssertTrue(app.staticTexts["原生只读页面"].exists)
+        capture("import-history")
+    }
+
     func testChartAxesPreserveTimeSpacingAndTouchShowsSelections() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()

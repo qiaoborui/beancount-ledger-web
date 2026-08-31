@@ -67,6 +67,10 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         SafePreviewLedgerData.accountDetail(account: account, currency: currency, start: start, end: end)
     }
 
+    func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
+        SafePreviewLedgerData.importDocuments
+    }
+
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
         SafePreviewLedgerData.dashboard(start: start, end: end, valuationCurrency: valuationCurrency)
     }
@@ -211,6 +215,53 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-05-09", payee: "教育储备", narration: "五月定期转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_260_000, "CNY"), ("Assets:Bank:Daily", -1_260_000, "CNY")], line: 73),
         transaction(date: "2026-04-16", payee: "教育储备", narration: "春季计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_880_000, "CNY"), ("Assets:Bank:Daily", -1_880_000, "CNY")], line: 51),
         transaction(date: "2026-03-08", payee: "教育储备", narration: "年度储备启动", postings: [("Assets:Bank:FamilyEducationReserve", 3_420_000, "CNY"), ("Assets:Bank:Daily", -3_420_000, "CNY")], line: 27),
+    ]
+
+    static let importDocuments = [
+        LedgerImportDocument(
+            path: "transactions/2026/documents/imports/alipay-2026-08.csv",
+            name: "alipay-2026-08.csv",
+            year: "2026",
+            ext: ".csv",
+            provider: "alipay",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-28",
+            size: 184_320,
+            modTime: "2026-08-29T08:00:00Z"
+        ),
+        LedgerImportDocument(
+            path: "transactions/2026/documents/imports/wechat-2026-08.xlsx",
+            name: "wechat-2026-08.xlsx",
+            year: "2026",
+            ext: ".xlsx",
+            provider: "wechat",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-25",
+            size: 96_420,
+            modTime: "2026-08-26T09:12:00Z"
+        ),
+        LedgerImportDocument(
+            path: "transactions/2026/documents/imports/cmb-2026-07.pdf",
+            name: "cmb-2026-07.pdf",
+            year: "2026",
+            ext: ".pdf",
+            provider: "cmb",
+            dateStart: "2026-07-01",
+            dateEnd: "2026-07-31",
+            size: 428_910,
+            modTime: "2026-08-03T07:30:00Z"
+        ),
+        LedgerImportDocument(
+            path: "transactions/2026/documents/imports/alipay-2026-07.csv",
+            name: "alipay-2026-07.csv",
+            year: "2026",
+            ext: ".csv",
+            provider: "alipay",
+            dateStart: "2026-07-01",
+            dateEnd: "2026-07-31",
+            size: 172_840,
+            modTime: "2026-08-01T08:00:00Z"
+        ),
     ]
 
     static func bootstrap(

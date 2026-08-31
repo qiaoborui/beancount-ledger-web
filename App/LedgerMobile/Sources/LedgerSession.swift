@@ -407,6 +407,12 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func importDocuments() async throws -> [LedgerImportDocument] {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.importDocuments(baseURL: serverURL)
+        }
+    }
+
     func runBQL(query: String) async throws -> BQLResult {
         let currency = ledger?.valuationCurrency ?? "CNY"
         return try await performSensitiveRequest { api, serverURL in
