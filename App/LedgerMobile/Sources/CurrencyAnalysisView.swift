@@ -313,11 +313,14 @@ private struct CurrencySparkline: View {
     let currency: String
     let valuationCurrency: String
 
-    @State private var selectedDate: String?
+    @State private var selectedIndex: Int?
+
+    private var axis: LedgerChartAxis {
+        LedgerChartAxis(labels: points.map(\.date), referenceLabel: points.first?.date)
+    }
 
     private var selectedPoint: CurrencyRatePoint? {
-        guard let selectedDate else { return nil }
-        return points.first { $0.date == selectedDate }
+        selectedIndex.flatMap { points.indices.contains($0) ? points[$0] : nil }
     }
 
     private var yDomain: ClosedRange<Double> {
@@ -331,9 +334,9 @@ private struct CurrencySparkline: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Chart {
-                ForEach(points) { point in
+                ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
                     LineMark(
-                        x: .value("日期", point.date),
+                        x: .value("日期", axis.position(at: index)),
                         y: .value("汇率", point.rate)
                     )
                     .foregroundStyle(LedgerPalette.cobaltLight)
@@ -341,21 +344,37 @@ private struct CurrencySparkline: View {
                     .interpolationMethod(.monotone)
                 }
 
-                if let selectedPoint {
-                    RuleMark(x: .value("选中日期", selectedPoint.date))
+                if let selectedIndex, points.indices.contains(selectedIndex) {
+                    let selectedPoint = points[selectedIndex]
+                    let x = axis.position(at: selectedIndex)
+                    RuleMark(x: .value("选中日期", x))
                         .foregroundStyle(LedgerPalette.lineStrong)
                     PointMark(
-                        x: .value("选中日期", selectedPoint.date),
+                        x: .value("选中日期", x),
                         y: .value("选中汇率", selectedPoint.rate)
                     )
                     .foregroundStyle(LedgerPalette.cobalt)
                     .symbolSize(38)
                 }
             }
-            .chartXAxis(.hidden)
+            .chartXScale(domain: axis.domain)
+            .chartXAxis {
+                AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 2)) { value in
+                    AxisValueLabel(collisionResolution: .disabled) {
+                        if let position = value.as(Double.self) {
+                            Text(axis.shortLabel(nearestTo: position))
+                                .font(.system(size: 8, weight: .medium).monospacedDigit())
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                    }
+                }
+            }
             .chartYAxis(.hidden)
             .chartYScale(domain: yDomain)
-            .chartXSelection(value: $selectedDate)
+            .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .accessibilityLabel("\(currency) 到 \(valuationCurrency) 的汇率趋势")
+            .accessibilityValue(CurrencyRateText.accessibilityTrend(points))
+            .accessibilityIdentifier("currency-sparkline-\(currency)")
             .padding(.horizontal, 2)
             .padding(.vertical, LedgerSpacing.sm)
 
@@ -373,14 +392,31 @@ private struct CurrencySparkline: View {
                     }
                     .padding(4)
                     .allowsHitTesting(false)
+                    .accessibilityIdentifier("currency-chart-selection-\(currency)")
             }
         }
         .background(LedgerPalette.raised.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(currency) 到 \(valuationCurrency) 的汇率趋势")
-        .accessibilityValue(CurrencyRateText.accessibilityTrend(points))
-        .accessibilityIdentifier("currency-sparkline-\(currency)")
+        .accessibilityElement(children: .contain)
+    }
+
+    private func selectionOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let frame = geometry[plotFrame]
+                            let x = value.location.x - frame.minX
+                            guard x >= 0, x <= frame.width,
+                                  let position: Double = proxy.value(atX: x) else { return }
+                            selectedIndex = axis.nearestIndex(to: position)
+                        }
+                )
+        }
     }
 }
 

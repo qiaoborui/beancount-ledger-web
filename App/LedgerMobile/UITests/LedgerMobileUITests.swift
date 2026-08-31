@@ -146,6 +146,91 @@ final class LedgerMobileUITests: XCTestCase {
         capture("currency-selected-visible")
     }
 
+    func testChartAxesPreserveTimeSpacingAndTouchShowsSelections() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            app.buttons["sidebar-dashboard"].tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            waitUntilHittable(app.buttons["more-analysis-dashboard"])
+            app.buttons["more-analysis-dashboard"].tap()
+        }
+
+        let cashflow = app.descendants(matching: .any)["cashflow-trend-chart"]
+        XCTAssertTrue(cashflow.waitForExistence(timeout: 4))
+        XCTAssertEqual(cashflow.value as? String, "真实时间轴")
+        dragAcrossChart(cashflow)
+        XCTAssertTrue(app.descendants(matching: .any)["cashflow-chart-selection"].waitForExistence(timeout: 3))
+        capture("chart-cashflow-selected")
+
+        if isPad {
+            app.buttons["sidebar-netWorth"].tap()
+        } else {
+            app.navigationBars["仪表盘"].buttons.firstMatch.tap()
+            waitUntilHittable(app.buttons["more-analysis-netWorth"])
+            app.buttons["more-analysis-netWorth"].tap()
+        }
+        let netWorth = app.descendants(matching: .any)["net-worth-trend-chart"]
+        XCTAssertTrue(netWorth.waitForExistence(timeout: 4))
+        dragAcrossChart(netWorth)
+        XCTAssertTrue(app.descendants(matching: .any)["net-worth-chart-selection"].waitForExistence(timeout: 3))
+        capture("chart-net-worth-selected")
+
+        if isPad {
+            app.buttons["sidebar-currencies"].tap()
+        } else {
+            app.navigationBars["净资产"].buttons.firstMatch.tap()
+            let entry = app.buttons["more-currencies"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+        let currencyContent = app.scrollViews["currency-analysis-content"]
+        XCTAssertTrue(currencyContent.waitForExistence(timeout: 4))
+        let currencyChart = app.descendants(matching: .any)["currency-sparkline-USD"]
+        for _ in 0..<4 where !currencyChart.isHittable { currencyContent.swipeUp() }
+        waitUntilHittable(currencyChart)
+        dragAcrossChart(currencyChart)
+        XCTAssertTrue(app.descendants(matching: .any)["currency-chart-selection-USD"].waitForExistence(timeout: 3))
+        capture("chart-currency-selected")
+
+        if isPad {
+            app.buttons["sidebar-query"].tap()
+        } else {
+            app.navigationBars["货币与汇率"].buttons.firstMatch.tap()
+            let entry = app.buttons["more-query"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+        let workbench = app.scrollViews["bql-workbench"]
+        XCTAssertTrue(workbench.waitForExistence(timeout: 4))
+        app.buttons["bql-run-all"].tap()
+        let result = app.descendants(matching: .any)["bql-result-1"]
+        for _ in 0..<5 where !result.exists { workbench.swipeUp() }
+        XCTAssertTrue(result.waitForExistence(timeout: 4))
+
+        app.buttons["柱状图"].tap()
+        let barChart = app.descendants(matching: .any)["bql-bar-chart"]
+        for _ in 0..<3 where !barChart.isHittable { workbench.swipeUp() }
+        waitUntilHittable(barChart)
+        dragAcrossChart(barChart)
+        XCTAssertTrue(app.descendants(matching: .any)["bql-chart-selection"].waitForExistence(timeout: 3))
+        capture("chart-bql-bar-selected")
+
+        app.buttons["饼图"].tap()
+        let pieChart = app.descendants(matching: .any)["bql-pie-chart"]
+        waitUntilHittable(pieChart)
+        pieChart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.52)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["bql-chart-selection"].waitForExistence(timeout: 3))
+        capture("chart-bql-pie-selected")
+    }
+
     private func exerciseCurrencies(capturePrefix: String) {
         let content = app.scrollViews["currency-analysis-content"]
         XCTAssertTrue(content.waitForExistence(timeout: 3))
@@ -269,6 +354,12 @@ final class LedgerMobileUITests: XCTestCase {
             scrollView.swipeUp()
         }
         XCTAssertLessThanOrEqual(element.frame.maxY, obscuredEdge)
+    }
+
+    private func dragAcrossChart(_ chart: XCUIElement) {
+        let start = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.54))
+        let end = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.54))
+        start.press(forDuration: 0.12, thenDragTo: end)
     }
 
     private func capture(_ name: String) {
