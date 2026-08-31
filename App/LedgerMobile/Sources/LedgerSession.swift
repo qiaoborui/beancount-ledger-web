@@ -413,6 +413,45 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func importProviders() async throws -> [LedgerImportProviderInfo] {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.importProviders(baseURL: serverURL)
+        }
+    }
+
+    func previewImport(
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.previewImport(
+                baseURL: serverURL,
+                file: file,
+                provider: provider,
+                alipayFundRounding: alipayFundRounding,
+                archivePassword: archivePassword
+            )
+        }
+    }
+
+    func commitImport(
+        preview: LedgerImportPreview,
+        entries: [LedgerImportEntry]
+    ) async throws -> LedgerImportCommitResult {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.commitImport(
+                baseURL: serverURL,
+                request: LedgerImportCommitRequest(
+                    importID: preview.importID,
+                    provider: preview.provider,
+                    entries: entries
+                )
+            )
+        }
+    }
+
     func runBQL(query: String) async throws -> BQLResult {
         let currency = ledger?.valuationCurrency ?? "CNY"
         return try await performSensitiveRequest { api, serverURL in

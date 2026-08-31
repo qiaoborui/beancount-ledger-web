@@ -794,6 +794,45 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(widgetStore.load()?.importsUpdatedAt, previous.importsUpdatedAt)
     }
 
+    func testNativeImportUsesReadySessionAndCommitsSelectedEntries() async throws {
+        let suiteName = "ledger-mobile-native-import-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            importProvidersPayload: Self.importProviders,
+            importPreviewPayload: Self.importPreview,
+            importCommitPayload: Self.importCommitResult
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let providers = try await session.importProviders()
+        let file = LedgerImportSelectedFile(name: "statement.zip", data: Data("safe".utf8))
+        let preview = try await session.previewImport(
+            file: file,
+            provider: "wechat",
+            alipayFundRounding: true,
+            archivePassword: "archive-secret"
+        )
+        let selectedEntries = Array(preview.entries.suffix(1))
+        let result = try await session.commitImport(preview: preview, entries: selectedEntries)
+        let requests = await api.importRequests()
+
+        XCTAssertEqual(providers, Self.importProviders)
+        XCTAssertEqual(requests.providerCalls, 1)
+        XCTAssertEqual(requests.preview?.fileName, "statement.zip")
+        XCTAssertEqual(requests.preview?.provider, "wechat")
+        XCTAssertEqual(requests.preview?.alipayFundRounding, true)
+        XCTAssertEqual(requests.preview?.archivePassword, "archive-secret")
+        XCTAssertEqual(requests.commit?.importID, preview.importID)
+        XCTAssertEqual(requests.commit?.provider, preview.provider)
+        XCTAssertEqual(requests.commit?.entryIDs, selectedEntries.map(\.id))
+        XCTAssertEqual(result, Self.importCommitResult)
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -829,6 +868,95 @@ final class LedgerSessionTests: XCTestCase {
             modTime: "2026-08-29T08:00:00Z"
         ),
     ]
+
+    private static let importProviders = [
+        LedgerImportProviderInfo(
+            id: "wechat",
+            label: "微信支付",
+            detail: "微信支付导出的明细表",
+            extensions: [".xlsx", ".xls"],
+            accept: ".xlsx / .xls",
+            engine: "deg-module"
+        ),
+    ]
+
+    private static let importEntries = [
+        LedgerImportEntry(
+            id: "import-entry-1",
+            date: "2026-08-28",
+            flag: "*",
+            payee: "城市书房",
+            narration: "年度阅读计划",
+            source: "wechat",
+            orderID: "order-1",
+            merchantID: nil,
+            payTime: nil,
+            method: "零钱",
+            transactionType: "支出",
+            status: "支付成功",
+            type: nil,
+            categoryAccount: "Expenses:Education:Books",
+            fundingAccount: "Assets:Bank:Daily",
+            amount: 328,
+            currency: "CNY",
+            metadata: [:],
+            postings: []
+        ),
+        LedgerImportEntry(
+            id: "import-entry-2",
+            date: "2026-08-30",
+            flag: "*",
+            payee: "青禾市场",
+            narration: "周末食材",
+            source: "wechat",
+            orderID: "order-2",
+            merchantID: nil,
+            payTime: nil,
+            method: "银行卡",
+            transactionType: "支出",
+            status: "支付成功",
+            type: nil,
+            categoryAccount: "Expenses:Food:Groceries",
+            fundingAccount: "Liabilities:CreditCard",
+            amount: 186.8,
+            currency: "CNY",
+            metadata: [:],
+            postings: []
+        ),
+    ]
+
+    private static let importPreview = LedgerImportPreview(
+        importID: "preview-123",
+        provider: "wechat",
+        providerDetection: LedgerImportProviderDetection(
+            provider: "wechat",
+            reason: "文件结构匹配",
+            confidence: "high"
+        ),
+        originalFilename: "statement.zip",
+        dedupReport: "待写入 2 条",
+        entries: importEntries,
+        candidateCount: 2,
+        rawRowCount: 3,
+        filteredRowCount: 3,
+        generatedCount: 3,
+        excludedRowCount: 0,
+        skippedDuplicateCount: 1,
+        dateStart: "2026-08-01",
+        dateEnd: "2026-08-30",
+        warnings: []
+    )
+
+    private static let importCommitResult = LedgerImportCommitResult(
+        ok: true,
+        outputFile: "transactions/2026/imports/import.bean",
+        includeFile: "transactions/2026/08.bean",
+        documentFile: "transactions/2026/documents/imports/statement.zip",
+        count: 1,
+        beanText: nil,
+        readModelPending: false,
+        runtimeCleanupError: nil
+    )
 }
 
 private actor SessionMockAPI: LedgerAPI {
@@ -849,6 +977,25 @@ private actor SessionMockAPI: LedgerAPI {
         let currency: String
         let start: String
         let end: String
+    }
+
+    struct ImportPreviewCall: Equatable, Sendable {
+        let fileName: String
+        let provider: String?
+        let alipayFundRounding: Bool
+        let archivePassword: String
+    }
+
+    struct ImportCommitCall: Equatable, Sendable {
+        let importID: String
+        let provider: String
+        let entryIDs: [String]
+    }
+
+    struct ImportRequests: Equatable, Sendable {
+        let providerCalls: Int
+        let preview: ImportPreviewCall?
+        let commit: ImportCommitCall?
     }
 
     struct CallCounts: Sendable {
@@ -877,6 +1024,9 @@ private actor SessionMockAPI: LedgerAPI {
     let payload: LedgerBootstrap
     let widgetReport: LedgerHomeReport?
     let widgetImportDocuments: [LedgerImportDocument]
+    let importProvidersPayload: [LedgerImportProviderInfo]
+    let importPreviewPayload: LedgerImportPreview?
+    let importCommitPayload: LedgerImportCommitResult?
     let importDocumentsShouldFail: Bool
     let lockShouldFail: Bool
     let accountDetailErrorStatus: Int?
@@ -905,6 +1055,9 @@ private actor SessionMockAPI: LedgerAPI {
     private var requests: [BootstrapRequest] = []
     private var requestedBQL: [BQLCall] = []
     private var requestedAccountDetails: [AccountDetailCall] = []
+    private var importProviderCalls = 0
+    private var requestedImportPreview: ImportPreviewCall?
+    private var requestedImportCommit: ImportCommitCall?
 
     init(
         healthStatus: HealthStatus = HealthStatus(
@@ -916,6 +1069,9 @@ private actor SessionMockAPI: LedgerAPI {
         payload: LedgerBootstrap,
         widgetReport: LedgerHomeReport? = nil,
         widgetImportDocuments: [LedgerImportDocument] = [],
+        importProvidersPayload: [LedgerImportProviderInfo] = [],
+        importPreviewPayload: LedgerImportPreview? = nil,
+        importCommitPayload: LedgerImportCommitResult? = nil,
         importDocumentsShouldFail: Bool = false,
         lockShouldFail: Bool = false,
         accountDetailErrorStatus: Int? = nil,
@@ -935,6 +1091,9 @@ private actor SessionMockAPI: LedgerAPI {
         self.payload = payload
         self.widgetReport = widgetReport
         self.widgetImportDocuments = widgetImportDocuments
+        self.importProvidersPayload = importProvidersPayload
+        self.importPreviewPayload = importPreviewPayload
+        self.importCommitPayload = importCommitPayload
         self.importDocumentsShouldFail = importDocumentsShouldFail
         self.lockShouldFail = lockShouldFail
         self.accountDetailErrorStatus = accountDetailErrorStatus
@@ -1052,6 +1211,45 @@ private actor SessionMockAPI: LedgerAPI {
             throw LedgerAPIError.transport("import history unavailable")
         }
         return widgetImportDocuments
+    }
+
+    func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
+        importProviderCalls += 1
+        return importProvidersPayload
+    }
+
+    func previewImport(
+        baseURL: URL,
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        requestedImportPreview = ImportPreviewCall(
+            fileName: file.name,
+            provider: provider,
+            alipayFundRounding: alipayFundRounding,
+            archivePassword: archivePassword
+        )
+        guard let importPreviewPayload else {
+            throw LedgerAPIError.incompatibleServer("missing import preview fixture")
+        }
+        return importPreviewPayload
+    }
+
+    func commitImport(
+        baseURL: URL,
+        request: LedgerImportCommitRequest
+    ) async throws -> LedgerImportCommitResult {
+        requestedImportCommit = ImportCommitCall(
+            importID: request.importID,
+            provider: request.provider,
+            entryIDs: request.entries.map(\.id)
+        )
+        guard let importCommitPayload else {
+            throw LedgerAPIError.incompatibleServer("missing import commit fixture")
+        }
+        return importCommitPayload
     }
 
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
@@ -1191,6 +1389,14 @@ private actor SessionMockAPI: LedgerAPI {
 
     func accountDetailRequests() -> [AccountDetailCall] {
         requestedAccountDetails
+    }
+
+    func importRequests() -> ImportRequests {
+        ImportRequests(
+            providerCalls: importProviderCalls,
+            preview: requestedImportPreview,
+            commit: requestedImportCommit
+        )
     }
 
     private func waitForAnalysisResponse() async throws {

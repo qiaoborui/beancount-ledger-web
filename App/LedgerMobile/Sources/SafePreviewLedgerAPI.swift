@@ -18,6 +18,7 @@ extension LedgerSession {
 #if DEBUG
 private actor SafePreviewLedgerAPI: LedgerAPI {
     private var history: [BQLHistoryRecord] = []
+    private var committedImportDocument: LedgerImportDocument?
 
     func health(baseURL: URL) async throws -> HealthStatus {
         HealthStatus(
@@ -68,7 +69,54 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
-        SafePreviewLedgerData.importDocuments
+        if let committedImportDocument {
+            return [committedImportDocument] + SafePreviewLedgerData.importDocuments
+        }
+        return SafePreviewLedgerData.importDocuments
+    }
+
+    func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
+        SafePreviewLedgerData.importProviders
+    }
+
+    func previewImport(
+        baseURL: URL,
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        SafePreviewLedgerData.importPreview(
+            filename: file.name,
+            provider: provider ?? "wechat"
+        )
+    }
+
+    func commitImport(
+        baseURL: URL,
+        request: LedgerImportCommitRequest
+    ) async throws -> LedgerImportCommitResult {
+        committedImportDocument = LedgerImportDocument(
+            path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
+            name: "2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
+            year: "2026",
+            ext: ".xlsx",
+            provider: request.provider,
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-30",
+            size: 118_640,
+            modTime: "2026-08-31T14:30:00Z"
+        )
+        return LedgerImportCommitResult(
+            ok: true,
+            outputFile: "transactions/2026/imports/2026-08-01_2026-08-30-\(request.provider).bean",
+            includeFile: "transactions/2026/08.bean",
+            documentFile: committedImportDocument?.path,
+            count: request.entries.count,
+            beanText: nil,
+            readModelPending: false,
+            runtimeCleanupError: nil
+        )
     }
 
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
@@ -263,6 +311,108 @@ private enum SafePreviewLedgerData {
             modTime: "2026-08-01T08:00:00Z"
         ),
     ]
+
+    static let importProviders = [
+        LedgerImportProviderInfo(
+            id: "alipay",
+            label: "支付宝",
+            detail: "CSV 账单，支持基金补差选项",
+            extensions: [".csv"],
+            accept: ".csv",
+            engine: "deg-module"
+        ),
+        LedgerImportProviderInfo(
+            id: "wechat",
+            label: "微信支付",
+            detail: "微信支付导出的明细表",
+            extensions: [".xlsx", ".xls"],
+            accept: ".xlsx,.xls",
+            engine: "deg-module"
+        ),
+        LedgerImportProviderInfo(
+            id: "cmb",
+            label: "招商银行信用卡",
+            detail: "信用卡 PDF 或已转换 CSV",
+            extensions: [".pdf", ".csv"],
+            accept: ".pdf,.csv",
+            engine: "deg-module"
+        ),
+    ]
+
+    static func importPreview(filename: String, provider: String) -> LedgerImportPreview {
+        let resolvedProvider = LedgerImportProvider.provider(provider) == nil ? "wechat" : provider
+        let entries = [
+            LedgerImportEntry(
+                id: "safe-import-1",
+                date: "2026-08-28",
+                flag: "*",
+                payee: "城市书房",
+                narration: "年度阅读计划",
+                source: "wechat",
+                orderID: "safe-order-1",
+                merchantID: nil,
+                payTime: "2026-08-28 20:16:00",
+                method: "零钱",
+                transactionType: "支出",
+                status: "支付成功",
+                type: nil,
+                categoryAccount: "Expenses:Education:Books",
+                fundingAccount: "Assets:Bank:Daily",
+                amount: 328,
+                currency: "CNY",
+                metadata: ["orderId": "safe-order-1"],
+                postings: [
+                    LedgerImportPosting(account: "Expenses:Education:Books", amount: "328.00", currency: "CNY", priceKind: nil, priceAmount: nil, priceCurrency: nil),
+                    LedgerImportPosting(account: "Assets:Bank:Daily", amount: "-328.00", currency: "CNY", priceKind: nil, priceAmount: nil, priceCurrency: nil),
+                ]
+            ),
+            LedgerImportEntry(
+                id: "safe-import-2",
+                date: "2026-08-30",
+                flag: "*",
+                payee: "青禾市场",
+                narration: "周末食材",
+                source: "wechat",
+                orderID: "safe-order-2",
+                merchantID: nil,
+                payTime: "2026-08-30 11:42:00",
+                method: "银行卡",
+                transactionType: "支出",
+                status: "支付成功",
+                type: nil,
+                categoryAccount: "Expenses:Food:Groceries",
+                fundingAccount: "Liabilities:CreditCard",
+                amount: 186.8,
+                currency: "CNY",
+                metadata: ["orderId": "safe-order-2"],
+                postings: [
+                    LedgerImportPosting(account: "Expenses:Food:Groceries", amount: "186.80", currency: "CNY", priceKind: nil, priceAmount: nil, priceCurrency: nil),
+                    LedgerImportPosting(account: "Liabilities:CreditCard", amount: "-186.80", currency: "CNY", priceKind: nil, priceAmount: nil, priceCurrency: nil),
+                ]
+            ),
+        ]
+        return LedgerImportPreview(
+            importID: "safe-import-preview",
+            provider: resolvedProvider,
+            providerDetection: LedgerImportProviderDetection(
+                provider: resolvedProvider,
+                reason: "文件结构与微信支付账单一致",
+                confidence: "high"
+            ),
+            originalFilename: filename,
+            dedupReport: "生成 3 条，跳过 1 条已存在，待写入 2 条。",
+            entries: entries,
+            candidateCount: entries.count,
+            rawRowCount: 4,
+            filteredRowCount: 3,
+            generatedCount: 3,
+            excludedRowCount: 1,
+            skippedDuplicateCount: 1,
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-30",
+            warnings: ["已跳过 1 条重复交易。"]
+        )
+    }
 
     static func bootstrap(
         start: String,

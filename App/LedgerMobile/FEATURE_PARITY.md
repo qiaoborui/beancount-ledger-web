@@ -19,7 +19,7 @@ behavior.
 | Agent | `POST /api/ai/agent/turn`, session timeline | Planned | Read and write tools | P2 |
 | Query | `POST /api/ledger/bql`, BQL history | Multi-statement editor, examples, table/chart results, warnings, history rename/run/delete | Read plus runtime history | P2 |
 | Currencies | bootstrap commodities, prices, balances and valuation data | Current, inverse and CNY-cross rates, 90-point trends, missing-rate warnings, persistent valuation currency | Read | P2 |
-| Imports | `GET /api/ledger/imports/documents`, `/api/ledger/imports/*` | Native channel freshness and archive history; preview and commit remain planned | Read history; write with preview later | P3 |
+| Imports | `GET /api/ledger/imports/documents`, `GET /api/ledger/imports/providers`, `POST /api/ledger/imports/preview`, `POST /api/ledger/imports/commit` | Native file selection, provider override, ZIP password, server preview and dedup review, candidate selection, confirmation, commit result, channel freshness, and archive history | Preview-confirmed write | P3 |
 | Reconcile | `GET/POST /api/ledger/reconciliation` | Planned after read-only parity | Write with preview | P3 |
 | Ledger editor | `/api/ledger/editor/*` | Planned last | Write | P3 |
 | Add, edit, reverse, delete transaction | `/api/ledger/append*`, `/api/ledger/transactions` | Planned after read-only parity | Write with confirmation | P3 |
@@ -33,7 +33,9 @@ Navigation parity:
   destination. Money result columns follow the global privacy toggle.
 - Currencies is available from iPhone More and the iPad sidebar. Valuation
   currency changes reload the current ledger range and persist per server origin.
-- Import history is available from iPhone More and the iPad sidebar. It shows
-  channel freshness and archived bill metadata while keeping native access read-only.
+- Imports are available from iPhone More and the iPad sidebar. The native flow
+  selects files through Files, delegates parsing and validation to the server,
+  lets the user exclude candidate transactions, confirms the write, and refreshes
+  channel freshness and archived bill metadata after completion.
 - Write features retain the web app's preview, validation, confirmation, and
   rollback boundaries.
