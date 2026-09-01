@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testInjectedLedgerClockKeepsCalendarRangesStable() {
+        let suiteName = "ledger-mobile-clock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+
+        let session = LedgerSession(
+            api: SessionMockAPI(payload: Self.payload),
+            defaults: defaults,
+            ledgerNow: { now }
+        )
+
+        XCTAssertEqual(session.selectedRange, .month(year: 2026, month: 8))
+        session.presentRangePicker()
+        session.selectDraftPreset(.quarter)
+        XCTAssertEqual(session.draftRange, LedgerDateRange.current(.quarter, now: now))
+    }
+
     func testBackgroundRefreshKeepsAmountsConcealed() async {
         let suiteName = "ledger-mobile-session-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

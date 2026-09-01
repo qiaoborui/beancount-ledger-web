@@ -348,7 +348,7 @@ export const zhCN = {
     errorSummary: "{{error}} 条同步失败，{{total}} 条待处理",
     pendingSummary: "{{count}} 条待同步，最早 {{oldest}}",
     conflictOriginalMissing: "找不到原交易",
-    conflictSourceNotUnique: "交易来源",
+    conflictSourceNotUnique: "交易来源不唯一",
   },
   netWorth: {
     currentPosition: "当前头寸",

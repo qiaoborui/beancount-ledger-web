@@ -106,6 +106,23 @@ describe("pending ledger operations", () => {
     expect(rows[0].pending).toEqual({ kind: "add-transaction-tags", operationId: "tags-1" });
   });
 
+  it("keeps line-distinct transactions with the same hash in one grouped tag operation", () => {
+    const first = txn(3, { source: { file: "/ledger/2026.bean", line: 3, hash: "same-hash" } });
+    const second = txn(9, { source: { file: "/ledger/2026.bean", line: 9, hash: "same-hash" } });
+    const operations = mergePendingOperation([], {
+      id: "tags-1",
+      createdAt: 1,
+      kind: "add-transaction-tags",
+      sources: [first.source, second.source],
+      tags: ["travel"],
+    });
+    const rows = applyPendingLedgerOperations([first, second], operations);
+
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ kind: "add-transaction-tags", sources: [first.source, second.source] });
+    expect(rows.map((row) => row.tags)).toEqual([["travel"], ["travel"]]);
+  });
+
   it("folds pending batch tags into a later full transaction update", () => {
     const source = txn(3).source;
     const tagged = mergePendingOperation([], { id: "tags-1", createdAt: 1, kind: "add-transaction-tags", sources: [source], tags: ["travel"] });

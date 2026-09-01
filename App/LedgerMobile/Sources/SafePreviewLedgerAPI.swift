@@ -8,7 +8,8 @@ extension LedgerSession {
             let defaults = UserDefaults(suiteName: suiteName) ?? .standard
             defaults.removePersistentDomain(forName: suiteName)
             defaults.set("https://preview.ledger.invalid", forKey: "ledger.mobile.server-origin")
-            return LedgerSession(api: SafePreviewLedgerAPI(), defaults: defaults)
+            let previewNow = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+            return LedgerSession(api: SafePreviewLedgerAPI(), defaults: defaults, ledgerNow: { previewNow })
         }
         #endif
         return LedgerSession()

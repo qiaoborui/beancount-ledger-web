@@ -22,6 +22,7 @@ vi.mock("@/lib/indexedLedgerCache", () => ({
 
 import { discardPendingLedgerOperation, hasPendingOperationsToSync, isPendingLedgerConflict, readPendingLedgerOperations, syncOperation } from "./usePendingLedgerWrites";
 import type { PendingLedgerOperation } from "../pendingLedgerOperations";
+import i18n from "@/i18n";
 
 const pendingOperationsKey = "ledger_pending_operations";
 const indexedPendingOperationsKey = "ledger_pending_operations:v2";
@@ -161,6 +162,17 @@ describe("syncOperation", () => {
     expect(isPendingLedgerConflict("找不到原交易，账本可能已被修改，请刷新后重试")).toBe(true);
     expect(isPendingLedgerConflict("交易来源不唯一，账本可能已被修改，请刷新后重试")).toBe(true);
     expect(isPendingLedgerConflict("连接超时")).toBe(false);
+  });
+
+  it("classifies server conflicts while the interface uses English", async () => {
+    const previousLanguage = i18n.language;
+    await i18n.changeLanguage("en-US");
+    try {
+      expect(isPendingLedgerConflict("找不到原交易，账本可能已被修改，请刷新后重试")).toBe(true);
+      expect(isPendingLedgerConflict("交易来源不唯一，账本可能已被修改，请刷新后重试")).toBe(true);
+    } finally {
+      await i18n.changeLanguage(previousLanguage);
+    }
   });
 
   it("rejects pending writes that belong to another ledger", async () => {

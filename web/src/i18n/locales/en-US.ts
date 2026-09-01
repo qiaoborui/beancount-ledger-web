@@ -352,7 +352,7 @@ export const enUS: DeepStringify<TranslationResource> = {
     errorSummary: "{{error}} failed to sync, {{total}} pending",
     pendingSummary: "{{count}} pending sync, earliest {{oldest}}",
     conflictOriginalMissing: "original transaction not found",
-    conflictSourceNotUnique: "transaction source",
+    conflictSourceNotUnique: "transaction source is not unique",
   },
   netWorth: {
     currentPosition: "Current position",

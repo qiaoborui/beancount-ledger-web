@@ -12,7 +12,7 @@ import {
 } from "../pendingLedgerOperations";
 import type { LedgerVersion, Txn } from "../types";
 import { apiEndpointLedgerScope, apiEndpointPreviousLedgerScope, apiEndpointSettingsChangeEvent, apiEndpointStorageKeyForLedgerScope, apiFetch } from "@/lib/apiEndpoints";
-import i18n from "@/i18n";
+import i18n, { supportedLanguages } from "@/i18n";
 
 const pendingOperationsKey = "ledger_pending_operations";
 const indexedPendingOperationsKey = "ledger_pending_operations:v2";
@@ -207,7 +207,10 @@ function addTransactionTagsOperation(sources: Txn["source"][], tags: string[], b
 }
 
 export function isPendingLedgerConflict(message: string) {
-  return message.includes(i18n.t("pendingWrites.conflictOriginalMissing")) || message.includes(i18n.t("pendingWrites.conflictSourceNotUnique"));
+  return supportedLanguages.some((language) => (
+    message.includes(i18n.t("pendingWrites.conflictOriginalMissing", { lng: language }))
+    || message.includes(i18n.t("pendingWrites.conflictSourceNotUnique", { lng: language }))
+  ));
 }
 
 export function discardPendingLedgerOperation(operations: PendingLedgerOperation[], id: string) {

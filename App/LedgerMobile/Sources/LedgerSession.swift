@@ -66,6 +66,7 @@ final class LedgerSession: ObservableObject {
     private let passkeyAuthenticator: any PasskeyAuthenticating
     private let widgetSnapshotStore: LedgerWidgetSnapshotStore
     private let defaults: UserDefaults
+    private let ledgerNow: () -> Date
     private var applicationActive = true
     private var requestGeneration = 0
     private static let serverKey = "ledger.mobile.server-origin"
@@ -81,12 +82,14 @@ final class LedgerSession: ObservableObject {
         defaults: UserDefaults = .standard,
         biometricStore: (any BiometricCredentialStore)? = nil,
         passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
-        widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared
+        widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared,
+        ledgerNow: @escaping () -> Date = Date.init
     ) {
-        let initialRange = LedgerDateRange.current(.month)
+        let initialRange = LedgerDateRange.current(.month, now: ledgerNow())
         selectedRange = initialRange
         draftRange = initialRange
         self.defaults = defaults
+        self.ledgerNow = ledgerNow
         self.biometricStore = biometricStore ?? SystemBiometricCredentialStore()
         self.passkeyAuthenticator = passkeyAuthenticator ?? SystemPasskeyAuthenticationService()
         self.widgetSnapshotStore = widgetSnapshotStore
@@ -504,7 +507,7 @@ final class LedgerSession: ObservableObject {
 
     func selectDraftPreset(_ preset: LedgerDateRangePreset) {
         guard preset != .custom else { return }
-        draftRange = LedgerDateRange.current(preset)
+        draftRange = LedgerDateRange.current(preset, now: ledgerNow())
     }
 
     func updateDraftStart(_ date: Date) {
@@ -604,7 +607,7 @@ final class LedgerSession: ObservableObject {
         password = ""
         errorMessage = nil
         amountsVisible = false
-        let initialRange = LedgerDateRange.current(.month)
+        let initialRange = LedgerDateRange.current(.month, now: ledgerNow())
         selectedRange = initialRange
         draftRange = initialRange
         isRangeLoading = false
@@ -720,7 +723,7 @@ final class LedgerSession: ObservableObject {
             baseURL: serverURL,
             start: targetRange.start,
             end: targetRange.queryEndExclusive,
-            today: LedgerDateRange.today(),
+            today: LedgerDateRange.today(now: ledgerNow()),
             valuationCurrency: targetCurrency
         )
         guard generation == requestGeneration else { return }
@@ -750,7 +753,7 @@ final class LedgerSession: ObservableObject {
         valuationCurrency: String,
         generation: Int
     ) async {
-        let month = LedgerDateRange.current(.month)
+        let month = LedgerDateRange.current(.month, now: ledgerNow())
         async let reportRequest: LedgerHomeReport? = try? await api.homeReport(
             baseURL: serverURL,
             start: month.start,

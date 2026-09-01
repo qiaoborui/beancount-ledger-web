@@ -61,7 +61,7 @@ type LegacyPendingWrite = {
 };
 
 export function sourceKey(source: Txn["source"]) {
-  return source.hash ? `${source.file}#${source.hash}` : `${source.file}:${source.line}`;
+  return JSON.stringify([source.file, source.line, source.hash ?? ""]);
 }
 
 function isTransactionOperation(operation: PendingLedgerOperation): operation is PendingUpdateTransactionOperation | PendingDeleteTransactionOperation {

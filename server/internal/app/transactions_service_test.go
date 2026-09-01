@@ -79,6 +79,33 @@ func TestTransactionServiceAddTagsUpdatesBatchAndPreservesHeaderComment(t *testi
 	}
 }
 
+func TestTransactionServiceAddTagsKeepsLineDistinctSourcesWithSameHash(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+
+	block := "2026-05-01 * \"Duplicate\" \"Same raw transaction\"\n  Expenses:Food  12.00 CNY\n  Assets:Cash  -12.00 CNY"
+	file := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")
+	mustWrite(t, file, block+"\n"+block)
+	hash := transactionHash(strings.Split(block, "\n"))
+
+	service := NewTransactionService(NewLedgerCache(cfg), NewLedgerWriter(cfg, nil))
+	err := service.AddTags([]TransactionSource{
+		{File: "transactions/2026/05.bean", Line: 1, Hash: hash},
+		{File: "transactions/2026/05.bean", Line: 4, Hash: hash},
+	}, []string{"travel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(mustRead(t, file)), "#travel"); got != 2 {
+		t.Fatalf("line-distinct sources with one hash received %d tags, want 2", got)
+	}
+}
+
 func TestTransactionServiceAddTagsIsAtomicWhenAnySourceIsStale(t *testing.T) {
 	cfg := testLedger(t)
 	beanCheck := filepath.Join(t.TempDir(), "bean-check")

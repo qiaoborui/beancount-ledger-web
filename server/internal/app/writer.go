@@ -566,7 +566,12 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 		return errors.New("至少需要一个标签")
 	}
 	byFile := map[string][]TransactionSource{}
-	seen := map[string]bool{}
+	type sourceIdentity struct {
+		file string
+		line int
+		hash string
+	}
+	seen := map[sourceIdentity]bool{}
 	for _, source := range sources {
 		if strings.TrimSpace(source.Hash) == "" {
 			return errors.New("批量打标签需要交易哈希，请刷新后重试")
@@ -575,7 +580,7 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 		if err != nil {
 			return err
 		}
-		key := file + "#" + source.Hash
+		key := sourceIdentity{file: file, line: source.Line, hash: source.Hash}
 		if seen[key] {
 			continue
 		}
