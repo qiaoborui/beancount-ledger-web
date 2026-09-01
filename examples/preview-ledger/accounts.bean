@@ -108,6 +108,9 @@
 2026-01-01 open Expenses:Housing:Other
   alias: "其他居住"
 
+2026-01-01 open Expenses:Accommodation:Hotel
+  alias: "酒店民宿"
+
 2026-01-01 open Expenses:Communication:Mobile
   alias: "手机话费"
 2026-01-01 open Expenses:Communication:Internet
@@ -143,8 +146,6 @@
   alias: "运动健身"
 2026-01-01 open Expenses:Entertainment
   alias: "娱乐休闲"
-2026-01-01 open Expenses:Travel
-  alias: "旅行"
 2026-01-01 open Expenses:Fees
   alias: "手续费"
 2026-01-01 open Expenses:Investment:Loss

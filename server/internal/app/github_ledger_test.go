@@ -219,6 +219,47 @@ func TestGitHubAPIReplaceTransactionSkipsIdenticalWrite(t *testing.T) {
 	}
 }
 
+func TestGitHubAPIAddTransactionTagsUsesOneCommitAcrossFiles(t *testing.T) {
+	first := strings.Join([]string{
+		`2026-05-01 * "Airline" "Ticket"`,
+		"  Expenses:Food 12.00 CNY",
+		"  Assets:Cash -12.00 CNY",
+	}, "\n")
+	second := strings.Join([]string{
+		`2026-06-01 * "Hotel" "Room" #travel`,
+		"  Expenses:Food 88.00 CNY",
+		"  Assets:Cash -88.00 CNY",
+	}, "\n")
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\ninclude \"transactions/2026/06.bean\"\n",
+		"commodities.bean":          "2026-01-01 commodity CNY\n",
+		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Expenses:Food CNY\n",
+		"transactions/2026/05.bean": first + "\n",
+		"transactions/2026/06.bean": second + "\n",
+	})
+	defer fake.server.Close()
+
+	writer := NewLedgerWriter(githubAPITestConfig(t, fake), nil)
+	err := writer.AddTransactionTags([]TransactionSource{
+		{File: "transactions/2026/05.bean", Line: 1, Hash: transactionHash(strings.Split(first, "\n"))},
+		{File: "transactions/2026/06.bean", Line: 1, Hash: transactionHash(strings.Split(second, "\n"))},
+	}, []string{"travel", "trip-2026-hokkaido"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.commitCount != 1 || len(fake.treePaths) != 2 {
+		t.Fatalf("commits=%d treePaths=%#v", fake.commitCount, fake.treePaths)
+	}
+	for _, blob := range fake.blobs {
+		if strings.Contains(blob, "Airline") && !strings.Contains(blob, "#travel #trip-2026-hokkaido") {
+			t.Fatalf("first file missing tags: %q", blob)
+		}
+		if strings.Contains(blob, "Hotel") && strings.Count(blob, "#travel") != 1 {
+			t.Fatalf("existing tag was duplicated: %q", blob)
+		}
+	}
+}
+
 func TestLedgerWriteTransactionRequiresSourceLocator(t *testing.T) {
 	tx := &LedgerWriteTransaction{github: &githubLedgerTransaction{baseCommitSHA: "current-commit"}}
 

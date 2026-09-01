@@ -22,13 +22,13 @@
   Assets:CN:Wechat:Balance                -22.00 CNY
   Expenses:Food:Drinks                     22.00 CNY
 
-2026-02-10 * "火车票" "返乡高铁"
+2026-02-10 * "火车票" "返乡高铁" #travel #trip-2026-spring-festival
   Assets:CN:Alipay:Balance               -368.00 CNY
-  Expenses:Travel                         368.00 CNY
+  Expenses:Transport:Public               368.00 CNY
 
-2026-02-12 * "酒店" "短住"
+2026-02-12 * "酒店" "短住" #travel #trip-2026-spring-festival
   Liabilities:CN:CreditCard              -520.00 CNY
-  Expenses:Travel                         520.00 CNY
+  Expenses:Accommodation:Hotel            520.00 CNY
 
 2026-02-14 * "餐厅" "家庭聚餐"
   Liabilities:CN:CreditCard              -428.00 CNY
@@ -65,4 +65,3 @@
 2026-02-28 * "视频会员" "月度订阅"
   Assets:CN:Alipay:Balance                -35.00 CNY
   Expenses:Digital:Subscription            35.00 CNY
-

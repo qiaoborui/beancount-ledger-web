@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +40,96 @@ func TestFindTransactionPrefersHashOverStaleLine(t *testing.T) {
 	found := FindTransaction(txns, TransactionSource{File: "transactions/2026/05.bean", Line: 1, Hash: "old"})
 	if found == nil || found.Narration != "Original" {
 		t.Fatalf("hash must identify the approved transaction, got %#v", found)
+	}
+}
+
+func TestTransactionServiceAddTagsUpdatesBatchAndPreservesHeaderComment(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+
+	file := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")
+	before := string(mustRead(t, file))
+	lines := strings.Split(strings.TrimRight(before, "\n"), "\n")
+	first := transactionHash(lines[0:4])
+	second := transactionHash(lines[5:8])
+	lines[0] = `2026-05-01 * "Cafe; inside quote" "Lunch" #work ; keep this`
+	mustWrite(t, file, strings.Join(lines, "\n")+"\n")
+	updated := strings.Split(strings.TrimRight(string(mustRead(t, file)), "\n"), "\n")
+	first = transactionHash(updated[0:4])
+
+	service := NewTransactionService(NewLedgerCache(cfg), NewLedgerWriter(cfg, nil))
+	err := service.AddTags([]TransactionSource{
+		{File: "transactions/2026/05.bean", Line: 1, Hash: first},
+		{File: "transactions/2026/05.bean", Line: 6, Hash: second},
+	}, []string{"travel", "trip-2026-hokkaido", "travel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustRead(t, file))
+	if !strings.Contains(after, `#work #travel #trip-2026-hokkaido ; keep this`) {
+		t.Fatalf("first transaction tags/comment were not preserved:\n%s", after)
+	}
+	if strings.Count(after, "#travel") != 2 || strings.Count(after, "#trip-2026-hokkaido") != 2 {
+		t.Fatalf("both transactions should receive deduplicated tags:\n%s", after)
+	}
+}
+
+func TestTransactionServiceAddTagsIsAtomicWhenAnySourceIsStale(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	file := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")
+	before := string(mustRead(t, file))
+	lines := strings.Split(strings.TrimRight(before, "\n"), "\n")
+	validHash := transactionHash(lines[0:4])
+
+	service := NewTransactionService(NewLedgerCache(cfg), NewLedgerWriter(cfg, nil))
+	err := service.AddTags([]TransactionSource{
+		{File: "transactions/2026/05.bean", Line: 1, Hash: validHash},
+		{File: "transactions/2026/05.bean", Line: 6, Hash: "stale"},
+	}, []string{"travel"})
+	if err == nil || !strings.Contains(err.Error(), "找不到原交易") {
+		t.Fatalf("expected stale-source error, got %v", err)
+	}
+	if after := string(mustRead(t, file)); after != before {
+		t.Fatalf("batch must be all-or-nothing; file changed:\n%s", after)
+	}
+}
+
+func TestAddTransactionTagsRouteWritesOneValidatedBatch(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	file := filepath.Join(cfg.LedgerRoot, "transactions", "2026", "05.bean")
+	lines := strings.Split(strings.TrimRight(string(mustRead(t, file)), "\n"), "\n")
+	body, err := json.Marshal(AddTransactionTagsRequest{
+		Sources: []TransactionSource{{File: "transactions/2026/05.bean", Line: 1, Hash: transactionHash(lines[0:4])}},
+		Tags:    []string{"travel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := testRouter(t, cfg)
+	response := requestWithCookies(router, http.MethodPost, "/api/ledger/transactions/tags", string(body), loginCookies(t, router))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if after := string(mustRead(t, file)); !strings.Contains(after, `"Lunch" #work #travel`) {
+		t.Fatalf("route did not add tag:\n%s", after)
 	}
 }
 

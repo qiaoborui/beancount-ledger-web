@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Plus, SlidersHorizontal, Tag, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import i18n from "@/i18n";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -307,12 +308,16 @@ function PostingFlow({ postings, maxShow = 3 }: { postings: Txn["postings"]; max
   );
 }
 
-const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selected, viewMode, onSelect }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void }) {
+const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selected, bulkSelected, bulkDisabled, viewMode, onSelect, onToggleBulk }: { txn: Txn; accounts: AccountView[]; selected: boolean; bulkSelected: boolean; bulkDisabled: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void; onToggleBulk: (txn: Txn, checked: boolean) => void }) {
   const { t } = useTranslation();
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const pending = pendingLabel(txn);
   return (
-    <button type="button" className={`transaction-list-card card mb-2 block w-full min-w-0 overflow-hidden p-4 text-left ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`} onClick={() => onSelect(transactionKey(txn), txn)}>
+    <article className={`transaction-list-card card relative mb-2 min-w-0 overflow-hidden ${selected ? "border-brand bg-[var(--selected-bg)]" : ""}`}>
+      <div className="absolute left-3 top-4 z-10 grid h-8 w-8 place-items-center">
+        <Checkbox className="relative after:absolute after:-inset-3" checked={bulkSelected} disabled={bulkDisabled} onCheckedChange={(checked) => onToggleBulk(txn, checked === true)} aria-label={i18n.t("transactionList.selectForBulkTags", { payee: txn.payee || txn.narration })} />
+      </div>
+      <button type="button" className="block w-full min-w-0 p-4 pl-14 text-left" onClick={() => onSelect(transactionKey(txn), txn)}>
       <ResponsiveValueRow
         label={<div className="min-w-0">
           <strong className="block truncate text-[15px] leading-5 text-ink">{txn.payee}</strong>
@@ -336,11 +341,12 @@ const MemoTransactionCard = memo(function TransactionCard({ txn, accounts, selec
           <MetadataBadges txn={txn} limit={3} />
         </>
       )}
-    </button>
+      </button>
+    </article>
   );
 });
 
-const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, accounts, selected, viewMode, onSelect, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
+const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, accounts, selected, bulkSelected, bulkDisabled, viewMode, onSelect, onToggleBulk, rowRef, rowId }: { txn: Txn; accounts: AccountView[]; selected: boolean; bulkSelected: boolean; bulkDisabled: boolean; viewMode?: "compact" | "full"; onSelect: (key: string, txn: Txn) => void; onToggleBulk: (txn: Txn, checked: boolean) => void; rowRef?: (node: HTMLButtonElement | null) => void; rowId?: string }) {
   const { t } = useTranslation();
   const displayAmount = transactionDisplayAmount(txn, accounts);
   const categoryRows = categoryAccounts(txn);
@@ -348,26 +354,30 @@ const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, account
   const meta = metadataPairs(txn);
   const pending = pendingLabel(txn);
   return (
-    <button
-      id={rowId}
-      ref={rowRef}
-      type="button"
-      className={`transaction-list-card grid w-full grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-4 ${selected ? "bg-[var(--selected-bg)]" : "bg-transparent"}`}
-      onClick={() => onSelect(transactionKey(txn), txn)}
-    >
+    <div className={`grid grid-cols-[2.75rem_minmax(0,1fr)] items-stretch ${selected ? "bg-[var(--selected-bg)]" : "bg-transparent"}`} role="row">
+      <div className="grid place-items-center" role="gridcell">
+        <Checkbox className="relative after:absolute after:-inset-3" checked={bulkSelected} disabled={bulkDisabled} onCheckedChange={(checked) => onToggleBulk(txn, checked === true)} aria-label={i18n.t("transactionList.selectForBulkTags", { payee: txn.payee || txn.narration })} />
+      </div>
+      <button
+        id={rowId}
+        ref={rowRef}
+        type="button"
+        className="transaction-list-card grid w-full grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-tag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:px-4"
+        onClick={() => onSelect(transactionKey(txn), txn)}
+      >
       <div className="text-xs font-medium tabular-nums text-stone">
         <div className="text-olive">{txn.date.slice(5)}</div>
         <div className="mt-1 text-[11px] text-stone/70">{txn.date.slice(0, 4)}</div>
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <strong className="truncate text-[13px] leading-5 text-ink">{txn.payee}</strong>
+          <strong className="truncate text-sm leading-5 text-ink">{txn.payee}</strong>
           {pending && <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand">{pending}</span>}
         </div>
         <div className="mt-0.5 truncate text-xs leading-5 text-warm">{txn.narration || t("transactionList.noNarration")}</div>
         {viewMode === "full" && <PostingFlow postings={txn.postings} maxShow={4} />}
       </div>
-      <div className={`text-right text-[13px] font-semibold tabular-nums ${displayAmount ? transactionAmountColor(displayAmount) : "text-stone"}`}>{displayAmount ? fmtTxnAmount(displayAmount) : "—"}</div>
+      <div className={`text-right text-sm font-semibold tabular-nums ${displayAmount ? transactionAmountColor(displayAmount) : "text-stone"}`}>{displayAmount ? fmtTxnAmount(displayAmount) : "—"}</div>
       <div className="min-w-0">
         <div className="truncate text-xs font-medium text-warm">{categoryRows.join(" · ") || t("transactionList.uncategorized")}</div>
         <div className="mt-1 truncate text-[11px] text-stone">{paymentAccounts.map((posting) => shortAccount(posting.account)).join(" / ") || t("transactionList.noPaymentAccount")}</div>
@@ -381,11 +391,12 @@ const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, account
           </div>
         ) : <span className="text-xs text-stone/60">—</span>}
       </div>
-    </button>
+      </button>
+    </div>
   );
 });
 
-export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
+export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, onAddTags, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; onAddTags?: (sources: Txn["source"][], tags: string[]) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
   const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -394,6 +405,8 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const [activeTxnKey, setActiveTxnKey] = useState<string | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [filterViews, setFilterViews] = useState<StoredFilterViews>(() => loadFilterViews());
+  const [bulkSelectedKeys, setBulkSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkTagInput, setBulkTagInput] = useState("");
   const desktopRowRefs = useRef(new Map<string, HTMLButtonElement>());
   const categories = useMemo(() => Array.from(new Set(txns.flatMap(categoryAccounts))).sort(), [txns]);
   const accountOptionLabels = useMemo(() => Object.fromEntries(accounts.map((account) => [account.account, formatAccountOptionLabel(account)])), [accounts]);
@@ -425,9 +438,15 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const bulkEligibleRows = pageRows.filter((txn) => Boolean(txn.source.hash) && !txn.pending);
+  const allPageRowsBulkSelected = bulkEligibleRows.length > 0 && bulkEligibleRows.every((txn) => bulkSelectedKeys.has(transactionKey(txn)));
 
   useEffect(() => { setPage(1); }, [debouncedCategoryQuery, debouncedSearchQuery, debouncedMetadataQuery, pageSize, txns.length, matchMode]);
   useEffect(() => { saveFilterViews(filterViews); }, [filterViews]);
+  useEffect(() => {
+    const available = new Set(txns.filter((txn) => txn.source.hash && !txn.pending).map(transactionKey));
+    setBulkSelectedKeys((current) => new Set([...current].filter((key) => available.has(key))));
+  }, [txns]);
   useEffect(() => {
     if (!searchable || !hasFilterSnapshot(currentFilterSnapshot)) return;
     setFilterViews((views) => upsertRecentFilterView(views, currentFilterSnapshot));
@@ -492,6 +511,40 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
     setSelected(txn);
     setDrawerTxn(txn);
   }, []);
+  const toggleBulkTransaction = useCallback((txn: Txn, checked: boolean) => {
+    const key = transactionKey(txn);
+    if (checked && bulkSelectedKeys.size >= 200) {
+      showToast?.("info", t("transactionList.selectionLimit"));
+      return;
+    }
+    setBulkSelectedKeys((current) => {
+      const next = new Set(current);
+      if (checked && next.size < 200) next.add(key);
+      else if (!checked) next.delete(key);
+      return next;
+    });
+  }, [bulkSelectedKeys.size, showToast, t]);
+  const toggleCurrentPageBulk = (checked: boolean) => {
+    setBulkSelectedKeys((current) => {
+      const next = new Set(current);
+      for (const txn of bulkEligibleRows) {
+        const key = transactionKey(txn);
+        if (!checked) next.delete(key);
+        else if (next.size < 200) next.add(key);
+      }
+      return next;
+    });
+  };
+  const applyBulkTags = () => {
+    const tags = [...new Set(bulkTagInput.split(/[\s,]+/).map((tag) => tag.trim().replace(/^#+/, "")).filter(Boolean))];
+    if (!bulkSelectedKeys.size) return showToast?.("info", t("transactionList.selectBeforeTagging"));
+    if (!tags.length || tags.length > 50 || tags.some((tag) => tag.length > 64 || !/^[A-Za-z0-9_-]+$/.test(tag))) return showToast?.("error", t("transactionList.tagFormatError"));
+    const selectedTxns = txns.filter((txn) => bulkSelectedKeys.has(transactionKey(txn)) && txn.source.hash && !txn.pending).slice(0, 200);
+    if (!selectedTxns.length) return;
+    onAddTags?.(selectedTxns.map((txn) => txn.source), tags);
+    setBulkSelectedKeys(new Set());
+    setBulkTagInput("");
+  };
   const focusDesktopRow = (key: string) => {
     window.requestAnimationFrame(() => desktopRowRefs.current.get(key)?.focus());
   };
@@ -609,9 +662,41 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       )}
 
       {!searchable && rows.length > 0 && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 md:px-4">
-        <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">{t("transactionList.recentTransactions")}</h2><p className="mt-0.5 text-[10px] text-stone">{t("transactionList.recentHint")}</p></div>
+        <div className="min-w-0"><h2 className="text-sm font-semibold text-ink">{t("transactionList.recentTransactions")}</h2><p className="mt-0.5 text-xs text-stone">{t("transactionList.recentHint")}</p></div>
         <span className="shrink-0 text-[11px] tabular-nums text-stone">{t("transactionList.countShort", { count: rows.length })}</span>
       </div>}
+
+      {searchable && onAddTags && rows.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-panel px-3 py-3 sm:flex-row sm:items-center md:px-4">
+          <div className="flex shrink-0 items-center gap-2">
+            <Checkbox
+              id="transaction-select-page"
+              className="relative after:absolute after:-inset-3"
+              checked={allPageRowsBulkSelected ? true : bulkEligibleRows.some((txn) => bulkSelectedKeys.has(transactionKey(txn))) ? "indeterminate" : false}
+              onCheckedChange={(checked) => toggleCurrentPageBulk(checked === true)}
+              disabled={bulkEligibleRows.length === 0}
+            />
+            <label htmlFor="transaction-select-page" className="cursor-pointer text-sm text-ink">{t("transactionList.selectedCount", { count: bulkSelectedKeys.size })}</label>
+            <span className="text-xs text-stone">{t("transactionList.selectPageHint")}</span>
+          </div>
+          <div className="grid min-w-0 flex-1 grid-cols-2 items-center gap-2 sm:ml-2 sm:flex">
+            <div className="relative col-span-2 min-w-0 flex-1">
+              <Tag className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
+              <Input
+                className="h-11 min-w-0 bg-paper pl-9 sm:h-9"
+                value={bulkTagInput}
+                onChange={(event) => setBulkTagInput(event.target.value)}
+                placeholder={t("transactionList.bulkTagPlaceholder")}
+                aria-label={t("transactionList.bulkTagPlaceholder")}
+                maxLength={1024}
+                onKeyDown={(event) => { if (event.key === "Enter") applyBulkTags(); }}
+              />
+            </div>
+            <Button type="button" size="sm" className="h-11 sm:h-9" onClick={applyBulkTags} disabled={!bulkSelectedKeys.size}>{t("transactionList.addTags")}</Button>
+            {bulkSelectedKeys.size > 0 && <Button type="button" size="sm" variant="ghost" className="h-11 text-stone sm:h-9" onClick={() => setBulkSelectedKeys(new Set())}>{t("transactionList.clearSelection")}</Button>}
+          </div>
+        </div>
+      )}
 
       {rows.length === 0 && <div className="border-b border-line bg-panel p-6 text-center text-sm text-stone">{serverSearchLoading ? t("transactionList.searchingMatches") : t("transactionList.noMatches")}</div>}
 
@@ -626,12 +711,15 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
             aria-activedescendant={activeTxnKey ? desktopRowId(pageRows.find((txn) => transactionKey(txn) === activeTxnKey) ?? pageRows[0]) : undefined}
             onKeyDown={handleDesktopListKeyDown}
           >
-            <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 border-b border-line bg-tag px-3 py-2 text-[10px] font-semibold text-stone md:px-4">
-              <span>{t("transactionList.date")}</span>
-              <span>{t("transactionList.transaction")}</span>
-              <span className="text-right">{t("transactionList.amount")}</span>
-              <span>{t("transactionList.categoryAccount")}</span>
-              <span>{t("transactionList.tags")}</span>
+            <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] border-b border-line bg-tag text-xs font-semibold text-stone">
+              <span className="sr-only">{t("transactionList.selection")}</span>
+              <div className="grid grid-cols-[72px_minmax(240px,1.15fr)_124px_minmax(220px,1fr)_minmax(150px,0.72fr)] gap-3 px-3 py-2 md:px-4">
+                <span>{t("transactionList.date")}</span>
+                <span>{t("transactionList.transaction")}</span>
+                <span className="text-right">{t("transactionList.amount")}</span>
+                <span>{t("transactionList.categoryAccount")}</span>
+                <span>{t("transactionList.tags")}</span>
+              </div>
             </div>
             <div className="divide-y divide-line">
               {pageRows.map((txn) => {
@@ -644,8 +732,11 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
                     txn={txn}
                     accounts={accounts}
                     selected={Boolean(selectedMatches(txn))}
+                    bulkSelected={bulkSelectedKeys.has(key)}
+                    bulkDisabled={!txn.source.hash || Boolean(txn.pending)}
                     viewMode={viewMode}
                     onSelect={handleSelectRow}
+                    onToggleBulk={toggleBulkTransaction}
                   />
                 );
               })}
@@ -654,7 +745,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
           <div className="lg:hidden">
             {pageRows.map((txn) => {
               const key = transactionKey(txn);
-              return <MemoTransactionCard key={key} txn={txn} accounts={accounts} selected={Boolean(selectedMatches(txn))} viewMode={viewMode} onSelect={handleSelectCard} />;
+              return <MemoTransactionCard key={key} txn={txn} accounts={accounts} selected={Boolean(selectedMatches(txn))} bulkSelected={bulkSelectedKeys.has(key)} bulkDisabled={!txn.source.hash || Boolean(txn.pending)} viewMode={viewMode} onSelect={handleSelectCard} onToggleBulk={toggleBulkTransaction} />;
             })}
           </div>
           {pager}

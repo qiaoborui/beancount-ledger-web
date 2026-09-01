@@ -61,8 +61,15 @@ struct TransactionsView: View {
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
+    private var availableTags: [String] {
+        Array(Set(transactions.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     private var activeStructuredFilterCount: Int {
-        (filters.kind == .all ? 0 : 1) + (filters.account == nil ? 0 : 1)
+        (filters.kind == .all ? 0 : 1)
+            + (filters.account == nil ? 0 : 1)
+            + (filters.tags.isEmpty ? 0 : 1)
     }
 
     var body: some View {
@@ -114,7 +121,7 @@ struct TransactionsView: View {
                                 .padding(.horizontal, LedgerSpacing.lg)
                                 .padding(.bottom, LedgerSpacing.md)
 
-                            if filters.kind != .all || filters.account != nil {
+                            if filters.kind != .all || filters.account != nil || !filters.tags.isEmpty {
                                 TransactionFilterChips(filters: $filters)
                                     .padding(.bottom, LedgerSpacing.md)
                             }
@@ -147,7 +154,7 @@ struct TransactionsView: View {
                                         Text("没有匹配的交易")
                                             .font(.system(size: 15, weight: .semibold))
                                             .foregroundStyle(LedgerPalette.ink)
-                                        Text("调整关键词、交易类型或账户筛选。")
+                                        Text("调整关键词、交易类型、账户或标签筛选。")
                                             .font(.system(size: 12))
                                             .foregroundStyle(LedgerPalette.secondary)
                                     }
@@ -192,7 +199,9 @@ struct TransactionsView: View {
                 TransactionFilterSheet(
                     kind: $filters.kind,
                     account: $filters.account,
+                    tags: $filters.tags,
                     accounts: availableAccounts,
+                    availableTags: availableTags,
                     onDone: { filterPresented = false }
                 )
                 .ledgerPrivacyProtectedSheet()
@@ -257,9 +266,15 @@ private struct TransactionFilterChips: View {
                         filters.account = nil
                     }
                 }
+                ForEach(filters.tags.sorted(), id: \.self) { tag in
+                    filterChip(title: "#\(tag)") {
+                        filters.tags.remove(tag)
+                    }
+                }
                 Button("清除筛选") {
                     filters.kind = .all
                     filters.account = nil
+                    filters.tags.removeAll()
                 }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
@@ -293,8 +308,22 @@ private struct TransactionFilterChips: View {
 private struct TransactionFilterSheet: View {
     @Binding var kind: TransactionKindFilter
     @Binding var account: String?
+    @Binding var tags: Set<String>
     let accounts: [String]
+    let availableTags: [String]
     let onDone: () -> Void
+
+    @State private var tagQuery = ""
+
+    private var displayedTags: [String] {
+        let allTags = Array(Set(availableTags).union(tags))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let query = tagQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard !query.isEmpty else { return allTags }
+        return allTags.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -318,11 +347,64 @@ private struct TransactionFilterSheet: View {
                     }
                 }
 
-                if kind != .all || account != nil {
+                Section {
+                    HStack(spacing: LedgerSpacing.sm) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(LedgerPalette.secondary)
+                        TextField("搜索标签", text: $tagQuery)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+
+                    if availableTags.isEmpty, tags.isEmpty {
+                        Text("当前范围没有标签")
+                            .foregroundStyle(LedgerPalette.secondary)
+                    } else if displayedTags.isEmpty {
+                        Text("没有匹配标签")
+                            .foregroundStyle(LedgerPalette.secondary)
+                    } else {
+                        ForEach(displayedTags, id: \.self) { tag in
+                            Button {
+                                if tags.contains(tag) {
+                                    tags.remove(tag)
+                                } else {
+                                    tags.insert(tag)
+                                }
+                            } label: {
+                                HStack {
+                                    Text("#\(tag)")
+                                        .foregroundStyle(LedgerPalette.ink)
+                                    Spacer()
+                                    if tags.contains(tag) {
+                                        Image(systemName: "checkmark")
+                                            .fontWeight(.semibold)
+                                            .foregroundStyle(LedgerPalette.cobalt)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("transaction-tag-filter-\(tag)")
+                            .accessibilityValue(tags.contains(tag) ? "已选择" : "未选择")
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("标签")
+                        if !tags.isEmpty {
+                            Text("已选 \(tags.count)")
+                        }
+                    }
+                } footer: {
+                    Text("选择多个标签时，显示包含其中任一标签的交易。")
+                }
+
+                if kind != .all || account != nil || !tags.isEmpty {
                     Section {
                         Button("重置筛选", role: .destructive) {
                             kind = .all
                             account = nil
+                            tags.removeAll()
                         }
                     }
                 }

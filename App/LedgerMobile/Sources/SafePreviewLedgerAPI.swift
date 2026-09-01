@@ -248,15 +248,15 @@ private enum SafePreviewLedgerData {
     ]
 
     static let transactions = [
-        transaction(date: "2026-08-28", payee: "城市书房", narration: "年度阅读计划", postings: [("Expenses:Education:Books", 32_800, "CNY"), ("Liabilities:CreditCard", -32_800, "CNY")], line: 88, tags: ["学习"]),
+        transaction(date: "2026-08-28", payee: "城市书房", narration: "年度阅读计划", postings: [("Expenses:Education:Books", 32_800, "CNY"), ("Liabilities:CreditCard", -32_800, "CNY")], line: 88, tags: ["learning"]),
         transaction(date: "2026-08-26", payee: "青禾市场", narration: "周末食材", postings: [("Expenses:Food:Groceries", 18_680, "CNY"), ("Assets:Bank:Daily", -18_680, "CNY")], line: 76),
-        transaction(date: "2026-08-24", payee: "全球指数基金", narration: "月度定投", postings: [("Assets:Investments:IndexFund", 1_500_000, "CNY"), ("Assets:Bank:Daily", -1_500_000, "CNY")], line: 69, tags: ["投资"]),
-        transaction(date: "2026-08-21", payee: "云端出行", narration: "差旅交通", postings: [("Expenses:Travel:Transport", 57_600, "CNY"), ("Liabilities:CreditCard", -57_600, "CNY")], line: 61),
+        transaction(date: "2026-08-24", payee: "全球指数基金", narration: "月度定投", postings: [("Assets:Investments:IndexFund", 1_500_000, "CNY"), ("Assets:Bank:Daily", -1_500_000, "CNY")], line: 69, tags: ["investment"]),
+        transaction(date: "2026-08-21", payee: "云端出行", narration: "差旅交通", postings: [("Expenses:Transport:Public", 57_600, "CNY"), ("Liabilities:CreditCard", -57_600, "CNY")], line: 61, tags: ["travel", "trip-2026-shanghai"]),
         transaction(date: "2026-08-18", payee: "工资", narration: "八月薪资", postings: [("Assets:Bank:Daily", 4_800_000, "CNY"), ("Income:Salary", -4_800_000, "CNY")], line: 52),
         transaction(date: "2026-08-15", payee: "教育储备", narration: "家庭长期计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 2_000_000, "CNY"), ("Assets:Bank:Daily", -2_000_000, "CNY")], line: 44),
         transaction(date: "2026-08-12", payee: "山岚咖啡", narration: "朋友聚会", postings: [("Expenses:Food:Dining", 23_600, "CNY"), ("Assets:Bank:Daily", -23_600, "CNY")], line: 37),
         transaction(date: "2026-08-09", payee: "房屋租金", narration: "八月房租", postings: [("Expenses:Housing:Rent", 380_000, "CNY"), ("Assets:Bank:Daily", -380_000, "CNY")], line: 29),
-        transaction(date: "2026-08-06", payee: "差旅报销", narration: "七月差旅", postings: [("Assets:Bank:Daily", 250_000, "CNY"), ("Income:Reimbursement", -250_000, "CNY")], line: 21, tags: ["报销"]),
+        transaction(date: "2026-08-06", payee: "差旅报销", narration: "七月差旅", postings: [("Assets:Bank:Daily", 250_000, "CNY"), ("Income:Reimbursement", -250_000, "CNY")], line: 21, tags: ["reimbursement"]),
         transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14),
         transaction(date: "2026-07-12", payee: "教育储备", narration: "暑期计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_580_000, "CNY"), ("Assets:Bank:Daily", -1_580_000, "CNY")], line: 118),
         transaction(date: "2026-06-18", payee: "教育储备", narration: "家庭奖金转入", postings: [("Assets:Bank:FamilyEducationReserve", 2_360_000, "CNY"), ("Assets:Bank:Daily", -2_360_000, "CNY")], line: 96),
@@ -695,7 +695,7 @@ private enum SafePreviewLedgerData {
                 LedgerCategorySeries(account: "Expenses:Housing", alias: "居住", label: "居住", total: value(380_000), values: []),
                 LedgerCategorySeries(account: "Expenses:Education", alias: "教育", label: "教育", total: value(32_800), values: []),
                 LedgerCategorySeries(account: "Expenses:Food", alias: "餐饮", label: "餐饮", total: value(84_780), values: []),
-                LedgerCategorySeries(account: "Expenses:Travel", alias: "出行", label: "出行", total: value(57_600), values: []),
+                LedgerCategorySeries(account: "Expenses:Transport", alias: "交通", label: "交通", total: value(57_600), values: []),
             ],
             topPayees: [
                 LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1),
@@ -724,7 +724,7 @@ private enum SafePreviewLedgerData {
             expense: [
                 LedgerIncomeNode(account: "Expenses:Housing", alias: "居住", label: "居住", amount: value(380_000), children: [], depth: 0, txCount: 1),
                 LedgerIncomeNode(account: "Expenses:Food", alias: "餐饮", label: "餐饮", amount: value(84_780), children: [], depth: 0, txCount: 3),
-                LedgerIncomeNode(account: "Expenses:Travel", alias: "出行", label: "出行", amount: value(57_600), children: [], depth: 0, txCount: 1),
+                LedgerIncomeNode(account: "Expenses:Transport", alias: "交通", label: "交通", amount: value(57_600), children: [], depth: 0, txCount: 1),
                 LedgerIncomeNode(account: "Expenses:Education", alias: "教育", label: "教育", amount: value(32_800), children: [], depth: 0, txCount: 1),
             ],
             totalIncome: value(5_050_000),
@@ -761,7 +761,7 @@ private enum SafePreviewLedgerData {
             rows: [
                 [.string("2026-08"), .string("Expenses:Housing:Rent"), .number(380_000)],
                 [.string("2026-08"), .string("Expenses:Food:Groceries"), .number(61_180)],
-                [.string("2026-08"), .string("Expenses:Travel:Transport"), .number(57_600)],
+                [.string("2026-08"), .string("Expenses:Transport:Public"), .number(57_600)],
                 [.string("2026-08"), .string("Expenses:Education:Books"), .number(32_800)],
             ],
             query: query,

@@ -31,6 +31,10 @@ func (s *TransactionService) Update(source TransactionSource, entry LedgerEntry)
 	return s.writer.ReplaceTransactionBlock(source, entry)
 }
 
+func (s *TransactionService) AddTags(sources []TransactionSource, tags []string) error {
+	return s.writer.AddTransactionTags(sources, tags)
+}
+
 func (s *TransactionService) Delete(source TransactionSource, reason string) error {
 	return s.writer.CommentTransactionBlock(source, reason)
 }

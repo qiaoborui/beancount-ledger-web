@@ -38,17 +38,17 @@
   Assets:CN:DigitalBank:Yulibao            15.67 CNY
   Income:Interest:Bank                    -15.67 CNY
 
-2026-06-09 * "网约车" "机场去程"
+2026-06-09 * "网约车" "机场去程" #travel #trip-2026-weekend
   Liabilities:CN:CreditCard              -118.60 CNY
   Expenses:Transport:Taxi                 118.60 CNY
 
-2026-06-10 * "酒店" "周末住宿"
+2026-06-10 * "酒店" "周末住宿" #travel #trip-2026-weekend
   Liabilities:CN:CreditCard              -680.00 CNY
-  Expenses:Travel                         680.00 CNY
+  Expenses:Accommodation:Hotel            680.00 CNY
 
-2026-06-11 * "火车票" "城际出行"
+2026-06-11 * "火车票" "城际出行" #travel #trip-2026-weekend
   Assets:CN:Alipay:Balance               -247.00 CNY
-  Expenses:Travel                         247.00 CNY
+  Expenses:Transport:Public               247.00 CNY
 
 2026-06-12 * "宽带运营商" "家庭宽带"
   Assets:CN:Bank:PrimaryChecking         -120.00 CNY

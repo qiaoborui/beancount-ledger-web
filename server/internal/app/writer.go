@@ -106,6 +106,7 @@ const (
 	ledgerWriteSourceAccountAppend       = "account-append"
 	ledgerWriteSourceAccountOperations   = "account-operations"
 	ledgerWriteSourceTransactionUpdate   = "transaction-update"
+	ledgerWriteSourceTransactionTags     = "transaction-tags-batch"
 	ledgerWriteSourceTransactionDelete   = "transaction-delete"
 	ledgerWriteSourceTransactionReversal = "transaction-reversal"
 	ledgerWriteSourceReconciliation      = "reconciliation"
@@ -543,6 +544,138 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 		next := strings.TrimRight(strings.Join(nextLines, "\n"), "\n") + "\n"
 		return tx.WriteFile(file, []byte(next), 0o644)
 	})
+}
+
+func normalizeTransactionTags(tags []string) []string {
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimPrefix(strings.TrimSpace(tag), "#")
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		normalized = append(normalized, tag)
+	}
+	return normalized
+}
+
+func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []string) error {
+	tags = normalizeTransactionTags(tags)
+	if len(tags) == 0 {
+		return errors.New("至少需要一个标签")
+	}
+	byFile := map[string][]TransactionSource{}
+	seen := map[string]bool{}
+	for _, source := range sources {
+		if strings.TrimSpace(source.Hash) == "" {
+			return errors.New("批量打标签需要交易哈希，请刷新后重试")
+		}
+		file, err := editableLedgerFile(w.cfg, source.File)
+		if err != nil {
+			return err
+		}
+		key := file + "#" + source.Hash
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		byFile[file] = append(byFile[file], source)
+	}
+	files := make([]string, 0, len(byFile))
+	for file := range byFile {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	return w.RunTransactionWithSource(ledgerWriteSourceTransactionTags, func(tx *LedgerWriteTransaction) error {
+		for _, file := range files {
+			before, err := tx.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			lines := strings.Split(strings.ReplaceAll(string(before), "\r\n", "\n"), "\n")
+			headerIndexes := make([]int, 0, len(byFile[file]))
+			for _, source := range byFile[file] {
+				_, start, _, err := transactionBlock(string(before), source)
+				if err != nil {
+					return err
+				}
+				headerIndexes = append(headerIndexes, start)
+			}
+			for _, index := range headerIndexes {
+				lines[index] = addTagsToTransactionHeader(lines[index], tags)
+			}
+			next := strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+			if err := tx.WriteFile(file, []byte(next), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func addTagsToTransactionHeader(header string, tags []string) string {
+	commentAt := len(header)
+	inQuote, escaped := false, false
+	for index, char := range header {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote && char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if char == ';' && !inQuote {
+			commentAt = index
+			break
+		}
+	}
+	code, comment := header[:commentAt], header[commentAt:]
+	existing := map[string]bool{}
+	inQuote, escaped = false, false
+	var outside strings.Builder
+	for _, char := range code {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote && char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			inQuote = !inQuote
+			outside.WriteRune(' ')
+			continue
+		}
+		if inQuote {
+			outside.WriteRune(' ')
+		} else {
+			outside.WriteRune(char)
+		}
+	}
+	for _, field := range strings.Fields(outside.String()) {
+		if strings.HasPrefix(field, "#") {
+			existing[strings.TrimPrefix(field, "#")] = true
+		}
+	}
+	missing := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if !existing[tag] {
+			missing = append(missing, tag)
+		}
+	}
+	if len(missing) == 0 {
+		return header
+	}
+	trailing := code[len(strings.TrimRight(code, " \t")):]
+	code = strings.TrimRight(code, " \t") + " #" + strings.Join(missing, " #") + trailing
+	return code + comment
 }
 
 func (w *LedgerWriter) validateEntryCommodities(tx *LedgerWriteTransaction, entries []LedgerEntry) error {

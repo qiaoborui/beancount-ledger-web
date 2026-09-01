@@ -33,6 +33,7 @@ type ImportEntry struct {
 	FundingAccount  string            `json:"fundingAccount"`
 	Amount          float64           `json:"amount"`
 	Currency        string            `json:"currency"`
+	Tags            []string          `json:"tags,omitempty"`
 	Metadata        map[string]string `json:"metadata"`
 	Postings        []EntryPosting    `json:"postings"`
 }
@@ -959,7 +960,12 @@ func (s *Server) validateAndRenderImportEntries(entries []ImportEntry) (string, 
 		if flag != "!" {
 			flag = "*"
 		}
-		lines := []string{fmt.Sprintf(`%s %s "%s" "%s"`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration))}
+		tags := normalizeTransactionTags(entry.Tags)
+		tagText := ""
+		if len(tags) > 0 {
+			tagText = " #" + strings.Join(tags, " #")
+		}
+		lines := []string{fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), tagText)}
 		keys := make([]string, 0, len(metadata))
 		for key := range metadata {
 			keys = append(keys, key)

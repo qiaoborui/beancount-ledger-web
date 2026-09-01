@@ -49,6 +49,11 @@ type UpdateTransactionRequest struct {
 	Entry  LedgerEntry       `json:"entry"`
 }
 
+type AddTransactionTagsRequest struct {
+	Sources []TransactionSource `json:"sources"`
+	Tags    []string            `json:"tags"`
+}
+
 type DeleteTransactionRequest struct {
 	Source TransactionSource `json:"source"`
 	Reason string            `json:"reason"`
@@ -92,6 +97,11 @@ var (
 	metadataKeyPattern = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*$`)
 	decimal2Re         = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
 	decimal6Re         = regexp.MustCompile(`^-?\d+(\.\d{1,6})?$`)
+)
+
+const (
+	maxTransactionTags = 50
+	maxTagLength       = 64
 )
 
 func (r LoginRequest) Validate() error {
@@ -169,6 +179,36 @@ func (r UpdateTransactionRequest) Validate() error {
 		return err
 	}
 	return r.Entry.Validate()
+}
+
+func (r AddTransactionTagsRequest) Validate() error {
+	if len(r.Sources) == 0 {
+		return fmt.Errorf("sources is required")
+	}
+	if len(r.Sources) > 200 {
+		return fmt.Errorf("sources must contain at most 200 transactions")
+	}
+	for i, source := range r.Sources {
+		if err := source.Validate(); err != nil {
+			return fmt.Errorf("sources[%d]: %w", i, err)
+		}
+		if strings.TrimSpace(source.Hash) == "" {
+			return fmt.Errorf("sources[%d].hash is required", i)
+		}
+	}
+	if len(r.Tags) == 0 {
+		return fmt.Errorf("tags is required")
+	}
+	if len(r.Tags) > maxTransactionTags {
+		return fmt.Errorf("tags must contain at most %d values", maxTransactionTags)
+	}
+	for i, tag := range r.Tags {
+		tag = strings.TrimPrefix(strings.TrimSpace(tag), "#")
+		if len(tag) > maxTagLength || !tagPattern.MatchString(tag) {
+			return fmt.Errorf("tags[%d] is invalid", i)
+		}
+	}
+	return nil
 }
 
 func (r DeleteTransactionRequest) Validate() error {
@@ -376,6 +416,15 @@ func (e ImportEntry) Validate() error {
 	}
 	if err := validateCurrency("currency", e.Currency); err != nil {
 		return err
+	}
+	if len(e.Tags) > maxTransactionTags {
+		return fmt.Errorf("tags must contain at most %d values", maxTransactionTags)
+	}
+	for i, tag := range e.Tags {
+		tag = strings.TrimPrefix(strings.TrimSpace(tag), "#")
+		if len(tag) > maxTagLength || !tagPattern.MatchString(tag) {
+			return fmt.Errorf("tags[%d] is invalid", i)
+		}
 	}
 	return nil
 }

@@ -201,6 +201,11 @@ function deleteOperation(source: Txn["source"], reason: string, baseLedgerVersio
   return { id: makeId(), createdAt: now, updatedAt: now, kind: "delete-transaction", source, reason, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
 }
 
+function addTransactionTagsOperation(sources: Txn["source"][], tags: string[], baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
+  const now = Date.now();
+  return { id: makeId(), createdAt: now, updatedAt: now, kind: "add-transaction-tags", sources, tags, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
+}
+
 export function isPendingLedgerConflict(message: string) {
   return message.includes(i18n.t("pendingWrites.conflictOriginalMissing")) || message.includes(i18n.t("pendingWrites.conflictSourceNotUnique"));
 }
@@ -226,6 +231,13 @@ export async function syncOperation(operation: PendingLedgerOperation) {
 
   if (operation.kind === "update-transaction") {
     const res = await apiFetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) }, { kind: "write" });
+    const data = await readJson<{ error?: string }>(res);
+    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.updateSyncFailed"));
+    return;
+  }
+
+  if (operation.kind === "add-transaction-tags") {
+    const res = await apiFetch("/api/ledger/transactions/tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: operation.sources, tags: operation.tags }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.updateSyncFailed"));
     return;
@@ -287,6 +299,10 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
 
   const enqueueTransactionDelete = useCallback((source: Txn["source"], reason: string) => {
     enqueueOperation(deleteOperation(source, reason, ledgerVersion));
+  }, [enqueueOperation, ledgerVersion]);
+
+  const enqueueAddTransactionTags = useCallback((sources: Txn["source"][], tags: string[]) => {
+    enqueueOperation(addTransactionTagsOperation(sources, tags, ledgerVersion));
   }, [enqueueOperation, ledgerVersion]);
 
   const syncPendingWrites = useCallback(async ({ userInitiated = false }: { userInitiated?: boolean } = {}) => {
@@ -391,6 +407,7 @@ export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { loa
     enqueuePendingWrites,
     enqueueTransactionUpdate,
     enqueueTransactionDelete,
+    enqueueAddTransactionTags,
     syncPendingWrites,
     syncingPendingWrites,
     discardPendingOperation,

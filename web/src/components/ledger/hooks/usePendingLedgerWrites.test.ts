@@ -123,6 +123,21 @@ describe("syncOperation", () => {
     expect(body.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
   });
 
+  it("syncs bulk tags with one grouped request", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ ok: true }, true));
+    vi.stubGlobal("fetch", fetchMock);
+    const sources = [
+      { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "hash-12" },
+      { file: "/ledger/transactions/2026/05.bean", line: 24, hash: "hash-24" },
+    ];
+
+    await syncOperation({ id: "tags-1", createdAt: 1, kind: "add-transaction-tags", sources, tags: ["travel"] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/ledger/transactions/tags");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ sources, tags: ["travel"] });
+  });
+
   it("keeps the transaction hash when a delete needs confirmation", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(response({ error: "找不到原交易，账本可能已被修改，请刷新后重试" }, false));
     vi.stubGlobal("fetch", fetchMock);

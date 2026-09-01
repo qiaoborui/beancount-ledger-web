@@ -111,15 +111,15 @@
   Assets:CN:Bank:PrimaryChecking            8.91 CNY
   Income:Interest:Bank                     -8.91 CNY
 
-2026-05-26 * "朋友代付" "周末民宿"
-  Expenses:Travel                         320.00 CNY
+2026-05-26 * "朋友代付" "周末民宿" #travel #trip-2026-weekend
+  Expenses:Accommodation:Hotel            320.00 CNY
   Liabilities:Payable:Friends            -320.00 CNY
 
 2026-05-27 * "朋友转账" "归还民宿款"
   Assets:CN:Wechat:Balance               -320.00 CNY
   Liabilities:Payable:Friends             320.00 CNY
 
-2026-05-28 * "租车平台" "短途租车"
+2026-05-28 * "租车平台" "短途租车" #travel #trip-2026-weekend
   Liabilities:CN:CreditCard              -286.50 CNY
   Expenses:Transport:CarRental            286.50 CNY
 

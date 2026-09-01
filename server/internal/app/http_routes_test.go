@@ -406,6 +406,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/summary":                  true,
 		"GET /api/ledger/transactions":             true,
 		"POST /api/ledger/transactions":            true,
+		"POST /api/ledger/transactions/tags":       true,
 		"PUT /api/ledger/transactions":             true,
 		"DELETE /api/ledger/transactions":          true,
 		"GET /api/ledger/balances":                 true,
