@@ -576,6 +576,9 @@ ORDER BY transaction_ordinal, metadata_key`, revision.ID)
 	if err := g.Wait(); err != nil {
 		return nil, false, err
 	}
+	if includeBeanPayloads {
+		AttachEditableTransactionEntries(snapshot.Transactions, snapshot.BeanEntries)
+	}
 	for index := range snapshot.Transactions {
 		snapshot.Transactions[index].Source.GitSHA = revision.GitSHA
 	}

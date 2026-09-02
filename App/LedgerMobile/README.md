@@ -1,8 +1,8 @@
 # LedgerMobile
 
 `LedgerMobile` is the native iOS client for Beancount Ledger Web. Financial
-review remains read-only across the main app, while bill imports use the
-server's existing preview, validation, confirmation, and rollback boundary.
+review, safe transaction editing, and bill imports reuse the server's existing
+validation, confirmation, and rollback boundaries.
 The app connects to an existing HTTPS deployment and reuses the server's cookie
 authentication and privacy lock.
 
@@ -10,8 +10,8 @@ authentication and privacy lock.
 
 - Verify a compatible Ledger Web HTTPS origin before accepting a password.
 - Restore the Cookie session and read the current month's overview.
-- Search and filter transactions by keyword, type, and account, then open the
-  transaction detail.
+- Search and filter transactions by keyword, type, and account, edit safely
+  round-trippable entries, and apply tags to up to 200 selected transactions.
 - Browse grouped account balances, account details, related transactions, and
   running balances.
 - Review Dashboard KPIs, cashflow trends, spending structure, and anomalous

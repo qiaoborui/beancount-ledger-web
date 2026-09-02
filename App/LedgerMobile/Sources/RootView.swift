@@ -348,9 +348,8 @@ private struct LoginView: View {
 
 enum LedgerDestination: String, CaseIterable, Hashable {
     case overview
-    case dashboard
-    case netWorth
-    case incomeStatement
+    case assets
+    case incomeExpense
     case investments
     case currencies
     case query
@@ -362,9 +361,8 @@ enum LedgerDestination: String, CaseIterable, Hashable {
     var title: String {
         switch self {
         case .overview: "财务概览"
-        case .dashboard: "仪表盘"
-        case .netWorth: "净资产"
-        case .incomeStatement: "损益"
+        case .assets: "资产"
+        case .incomeExpense: "收支分析"
         case .investments: "投资"
         case .currencies: "货币与汇率"
         case .query: "查询"
@@ -378,9 +376,8 @@ enum LedgerDestination: String, CaseIterable, Hashable {
     var systemImage: String {
         switch self {
         case .overview: "house"
-        case .dashboard: "rectangle.3.group"
-        case .netWorth: "chart.line.uptrend.xyaxis"
-        case .incomeStatement: "sum"
+        case .assets: "building.columns"
+        case .incomeExpense: "chart.bar.xaxis"
         case .investments: "chart.pie"
         case .currencies: "coloncurrencysign"
         case .query: "cylinder.split.1x2"
@@ -390,6 +387,10 @@ enum LedgerDestination: String, CaseIterable, Hashable {
         case .settings: "gearshape"
         }
     }
+
+    static func stored(_ rawValue: String) -> LedgerDestination {
+        LedgerDestination(rawValue: rawValue) ?? .overview
+    }
 }
 
 private struct MainTabView: View {
@@ -398,7 +399,7 @@ private struct MainTabView: View {
 
     private var selection: Binding<LedgerDestination> {
         Binding(
-            get: { LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview },
+            get: { LedgerDestination.stored(session.primaryDestinationID) },
             set: { session.primaryDestinationID = $0.rawValue }
         )
     }
@@ -406,10 +407,10 @@ private struct MainTabView: View {
     private var compactSelection: Binding<LedgerDestination> {
         Binding(
             get: {
-                switch LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview {
+                switch LedgerDestination.stored(session.primaryDestinationID) {
                 case .overview, .transactions, .accounts, .settings:
-                    return LedgerDestination(rawValue: session.primaryDestinationID) ?? .overview
-                case .dashboard, .netWorth, .incomeStatement, .investments, .currencies, .query, .imports:
+                    return LedgerDestination.stored(session.primaryDestinationID)
+                case .assets, .incomeExpense, .investments, .currencies, .query, .imports:
                     return .settings
                 }
             },
@@ -465,12 +466,10 @@ private struct LedgerRegularShell: View {
                 switch selection {
                 case .overview:
                     OverviewView()
-                case .dashboard:
-                    LedgerAnalysisView(kind: .dashboard, showsAppBar: true)
-                case .netWorth:
-                    LedgerAnalysisView(kind: .netWorth, showsAppBar: true)
-                case .incomeStatement:
-                    LedgerAnalysisView(kind: .incomeStatement, showsAppBar: true)
+                case .assets:
+                    LedgerAnalysisView(kind: .assets, showsAppBar: true)
+                case .incomeExpense:
+                    LedgerAnalysisView(kind: .incomeExpense, showsAppBar: true)
                 case .investments:
                     LedgerAnalysisView(kind: .investments, showsAppBar: true)
                 case .currencies:
@@ -532,7 +531,7 @@ private struct LedgerSidebar: View {
                 .padding(.horizontal, LedgerSpacing.sm)
                 .padding(.bottom, LedgerSpacing.sm)
 
-            Text("只读模式")
+            Text("安全写入")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(LedgerPalette.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

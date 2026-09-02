@@ -734,8 +734,22 @@ func parseBalanceBeanAmountTokens(tokens []beanToken) (BeanAmount, string, int, 
 }
 
 func parseCostTokens(tokens []beanToken) (BeanAmount, bool, int, bool) {
-	if len(tokens) < 3 || (tokens[0].Value != "{" && tokens[0].Value != "{{") {
+	total, next, ok := parseCostTokenSpan(tokens)
+	if !ok {
 		return BeanAmount{}, false, 0, false
+	}
+	end := next - 1
+	for start := 1; start < end; start++ {
+		if amount, _, ok := parseBeanAmountTokens(tokens[start:end]); ok {
+			return amount, total, next, true
+		}
+	}
+	return BeanAmount{}, total, next, false
+}
+
+func parseCostTokenSpan(tokens []beanToken) (bool, int, bool) {
+	if len(tokens) < 2 || (tokens[0].Value != "{" && tokens[0].Value != "{{") {
+		return false, 0, false
 	}
 	closeToken := "}"
 	total := false
@@ -751,14 +765,9 @@ func parseCostTokens(tokens []beanToken) (BeanAmount, bool, int, bool) {
 		}
 	}
 	if end < 0 {
-		return BeanAmount{}, false, 0, false
+		return false, 0, false
 	}
-	for start := 1; start < end; start++ {
-		if amount, next, ok := parseBeanAmountTokens(tokens[start:end]); ok {
-			return amount, total, start + next + 1, true
-		}
-	}
-	return BeanAmount{}, total, end + 1, false
+	return total, end + 1, true
 }
 
 func directNumberText(tokens []beanToken) (string, bool) {
@@ -1117,6 +1126,12 @@ func scanBeanString(input string, start int) (string, int) {
 				out.WriteRune('\n')
 			case 't':
 				out.WriteRune('\t')
+			case 'r':
+				out.WriteRune('\r')
+			case 'b':
+				out.WriteRune('\b')
+			case 'f':
+				out.WriteRune('\f')
 			default:
 				out.WriteRune(next)
 			}

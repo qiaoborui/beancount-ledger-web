@@ -145,7 +145,7 @@ struct MoreView: View {
                                         .background(LedgerPalette.tag)
                                         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text("原生只读模式")
+                                        Text("原生账本模式")
                                             .font(.system(size: 14, weight: .semibold))
                                             .foregroundStyle(LedgerPalette.ink)
                                         Text(session.serverURL?.host ?? "Ledger iOS")
@@ -153,7 +153,7 @@ struct MoreView: View {
                                             .foregroundStyle(LedgerPalette.secondary)
                                     }
                                     Spacer()
-                                    Text("只读")
+                                    Text("读写")
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundStyle(LedgerPalette.cobalt)
                                         .padding(.horizontal, 9)

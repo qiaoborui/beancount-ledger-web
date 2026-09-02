@@ -348,6 +348,9 @@ struct LedgerBootstrap: Decodable {
     let summary: LedgerSummary
     let comparisons: LedgerPeriodComparisons?
     let accountBalances: [AccountBalance]
+    let netWorthHistory: [LedgerNetWorthPoint]
+    let monthEndNetWorth: [LedgerNetWorthPoint]
+    let netWorthWindows: LedgerNetWorthWindows?
     let transactions: [LedgerTransaction]
     let accounts: [LedgerAccount]
     let commodities: [String]
@@ -361,6 +364,9 @@ struct LedgerBootstrap: Decodable {
         case summary
         case comparisons
         case accountBalances
+        case netWorthHistory
+        case monthEndNetWorth
+        case netWorthWindows
         case transactions
         case accounts
         case commodities
@@ -375,6 +381,9 @@ struct LedgerBootstrap: Decodable {
         summary: LedgerSummary,
         comparisons: LedgerPeriodComparisons? = nil,
         accountBalances: [AccountBalance],
+        netWorthHistory: [LedgerNetWorthPoint] = [],
+        monthEndNetWorth: [LedgerNetWorthPoint] = [],
+        netWorthWindows: LedgerNetWorthWindows? = nil,
         transactions: [LedgerTransaction],
         accounts: [LedgerAccount],
         commodities: [String] = [],
@@ -387,6 +396,9 @@ struct LedgerBootstrap: Decodable {
         self.summary = summary
         self.comparisons = comparisons
         self.accountBalances = accountBalances
+        self.netWorthHistory = netWorthHistory
+        self.monthEndNetWorth = monthEndNetWorth
+        self.netWorthWindows = netWorthWindows
         self.transactions = transactions
         self.accounts = accounts
         self.commodities = commodities
@@ -402,6 +414,9 @@ struct LedgerBootstrap: Decodable {
         summary = try container.decode(LedgerSummary.self, forKey: .summary)
         comparisons = try container.decodeIfPresent(LedgerPeriodComparisons.self, forKey: .comparisons)
         accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
+        netWorthHistory = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .netWorthHistory) ?? []
+        monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
+        netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
         commodities = try container.decodeIfPresent([String].self, forKey: .commodities) ?? []
@@ -516,20 +531,83 @@ struct LedgerImportDocument: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
-struct LedgerTransaction: Decodable, Identifiable, Equatable {
+enum LedgerMetadataValue: Codable, Equatable, Sendable {
+    case null
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else {
+            self = .string(try container.decode(String.self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case let .string(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .bool(value): try container.encode(value)
+        }
+    }
+}
+
+struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
     let date: String
     let payee: String
     let narration: String
+    let metadata: [String: LedgerMetadataValue]?
     let tags: [String]?
     let postings: [LedgerPosting]
+    let editableEntry: LedgerTransactionEntry?
     let source: TransactionSource
+
+    private enum CodingKeys: String, CodingKey {
+        case date
+        case payee
+        case narration
+        case metadata
+        case tags
+        case postings
+        case editableEntry = "entry"
+        case source
+    }
+
+    init(
+        date: String,
+        payee: String,
+        narration: String,
+        metadata: [String: LedgerMetadataValue]? = nil,
+        tags: [String]? = nil,
+        postings: [LedgerPosting],
+        editableEntry: LedgerTransactionEntry? = nil,
+        source: TransactionSource
+    ) {
+        self.date = date
+        self.payee = payee
+        self.narration = narration
+        self.metadata = metadata
+        self.tags = tags
+        self.postings = postings
+        self.editableEntry = editableEntry
+        self.source = source
+    }
 
     var id: String {
         "\(source.gitSHA ?? "local"):\(source.file):\(source.line):\(source.hash ?? "")"
     }
 }
 
-struct LedgerPosting: Decodable, Equatable, Identifiable {
+struct LedgerPosting: Codable, Equatable, Identifiable, Sendable {
     let account: String
     let amount: Int
     let currency: String?
@@ -537,7 +615,7 @@ struct LedgerPosting: Decodable, Equatable, Identifiable {
     var id: String { "\(account):\(amount):\(currency ?? "")" }
 }
 
-struct TransactionSource: Decodable, Equatable {
+struct TransactionSource: Codable, Equatable, Sendable {
     let file: String
     let line: Int
     let hash: String?
@@ -551,7 +629,197 @@ struct TransactionSource: Decodable, Equatable {
     }
 }
 
-struct AccountBalance: Decodable, Equatable {
+struct LedgerTransactionEntryPosting: Codable, Equatable, Sendable {
+    let account: String
+    let flag: String?
+    let amount: String
+    let currency: String
+    let costKind: String?
+    let costAmount: String?
+    let costCurrency: String?
+    let costSpec: String?
+    let priceKind: String?
+    let priceAmount: String?
+    let priceCurrency: String?
+
+    init(
+        account: String,
+        flag: String? = nil,
+        amount: String,
+        currency: String,
+        costKind: String? = nil,
+        costAmount: String? = nil,
+        costCurrency: String? = nil,
+        costSpec: String? = nil,
+        priceKind: String? = nil,
+        priceAmount: String? = nil,
+        priceCurrency: String? = nil
+    ) {
+        self.account = account
+        self.flag = flag
+        self.amount = amount
+        self.currency = currency
+        self.costKind = costKind
+        self.costAmount = costAmount
+        self.costCurrency = costCurrency
+        self.costSpec = costSpec
+        self.priceKind = priceKind
+        self.priceAmount = priceAmount
+        self.priceCurrency = priceCurrency
+    }
+}
+
+struct LedgerTransactionEntry: Codable, Equatable, Sendable {
+    let kind: String
+    let date: String
+    let flag: String?
+    let payee: String
+    let narration: String
+    let metadata: [String: LedgerMetadataValue]
+    let tags: [String]
+    let links: [String]
+    let postings: [LedgerTransactionEntryPosting]
+    let currency: String
+    let confidence: Double
+    let needsReview: Bool
+    let questions: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case date
+        case flag
+        case payee
+        case narration
+        case metadata
+        case tags
+        case links
+        case postings
+        case currency
+        case confidence
+        case needsReview
+        case questions
+    }
+
+    init(
+        date: String,
+        flag: String? = nil,
+        payee: String,
+        narration: String,
+        metadata: [String: LedgerMetadataValue],
+        tags: [String],
+        links: [String] = [],
+        postings: [LedgerTransactionEntryPosting]
+    ) {
+        kind = "transaction"
+        self.date = date
+        self.flag = flag
+        self.payee = payee
+        self.narration = narration
+        self.metadata = metadata
+        self.tags = tags
+        self.links = links
+        self.postings = postings
+        currency = postings.first?.currency ?? "CNY"
+        confidence = 1
+        needsReview = false
+        questions = []
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "transaction"
+        date = try container.decode(String.self, forKey: .date)
+        flag = try container.decodeIfPresent(String.self, forKey: .flag)
+        payee = try container.decode(String.self, forKey: .payee)
+        narration = try container.decodeIfPresent(String.self, forKey: .narration) ?? ""
+        metadata = try container.decodeIfPresent([String: LedgerMetadataValue].self, forKey: .metadata) ?? [:]
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        links = try container.decodeIfPresent([String].self, forKey: .links) ?? []
+        postings = try container.decode([LedgerTransactionEntryPosting].self, forKey: .postings)
+        currency = try container.decodeIfPresent(String.self, forKey: .currency) ?? postings.first?.currency ?? "CNY"
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 1
+        needsReview = try container.decodeIfPresent(Bool.self, forKey: .needsReview) ?? false
+        questions = try container.decodeIfPresent([String].self, forKey: .questions) ?? []
+    }
+}
+
+struct LedgerTransactionUpdateRequest: Encodable, Equatable, Sendable {
+    let source: TransactionSource
+    let entry: LedgerTransactionEntry
+}
+
+struct LedgerTransactionTagsRequest: Encodable, Equatable, Sendable {
+    let sources: [TransactionSource]
+    let tags: [String]
+}
+
+enum LedgerTagValidationError: LocalizedError, Equatable {
+    case empty
+    case tooMany
+    case invalid(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .empty: "请输入至少一个标签"
+        case .tooMany: "标签总数最多 50 个"
+        case let .invalid(tag): "标签 #\(tag) 格式无效，仅支持字母、数字、下划线和连字符"
+        }
+    }
+}
+
+enum LedgerTagRules {
+    static let maximumCount = 50
+    static let maximumLength = 64
+
+    static func normalized(_ rawValues: [String]) -> [String] {
+        Array(Set(rawValues.compactMap { raw in
+            var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            while value.first == "#" {
+                value.removeFirst()
+            }
+            return value.isEmpty ? nil : value
+        }))
+        .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    static func parse(_ raw: String) throws -> [String] {
+        let values = normalized(raw.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",，"))))
+        guard !values.isEmpty else { throw LedgerTagValidationError.empty }
+        guard values.count <= maximumCount else { throw LedgerTagValidationError.tooMany }
+        for value in values where !isValid(value) {
+            throw LedgerTagValidationError.invalid(value)
+        }
+        return values
+    }
+
+    static func validating(_ values: [String]) throws -> [String] {
+        let normalizedValues = normalized(values)
+        guard normalizedValues.count <= maximumCount else { throw LedgerTagValidationError.tooMany }
+        for value in normalizedValues where !isValid(value) {
+            throw LedgerTagValidationError.invalid(value)
+        }
+        return normalizedValues
+    }
+
+    static func isValid(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= maximumLength else { return false }
+        return value.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil
+    }
+}
+
+enum TransactionTagSelectionRules {
+    static let maximumCount = 200
+
+    static func adding(_ candidateIDs: [String], to current: Set<String>) -> Set<String> {
+        var updated = current
+        for id in candidateIDs where updated.count < maximumCount {
+            updated.insert(id)
+        }
+        return updated
+    }
+}
+
+struct AccountBalance: Decodable, Equatable, Sendable {
     let account: String
     let currency: String
     let amount: Int
@@ -568,7 +836,7 @@ struct AccountBalance: Decodable, Equatable {
     var periodAvailable: Bool? = nil
 }
 
-struct LedgerAccount: Decodable, Equatable {
+struct LedgerAccount: Decodable, Equatable, Sendable {
     let account: String
     let openDate: String
     let closeDate: String?
@@ -717,15 +985,30 @@ extension LedgerAccountDetail {
     }
 }
 
+struct LedgerAssetsAnalysis: Equatable, Sendable {
+    let accountBalances: [AccountBalance]
+    let accounts: [LedgerAccount]
+    let netWorthHistory: [LedgerNetWorthPoint]
+    let monthEndNetWorth: [LedgerNetWorthPoint]
+    let netWorthWindows: LedgerNetWorthWindows?
+    let comparisons: LedgerPeriodComparisons?
+    let valuationCurrency: String
+}
+
+struct LedgerIncomeExpenseAnalysis: Equatable, Sendable {
+    let dashboard: LedgerDashboard
+    let statement: LedgerIncomeStatement
+}
+
 enum LedgerAnalysisResourceKind: Equatable, Sendable {
-    case dashboard
-    case incomeStatement
+    case assets
+    case incomeExpense
     case investments
 }
 
 enum LedgerAnalysisResource: Equatable, Sendable {
-    case dashboard(LedgerDashboard)
-    case incomeStatement(LedgerIncomeStatement)
+    case assets(LedgerAssetsAnalysis)
+    case incomeExpense(LedgerIncomeExpenseAnalysis)
     case investments(LedgerInvestmentSummary)
 }
 
@@ -929,6 +1212,30 @@ struct LedgerDashboard: Decodable, Equatable, Sendable {
     let topPayees: [LedgerPayeeAnalytics]
     let topPaymentAccounts: [LedgerAccountAnalytics]
     let anomalies: [LedgerDashboardAnomaly]
+
+    init(
+        start: String,
+        end: String,
+        currency: String,
+        kpis: LedgerDashboardKPI,
+        netWorthSeries: [LedgerNetWorthPoint],
+        cashflowSeries: [LedgerCashflowPoint],
+        categorySeries: [LedgerCategorySeries],
+        topPayees: [LedgerPayeeAnalytics],
+        topPaymentAccounts: [LedgerAccountAnalytics],
+        anomalies: [LedgerDashboardAnomaly]
+    ) {
+        self.start = start
+        self.end = end
+        self.currency = currency
+        self.kpis = kpis
+        self.netWorthSeries = netWorthSeries
+        self.cashflowSeries = cashflowSeries
+        self.categorySeries = categorySeries
+        self.topPayees = topPayees
+        self.topPaymentAccounts = topPaymentAccounts
+        self.anomalies = anomalies
+    }
 }
 
 struct LedgerDashboardKPI: Decodable, Equatable, Sendable {
@@ -947,6 +1254,20 @@ struct LedgerNetWorthPoint: Decodable, Equatable, Identifiable, Sendable {
     let liabilities: Int
     let netWorth: Int
     var id: String { date }
+}
+
+struct LedgerNetWorthDelta: Decodable, Equatable, Sendable {
+    let baseline: LedgerNetWorthPoint?
+    let change: Int?
+    let changeRatio: Double?
+}
+
+struct LedgerNetWorthWindows: Decodable, Equatable, Sendable {
+    let latest: LedgerNetWorthPoint?
+    let previousMonthEnd: LedgerNetWorthPoint?
+    let monthChange: Int?
+    let sixMonth: LedgerNetWorthDelta
+    let twelveMonth: LedgerNetWorthDelta
 }
 
 struct LedgerCashflowPoint: Decodable, Equatable, Identifiable, Sendable {
@@ -1005,8 +1326,80 @@ struct LedgerIncomeStatement: Decodable, Equatable, Sendable {
     let expense: [LedgerIncomeNode]
     let totalIncome: Int
     let totalExpense: Int
+    let expenseAnalytics: [LedgerExpenseCategoryAnalytics]
+    let topPayees: [LedgerPayeeAnalytics]
+    let topPaymentAccounts: [LedgerAccountAnalytics]
     let netIncome: Int
     let valuationCurrency: String
+
+    private enum CodingKeys: String, CodingKey {
+        case start
+        case end
+        case income
+        case expense
+        case totalIncome
+        case totalExpense
+        case expenseAnalytics
+        case topPayees
+        case topPaymentAccounts
+        case netIncome
+        case valuationCurrency
+    }
+
+    init(
+        start: String,
+        end: String,
+        income: [LedgerIncomeNode],
+        expense: [LedgerIncomeNode],
+        totalIncome: Int,
+        totalExpense: Int,
+        expenseAnalytics: [LedgerExpenseCategoryAnalytics] = [],
+        topPayees: [LedgerPayeeAnalytics] = [],
+        topPaymentAccounts: [LedgerAccountAnalytics] = [],
+        netIncome: Int,
+        valuationCurrency: String
+    ) {
+        self.start = start
+        self.end = end
+        self.income = income
+        self.expense = expense
+        self.totalIncome = totalIncome
+        self.totalExpense = totalExpense
+        self.expenseAnalytics = expenseAnalytics
+        self.topPayees = topPayees
+        self.topPaymentAccounts = topPaymentAccounts
+        self.netIncome = netIncome
+        self.valuationCurrency = valuationCurrency
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        start = try container.decode(String.self, forKey: .start)
+        end = try container.decode(String.self, forKey: .end)
+        income = try container.decode([LedgerIncomeNode].self, forKey: .income)
+        expense = try container.decode([LedgerIncomeNode].self, forKey: .expense)
+        totalIncome = try container.decode(Int.self, forKey: .totalIncome)
+        totalExpense = try container.decode(Int.self, forKey: .totalExpense)
+        expenseAnalytics = try container.decodeIfPresent([LedgerExpenseCategoryAnalytics].self, forKey: .expenseAnalytics) ?? []
+        topPayees = try container.decodeIfPresent([LedgerPayeeAnalytics].self, forKey: .topPayees) ?? []
+        topPaymentAccounts = try container.decodeIfPresent([LedgerAccountAnalytics].self, forKey: .topPaymentAccounts) ?? []
+        netIncome = try container.decode(Int.self, forKey: .netIncome)
+        valuationCurrency = try container.decode(String.self, forKey: .valuationCurrency)
+    }
+}
+
+struct LedgerExpenseCategoryAnalytics: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let alias: String?
+    let label: String
+    let amount: Int
+    let txCount: Int
+    let share: Double?
+    let previousAmount: Int
+    let changeRatio: Double?
+    let topPayees: [LedgerPayeeAnalytics]
+
+    var id: String { account }
 }
 
 struct LedgerIncomeNode: Decodable, Equatable, Identifiable, Sendable {

@@ -74,6 +74,17 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(payload.accountSections.map(\.title), ["现金与支付", "信用账户"])
         XCTAssertEqual(payload.accountSections.first?.rows.first?.label, "日常账户")
         XCTAssertEqual(payload.transactions.first?.source.gitSHA, "abc123")
+        XCTAssertEqual(payload.transactions.first?.metadata?["verified"], .bool(true))
+        XCTAssertEqual(payload.transactions.first?.metadata?["reviewedAt"], .null)
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.flag, "!")
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.links, ["receipt-2026"])
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.amount, "1.23456789")
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.costKind, "total")
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.costSpec, #"{{ 123.456789 USD, 2026-05-01, "lot-a" }}"#)
+        XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.priceKind, "unit")
+        XCTAssertEqual(payload.netWorthHistory.last?.netWorth, 1_000_000)
+        XCTAssertEqual(payload.monthEndNetWorth.count, 1)
+        XCTAssertEqual(payload.netWorthWindows?.monthChange, 15_000)
         XCTAssertEqual(payload.commodities, ["CNY", "USD"])
         XCTAssertEqual(payload.prices.first, LedgerPrice(date: "2026-08-20", currency: "USD", amount: 713, quoteCurrency: "CNY"))
 
@@ -357,6 +368,17 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
+    func testBulkTagSelectionKeepsExistingSelectionsWithinTwoHundredLimit() {
+        let current = Set((0..<150).map { "existing-\($0)" })
+        let candidates = (0..<200).map { "candidate-\($0)" }
+
+        let updated = TransactionTagSelectionRules.adding(candidates, to: current)
+
+        XCTAssertEqual(updated.count, 200)
+        XCTAssertTrue(current.isSubset(of: updated))
+        XCTAssertEqual(candidates.filter(updated.contains).count, 50)
+    }
+
     func testCompactMoneyUsesChineseAndInternationalUnits() {
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 999_999, currency: "CNY"), "¥9,999.99")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 1_234_567, currency: "CNY"), "¥1.2w")
@@ -485,13 +507,36 @@ final class LedgerModelsTests: XCTestCase {
         { "account": "Assets:Bank:Daily", "currency": "CNY", "amount": 1235000, "valuationCurrency": "CNY", "valuation": 1235000, "openingAmount": 1243500, "closingAmount": 1235000, "periodChange": -8500, "openingValuation": 1243500, "closingValuation": 1235000, "periodValuationChange": -8500, "periodAvailable": true },
         { "account": "Liabilities:CreditCard:Visa", "currency": "CNY", "amount": -235000, "valuationCurrency": "CNY", "valuation": -235000, "openingAmount": -226500, "closingAmount": -235000, "periodChange": -8500, "openingValuation": -226500, "closingValuation": -235000, "periodValuationChange": -8500, "periodAvailable": true }
       ],
+      "netWorthHistory": [
+        { "date": "2026-08-01", "assets": 1220000, "liabilities": 235000, "netWorth": 985000 },
+        { "date": "2026-08-31", "assets": 1235000, "liabilities": 235000, "netWorth": 1000000 }
+      ],
+      "monthEndNetWorth": [
+        { "date": "2026-08-31", "assets": 1235000, "liabilities": 235000, "netWorth": 1000000 }
+      ],
+      "netWorthWindows": {
+        "latest": { "date": "2026-08-31", "assets": 1235000, "liabilities": 235000, "netWorth": 1000000 },
+        "previousMonthEnd": { "date": "2026-07-31", "assets": 1220000, "liabilities": 235000, "netWorth": 985000 },
+        "monthChange": 15000,
+        "sixMonth": { "baseline": null, "change": null, "changeRatio": null },
+        "twelveMonth": { "baseline": null, "change": null, "changeRatio": null }
+      },
       "transactions": [
         {
-          "date": "2026-08-20", "payee": "海底捞", "narration": "晚餐", "tags": ["dining"],
+          "date": "2026-08-20", "payee": "海底捞", "narration": "晚餐", "metadata": { "verified": true, "reviewedAt": null }, "tags": ["dining"],
           "postings": [
             { "account": "Expenses:Food:Dining", "amount": 8500, "currency": "CNY" },
             { "account": "Assets:Bank:Daily", "amount": -8500, "currency": "CNY" }
           ],
+          "entry": {
+            "kind": "transaction", "date": "2026-08-20", "flag": "!", "payee": "海底捞", "narration": "晚餐",
+            "metadata": { "verified": true, "reviewedAt": null }, "tags": ["dining"], "links": ["receipt-2026"],
+            "postings": [
+              { "account": "Assets:Broker", "flag": "!", "amount": "1.23456789", "currency": "VT", "costKind": "total", "costAmount": "123.456789", "costCurrency": "USD", "costSpec": "{{ 123.456789 USD, 2026-05-01, \"lot-a\" }}", "priceKind": "unit", "priceAmount": "160.1234567", "priceCurrency": "USD" },
+              { "account": "Assets:Bank:Daily", "amount": "-197.530862", "currency": "USD" }
+            ],
+            "currency": "VT", "confidence": 1, "needsReview": false, "questions": []
+          },
           "source": { "file": "transactions/2026/08.bean", "line": 18, "hash": "expense-hash", "gitSha": "abc123" }
         },
         {
