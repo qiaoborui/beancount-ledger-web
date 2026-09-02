@@ -429,6 +429,9 @@ func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocke
 		if query != nil && !query.Matches(txn) {
 			continue
 		}
+		if !unlocked {
+			txn.Entry = nil
+		}
 		filtered = append(filtered, txn)
 	}
 	return filtered
@@ -445,6 +448,7 @@ func filterSensitiveTransactions(txns []Transaction) []Transaction {
 	filtered := make([]Transaction, 0, min(len(txns), 256))
 	for _, txn := range txns {
 		if !transactionHasIncome(txn) {
+			txn.Entry = nil
 			filtered = append(filtered, txn)
 		}
 	}

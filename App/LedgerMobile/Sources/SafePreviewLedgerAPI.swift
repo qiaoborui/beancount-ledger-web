@@ -121,6 +121,18 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         )
     }
 
+    func updateTransaction(
+        baseURL: URL,
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws {}
+
+    func addTransactionTags(
+        baseURL: URL,
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws {}
+
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
         let currentGitSHA = committedImportDocument == nil ? "safe-preview-baseline" : "safe-preview-indexed"
         return LedgerIndexInfo(
@@ -373,6 +385,7 @@ private enum SafePreviewLedgerData {
                 fundingAccount: "Assets:Bank:Daily",
                 amount: 328,
                 currency: "CNY",
+                tags: ["learning"],
                 metadata: ["orderId": "safe-order-1"],
                 postings: [
                     LedgerImportPosting(account: "Expenses:Education:Books", amount: "328.00", currency: "CNY", priceKind: nil, priceAmount: nil, priceCurrency: nil),
@@ -482,12 +495,26 @@ private enum SafePreviewLedgerData {
                 periodAvailable: true
             )
         }
+        let netWorthRows = dashboard(start: start, end: end, valuationCurrency: valuationCurrency).netWorthSeries
+        let latest = netWorthRows.last
+        let previous = netWorthRows.dropLast().last
+        let monthChange = latest.flatMap { latest in previous.map { latest.netWorth - $0.netWorth } }
+        let emptyDelta = LedgerNetWorthDelta(baseline: nil, change: nil, changeRatio: nil)
         return LedgerBootstrap(
             start: start,
             end: end,
             summary: LedgerSummary(currency: valuationCurrency, income: income, expense: expense, net: income - expense),
             comparisons: comparisons,
             accountBalances: valuedBalances,
+            netWorthHistory: netWorthRows,
+            monthEndNetWorth: netWorthRows,
+            netWorthWindows: LedgerNetWorthWindows(
+                latest: latest,
+                previousMonthEnd: previous,
+                monthChange: monthChange,
+                sixMonth: emptyDelta,
+                twelveMonth: emptyDelta
+            ),
             transactions: visible,
             accounts: accounts,
             commodities: commodities,
@@ -742,6 +769,38 @@ private enum SafePreviewLedgerData {
             ],
             totalIncome: value(5_050_000),
             totalExpense: value(555_180),
+            expenseAnalytics: [
+                LedgerExpenseCategoryAnalytics(
+                    account: "Expenses:Housing",
+                    alias: "居住",
+                    label: "居住",
+                    amount: value(380_000),
+                    txCount: 1,
+                    share: 0.6845,
+                    previousAmount: value(380_000),
+                    changeRatio: 0,
+                    topPayees: [LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1)]
+                ),
+                LedgerExpenseCategoryAnalytics(
+                    account: "Expenses:Unknown",
+                    alias: "待整理",
+                    label: "待整理",
+                    amount: value(23_600),
+                    txCount: 1,
+                    share: 0.0425,
+                    previousAmount: 0,
+                    changeRatio: nil,
+                    topPayees: [LedgerPayeeAnalytics(payee: "山岚咖啡", amount: value(23_600), txCount: 1)]
+                ),
+            ],
+            topPayees: [
+                LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1),
+                LedgerPayeeAnalytics(payee: "青禾市场", amount: value(61_180), txCount: 2),
+            ],
+            topPaymentAccounts: [
+                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: value(461_200), txCount: 5),
+                LedgerAccountAnalytics(account: "Liabilities:CreditCard", alias: "信用卡", label: "信用卡", amount: value(93_980), txCount: 3),
+            ],
             netIncome: value(4_494_820),
             valuationCurrency: valuationCurrency
         )
@@ -793,12 +852,27 @@ private enum SafePreviewLedgerData {
         line: Int,
         tags: [String]? = nil
     ) -> LedgerTransaction {
-        LedgerTransaction(
+        let editablePostings = postings.map {
+            LedgerTransactionEntryPosting(
+                account: $0.0,
+                amount: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double($0.1) / 100),
+                currency: $0.2
+            )
+        }
+        return LedgerTransaction(
             date: date,
             payee: payee,
             narration: narration,
             tags: tags,
             postings: postings.map { LedgerPosting(account: $0.0, amount: $0.1, currency: $0.2) },
+            editableEntry: LedgerTransactionEntry(
+                date: date,
+                payee: payee,
+                narration: narration,
+                metadata: [:],
+                tags: tags ?? [],
+                postings: editablePostings
+            ),
             source: TransactionSource(file: "transactions/2026/08.bean", line: line, hash: "safe-preview-\(line)", gitSHA: "preview")
         )
     }

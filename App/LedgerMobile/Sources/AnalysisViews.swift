@@ -2,42 +2,38 @@ import Charts
 import SwiftUI
 
 enum LedgerAnalysisKind: String, CaseIterable, Hashable {
-    case dashboard
-    case netWorth
-    case incomeStatement
+    case assets
+    case incomeExpense
     case investments
 
     var title: String {
         switch self {
-        case .dashboard: "仪表盘"
-        case .netWorth: "净资产"
-        case .incomeStatement: "损益"
+        case .assets: "资产"
+        case .incomeExpense: "收支分析"
         case .investments: "投资"
         }
     }
 
     var detail: String {
         switch self {
-        case .dashboard: "现金流、支出结构与异常活动"
-        case .netWorth: "资产、负债与净值趋势"
-        case .incomeStatement: "收入、支出与期间结余"
+        case .assets: "资产、负债、结构与净值趋势"
+        case .incomeExpense: "收入、支出、现金流与分类洞察"
         case .investments: "持仓市值、成本与收益"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .dashboard: "rectangle.3.group"
-        case .netWorth: "chart.line.uptrend.xyaxis"
-        case .incomeStatement: "sum"
+        case .assets: "building.columns"
+        case .incomeExpense: "chart.bar.xaxis"
         case .investments: "chart.pie"
         }
     }
 
     var resourceKind: LedgerAnalysisResourceKind {
         switch self {
-        case .dashboard, .netWorth: .dashboard
-        case .incomeStatement: .incomeStatement
+        case .assets: .assets
+        case .incomeExpense: .incomeExpense
         case .investments: .investments
         }
     }
@@ -124,14 +120,10 @@ struct LedgerAnalysisView: View {
                     }
 
                     switch resource {
-                    case let .dashboard(data):
-                        if kind == .netWorth {
-                            NetWorthAnalysisContent(data: data)
-                        } else {
-                            DashboardAnalysisContent(data: data)
-                        }
-                    case let .incomeStatement(data):
-                        IncomeStatementAnalysisContent(data: data)
+                    case let .assets(data):
+                        AssetsAnalysisContent(data: data)
+                    case let .incomeExpense(data):
+                        IncomeExpenseAnalysisContent(data: data)
                     case let .investments(data):
                         InvestmentsAnalysisContent(data: data)
                     }
@@ -143,7 +135,7 @@ struct LedgerAnalysisView: View {
             }
             .id(kind)
             .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
-            .refreshable { await load(replacingContent: false) }
+            .refreshable { await refresh() }
             .onAppear {
                 proxy.scrollTo(analysisTopID, anchor: .top)
             }
@@ -198,6 +190,17 @@ struct LedgerAnalysisView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    private func refresh() async {
+        if kind == .assets {
+            await session.refresh()
+            if let message = session.errorMessage {
+                errorMessage = message
+                return
+            }
+        }
+        await load(replacingContent: false)
+    }
 }
 
 private struct AnalysisRequestKey: Hashable {
@@ -208,45 +211,175 @@ private struct AnalysisRequestKey: Hashable {
     let reloadToken: Int
 }
 
-private struct DashboardAnalysisContent: View {
-    let data: LedgerDashboard
+private struct AssetsAnalysisContent: View {
+    let data: LedgerAssetsAnalysis
+
+    @State private var trendMode = AssetTrendMode.daily
+
+    private var valuations: [String: Int] {
+        Dictionary(grouping: data.accountBalances.filter { $0.valuationMissing != true }, by: \.account)
+            .mapValues { $0.reduce(0) { $0 + $1.valuation } }
+    }
+
+    private var assets: Int {
+        valuations.filter { $0.key.hasPrefix("Assets:") }.values.reduce(0, +)
+    }
+
+    private var liabilities: Int {
+        valuations.filter { $0.key.hasPrefix("Liabilities:") }.values.reduce(0) { $0 + abs($1) }
+    }
+
+    private var netWorth: Int { assets - liabilities }
+
+    private var assetAccounts: [(String, Int)] {
+        let accounts = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.account, $0) })
+        return valuations
+            .filter { $0.key.hasPrefix("Assets:") && $0.value > 0 }
+            .map { account, value in
+                (accounts[account]?.displayLabel ?? account.split(separator: ":").last.map(String.init) ?? account, value)
+            }
+            .sorted { $0.1 > $1.1 }
+    }
+
+    private var allocation: [(String, Int)] {
+        let known = Set(data.accounts.map(\.account))
+        var totals = ["现金与存款": 0, "理财与投资": 0, "应收": 0, "其他资产": 0]
+        for account in data.accounts where account.account.hasPrefix("Assets:") {
+            let amount = valuations[account.account] ?? 0
+            switch account.group {
+            case "cash": totals["现金与存款", default: 0] += amount
+            case "wealth": totals["理财与投资", default: 0] += amount
+            case "receivable": totals["应收", default: 0] += amount
+            default: totals["其他资产", default: 0] += amount
+            }
+        }
+        totals["其他资产", default: 0] += valuations
+            .filter { $0.key.hasPrefix("Assets:") && !known.contains($0.key) }
+            .values.reduce(0, +)
+        return ["现金与存款", "理财与投资", "应收", "其他资产"]
+            .compactMap { label in
+                guard let value = totals[label], value != 0 else { return nil }
+                return (label, value)
+            }
+    }
+
+    private var trendPoints: [LedgerNetWorthPoint] {
+        trendMode == .monthEnd && data.monthEndNetWorth.count > 1
+            ? data.monthEndNetWorth
+            : data.netWorthHistory
+    }
+
+    private var concentration: Double? {
+        guard assets > 0 else { return nil }
+        return Double(assetAccounts.prefix(3).reduce(0) { $0 + $1.1 }) / Double(assets)
+    }
 
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             AnalysisMetricGrid(metrics: [
-                AnalysisMetric("净资产", amount: data.kpis.netWorth, color: LedgerPalette.gold),
-                AnalysisMetric("期间结余", amount: data.kpis.net, color: data.kpis.net >= 0 ? LedgerPalette.income : LedgerPalette.expense),
-                AnalysisMetric("收入", amount: data.kpis.income, color: LedgerPalette.income),
-                AnalysisMetric("支出", amount: data.kpis.expense, color: LedgerPalette.expense),
-            ], currency: data.currency)
+                AnalysisMetric("总资产", amount: assets, color: LedgerPalette.income),
+                AnalysisMetric("总负债", amount: liabilities, color: LedgerPalette.expense),
+                AnalysisMetric("净资产", amount: netWorth, color: netWorth >= 0 ? LedgerPalette.gold : LedgerPalette.expense),
+            ], currency: data.valuationCurrency)
 
-            AnalysisChartPanel(title: "现金流趋势", detail: "按月比较收入与支出") {
-                if data.cashflowSeries.isEmpty {
+            AssetWindowPanel(
+                debtRatio: assets > 0 ? Double(liabilities) / Double(assets) : nil,
+                concentration: concentration,
+                windows: data.netWorthWindows,
+                currency: data.valuationCurrency
+            )
+
+            RankedAmountPanel(
+                title: "资产用途结构",
+                rows: allocation.map { ($0.0, $0.1, 0) },
+                currency: data.valuationCurrency,
+                color: LedgerPalette.cobalt
+            )
+
+            RankedAmountPanel(
+                title: "资产账户集中度",
+                rows: assetAccounts.prefix(8).map { ($0.0, $0.1, 0) },
+                currency: data.valuationCurrency,
+                color: LedgerPalette.gold
+            )
+
+            AnalysisChartPanel(title: "净值趋势", detail: "资产、负债与净资产的长期位置") {
+                Picker("趋势粒度", selection: $trendMode) {
+                    ForEach(AssetTrendMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(data.monthEndNetWorth.count <= 1)
+
+                if trendPoints.isEmpty {
+                    AnalysisEmptyContent(icon: "chart.line.uptrend.xyaxis", message: "所选范围暂无净值趋势")
+                } else {
+                    NetWorthTrendChart(
+                        points: trendPoints,
+                        currency: data.valuationCurrency,
+                        referenceLabel: trendPoints.first?.date ?? ""
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum AssetTrendMode: String, CaseIterable, Identifiable {
+    case daily
+    case monthEnd
+
+    var id: String { rawValue }
+    var title: String { self == .daily ? "每日" : "月末" }
+}
+
+private struct IncomeExpenseAnalysisContent: View {
+    let data: LedgerIncomeExpenseAnalysis
+
+    private var dashboard: LedgerDashboard { data.dashboard }
+    private var statement: LedgerIncomeStatement { data.statement }
+
+    var body: some View {
+        VStack(spacing: LedgerSpacing.lg) {
+            AnalysisMetricGrid(metrics: [
+                AnalysisMetric("收入", amount: statement.totalIncome, color: LedgerPalette.income),
+                AnalysisMetric("支出", amount: statement.totalExpense, color: LedgerPalette.expense),
+                AnalysisMetric("期间结余", amount: statement.netIncome, color: statement.netIncome >= 0 ? LedgerPalette.gold : LedgerPalette.expense),
+            ], currency: statement.valuationCurrency)
+
+            AnalysisChartPanel(title: "现金流", detail: "按月比较收入、支出与结余") {
+                if dashboard.cashflowSeries.isEmpty {
                     AnalysisEmptyContent(icon: "chart.xyaxis.line", message: "所选范围暂无现金流趋势")
                 } else {
                     CashflowTrendChart(
-                        points: data.cashflowSeries,
-                        currency: data.currency,
-                        referenceLabel: data.start
+                        points: dashboard.cashflowSeries,
+                        currency: dashboard.currency,
+                        referenceLabel: dashboard.start
                     )
                 }
             }
 
             RankedAmountPanel(
-                title: "支出结构",
-                rows: data.categorySeries.prefix(6).map { ($0.label, $0.total, 0) },
-                currency: data.currency,
+                title: "支出分类",
+                rows: statement.expenseAnalytics.prefix(6).map { ($0.label, $0.amount, $0.txCount) },
+                currency: statement.valuationCurrency,
                 color: LedgerPalette.expense
             )
 
-            if !data.anomalies.isEmpty {
+            IncomeExpenseHighlights(statement: statement)
+
+            IncomeNodePanel(title: "收入账户", nodes: flattened(statement.income), currency: statement.valuationCurrency, color: LedgerPalette.income)
+            IncomeNodePanel(title: "支出账户", nodes: flattened(statement.expense), currency: statement.valuationCurrency, color: LedgerPalette.expense)
+
+            if !dashboard.anomalies.isEmpty {
                 AnalysisListPanel(title: "需要留意", detail: "按金额与历史模式识别") {
-                    ForEach(Array(data.anomalies.prefix(4).enumerated()), id: \.offset) { _, anomaly in
+                    ForEach(Array(dashboard.anomalies.prefix(4).enumerated()), id: \.offset) { _, anomaly in
                         AnalysisAmountRow(
                             title: anomaly.payee.isEmpty ? anomaly.narration : anomaly.payee,
                             detail: "\(anomaly.date) · \(anomaly.account.split(separator: ":").last.map(String.init) ?? anomaly.account)",
                             amount: anomaly.amount,
-                            currency: data.currency,
+                            currency: dashboard.currency,
                             color: LedgerPalette.expense
                         )
                     }
@@ -254,41 +387,129 @@ private struct DashboardAnalysisContent: View {
             }
         }
     }
+
+    private func flattened(_ nodes: [LedgerIncomeNode]) -> [LedgerIncomeNode] {
+        nodes.flatMap { [$0] + flattened($0.children) }
+    }
 }
 
-private struct NetWorthAnalysisContent: View {
-    let data: LedgerDashboard
+private struct AssetWindowPanel: View {
+    let debtRatio: Double?
+    let concentration: Double?
+    let windows: LedgerNetWorthWindows?
+    let currency: String
+
+    var body: some View {
+        AnalysisListPanel(title: "资产位置", detail: "结构、变化与集中度") {
+            AssetWindowRow(title: "负债率", value: percent(debtRatio), detail: "总负债 / 总资产")
+            AssetWindowAmountRow(title: "期间变化", amount: windows?.monthChange, currency: currency, detail: windows?.previousMonthEnd?.date ?? "暂无月末基准")
+            AssetWindowAmountRow(title: "近 6 个月", amount: windows?.sixMonth.change, currency: currency, detail: percent(windows?.sixMonth.changeRatio))
+            AssetWindowAmountRow(title: "近 12 个月", amount: windows?.twelveMonth.change, currency: currency, detail: percent(windows?.twelveMonth.changeRatio))
+            AssetWindowRow(title: "前三账户集中度", value: percent(concentration), detail: "前三个资产账户占总资产比例")
+        }
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "暂无数据" }
+        return value.formatted(.percent.precision(.fractionLength(1)))
+    }
+}
+
+private struct AssetWindowRow: View {
+    @EnvironmentObject private var session: LedgerSession
+
+    let title: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: LedgerSpacing.md) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(LedgerPalette.ink)
+                Text(detail).font(.system(size: 10)).foregroundStyle(LedgerPalette.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(session.amountsVisible ? value : "••••••")
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .foregroundStyle(LedgerPalette.gold)
+        }
+        .padding(LedgerSpacing.lg)
+        .overlay(alignment: .bottom) { Rectangle().fill(LedgerPalette.line).frame(height: 1).padding(.leading, LedgerSpacing.lg) }
+    }
+}
+
+private struct AssetWindowAmountRow: View {
+    let title: String
+    let amount: Int?
+    let currency: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: LedgerSpacing.md) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(LedgerPalette.ink)
+                Text(detail).font(.system(size: 10)).foregroundStyle(LedgerPalette.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let amount {
+                AmountLabel(
+                    minorUnits: amount,
+                    currency: currency,
+                    font: .system(size: 13, weight: .semibold),
+                    color: amount >= 0 ? LedgerPalette.income : LedgerPalette.expense,
+                    showSign: true
+                )
+            } else {
+                Text("暂无数据")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+        }
+        .padding(LedgerSpacing.lg)
+        .overlay(alignment: .bottom) { Rectangle().fill(LedgerPalette.line).frame(height: 1).padding(.leading, LedgerSpacing.lg) }
+    }
+}
+
+private struct IncomeExpenseHighlights: View {
+    let statement: LedgerIncomeStatement
+
+    private var unknown: LedgerExpenseCategoryAnalytics? {
+        statement.expenseAnalytics.first { $0.account == "Expenses:Unknown" }
+    }
 
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
-            AnalysisMetricGrid(metrics: [
-                AnalysisMetric("净资产", amount: data.kpis.netWorth, color: LedgerPalette.gold),
-                AnalysisMetric("总资产", amount: data.kpis.assets, color: LedgerPalette.income),
-                AnalysisMetric("总负债", amount: data.kpis.liabilities, color: LedgerPalette.expense),
-            ], currency: data.currency)
-
-            AnalysisChartPanel(title: "净资产走势", detail: "资产减去负债后的长期位置") {
-                if data.netWorthSeries.isEmpty {
-                    AnalysisEmptyContent(icon: "chart.line.uptrend.xyaxis", message: "所选范围暂无净资产趋势")
-                } else {
-                    NetWorthTrendChart(
-                        points: data.netWorthSeries,
-                        currency: data.currency,
-                        referenceLabel: data.start
+            RankedAmountPanel(
+                title: "热门商户",
+                rows: statement.topPayees.prefix(5).map { ($0.payee, $0.amount, $0.txCount) },
+                currency: statement.valuationCurrency,
+                color: LedgerPalette.expense
+            )
+            RankedAmountPanel(
+                title: "支付账户",
+                rows: statement.topPaymentAccounts.prefix(5).map { ($0.label, $0.amount, $0.txCount) },
+                currency: statement.valuationCurrency,
+                color: LedgerPalette.cobalt
+            )
+            AnalysisListPanel(title: "待整理项目", detail: "Expenses:Unknown") {
+                if let unknown {
+                    AnalysisAmountRow(
+                        title: unknown.label,
+                        detail: "\(unknown.txCount) 笔 · 占支出 \(percent(unknown.share))",
+                        amount: unknown.amount,
+                        currency: statement.valuationCurrency,
+                        color: LedgerPalette.expense
                     )
-                }
-            }
-
-            AnalysisListPanel(title: "最近位置", detail: "最近 6 个观察点") {
-                if data.netWorthSeries.isEmpty {
-                    AnalysisEmptyRow(message: "暂无净资产观察点")
                 } else {
-                    ForEach(data.netWorthSeries.suffix(6).reversed()) { point in
-                        AnalysisAmountRow(title: point.date, detail: "资产与负债汇总", amount: point.netWorth, currency: data.currency, color: LedgerPalette.gold)
-                    }
+                    AnalysisEmptyRow(message: "当前期间没有待整理支出")
                 }
             }
         }
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "—" }
+        return value.formatted(.percent.precision(.fractionLength(1)))
     }
 }
 
@@ -442,72 +663,93 @@ private struct NetWorthTrendChart: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Chart {
-                ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
-                    let x = axis.position(at: index)
-                    AreaMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
-                        .foregroundStyle(LedgerPalette.cobalt.opacity(0.12))
-                    LineMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
-                    PointMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .symbolSize(18)
-                }
+        VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+            ZStack(alignment: .topTrailing) {
+                Chart {
+                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                        let x = axis.position(at: index)
+                        AreaMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
+                            .foregroundStyle(LedgerPalette.cobalt.opacity(0.12))
+                        LineMark(x: .value("日期", x), y: .value("净资产", point.netWorth))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                            .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                        LineMark(
+                            x: .value("日期", x),
+                            y: .value("资产", point.assets),
+                            series: .value("系列", "资产")
+                        )
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                        LineMark(
+                            x: .value("日期", x),
+                            y: .value("负债", point.liabilities),
+                            series: .value("系列", "负债")
+                        )
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round, dash: [5, 4]))
+                    }
 
-                if let selectedIndex, points.indices.contains(selectedIndex) {
-                    let point = points[selectedIndex]
-                    let x = axis.position(at: selectedIndex)
-                    RuleMark(x: .value("选中日期", x))
-                        .foregroundStyle(LedgerPalette.lineStrong)
-                    PointMark(x: .value("选中日期", x), y: .value("选中净资产", point.netWorth))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .symbolSize(48)
+                    if let selectedIndex, points.indices.contains(selectedIndex) {
+                        let point = points[selectedIndex]
+                        let x = axis.position(at: selectedIndex)
+                        RuleMark(x: .value("选中日期", x))
+                            .foregroundStyle(LedgerPalette.lineStrong)
+                        PointMark(x: .value("选中日期", x), y: .value("选中净资产", point.netWorth))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                            .symbolSize(48)
+                    }
                 }
-            }
-            .chartXScale(domain: axis.domain)
-            .chartXAxis {
-                AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 5)) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
-                        .foregroundStyle(LedgerPalette.line)
-                    AxisTick().foregroundStyle(LedgerPalette.lineStrong)
-                    AxisValueLabel(collisionResolution: .disabled) {
-                        if let position = value.as(Double.self) {
-                            Text(axis.shortLabel(nearestTo: position))
-                                .font(.system(size: 9, weight: .medium).monospacedDigit())
-                                .foregroundStyle(LedgerPalette.secondary)
+                .chartXScale(domain: axis.domain)
+                .chartXAxis {
+                    AxisMarks(position: .bottom, values: axis.tickPositions(maxCount: 5)) { value in
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                            .foregroundStyle(LedgerPalette.line)
+                        AxisTick().foregroundStyle(LedgerPalette.lineStrong)
+                        AxisValueLabel(collisionResolution: .disabled) {
+                            if let position = value.as(Double.self) {
+                                Text(axis.shortLabel(nearestTo: position))
+                                    .font(.system(size: 9, weight: .medium).monospacedDigit())
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
                         }
                     }
                 }
-            }
-            .chartYAxis(.hidden)
-            .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
-            .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
-            .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
-            .accessibilityIdentifier("net-worth-trend-chart")
+                .chartYAxis(.hidden)
+                .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
+                .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
+                .accessibilityIdentifier("net-worth-trend-chart")
 
-            if let selectedIndex, points.indices.contains(selectedIndex) {
-                let point = points[selectedIndex]
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(point.date)
-                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
-                    AmountLabel(minorUnits: point.netWorth, currency: currency, font: .system(size: 10, weight: .semibold), color: LedgerPalette.ink)
+                if let selectedIndex, points.indices.contains(selectedIndex) {
+                    let point = points[selectedIndex]
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(point.date)
+                            .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(LedgerPalette.secondary)
+                        AmountLabel(minorUnits: point.netWorth, currency: currency, prefix: "净值 ", font: .system(size: 10, weight: .semibold), color: LedgerPalette.cobalt)
+                        AmountLabel(minorUnits: point.assets, currency: currency, prefix: "资产 ", font: .system(size: 9, weight: .medium), color: LedgerPalette.ink)
+                        AmountLabel(minorUnits: point.liabilities, currency: currency, prefix: "负债 ", font: .system(size: 9, weight: .medium), color: LedgerPalette.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(LedgerPalette.panel.opacity(0.96))
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous)
+                            .stroke(LedgerPalette.line, lineWidth: 1)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("net-worth-chart-selection")
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(LedgerPalette.panel.opacity(0.96))
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: LedgerRadius.xs, style: .continuous)
-                        .stroke(LedgerPalette.line, lineWidth: 1)
-                }
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("net-worth-chart-selection")
             }
+            .frame(height: 190)
+
+            AnalysisChartLegend(items: [
+                ("净资产", LedgerPalette.cobalt),
+                ("资产", LedgerPalette.ink),
+                ("负债", LedgerPalette.secondary),
+            ])
         }
-        .frame(height: 220)
     }
 
     private func selectionOverlay(proxy: ChartProxy) -> some View {
@@ -527,27 +769,6 @@ private struct NetWorthTrendChart: View {
                         }
                 )
         }
-    }
-}
-
-private struct IncomeStatementAnalysisContent: View {
-    let data: LedgerIncomeStatement
-
-    var body: some View {
-        VStack(spacing: LedgerSpacing.lg) {
-            AnalysisMetricGrid(metrics: [
-                AnalysisMetric("净结余", amount: data.netIncome, color: data.netIncome >= 0 ? LedgerPalette.gold : LedgerPalette.expense),
-                AnalysisMetric("收入", amount: data.totalIncome, color: LedgerPalette.income),
-                AnalysisMetric("支出", amount: data.totalExpense, color: LedgerPalette.expense),
-            ], currency: data.valuationCurrency)
-
-            IncomeNodePanel(title: "收入构成", nodes: flattened(data.income), currency: data.valuationCurrency, color: LedgerPalette.income)
-            IncomeNodePanel(title: "支出构成", nodes: flattened(data.expense), currency: data.valuationCurrency, color: LedgerPalette.expense)
-        }
-    }
-
-    private func flattened(_ nodes: [LedgerIncomeNode]) -> [LedgerIncomeNode] {
-        nodes.flatMap { [$0] + flattened($0.children) }
     }
 }
 

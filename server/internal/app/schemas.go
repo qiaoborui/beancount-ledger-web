@@ -97,6 +97,7 @@ var (
 	metadataKeyPattern = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*$`)
 	decimal2Re         = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
 	decimal6Re         = regexp.MustCompile(`^-?\d+(\.\d{1,6})?$`)
+	beanDecimalRe      = regexp.MustCompile(`^[+-]?\d+(\.\d*)?$`)
 )
 
 const (
@@ -327,14 +328,25 @@ func (e LedgerEntry) Validate() error {
 		if strings.TrimSpace(e.Payee) == "" {
 			return fmt.Errorf("payee is required")
 		}
+		if e.Flag != "" && !isTransactionFlag(e.Flag) {
+			return fmt.Errorf("flag is invalid")
+		}
 		for key := range e.Metadata {
 			if !metadataKeyPattern.MatchString(key) {
 				return fmt.Errorf("metadata key %q is invalid", key)
 			}
 		}
+		if len(e.Tags) > maxTransactionTags {
+			return fmt.Errorf("tags must contain at most %d values", maxTransactionTags)
+		}
 		for _, tag := range e.Tags {
 			if !tagPattern.MatchString(tag) {
 				return fmt.Errorf("tag %q is invalid", tag)
+			}
+		}
+		for _, link := range e.Links {
+			if !tagPattern.MatchString(link) {
+				return fmt.Errorf("link %q is invalid", link)
 			}
 		}
 		if len(e.Postings) < 2 {
@@ -371,11 +383,38 @@ func (p EntryPosting) Validate() error {
 	if err := validateAccount("account", p.Account); err != nil {
 		return err
 	}
-	if err := validateAmount("amount", p.Amount); err != nil {
-		return err
+	if p.Flag != "" && !isPostingFlag(p.Flag) {
+		return fmt.Errorf("flag is invalid")
 	}
-	if err := validateCurrency("currency", p.Currency); err != nil {
-		return err
+	if p.Amount == "" || p.Currency == "" {
+		if p.Amount != "" || p.Currency != "" {
+			return fmt.Errorf("amount and currency must be provided together")
+		}
+	} else {
+		if err := validateBeanDecimal("amount", p.Amount); err != nil {
+			return err
+		}
+		if err := validateCurrency("currency", p.Currency); err != nil {
+			return err
+		}
+	}
+	if p.CostSpec != "" {
+		if err := validateCostSpec(p.CostSpec); err != nil {
+			return err
+		}
+	} else if p.CostAmount != "" || p.CostCurrency != "" {
+		if p.CostAmount == "" || p.CostCurrency == "" {
+			return fmt.Errorf("costAmount and costCurrency must be provided together")
+		}
+		if p.CostKind != "" && p.CostKind != "unit" && p.CostKind != "total" {
+			return fmt.Errorf("costKind must be unit or total")
+		}
+		if err := validateBeanDecimal("costAmount", p.CostAmount); err != nil {
+			return err
+		}
+		if err := validateCurrency("costCurrency", p.CostCurrency); err != nil {
+			return err
+		}
 	}
 	if p.PriceAmount != "" || p.PriceCurrency != "" {
 		if p.PriceAmount == "" || p.PriceCurrency == "" {
@@ -384,12 +423,128 @@ func (p EntryPosting) Validate() error {
 		if p.PriceKind != "" && p.PriceKind != "unit" && p.PriceKind != "total" {
 			return fmt.Errorf("priceKind must be unit or total")
 		}
-		if err := validateDecimalAmount("priceAmount", p.PriceAmount, 6); err != nil {
+		if err := validateBeanDecimal("priceAmount", p.PriceAmount); err != nil {
 			return err
 		}
 		if err := validateCurrency("priceCurrency", p.PriceCurrency); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateCostSpec(value string) error {
+	value = strings.TrimSpace(value)
+	if len(value) > 512 || strings.ContainsAny(value, "\r\n") || hasBeanComment(value) {
+		return fmt.Errorf("costSpec is invalid")
+	}
+	tokens := scanBeanLine(value)
+	total, next, ok := parseCostTokenSpan(tokens)
+	if !ok || next != len(tokens) {
+		return fmt.Errorf("costSpec is invalid")
+	}
+	if !validCostSpecComponents(tokens[1:len(tokens)-1], total) {
+		return fmt.Errorf("costSpec is invalid")
+	}
+	return nil
+}
+
+func validCostSpecComponents(tokens []beanToken, total bool) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	components := [][]beanToken{{}}
+	for _, token := range tokens {
+		if token.Value == "," {
+			if len(components[len(components)-1]) == 0 {
+				return false
+			}
+			components = append(components, []beanToken{})
+			continue
+		}
+		components[len(components)-1] = append(components[len(components)-1], token)
+	}
+	if len(components[len(components)-1]) == 0 {
+		return false
+	}
+	seenAmount, seenCurrency, seenDate, seenLabel := false, false, false, false
+	for _, component := range components {
+		switch {
+		case len(component) == 1 && component[0].Kind == beanTokenString:
+			if seenLabel {
+				return false
+			}
+			seenLabel = true
+		case len(component) == 1 && isBeanDateToken(component[0].Value):
+			if seenDate {
+				return false
+			}
+			seenDate = true
+		case len(component) == 1 && isCostCurrency(component[0].Value):
+			if seenCurrency || seenAmount {
+				return false
+			}
+			seenCurrency = true
+		case isCompleteBeanAmount(component) || isCompleteNumberExpression(component) || (!total && isCompoundCostAmount(component)):
+			if seenAmount || seenCurrency {
+				return false
+			}
+			seenAmount = true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isCompleteBeanAmount(tokens []beanToken) bool {
+	amount, next, ok := parseBeanAmountTokens(tokens)
+	return ok && next == len(tokens) && isCostCurrency(amount.Currency)
+}
+
+func isCostCurrency(value string) bool {
+	if !isBeanCurrency(value) {
+		return false
+	}
+	switch value {
+	case "NULL", "TRUE", "FALSE":
+		return false
+	default:
+		return true
+	}
+}
+
+func isCompleteNumberExpression(tokens []beanToken) bool {
+	_, ok := evalNumberExpressionRat(tokens)
+	return ok
+}
+
+func isCompoundCostAmount(tokens []beanToken) bool {
+	separator := -1
+	for index, token := range tokens {
+		if token.Value != "#" {
+			continue
+		}
+		if separator >= 0 {
+			return false
+		}
+		separator = index
+	}
+	if separator < 0 || separator >= len(tokens)-1 {
+		return false
+	}
+	if separator > 0 {
+		if _, ok := evalNumberExpressionRat(tokens[:separator]); !ok {
+			return false
+		}
+	}
+	return isCompleteBeanAmount(tokens[separator+1:])
+}
+
+func validateBeanDecimal(field, value string) error {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 || !beanDecimalRe.MatchString(value) {
+		return fmt.Errorf("%s must be a decimal number", field)
 	}
 	return nil
 }

@@ -65,10 +65,12 @@ type AccountOperation struct {
 type LedgerEntry struct {
 	Kind        string                   `json:"kind"`
 	Date        string                   `json:"date"`
+	Flag        string                   `json:"flag,omitempty"`
 	Payee       string                   `json:"payee,omitempty"`
 	Narration   string                   `json:"narration,omitempty"`
 	Metadata    map[string]MetadataValue `json:"metadata,omitempty"`
 	Tags        []string                 `json:"tags,omitempty"`
+	Links       []string                 `json:"links,omitempty"`
 	Postings    []EntryPosting           `json:"postings,omitempty"`
 	Account     string                   `json:"account,omitempty"`
 	Amount      string                   `json:"amount,omitempty"`
@@ -80,8 +82,13 @@ type LedgerEntry struct {
 
 type EntryPosting struct {
 	Account       string `json:"account"`
+	Flag          string `json:"flag,omitempty"`
 	Amount        string `json:"amount"`
 	Currency      string `json:"currency"`
+	CostKind      string `json:"costKind,omitempty"`
+	CostAmount    string `json:"costAmount,omitempty"`
+	CostCurrency  string `json:"costCurrency,omitempty"`
+	CostSpec      string `json:"costSpec,omitempty"`
 	PriceKind     string `json:"priceKind,omitempty"`
 	PriceAmount   string `json:"priceAmount,omitempty"`
 	PriceCurrency string `json:"priceCurrency,omitempty"`
@@ -593,6 +600,10 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 	}
 	sort.Strings(files)
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionTags, func(tx *LedgerWriteTransaction) error {
+		effectiveTags, err := transactionEffectiveTags(tx, w.cfg)
+		if err != nil {
+			return err
+		}
 		for _, file := range files {
 			before, err := tx.ReadFile(file)
 			if err != nil {
@@ -601,14 +612,30 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 			lines := strings.Split(strings.ReplaceAll(string(before), "\r\n", "\n"), "\n")
 			headerIndexes := make([]int, 0, len(byFile[file]))
 			for _, source := range byFile[file] {
-				_, start, _, err := transactionBlock(string(before), source)
+				blockLines, start, end, err := transactionBlock(string(before), source)
 				if err != nil {
+					return err
+				}
+				identity := transactionTagIdentity{
+					file: filepath.Clean(file),
+					line: start + 1,
+					hash: transactionHash(blockLines[start:end]),
+				}
+				current, ok := effectiveTags[identity]
+				if !ok {
+					return errors.New("无法读取交易的完整标签，请刷新后重试")
+				}
+				if err := validateFinalTransactionTags(current, tags); err != nil {
 					return err
 				}
 				headerIndexes = append(headerIndexes, start)
 			}
 			for _, index := range headerIndexes {
-				lines[index] = addTagsToTransactionHeader(lines[index], tags)
+				updated, err := addTagsToTransactionHeader(lines[index], tags)
+				if err != nil {
+					return err
+				}
+				lines[index] = updated
 			}
 			next := strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
 			if err := tx.WriteFile(file, []byte(next), 0o644); err != nil {
@@ -619,7 +646,48 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 	})
 }
 
-func addTagsToTransactionHeader(header string, tags []string) string {
+type transactionTagIdentity struct {
+	file string
+	line int
+	hash string
+}
+
+func transactionEffectiveTags(tx *LedgerWriteTransaction, cfg Config) (map[transactionTagIdentity][]string, error) {
+	lines, err := tx.ReadLedgerLines(mainBeanPath(cfg), map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	entries := ParseBeanLines(lines).Entries
+	result := make(map[transactionTagIdentity][]string, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
+			continue
+		}
+		identity := transactionTagIdentity{
+			file: filepath.Clean(entry.File),
+			line: entry.Line,
+			hash: transactionHash(entry.RawLines),
+		}
+		result[identity] = normalizeTransactionTags(entry.Tags)
+	}
+	return result, nil
+}
+
+func validateFinalTransactionTags(existing, added []string) error {
+	final := map[string]bool{}
+	for _, tag := range normalizeTransactionTags(existing) {
+		final[tag] = true
+	}
+	for _, tag := range normalizeTransactionTags(added) {
+		final[tag] = true
+	}
+	if len(final) > maxTransactionTags {
+		return fmt.Errorf("交易标签最多 %d 个", maxTransactionTags)
+	}
+	return nil
+}
+
+func addTagsToTransactionHeader(header string, tags []string) (string, error) {
 	commentAt := len(header)
 	inQuote, escaped := false, false
 	for index, char := range header {
@@ -666,7 +734,10 @@ func addTagsToTransactionHeader(header string, tags []string) string {
 	}
 	for _, field := range strings.Fields(outside.String()) {
 		if strings.HasPrefix(field, "#") {
-			existing[strings.TrimPrefix(field, "#")] = true
+			tag := strings.TrimPrefix(field, "#")
+			if tag != "" {
+				existing[tag] = true
+			}
 		}
 	}
 	missing := make([]string, 0, len(tags))
@@ -676,11 +747,14 @@ func addTagsToTransactionHeader(header string, tags []string) string {
 		}
 	}
 	if len(missing) == 0 {
-		return header
+		return header, nil
+	}
+	if len(existing)+len(missing) > maxTransactionTags {
+		return "", fmt.Errorf("交易标签最多 %d 个", maxTransactionTags)
 	}
 	trailing := code[len(strings.TrimRight(code, " \t")):]
 	code = strings.TrimRight(code, " \t") + " #" + strings.Join(missing, " #") + trailing
-	return code + comment
+	return code + comment, nil
 }
 
 func (w *LedgerWriter) validateEntryCommodities(tx *LedgerWriteTransaction, entries []LedgerEntry) error {
@@ -974,11 +1048,11 @@ func transactionBlock(text string, source TransactionSource) ([]string, int, int
 func transactionBlockAtLine(text string, line int) ([]string, int, int, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	start := line - 1
-	if start < 0 || start >= len(lines) || !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+[*!]\s+`).MatchString(lines[start]) {
+	if start < 0 || start >= len(lines) || !isTransactionHeaderLine(lines[start]) {
 		return nil, 0, 0, errors.New("交易来源行无效")
 	}
 	end := start + 1
-	for end < len(lines) && !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`).MatchString(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
+	for end < len(lines) && !isDatedBeanDirectiveLine(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
 		end++
 	}
 	return lines, start, end, nil
@@ -988,11 +1062,11 @@ func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	matchStart, matchEnd := -1, -1
 	for start := 0; start < len(lines); start++ {
-		if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+[*!]\s+`).MatchString(lines[start]) {
+		if !isTransactionHeaderLine(lines[start]) {
 			continue
 		}
 		end := start + 1
-		for end < len(lines) && !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s+`).MatchString(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
+		for end < len(lines) && !isDatedBeanDirectiveLine(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
 			end++
 		}
 		if transactionHash(lines[start:end]) == hash {
@@ -1008,16 +1082,43 @@ func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 	return nil, 0, 0, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
 }
 
+func isTransactionHeaderLine(line string) bool {
+	if strings.TrimSpace(line) == "" || isIndentedBeanLine(line) {
+		return false
+	}
+	tokens := scanBeanLine(line)
+	return len(tokens) >= 2 && isBeanDateToken(tokens[0].Value) && isTransactionFlag(tokens[1].Value)
+}
+
+func isDatedBeanDirectiveLine(line string) bool {
+	if strings.TrimSpace(line) == "" || isIndentedBeanLine(line) {
+		return false
+	}
+	tokens := scanBeanLine(line)
+	return len(tokens) >= 2 && isBeanDateToken(tokens[0].Value)
+}
+
 func TransactionToBean(entry LedgerEntry) string {
-	tagText := ""
+	annotationText := ""
 	if len(entry.Tags) > 0 {
 		tags := make([]string, len(entry.Tags))
 		for i, tag := range entry.Tags {
 			tags[i] = "#" + tag
 		}
-		tagText = " " + strings.Join(tags, " ")
+		annotationText = " " + strings.Join(tags, " ")
 	}
-	lines := []string{fmt.Sprintf(`%s * "%s" "%s"%s`, entry.Date, escapeBean(entry.Payee), escapeBean(entry.Narration), tagText)}
+	if len(entry.Links) > 0 {
+		links := make([]string, len(entry.Links))
+		for i, link := range entry.Links {
+			links[i] = "^" + link
+		}
+		annotationText += " " + strings.Join(links, " ")
+	}
+	flag := strings.TrimSpace(entry.Flag)
+	if flag == "" {
+		flag = "*"
+	}
+	lines := []string{fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), annotationText)}
 	keys := make([]string, 0, len(entry.Metadata))
 	for key := range entry.Metadata {
 		keys = append(keys, key)
@@ -1033,11 +1134,27 @@ func TransactionToBean(entry LedgerEntry) string {
 }
 
 func renderEntryPosting(posting EntryPosting) string {
-	currency := posting.Currency
-	if currency == "" {
-		currency = "CNY"
+	prefix := "  "
+	if posting.Flag != "" {
+		prefix += posting.Flag + " "
 	}
-	line := fmt.Sprintf("  %-34s %12s %s", posting.Account, posting.Amount, currency)
+	line := prefix + posting.Account
+	if posting.Amount != "" || posting.Currency != "" {
+		currency := posting.Currency
+		if currency == "" {
+			currency = "CNY"
+		}
+		line = fmt.Sprintf("%-36s %12s %s", prefix+posting.Account, posting.Amount, currency)
+	}
+	if posting.CostSpec != "" {
+		line += " " + posting.CostSpec
+	} else if posting.CostAmount != "" && posting.CostCurrency != "" {
+		open, close := "{", "}"
+		if posting.CostKind == "total" {
+			open, close = "{{", "}}"
+		}
+		line += fmt.Sprintf(" %s %s %s %s", open, posting.CostAmount, posting.CostCurrency, close)
+	}
 	if posting.PriceAmount != "" && posting.PriceCurrency != "" {
 		operator := "@"
 		if posting.PriceKind == "total" {
@@ -1182,11 +1299,18 @@ func operationSummary(operation AccountOperation) string {
 func escapeBean(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, "\n", `\n`)
+	value = strings.ReplaceAll(value, "\t", `\t`)
+	value = strings.ReplaceAll(value, "\r", `\r`)
+	value = strings.ReplaceAll(value, "\b", `\b`)
+	value = strings.ReplaceAll(value, "\f", `\f`)
 	return value
 }
 
 func metadataValueToBean(value MetadataValue) string {
 	switch typed := value.(type) {
+	case nil:
+		return "NULL"
 	case bool:
 		if typed {
 			return "TRUE"

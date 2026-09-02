@@ -324,6 +324,79 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(result.documentFile, "transactions/2026/documents/imports/statement.xlsx")
     }
 
+    func testTransactionUpdateUsesSourceHashAndCompleteEditableEntry() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/transactions")
+            XCTAssertEqual(request.httpMethod, "PUT")
+            let json = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any]
+            )
+            let source = try XCTUnwrap(json["source"] as? [String: Any])
+            XCTAssertEqual(source["file"] as? String, "transactions/2026/08.bean")
+            XCTAssertEqual(source["line"] as? Int, 88)
+            XCTAssertEqual(source["hash"] as? String, "source-hash")
+            let entry = try XCTUnwrap(json["entry"] as? [String: Any])
+            XCTAssertEqual(entry["kind"] as? String, "transaction")
+            XCTAssertEqual(entry["date"] as? String, "2026-08-28")
+            XCTAssertEqual(entry["tags"] as? [String], ["learning", "travel"])
+            XCTAssertEqual(entry["flag"] as? String, "!")
+            XCTAssertEqual(entry["links"] as? [String], ["receipt-2026"])
+            XCTAssertEqual((entry["metadata"] as? [String: Any])?["verified"] as? Bool, true)
+            XCTAssertTrue((entry["metadata"] as? [String: Any])?["reviewedAt"] is NSNull)
+            let postings = try XCTUnwrap(entry["postings"] as? [[String: Any]])
+            XCTAssertEqual(postings.first?["amount"] as? String, "1.23456789")
+            XCTAssertEqual(postings.first?["costKind"] as? String, "total")
+            XCTAssertEqual(postings.first?["costSpec"] as? String, #"{{ 123.456789 USD, 2026-05-01, "lot-a" }}"#)
+            XCTAssertEqual(postings.first?["priceKind"] as? String, "unit")
+            return Self.response(for: request, body: #"{"ok":true}"#)
+        }
+
+        try await makeClient().updateTransaction(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            source: TransactionSource(
+                file: "transactions/2026/08.bean",
+                line: 88,
+                hash: "source-hash",
+                gitSHA: "git-sha"
+            ),
+            entry: LedgerTransactionEntry(
+                date: "2026-08-28",
+                flag: "!",
+                payee: "城市书房",
+                narration: "年度阅读计划",
+                metadata: ["verified": .bool(true), "reviewedAt": .null],
+                tags: ["learning", "travel"],
+                links: ["receipt-2026"],
+                postings: [
+                    LedgerTransactionEntryPosting(account: "Expenses:Education:Books", flag: "!", amount: "1.23456789", currency: "VT", costKind: "total", costAmount: "123.456789", costCurrency: "USD", costSpec: #"{{ 123.456789 USD, 2026-05-01, "lot-a" }}"#, priceKind: "unit", priceAmount: "160.1234567", priceCurrency: "USD"),
+                    LedgerTransactionEntryPosting(account: "Liabilities:CreditCard", amount: "-328.00", currency: "CNY"),
+                ]
+            )
+        )
+    }
+
+    func testTransactionBulkTagsUsesAtomicEndpoint() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/transactions/tags")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let json = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any]
+            )
+            XCTAssertEqual(json["tags"] as? [String], ["travel", "trip-2026"])
+            XCTAssertEqual((json["sources"] as? [[String: Any]])?.count, 2)
+            return Self.response(for: request, body: #"{"ok":true}"#)
+        }
+
+        let sources = [1, 2].map {
+            TransactionSource(file: "transactions/2026/08.bean", line: $0, hash: "hash-\($0)", gitSHA: nil)
+        }
+        try await makeClient().addTransactionTags(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            sources: sources,
+            tags: ["travel", "trip-2026"]
+        )
+    }
+
     func testIndexInfoBypassesCachesAndDecodesActiveRevision() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/api/ledger/index-info")
@@ -450,6 +523,9 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(statement.netIncome, 4_494_820)
         XCTAssertEqual(statement.expense.first?.children.first?.label, "房租")
         XCTAssertEqual(statement.expense.first?.children.first?.depth, 1)
+        XCTAssertEqual(statement.expenseAnalytics.first?.txCount, 3)
+        XCTAssertEqual(statement.topPayees.first?.payee, "房屋租金")
+        XCTAssertEqual(statement.topPaymentAccounts.first?.account, "Assets:Bank:Daily")
     }
 
     func testInvestmentsUsesExpectedEndpointAndPreservesMissingValuation() async throws {
@@ -658,6 +734,9 @@ final class APIClientTests: XCTestCase {
       "expense":[{"account":"Expenses:Housing","alias":"居住","label":"居住","amount":380000,"children":[{"account":"Expenses:Housing:Rent","alias":"房租","label":"房租","amount":380000,"children":[],"depth":1,"txCount":1}],"depth":0,"txCount":1}],
       "totalIncome":5050000,
       "totalExpense":555180,
+      "expenseAnalytics":[{"account":"Expenses:Housing","alias":"居住","label":"居住","amount":380000,"txCount":3,"share":0.6845,"previousAmount":350000,"changeRatio":0.0857,"topPayees":[{"payee":"房屋租金","amount":380000,"txCount":1}]}],
+      "topPayees":[{"payee":"房屋租金","amount":380000,"txCount":1}],
+      "topPaymentAccounts":[{"account":"Assets:Bank:Daily","alias":"日常账户","label":"日常账户","amount":555180,"txCount":9}],
       "netIncome":4494820,
       "valuationCurrency":"CNY"
     }

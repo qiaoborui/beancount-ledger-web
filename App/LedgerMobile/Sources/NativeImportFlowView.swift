@@ -14,6 +14,8 @@ struct NativeImportFlowView: View {
     @State private var preview: LedgerImportPreview?
     @State private var reviewedEntries: [LedgerImportEntry] = []
     @State private var includedEntryIDs: Set<String> = []
+    @State private var selectedTagEntryIDs: Set<String> = []
+    @State private var bulkTagInput = ""
     @State private var editingEntry: LedgerImportEntry?
     @State private var commitResult: LedgerImportCommitResult?
     @State private var errorMessage: String?
@@ -55,6 +57,8 @@ struct NativeImportFlowView: View {
                             self.preview = nil
                             reviewedEntries = []
                             includedEntryIDs = []
+                            selectedTagEntryIDs = []
+                            bulkTagInput = ""
                             errorMessage = nil
                         }
                         .disabled(isCommitting)
@@ -266,6 +270,7 @@ struct NativeImportFlowView: View {
                     warningSection(preview.warnings)
                 }
 
+                bulkTagSection
                 entrySection(preview)
             }
             .padding(.horizontal, LedgerSpacing.lg)
@@ -367,7 +372,9 @@ struct NativeImportFlowView: View {
                         ImportEntryReviewRow(
                             entry: entry,
                             included: includedEntryIDs.contains(entry.id),
+                            tagSelected: selectedTagEntryIDs.contains(entry.id),
                             onToggle: { toggle(entry.id) },
+                            onToggleTag: { toggleTagSelection(entry.id) },
                             onEdit: { editingEntry = entry }
                         )
                         if index < reviewedEntries.count - 1 {
@@ -377,6 +384,58 @@ struct NativeImportFlowView: View {
                 }
             }
         }
+    }
+
+    private var bulkTagSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeading(title: "批量标签", detail: "已选 \(selectedTagEntryIDs.count) 条")
+                Spacer()
+                Button(allEntriesSelectedForTags ? "清空" : "全选") {
+                    selectedTagEntryIDs = allEntriesSelectedForTags
+                        ? []
+                        : Set(reviewedEntries.map(\.id))
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LedgerPalette.cobalt)
+                .frame(minHeight: 40)
+            }
+            LedgerPanel {
+                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                    TextField("travel, trip-2026", text: $bulkTagInput)
+                        .font(.system(size: 14, weight: .medium))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("import-bulk-tag-input")
+                    HStack(spacing: LedgerSpacing.sm) {
+                        Button("添加标签") { applyBulkTags(mode: .add) }
+                            .foregroundStyle(LedgerPalette.onBrand)
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .background(LedgerPalette.cobalt)
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+                            .accessibilityIdentifier("import-bulk-tag-add")
+                        Button("移除标签") { applyBulkTags(mode: .remove) }
+                            .foregroundStyle(LedgerPalette.olive)
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .background(LedgerPalette.tag)
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+                            .accessibilityIdentifier("import-bulk-tag-remove")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .buttonStyle(PressScaleButtonStyle())
+                    .disabled(selectedTagEntryIDs.isEmpty)
+                    .opacity(selectedTagEntryIDs.isEmpty ? 0.52 : 1)
+                    Text("交易行中的标签图标用于选择批量操作对象；提交时会发送编辑后的完整标签列表。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                .padding(LedgerSpacing.lg)
+            }
+        }
+    }
+
+    private var allEntriesSelectedForTags: Bool {
+        !reviewedEntries.isEmpty && reviewedEntries.allSatisfy { selectedTagEntryIDs.contains($0.id) }
     }
 
     private func commitBar(_ preview: LedgerImportPreview) -> some View {
@@ -607,6 +666,46 @@ struct NativeImportFlowView: View {
         }
     }
 
+    private func toggleTagSelection(_ id: String) {
+        if selectedTagEntryIDs.contains(id) {
+            selectedTagEntryIDs.remove(id)
+        } else {
+            selectedTagEntryIDs.insert(id)
+        }
+    }
+
+    private enum BulkTagMode {
+        case add
+        case remove
+    }
+
+    private func applyBulkTags(mode: BulkTagMode) {
+        guard !selectedTagEntryIDs.isEmpty else {
+            errorMessage = "请先选择需要修改标签的交易。"
+            return
+        }
+        do {
+            let tags = try LedgerTagRules.parse(bulkTagInput)
+            let changed = Set(tags)
+            reviewedEntries = try reviewedEntries.map { entry in
+                guard selectedTagEntryIDs.contains(entry.id) else { return entry }
+                let existing = LedgerTagRules.normalized(entry.tags ?? [])
+                let updated: [String]
+                switch mode {
+                case .add:
+                    updated = try LedgerTagRules.validating(existing + tags)
+                case .remove:
+                    updated = existing.filter { !changed.contains($0) }
+                }
+                return entry.applyingTags(updated)
+            }
+            bulkTagInput = ""
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func generatePreview() async {
         guard !isPreparing else { return }
         isPreparing = true
@@ -624,6 +723,8 @@ struct NativeImportFlowView: View {
             preview = updated
             reviewedEntries = updated.entries
             includedEntryIDs = Set(updated.entries.map(\.id))
+            selectedTagEntryIDs = []
+            bulkTagInput = ""
         } catch is CancellationError {
             return
         } catch {
@@ -705,6 +806,7 @@ private struct ImportAccountChoice: Identifiable, Equatable {
 private enum ImportEditorField: Hashable {
     case payee
     case narration
+    case tags
     case amount
 }
 
@@ -719,6 +821,7 @@ private struct ImportEntryEditor: View {
     @State private var flag: String
     @State private var payee: String
     @State private var narration: String
+    @State private var tagsText: String
     @State private var amountText: String
     @State private var fundingAccount: String
     @State private var categoryAccount: String
@@ -736,6 +839,7 @@ private struct ImportEntryEditor: View {
         _flag = State(initialValue: entry.flag == "!" ? "!" : "*")
         _payee = State(initialValue: entry.payee)
         _narration = State(initialValue: entry.narration)
+        _tagsText = State(initialValue: (entry.tags ?? []).joined(separator: " "))
         _amountText = State(initialValue: Self.amountText(
             entry.amount,
             fixedToMinorUnits: entry.supportsMainAmountEditing
@@ -763,6 +867,12 @@ private struct ImportEntryEditor: View {
             && !categoryAccount.isEmpty
             && fundingAccount != categoryAccount
             && (!entry.supportsMainAmountEditing || parsedAmount != nil)
+            && parsedTags != nil
+    }
+
+    private var parsedTags: [String]? {
+        if tagsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+        return try? LedgerTagRules.parse(tagsText)
     }
 
     var body: some View {
@@ -771,6 +881,7 @@ private struct ImportEntryEditor: View {
                 LazyVStack(alignment: .leading, spacing: LedgerSpacing.xl) {
                     editorSummary
                     transactionSection
+                    tagSection
                     accountSection
                     amountSection
                     sourceNote
@@ -779,6 +890,7 @@ private struct ImportEntryEditor: View {
                 .padding(.vertical, LedgerSpacing.xl)
                 .ledgerAdaptivePageWidth()
             }
+            .accessibilityIdentifier("import-edit-content")
             .scrollDismissesKeyboard(.interactively)
             .background(LedgerPalette.canvas)
             .navigationTitle("编辑交易")
@@ -920,6 +1032,42 @@ private struct ImportEntryEditor: View {
         }
     }
 
+    private var tagSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            SectionHeading(title: "标签", detail: "完整保留并支持编辑")
+            LedgerPanel {
+                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                    TextField("travel, dining", text: $tagsText)
+                        .font(.system(size: 14, weight: .medium))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .tags)
+                        .accessibilityIdentifier("import-edit-tags")
+                    if let tags = parsedTags, !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(tags, id: \.self) { tag in
+                                    Text("#\(tag)")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(LedgerPalette.olive)
+                                        .padding(.horizontal, 8)
+                                        .frame(minHeight: 26)
+                                        .background(LedgerPalette.tag)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    } else if parsedTags == nil {
+                        Text("标签仅支持字母、数字、下划线和连字符，单个最长 64 个字符。")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(LedgerPalette.gold)
+                    }
+                }
+                .padding(LedgerSpacing.lg)
+            }
+        }
+    }
+
     private var amountSection: some View {
         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
             SectionHeading(title: "金额", detail: entry.currency)
@@ -979,7 +1127,8 @@ private struct ImportEntryEditor: View {
                     narration: narration,
                     amount: parsedAmount ?? entry.amount,
                     categoryAccount: categoryAccount,
-                    fundingAccount: fundingAccount
+                    fundingAccount: fundingAccount,
+                    tags: parsedTags ?? entry.tags ?? []
                 )
                 onSave(updated)
                 dismiss()
@@ -1167,7 +1316,9 @@ private struct ImportAccountPicker: View {
 private struct ImportEntryReviewRow: View {
     let entry: LedgerImportEntry
     let included: Bool
+    let tagSelected: Bool
     let onToggle: () -> Void
+    let onToggleTag: () -> Void
     let onEdit: () -> Void
 
     @State private var expanded = false
@@ -1185,6 +1336,16 @@ private struct ImportEntryReviewRow: View {
                 .accessibilityLabel(included ? "排除 \(entry.payee)" : "包含 \(entry.payee)")
                 .accessibilityIdentifier("import-entry-toggle-\(entry.id)")
 
+                Button(action: onToggleTag) {
+                    Image(systemName: tagSelected ? "tag.fill" : "tag")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(tagSelected ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                        .frame(width: 36, height: 44)
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
+                .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
+
                 Button {
                     expanded.toggle()
                 } label: {
@@ -1198,6 +1359,12 @@ private struct ImportEntryReviewRow: View {
                                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                                 .foregroundStyle(LedgerPalette.secondary)
                                 .lineLimit(2)
+                            if let tags = entry.tags, !tags.isEmpty {
+                                Text(tags.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.olive)
+                                    .lineLimit(1)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         ViewThatFits(in: .horizontal) {
@@ -1247,6 +1414,9 @@ private struct ImportEntryReviewRow: View {
                     }
                     if let orderID = entry.orderID, !orderID.isEmpty {
                         ImportEntryDetailLine(label: "订单号", value: orderID)
+                    }
+                    if let tags = entry.tags, !tags.isEmpty {
+                        ImportEntryDetailLine(label: "标签", value: tags.map { "#\($0)" }.joined(separator: " "))
                     }
                 }
                 .padding(.leading, 52)

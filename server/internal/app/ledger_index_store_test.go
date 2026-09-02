@@ -137,6 +137,9 @@ func TestLedgerIndexStoreReplaceActiveSnapshotPostgres(t *testing.T) {
 	if got, want := activeSnapshot.Transactions[0].Metadata, map[string]MetadataValue{"orderId": "order-cafe", "statementHash": "hash-cafe", "imported": true, "amount": float64(12), "empty": nil}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("active snapshot transaction metadata=%#v, want %#v", got, want)
 	}
+	if got := activeSnapshot.Transactions[0].Entry; got == nil || got.Flag != "*" || len(got.Postings) != 2 || got.Postings[0].CostKind != "total" || got.Postings[0].PriceKind != "total" || got.Postings[1].Flag != "?" {
+		t.Fatalf("active snapshot editable transaction entry=%#v", got)
+	}
 	if got, want := activeSnapshot.Accounts[0].Metadata, map[string]MetadataValue{"provider": "Cash", "statement-day": float64(18), "autopay": true, "empty": nil}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("active snapshot account metadata=%#v, want %#v", got, want)
 	}

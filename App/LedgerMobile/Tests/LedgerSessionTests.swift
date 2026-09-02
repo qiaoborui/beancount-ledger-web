@@ -479,25 +479,23 @@ final class LedgerSessionTests: XCTestCase {
         let july = LedgerDateRange.month(year: 2026, month: 7)
         await session.applyRange(july)
 
-        let dashboardResource = try await session.analysisResource(.dashboard)
-        guard case let .dashboard(dashboard) = dashboardResource else {
-            return XCTFail("Expected dashboard resource")
+        let assetsResource = try await session.analysisResource(.assets)
+        guard case let .assets(assets) = assetsResource else {
+            return XCTFail("Expected assets resource")
         }
-        XCTAssertEqual(dashboard.start, "2026-07-01")
-        XCTAssertEqual(dashboard.end, "2026-08-01")
-        XCTAssertEqual(dashboard.currency, "USD")
+        XCTAssertEqual(assets.valuationCurrency, "USD")
         var calls = await api.callCounts()
-        XCTAssertEqual(calls.dashboard, 1)
+        XCTAssertEqual(calls.dashboard, 0)
         XCTAssertEqual(calls.incomeStatement, 0)
         XCTAssertEqual(calls.investments, 0)
 
-        let incomeResource = try await session.analysisResource(.incomeStatement)
-        guard case let .incomeStatement(incomeStatement) = incomeResource else {
-            return XCTFail("Expected income statement resource")
+        let incomeResource = try await session.analysisResource(.incomeExpense)
+        guard case let .incomeExpense(incomeExpense) = incomeResource else {
+            return XCTFail("Expected income and expense resource")
         }
-        XCTAssertEqual(incomeStatement.start, "2026-07-01")
-        XCTAssertEqual(incomeStatement.end, "2026-08-01")
-        XCTAssertEqual(incomeStatement.valuationCurrency, "USD")
+        XCTAssertEqual(incomeExpense.dashboard.start, "2026-07-01")
+        XCTAssertEqual(incomeExpense.statement.end, "2026-08-01")
+        XCTAssertEqual(incomeExpense.statement.valuationCurrency, "USD")
 
         _ = try await session.analysisResource(.investments)
         calls = await api.callCounts()
@@ -517,7 +515,7 @@ final class LedgerSessionTests: XCTestCase {
         await session.resume()
 
         do {
-            _ = try await session.analysisResource(.dashboard)
+            _ = try await session.analysisResource(.incomeExpense)
             XCTFail("Expected sensitive lock response")
         } catch let error as LedgerAPIError {
             guard case let .server(status, _) = error else {
@@ -547,7 +545,7 @@ final class LedgerSessionTests: XCTestCase {
         let session = LedgerSession(api: api, defaults: defaults)
         await session.resume()
 
-        let analysisRequest = Task { try await session.analysisResource(.dashboard) }
+        let analysisRequest = Task { try await session.analysisResource(.incomeExpense) }
         try await Task.sleep(nanoseconds: 10_000_000)
         session.logout()
         _ = try? await analysisRequest.value
@@ -851,6 +849,45 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(result, Self.importCommitResult)
     }
 
+    func testTransactionWritesUseReadySessionAndRefreshLedger() async throws {
+        let suiteName = "ledger-mobile-transaction-write-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let source = TransactionSource(
+            file: "transactions/2026/08.bean",
+            line: 18,
+            hash: "expense-hash",
+            gitSHA: "abc123"
+        )
+        let entry = LedgerTransactionEntry(
+            date: "2026-08-20",
+            payee: "海底捞",
+            narration: "晚餐",
+            metadata: [:],
+            tags: ["dining"],
+            postings: [
+                LedgerTransactionEntryPosting(account: "Expenses:Food:Dining", amount: "85.00", currency: "CNY"),
+                LedgerTransactionEntryPosting(account: "Assets:Bank:Daily", amount: "-85.00", currency: "CNY"),
+            ]
+        )
+
+        try await session.updateTransaction(source: source, entry: entry)
+        try await session.addTransactionTags(sources: [source], tags: ["travel"])
+
+        let writes = await api.transactionWrites()
+        XCTAssertEqual(writes.update?.source, source)
+        XCTAssertEqual(writes.update?.entry.tags, ["dining"])
+        XCTAssertEqual(writes.tags?.sources, [source])
+        XCTAssertEqual(writes.tags?.tags, ["travel"])
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.bootstrap, 3)
+    }
+
     func testImportIndexTrackingCompletesWhenTargetRequestIsIndexedByNewerRevision() async {
         let suiteName = "ledger-mobile-import-index-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1075,6 +1112,11 @@ private actor SessionMockAPI: LedgerAPI {
         let commit: ImportCommitCall?
     }
 
+    struct TransactionWrites: Equatable, Sendable {
+        let update: LedgerTransactionUpdateRequest?
+        let tags: LedgerTransactionTagsRequest?
+    }
+
     struct CallCounts: Sendable {
         let authStatus: Int
         let login: Int
@@ -1136,6 +1178,8 @@ private actor SessionMockAPI: LedgerAPI {
     private var importProviderCalls = 0
     private var requestedImportPreview: ImportPreviewCall?
     private var requestedImportCommit: ImportCommitCall?
+    private var requestedTransactionUpdate: LedgerTransactionUpdateRequest?
+    private var requestedTransactionTags: LedgerTransactionTagsRequest?
     private var indexInfoCalls = 0
 
     init(
@@ -1333,6 +1377,22 @@ private actor SessionMockAPI: LedgerAPI {
         return importCommitPayload
     }
 
+    func updateTransaction(
+        baseURL: URL,
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws {
+        requestedTransactionUpdate = LedgerTransactionUpdateRequest(source: source, entry: entry)
+    }
+
+    func addTransactionTags(
+        baseURL: URL,
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws {
+        requestedTransactionTags = LedgerTransactionTagsRequest(sources: sources, tags: tags)
+    }
+
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
         indexInfoCalls += 1
         guard let indexInfoPayload else {
@@ -1486,6 +1546,10 @@ private actor SessionMockAPI: LedgerAPI {
             preview: requestedImportPreview,
             commit: requestedImportCommit
         )
+    }
+
+    func transactionWrites() -> TransactionWrites {
+        TransactionWrites(update: requestedTransactionUpdate, tags: requestedTransactionTags)
     }
 
     func indexInfoCallCount() -> Int {

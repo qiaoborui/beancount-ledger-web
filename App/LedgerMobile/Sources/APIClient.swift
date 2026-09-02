@@ -101,6 +101,16 @@ protocol LedgerAPI: Sendable {
         baseURL: URL,
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult
+    func updateTransaction(
+        baseURL: URL,
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws
+    func addTransactionTags(
+        baseURL: URL,
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
@@ -149,6 +159,22 @@ extension LedgerAPI {
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+    }
+
+    func updateTransaction(
+        baseURL: URL,
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持编辑交易")
+    }
+
+    func addTransactionTags(
+        baseURL: URL,
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持批量添加标签")
     }
 
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
@@ -368,6 +394,32 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/imports/commit",
             method: "POST",
             body: request
+        )
+    }
+
+    func updateTransaction(
+        baseURL: URL,
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/transactions",
+            method: "PUT",
+            body: LedgerTransactionUpdateRequest(source: source, entry: entry)
+        )
+    }
+
+    func addTransactionTags(
+        baseURL: URL,
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/transactions/tags",
+            method: "POST",
+            body: LedgerTransactionTagsRequest(sources: sources, tags: tags)
         )
     }
 

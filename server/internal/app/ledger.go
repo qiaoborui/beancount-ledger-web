@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -48,6 +49,7 @@ type Transaction struct {
 	Tags      []string                 `json:"tags,omitempty"`
 	Links     []string                 `json:"links,omitempty"`
 	Postings  []Posting                `json:"postings"`
+	Entry     *LedgerEntry             `json:"entry,omitempty"`
 	Source    TransactionSource        `json:"source"`
 }
 
@@ -235,6 +237,7 @@ func TransactionsFromBeanEntries(entries []BeanEntry) []Transaction {
 				Tags:      entry.Tags,
 				Links:     entry.Links,
 				Postings:  finalizeParsedPostings(entry.Postings),
+				Entry:     EditableLedgerEntryFromBeanTransaction(entry),
 				Source:    TransactionSource{File: entry.File, Line: entry.Line, Hash: transactionHash(entry.RawLines)},
 			}
 			txns = append(txns, txn)
@@ -264,6 +267,309 @@ func TransactionsFromBeanEntries(entries []BeanEntry) []Transaction {
 		}
 	}
 	return txns
+}
+
+func LedgerEntryFromBeanTransaction(entry BeanEntry) LedgerEntry {
+	postings := make([]EntryPosting, 0, len(entry.Postings))
+	costSpecs := transactionPostingCostSpecs(entry.RawLines)
+	for index, posting := range entry.Postings {
+		row := EntryPosting{
+			Account:  posting.Account,
+			Flag:     posting.Flag,
+			Amount:   posting.Quantity.Number,
+			Currency: posting.Quantity.Currency,
+		}
+		if index < len(costSpecs) {
+			row.CostSpec = costSpecs[index]
+		}
+		if posting.CostCurrency != "" {
+			row.CostKind = "unit"
+			if posting.TotalCost {
+				row.CostKind = "total"
+			}
+			row.CostAmount = posting.Cost.Number
+			row.CostCurrency = posting.Cost.Currency
+		}
+		if posting.PriceCurrency != "" {
+			row.PriceKind = "unit"
+			if posting.TotalPrice {
+				row.PriceKind = "total"
+			}
+			row.PriceAmount = posting.Price.Number
+			row.PriceCurrency = posting.Price.Currency
+		}
+		postings = append(postings, row)
+	}
+	currency := ""
+	for _, posting := range postings {
+		if posting.Currency != "" {
+			currency = posting.Currency
+			break
+		}
+	}
+	return LedgerEntry{
+		Kind:        "transaction",
+		Date:        entry.Date,
+		Flag:        entry.Flag,
+		Payee:       entry.Payee,
+		Narration:   entry.Narration,
+		Metadata:    entry.Metadata,
+		Tags:        append([]string{}, entry.Tags...),
+		Links:       append([]string{}, entry.Links...),
+		Postings:    postings,
+		Currency:    currency,
+		Confidence:  1,
+		NeedsReview: false,
+		Questions:   []string{},
+	}
+}
+
+func EditableLedgerEntryFromBeanTransaction(entry BeanEntry) *LedgerEntry {
+	if !transactionMetadataRoundTrips(entry) || !transactionNumbersRoundTrip(entry) || !transactionStringsRoundTrip(entry) {
+		return nil
+	}
+	editable := LedgerEntryFromBeanTransaction(entry)
+	return &editable
+}
+
+func transactionNumbersRoundTrip(entry BeanEntry) bool {
+	for lineIndex, rawLine := range entry.RawLines {
+		if lineIndex == 0 {
+			continue
+		}
+		tokens := scanBeanLine(strings.TrimSpace(rawLine))
+		if len(tokens) == 0 {
+			continue
+		}
+		index := 0
+		if isPostingFlag(tokens[index].Value) {
+			index++
+		}
+		if index >= len(tokens) || !isBeanAccount(tokens[index].Value) {
+			continue
+		}
+		index++
+		if index == len(tokens) {
+			continue
+		}
+		if _, next, ok := parseBeanAmountTokens(tokens[index:]); ok {
+			if _, direct := directNumberText(tokens[index : index+next-1]); !direct {
+				return false
+			}
+			index += next
+		} else {
+			return false
+		}
+		for index < len(tokens) {
+			switch tokens[index].Value {
+			case "{", "{{":
+				_, next, ok := parseCostTokenSpan(tokens[index:])
+				if !ok {
+					return false
+				}
+				if err := validateCostSpec(renderBeanTokens(tokens[index : index+next])); err != nil {
+					return false
+				}
+				index += next
+			case "@", "@@":
+				_, next, ok := parseBeanAmountTokens(tokens[index+1:])
+				if !ok {
+					return false
+				}
+				if _, direct := directNumberText(tokens[index+1 : index+next]); !direct {
+					return false
+				}
+				index += next + 1
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func transactionStringsRoundTrip(entry BeanEntry) bool {
+	for _, rawLine := range entry.RawLines {
+		inQuote, escaped := false, false
+		for _, char := range rawLine {
+			if escaped {
+				switch char {
+				case '"', '\\', 'n', 't', 'r', 'b', 'f':
+				default:
+					return false
+				}
+				escaped = false
+				continue
+			}
+			if inQuote && char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == '"' {
+				inQuote = !inQuote
+			}
+		}
+		if inQuote || escaped {
+			return false
+		}
+	}
+	return true
+}
+
+func transactionMetadataRoundTrips(entry BeanEntry) bool {
+	rawMetadataKeys := map[string]bool{}
+	postingIndent := -1
+	for index, rawLine := range entry.RawLines {
+		if hasBeanComment(rawLine) {
+			return false
+		}
+		if index == 0 {
+			continue
+		}
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == "" || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		tokens := scanBeanLine(trimmed)
+		if _, ok := parsePostingTokens(tokens); ok {
+			postingIndent = beanIndentWidth(rawLine)
+			continue
+		}
+		key, _, ok := parseMetadataLine(tokens)
+		if !ok {
+			continue
+		}
+		if postingIndent >= 0 && beanIndentWidth(rawLine) > postingIndent {
+			return false
+		}
+		if !metadataTokensRoundTrip(tokens[1:]) {
+			return false
+		}
+		rawMetadataKeys[key] = true
+	}
+	if len(rawMetadataKeys) != len(entry.Metadata) {
+		return false
+	}
+	for key := range entry.Metadata {
+		if !rawMetadataKeys[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasBeanComment(rawLine string) bool {
+	inQuote, escaped := false, false
+	for _, char := range rawLine {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote && char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if char == ';' && !inQuote {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataTokensRoundTrip(tokens []beanToken) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	if len(tokens) != 1 {
+		return false
+	}
+	if tokens[0].Kind == beanTokenString {
+		return true
+	}
+	switch tokens[0].Value {
+	case "TRUE", "FALSE", "NULL":
+		return true
+	default:
+		return false
+	}
+}
+
+func beanIndentWidth(value string) int {
+	width := 0
+	for _, char := range value {
+		switch char {
+		case ' ':
+			width++
+		case '\t':
+			width += 4
+		default:
+			return width
+		}
+	}
+	return width
+}
+
+func transactionPostingCostSpecs(rawLines []string) []string {
+	specs := []string{}
+	for _, rawLine := range rawLines {
+		tokens := scanBeanLine(strings.TrimSpace(rawLine))
+		if _, ok := parsePostingTokens(tokens); !ok {
+			continue
+		}
+		spec := ""
+		for index, token := range tokens {
+			if token.Value != "{" && token.Value != "{{" {
+				continue
+			}
+			if _, next, ok := parseCostTokenSpan(tokens[index:]); ok {
+				spec = renderBeanTokens(tokens[index : index+next])
+			}
+			break
+		}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
+func renderBeanTokens(tokens []beanToken) string {
+	parts := make([]string, len(tokens))
+	for index, token := range tokens {
+		switch token.Kind {
+		case beanTokenString:
+			parts[index] = `"` + escapeBean(token.Value) + `"`
+		case beanTokenTag:
+			parts[index] = "#" + token.Value
+		case beanTokenLink:
+			parts[index] = "^" + token.Value
+		default:
+			parts[index] = token.Value
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func AttachEditableTransactionEntries(transactions []Transaction, entries []BeanEntry) {
+	bySource := make(map[string]LedgerEntry, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != "transaction" {
+			continue
+		}
+		if editable := EditableLedgerEntryFromBeanTransaction(entry); editable != nil {
+			key := fmt.Sprintf("%s:%d", entry.File, entry.Line)
+			bySource[key] = *editable
+		}
+	}
+	for index := range transactions {
+		key := fmt.Sprintf("%s:%d", transactions[index].Source.File, transactions[index].Source.Line)
+		if entry, ok := bySource[key]; ok {
+			entryCopy := entry
+			transactions[index].Entry = &entryCopy
+		}
+	}
 }
 
 func applyPostingsToBalances(balances map[string]map[string]int, postings []Posting) {

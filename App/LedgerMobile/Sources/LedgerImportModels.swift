@@ -164,7 +164,8 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
         narration: String,
         amount: Double,
         categoryAccount: String,
-        fundingAccount: String
+        fundingAccount: String,
+        tags: [String]? = nil
     ) -> LedgerImportEntry {
         let categoryIndex = postings.firstIndex { $0.account == self.categoryAccount }
         let fundingIndex = postings.firstIndex { $0.account == self.fundingAccount }
@@ -215,9 +216,34 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
             fundingAccount: fundingAccount,
             amount: updatedAmount,
             currency: currency,
-            tags: tags,
+            tags: tags ?? self.tags,
             metadata: metadata,
             postings: updatedPostings
+        )
+    }
+
+    func applyingTags(_ rawTags: [String]) -> LedgerImportEntry {
+        LedgerImportEntry(
+            id: id,
+            date: date,
+            flag: flag,
+            payee: payee,
+            narration: narration,
+            source: source,
+            orderID: orderID,
+            merchantID: merchantID,
+            payTime: payTime,
+            method: method,
+            transactionType: transactionType,
+            status: status,
+            type: type,
+            categoryAccount: categoryAccount,
+            fundingAccount: fundingAccount,
+            amount: amount,
+            currency: currency,
+            tags: rawTags,
+            metadata: metadata,
+            postings: postings
         )
     }
 

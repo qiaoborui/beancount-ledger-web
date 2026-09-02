@@ -102,7 +102,8 @@ final class LedgerImportModelsTests: XCTestCase {
             narration: "  九月新书  ",
             amount: 18.75,
             categoryAccount: "Expenses:Education:Books",
-            fundingAccount: "Assets:Bank:Daily"
+            fundingAccount: "Assets:Bank:Daily",
+            tags: ["books", "travel"]
         )
 
         XCTAssertEqual(updated.date, "2026-09-02")
@@ -112,7 +113,7 @@ final class LedgerImportModelsTests: XCTestCase {
         XCTAssertEqual(updated.amount, 18.75)
         XCTAssertEqual(updated.categoryAccount, "Expenses:Education:Books")
         XCTAssertEqual(updated.fundingAccount, "Assets:Bank:Daily")
-        XCTAssertEqual(updated.tags, ["travel", "trip-2026-shanghai"])
+        XCTAssertEqual(updated.tags, ["books", "travel"])
         XCTAssertEqual(updated.postings.map(\.account), ["Expenses:Education:Books", "Assets:Bank:Daily"])
         XCTAssertEqual(updated.postings.map(\.amount), ["18.75", "-18.75"])
     }
@@ -131,6 +132,25 @@ final class LedgerImportModelsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(LedgerImportEntry.self, from: encoded)
 
         XCTAssertEqual(decoded.tags, ["travel", "trip-2026-shanghai"])
+    }
+
+    func testTagRulesNormalizeValidateAndRejectInvalidTags() throws {
+        XCTAssertEqual(
+            try LedgerTagRules.parse("#travel, dining  travel，trip-2026"),
+            ["dining", "travel", "trip-2026"]
+        )
+        XCTAssertThrowsError(try LedgerTagRules.parse("旅行")) { error in
+            XCTAssertEqual(error as? LedgerTagValidationError, .invalid("旅行"))
+        }
+        XCTAssertThrowsError(try LedgerTagRules.parse("travel#")) { error in
+            XCTAssertEqual(error as? LedgerTagValidationError, .invalid("travel#"))
+        }
+        XCTAssertThrowsError(try LedgerTagRules.validating((0...50).map { "tag-\($0)" })) { error in
+            XCTAssertEqual(error as? LedgerTagValidationError, .tooMany)
+        }
+        XCTAssertThrowsError(try LedgerTagRules.parse("")) { error in
+            XCTAssertEqual(error as? LedgerTagValidationError, .empty)
+        }
     }
 
     func testComplexReviewEntryKeepsOriginalAmountsWhileUpdatingAccounts() {

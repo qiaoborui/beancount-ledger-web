@@ -374,22 +374,39 @@ final class LedgerSession: ObservableObject {
         do {
             let resource: LedgerAnalysisResource
             switch kind {
-            case .dashboard:
-                resource = .dashboard(
-                    try await api.dashboard(
-                        baseURL: serverURL,
-                        start: range.start,
-                        end: range.queryEndExclusive,
-                        valuationCurrency: valuationCurrency
+            case .assets:
+                guard let ledger else {
+                    throw LedgerAPIError.incompatibleServer("当前账本数据不可用")
+                }
+                resource = .assets(
+                    LedgerAssetsAnalysis(
+                        accountBalances: ledger.accountBalances,
+                        accounts: ledger.accounts,
+                        netWorthHistory: ledger.netWorthHistory,
+                        monthEndNetWorth: ledger.monthEndNetWorth,
+                        netWorthWindows: ledger.netWorthWindows,
+                        comparisons: ledger.comparisons,
+                        valuationCurrency: ledger.valuationCurrency
                     )
                 )
-            case .incomeStatement:
-                resource = .incomeStatement(
-                    try await api.incomeStatement(
-                        baseURL: serverURL,
-                        start: range.start,
-                        end: range.queryEndExclusive,
-                        valuationCurrency: valuationCurrency
+            case .incomeExpense:
+                async let dashboard = api.dashboard(
+                    baseURL: serverURL,
+                    start: range.start,
+                    end: range.queryEndExclusive,
+                    valuationCurrency: valuationCurrency
+                )
+                async let statement = api.incomeStatement(
+                    baseURL: serverURL,
+                    start: range.start,
+                    end: range.queryEndExclusive,
+                    valuationCurrency: valuationCurrency
+                )
+                let (dashboardValue, statementValue) = try await (dashboard, statement)
+                resource = .incomeExpense(
+                    LedgerIncomeExpenseAnalysis(
+                        dashboard: dashboardValue,
+                        statement: statementValue
                     )
                 )
             case .investments:
@@ -460,6 +477,26 @@ final class LedgerSession: ObservableObject {
                 )
             )
         }
+    }
+
+    func updateTransaction(
+        source: TransactionSource,
+        entry: LedgerTransactionEntry
+    ) async throws {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.updateTransaction(baseURL: serverURL, source: source, entry: entry)
+        }
+        await refresh()
+    }
+
+    func addTransactionTags(
+        sources: [TransactionSource],
+        tags: [String]
+    ) async throws {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.addTransactionTags(baseURL: serverURL, sources: sources, tags: tags)
+        }
+        await refresh()
     }
 
     func indexInfo(targetGitSHA: String? = nil) async throws -> LedgerIndexInfo {

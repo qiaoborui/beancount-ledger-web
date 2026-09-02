@@ -17,6 +17,9 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
 		t.Fatalf("locked transaction feed should hide income transactions: %#v", lockedTxns)
 	}
+	if lockedTxns[0].Entry != nil {
+		t.Fatalf("locked transaction feed should hide editable source fields: %#v", lockedTxns[0].Entry)
+	}
 	if locked.Start != "2026-05-01" || locked.End != "2026-06-01" || locked.SensitiveUnlocked {
 		t.Fatalf("locked transaction query metadata changed: %#v", locked)
 	}
@@ -28,6 +31,9 @@ func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	unlockedTxns := unlocked.Transactions
 	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
 		t.Fatalf("unlocked transaction feed should include all transactions newest first: %#v", unlockedTxns)
+	}
+	if unlockedTxns[0].Entry == nil || unlockedTxns[1].Entry == nil {
+		t.Fatalf("unlocked transaction feed should include editable source fields: %#v", unlockedTxns)
 	}
 	if !unlocked.SensitiveUnlocked {
 		t.Fatalf("unlocked transaction query metadata changed: %#v", unlocked)
@@ -321,6 +327,7 @@ func TestBuildLedgerTransactionsFromIndexedRangeRespectSensitiveUnlock(t *testin
 		},
 		{
 			Date: "2026-05-01", Payee: "Cafe",
+			Entry: &LedgerEntry{Kind: "transaction", Metadata: map[string]MetadataValue{"receipt": "private"}},
 			Postings: []Posting{
 				{Account: "Expenses:Food", Amount: 1200, Currency: "CNY"},
 				{Account: "Assets:Cash", Amount: -1200, Currency: "CNY"},
@@ -333,11 +340,17 @@ func TestBuildLedgerTransactionsFromIndexedRangeRespectSensitiveUnlock(t *testin
 	if len(lockedTxns) != 1 || lockedTxns[0].Payee != "Cafe" {
 		t.Fatalf("direct indexed feed should hide income transactions: %#v", lockedTxns)
 	}
+	if lockedTxns[0].Entry != nil {
+		t.Fatalf("direct indexed feed should hide editable source fields: %#v", lockedTxns[0].Entry)
+	}
 
 	unlocked := BuildLedgerTransactionsFromIndexedRange(txns, "2026-05-01", "2026-06-01", true)
 	unlockedTxns := unlocked.Transactions
 	if len(unlockedTxns) != 2 || unlockedTxns[0].Payee != "Employer" || unlockedTxns[1].Payee != "Cafe" {
 		t.Fatalf("direct indexed feed should preserve database order: %#v", unlockedTxns)
+	}
+	if unlockedTxns[1].Entry == nil {
+		t.Fatalf("unlocked indexed feed should preserve editable source fields: %#v", unlockedTxns[1])
 	}
 }
 
