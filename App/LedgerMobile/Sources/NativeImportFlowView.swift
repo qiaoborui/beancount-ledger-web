@@ -12,7 +12,9 @@ struct NativeImportFlowView: View {
     @State private var alipayFundRounding = false
     @State private var archivePassword = ""
     @State private var preview: LedgerImportPreview?
+    @State private var reviewedEntries: [LedgerImportEntry] = []
     @State private var includedEntryIDs: Set<String> = []
+    @State private var editingEntry: LedgerImportEntry?
     @State private var commitResult: LedgerImportCommitResult?
     @State private var errorMessage: String?
     @State private var isPreparing = false
@@ -21,7 +23,7 @@ struct NativeImportFlowView: View {
     @State private var cleanupWarningDismissed = false
 
     private var selectedEntries: [LedgerImportEntry] {
-        preview?.entries.filter { includedEntryIDs.contains($0.id) } ?? []
+        reviewedEntries.filter { includedEntryIDs.contains($0.id) }
     }
 
     private var currentTitle: String {
@@ -51,6 +53,7 @@ struct NativeImportFlowView: View {
                     if preview != nil, commitResult == nil {
                         Button("返回") {
                             self.preview = nil
+                            reviewedEntries = []
                             includedEntryIDs = []
                             errorMessage = nil
                         }
@@ -71,6 +74,16 @@ struct NativeImportFlowView: View {
             Button("继续核对", role: .cancel) {}
         } message: {
             Text(commitConfirmationDetail)
+        }
+        .sheet(item: $editingEntry) { entry in
+            ImportEntryEditor(
+                entry: entry,
+                accounts: importAccountChoices(for: entry),
+                onSave: { updated in
+                    applyEditedEntry(updated)
+                }
+            )
+            .ledgerPrivacyProtectedSheet()
         }
     }
 
@@ -330,16 +343,16 @@ struct NativeImportFlowView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .tracking(-0.15)
                         .foregroundStyle(LedgerPalette.ink)
-                    Text("已选择 \(selectedEntries.count) / \(preview.entries.count)")
+                    Text("已选择 \(selectedEntries.count) / \(reviewedEntries.count)")
                         .font(.system(size: 11, weight: .medium).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 Spacer(minLength: 0)
-                Button(includedEntryIDs.count == preview.entries.count ? "取消全选" : "全选") {
-                    if includedEntryIDs.count == preview.entries.count {
+                Button(includedEntryIDs.count == reviewedEntries.count ? "取消全选" : "全选") {
+                    if includedEntryIDs.count == reviewedEntries.count {
                         includedEntryIDs = []
                     } else {
-                        includedEntryIDs = Set(preview.entries.map(\.id))
+                        includedEntryIDs = Set(reviewedEntries.map(\.id))
                     }
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -350,13 +363,14 @@ struct NativeImportFlowView: View {
 
             LedgerPanel {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(preview.entries.enumerated()), id: \.element.id) { index, entry in
+                    ForEach(Array(reviewedEntries.enumerated()), id: \.element.id) { index, entry in
                         ImportEntryReviewRow(
                             entry: entry,
                             included: includedEntryIDs.contains(entry.id),
-                            onToggle: { toggle(entry.id) }
+                            onToggle: { toggle(entry.id) },
+                            onEdit: { editingEntry = entry }
                         )
-                        if index < preview.entries.count - 1 {
+                        if index < reviewedEntries.count - 1 {
                             Divider().overlay(LedgerPalette.line).padding(.leading, 52)
                         }
                     }
@@ -465,6 +479,43 @@ struct NativeImportFlowView: View {
         return providerLabel(providerOverride)
     }
 
+    private func importAccountChoices(for entry: LedgerImportEntry) -> [ImportAccountChoice] {
+        var choices = Dictionary(uniqueKeysWithValues: (session.ledger?.accounts ?? []).map { account in
+            (
+                account.account,
+                ImportAccountChoice(
+                    account: account.account,
+                    label: account.alias?.isEmpty == false ? account.alias! : account.label,
+                    group: account.group,
+                    active: account.active
+                )
+            )
+        })
+        let currentAccounts = Set(
+            entry.postings.map(\.account) + [entry.categoryAccount, entry.fundingAccount]
+        )
+        for account in currentAccounts where choices[account] == nil {
+            choices[account] = ImportAccountChoice(
+                account: account,
+                label: account.split(separator: ":").last.map(String.init) ?? account,
+                group: "current",
+                active: true
+            )
+        }
+        return choices.values.sorted { left, right in
+            if left.active != right.active { return left.active && !right.active }
+            let labelOrder = left.label.localizedStandardCompare(right.label)
+            return labelOrder == .orderedSame
+                ? left.account.localizedStandardCompare(right.account) == .orderedAscending
+                : labelOrder == .orderedAscending
+        }
+    }
+
+    private func applyEditedEntry(_ updated: LedgerImportEntry) {
+        guard let index = reviewedEntries.firstIndex(where: { $0.id == updated.id }) else { return }
+        reviewedEntries[index] = updated
+    }
+
     private var selectedProviderDetail: String {
         guard let providerOverride else { return "根据文件名和账单结构选择渠道" }
         return providers.first(where: { $0.id == providerOverride })?.detail ?? "使用指定渠道生成预览"
@@ -529,6 +580,7 @@ struct NativeImportFlowView: View {
             guard !Task.isCancelled else { return }
             archivePassword = ""
             preview = updated
+            reviewedEntries = updated.entries
             includedEntryIDs = Set(updated.entries.map(\.id))
         } catch is CancellationError {
             return
@@ -593,10 +645,482 @@ private struct ImportPreviewMetricRow: View {
     }
 }
 
+private struct ImportAccountChoice: Identifiable, Equatable {
+    let account: String
+    let label: String
+    let group: String
+    let active: Bool
+
+    var id: String { account }
+}
+
+private enum ImportEditorField: Hashable {
+    case payee
+    case narration
+    case amount
+}
+
+private struct ImportEntryEditor: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let entry: LedgerImportEntry
+    let accounts: [ImportAccountChoice]
+    let onSave: (LedgerImportEntry) -> Void
+
+    @State private var date: Date
+    @State private var flag: String
+    @State private var payee: String
+    @State private var narration: String
+    @State private var amountText: String
+    @State private var fundingAccount: String
+    @State private var categoryAccount: String
+    @FocusState private var focusedField: ImportEditorField?
+
+    init(
+        entry: LedgerImportEntry,
+        accounts: [ImportAccountChoice],
+        onSave: @escaping (LedgerImportEntry) -> Void
+    ) {
+        self.entry = entry
+        self.accounts = accounts
+        self.onSave = onSave
+        _date = State(initialValue: Self.parseDate(entry.date) ?? Date())
+        _flag = State(initialValue: entry.flag == "!" ? "!" : "*")
+        _payee = State(initialValue: entry.payee)
+        _narration = State(initialValue: entry.narration)
+        _amountText = State(initialValue: Self.amountText(
+            entry.amount,
+            fixedToMinorUnits: entry.supportsMainAmountEditing
+        ))
+        _fundingAccount = State(initialValue: entry.fundingAccount)
+        _categoryAccount = State(initialValue: entry.categoryAccount)
+    }
+
+    private var parsedAmount: Double? {
+        let normalized = amountText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        let components = normalized.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count <= 2,
+              components.last.map({ $0.count <= 2 }) ?? true,
+              let value = Double(normalized),
+              value.isFinite,
+              value > 0,
+              value <= LedgerImportEntry.maximumEditableMainAmount else { return nil }
+        return value
+    }
+
+    private var canSave: Bool {
+        !fundingAccount.isEmpty
+            && !categoryAccount.isEmpty
+            && fundingAccount != categoryAccount
+            && (!entry.supportsMainAmountEditing || parsedAmount != nil)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: LedgerSpacing.xl) {
+                    editorSummary
+                    transactionSection
+                    accountSection
+                    amountSection
+                    sourceNote
+                }
+                .padding(.horizontal, LedgerSpacing.lg)
+                .padding(.vertical, LedgerSpacing.xl)
+                .ledgerAdaptivePageWidth()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(LedgerPalette.canvas)
+            .navigationTitle("编辑交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { focusedField = nil }
+                        .accessibilityIdentifier("import-edit-keyboard-done")
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                saveBar
+            }
+        }
+        .interactiveDismissDisabled(false)
+        .privacySensitive()
+    }
+
+    private var editorSummary: some View {
+        HStack(spacing: LedgerSpacing.md) {
+            Image(systemName: "pencil.and.list.clipboard")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(LedgerPalette.onBrand)
+                .frame(width: 42, height: 42)
+                .background(LedgerPalette.cobalt)
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(payee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未命名交易" : payee)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
+                Text("修改只会应用到本次导入候选项")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var transactionSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            SectionHeading(title: "交易信息", detail: "标题与商家")
+            LedgerPanel {
+                VStack(spacing: 0) {
+                    ImportEditorTextField(
+                        title: "商家",
+                        placeholder: "输入商家或交易对方",
+                        text: $payee,
+                        textContentType: .organizationName,
+                        accessibilityIdentifier: "import-edit-payee",
+                        focusedField: $focusedField,
+                        field: .payee
+                    )
+                    Divider().overlay(LedgerPalette.line).padding(.leading, LedgerSpacing.lg)
+                    ImportEditorTextField(
+                        title: "标题",
+                        placeholder: "输入交易标题",
+                        text: $narration,
+                        accessibilityIdentifier: "import-edit-narration",
+                        focusedField: $focusedField,
+                        field: .narration
+                    )
+                    Divider().overlay(LedgerPalette.line).padding(.leading, LedgerSpacing.lg)
+                    HStack {
+                        Text("日期")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer(minLength: LedgerSpacing.md)
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(LedgerPalette.cobalt)
+                    }
+                    .padding(.horizontal, LedgerSpacing.lg)
+                    .frame(minHeight: 50)
+                    Divider().overlay(LedgerPalette.line).padding(.leading, LedgerSpacing.lg)
+                    Picker("状态", selection: $flag) {
+                        Text("已确认").tag("*")
+                        Text("待核对").tag("!")
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(LedgerSpacing.lg)
+                }
+            }
+        }
+    }
+
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            SectionHeading(title: "资金流向", detail: "来源到账目分类")
+            LedgerPanel {
+                VStack(spacing: 0) {
+                    NavigationLink {
+                        ImportAccountPicker(
+                            title: "选择来源账户",
+                            accounts: accounts,
+                            selection: $fundingAccount
+                        )
+                    } label: {
+                        ImportAccountSelectionRow(
+                            icon: "arrow.up.right",
+                            title: "来源账户",
+                            choice: accountChoice(fundingAccount)
+                        )
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityIdentifier("import-edit-source-account")
+
+                    Divider().overlay(LedgerPalette.line).padding(.leading, 52)
+
+                    NavigationLink {
+                        ImportAccountPicker(
+                            title: "选择目标账户",
+                            accounts: accounts,
+                            selection: $categoryAccount
+                        )
+                    } label: {
+                        ImportAccountSelectionRow(
+                            icon: "arrow.down.right",
+                            title: "目标账户",
+                            choice: accountChoice(categoryAccount)
+                        )
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityIdentifier("import-edit-target-account")
+                }
+            }
+            if fundingAccount == categoryAccount {
+                Text("来源账户和目标账户需使用不同账户。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.gold)
+                    .padding(.horizontal, LedgerSpacing.sm)
+            }
+        }
+    }
+
+    private var amountSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            SectionHeading(title: "金额", detail: entry.currency)
+            LedgerPanel {
+                VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                    HStack(spacing: LedgerSpacing.md) {
+                        Text(entry.currency)
+                            .font(.system(size: 12, weight: .semibold).monospaced())
+                            .foregroundStyle(LedgerPalette.cobalt)
+                            .padding(.horizontal, 9)
+                            .frame(minHeight: 30)
+                            .background(LedgerPalette.tag)
+                            .clipShape(Capsule())
+                        TextField("0.00", text: $amountText)
+                            .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(LedgerPalette.warm)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.decimalPad)
+                            .disabled(!entry.supportsMainAmountEditing)
+                            .focused($focusedField, equals: .amount)
+                            .accessibilityIdentifier("import-edit-amount")
+                    }
+                    if entry.supportsMainAmountEditing {
+                        Text(parsedAmount == nil ? "请输入大于 0 且最多两位小数的金额。" : "保存后会同步更新来源与目标两条分录。")
+                            .foregroundStyle(parsedAmount == nil ? LedgerPalette.gold : LedgerPalette.secondary)
+                    } else {
+                        Text("该交易包含拆分、多币种或价格信息，当前保留原分录金额。")
+                            .foregroundStyle(LedgerPalette.gold)
+                    }
+                }
+                .font(.system(size: 11))
+                .padding(LedgerSpacing.lg)
+            }
+        }
+    }
+
+    private var sourceNote: some View {
+        HStack(alignment: .top, spacing: LedgerSpacing.sm) {
+            Image(systemName: "checkmark.shield")
+                .foregroundStyle(LedgerPalette.cobalt)
+            Text("保存后仍停留在核对阶段。最终提交时服务器会检查账户、币种、分录平衡与账本语法。")
+                .font(.system(size: 11))
+                .foregroundStyle(LedgerPalette.secondary)
+        }
+        .padding(.horizontal, LedgerSpacing.sm)
+    }
+
+    private var saveBar: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(LedgerPalette.line).frame(height: 1)
+            Button("保存修改") {
+                focusedField = nil
+                let updated = entry.applyingReviewEdits(
+                    date: Self.formatDate(date),
+                    flag: flag,
+                    payee: payee,
+                    narration: narration,
+                    amount: parsedAmount ?? entry.amount,
+                    categoryAccount: categoryAccount,
+                    fundingAccount: fundingAccount
+                )
+                onSave(updated)
+                dismiss()
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(LedgerPalette.onBrand)
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background(LedgerPalette.cobalt)
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            .buttonStyle(PressScaleButtonStyle())
+            .disabled(!canSave)
+            .opacity(canSave ? 1 : 0.52)
+            .accessibilityIdentifier("import-edit-save")
+            .padding(.horizontal, LedgerSpacing.lg)
+            .padding(.vertical, LedgerSpacing.md)
+        }
+        .background(LedgerPalette.panel)
+    }
+
+    private func accountChoice(_ account: String) -> ImportAccountChoice {
+        accounts.first(where: { $0.account == account })
+            ?? ImportAccountChoice(account: account, label: account, group: "current", active: true)
+    }
+
+    private static func parseDate(_ raw: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: raw)
+    }
+
+    private static func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func amountText(_ amount: Double, fixedToMinorUnits: Bool) -> String {
+        if fixedToMinorUnits {
+            return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), amount)
+        }
+        return String(amount)
+    }
+}
+
+private struct ImportEditorTextField: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    var textContentType: UITextContentType? = nil
+    var accessibilityIdentifier: String
+    var focusedField: FocusState<ImportEditorField?>.Binding
+    var field: ImportEditorField
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(LedgerPalette.secondary)
+            TextField(placeholder, text: $text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(LedgerPalette.ink)
+                .textContentType(textContentType)
+                .submitLabel(.next)
+                .focused(focusedField, equals: field)
+                .accessibilityIdentifier(accessibilityIdentifier)
+        }
+        .padding(.horizontal, LedgerSpacing.lg)
+        .padding(.vertical, LedgerSpacing.md)
+    }
+}
+
+private struct ImportAccountSelectionRow: View {
+    let icon: String
+    let title: String
+    let choice: ImportAccountChoice
+
+    var body: some View {
+        HStack(spacing: LedgerSpacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(LedgerPalette.cobalt)
+                .frame(width: 34, height: 34)
+                .background(LedgerPalette.tag)
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.secondary)
+                Text(choice.label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
+                Text(choice.account)
+                    .font(.system(size: 9, weight: .medium).monospaced())
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(LedgerPalette.secondary)
+        }
+        .padding(.horizontal, LedgerSpacing.lg)
+        .padding(.vertical, LedgerSpacing.md)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ImportAccountPicker: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let accounts: [ImportAccountChoice]
+    @Binding var selection: String
+
+    @State private var query = ""
+
+    private var filteredAccounts: [ImportAccountChoice] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return accounts }
+        return accounts.filter {
+            $0.label.localizedCaseInsensitiveContains(trimmed)
+                || $0.account.localizedCaseInsensitiveContains(trimmed)
+                || $0.group.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
+
+    var body: some View {
+        List(filteredAccounts) { choice in
+            Button {
+                selection = choice.account
+                dismiss()
+            } label: {
+                HStack(spacing: LedgerSpacing.md) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: LedgerSpacing.sm) {
+                            Text(choice.label)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            if !choice.active {
+                                Text("已停用")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.gold)
+                            }
+                        }
+                        Text(choice.account)
+                            .font(.system(size: 10, weight: .medium).monospaced())
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if choice.account == selection {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .listRowBackground(LedgerPalette.panel)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(LedgerPalette.canvas)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索账户名称或路径")
+        .overlay {
+            if filteredAccounts.isEmpty {
+                EmptyLedgerState(
+                    icon: "magnifyingglass",
+                    title: "没有匹配的账户",
+                    detail: "尝试搜索账户中文名称或完整路径。"
+                )
+            }
+        }
+    }
+}
+
 private struct ImportEntryReviewRow: View {
     let entry: LedgerImportEntry
     let included: Bool
     let onToggle: () -> Void
+    let onEdit: () -> Void
 
     @State private var expanded = false
 
@@ -643,11 +1167,21 @@ private struct ImportEntryReviewRow: View {
                             .frame(width: 18)
                     }
                     .padding(.vertical, LedgerSpacing.md)
-                    .padding(.trailing, LedgerSpacing.lg)
+                    .padding(.trailing, LedgerSpacing.sm)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityIdentifier("import-entry-\(entry.id)")
+
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .frame(width: 40, height: 44)
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel("编辑 \(entry.payee.isEmpty ? "未命名交易" : entry.payee)")
+                .accessibilityIdentifier("import-entry-edit-\(entry.id)")
             }
 
             if expanded {

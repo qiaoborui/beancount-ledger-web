@@ -272,9 +272,38 @@ final class LedgerMobileUITests: XCTestCase {
         toggle.tap()
         XCTAssertTrue(app.staticTexts["已选择 2 / 2"].waitForExistence(timeout: 3))
 
-        app.buttons["import-entry-safe-import-1"].tap()
+        let edit = app.buttons["import-entry-edit-safe-import-1"]
+        XCTAssertTrue(edit.exists)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
+
+        replaceText(in: app.textFields["import-edit-payee"], with: "新城市书房")
+        replaceText(in: app.textFields["import-edit-narration"], with: "九月阅读计划")
+        replaceText(in: app.textFields["import-edit-amount"], with: "368.50")
+        app.buttons["import-edit-keyboard-done"].tap()
+        app.buttons["import-edit-save"].tap()
+
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["新城市书房"].waitForExistence(timeout: 3))
+        let reviewedEntry = app.buttons["import-entry-safe-import-1"]
+        let review = app.scrollViews["native-import-preview"]
+        for _ in 0..<3 where !reviewedEntry.isHittable { review.swipeUp() }
+        waitUntilHittable(reviewedEntry)
+        reviewedEntry.tap()
         XCTAssertTrue(app.staticTexts["分类账户"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Expenses:Education:Books"].exists)
+        XCTAssertTrue(app.staticTexts["368.50 CNY"].exists)
+
+        let editAgain = app.buttons["import-entry-edit-safe-import-1"]
+        waitUntilHittable(editAgain)
+        editAgain.tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.textFields["import-edit-payee"].value as? String, "新城市书房")
+        XCTAssertEqual(app.textFields["import-edit-narration"].value as? String, "九月阅读计划")
+        XCTAssertEqual(app.textFields["import-edit-amount"].value as? String, "368.50")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 3))
         capture("import-flow-02-review")
 
         app.buttons["写入 2 条交易"].tap()
@@ -531,6 +560,16 @@ final class LedgerMobileUITests: XCTestCase {
             object: element
         )
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
+    }
+
+    private func replaceText(in element: XCUIElement, with replacement: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: 3))
+        element.tap()
+        let currentValue = (element.value as? String) ?? ""
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
+        element.typeText(replacement)
+        XCTAssertEqual(element.value as? String, replacement)
     }
 
     private func assertStaysPresent(_ element: XCUIElement, duration: TimeInterval) {
