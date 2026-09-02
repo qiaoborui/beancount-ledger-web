@@ -201,7 +201,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	ledgerRead60s := ledger.Group("", cacheControl(60))
 	ledgerRead60s.GET("/version", s.ledgerVersion)
-	ledgerRead60s.GET("/index-info", s.indexInfo)
+	ledger.GET("/index-info", noStore(), s.indexInfo)
 	ledgerRead60s.GET("/entries", s.ledgerEntries)
 	ledgerRead60s.GET("/balances", s.balances)
 	ledgerRead60s.GET("/investments", s.investments)
@@ -457,7 +457,7 @@ func (s *Server) indexInfo(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"readModel": s.cfg.LedgerReadModel, "enabled": false, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"readModel": s.cfg.LedgerReadModel,
 		"enabled":   true,
 		"active":    indexed,
@@ -466,7 +466,25 @@ func (s *Server) indexInfo(c *gin.Context) {
 		"version":   revision.LedgerVersion.Version,
 		"fileCount": revision.LedgerVersion.FileCount,
 		"indexedAt": revision.IndexedAt.UTC().Format(time.RFC3339),
-	})
+	}
+	if targetGitSHA := strings.TrimSpace(c.Query("gitSHA")); targetGitSHA != "" {
+		if reader, ok := s.indexStore.(interface {
+			IndexRequestStatus(context.Context, string) (string, bool, error)
+		}); ok {
+			status, found, statusErr := reader.IndexRequestStatus(c.Request.Context(), targetGitSHA)
+			if statusErr != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"readModel": s.cfg.LedgerReadModel,
+					"enabled":   false,
+					"error":     statusErr.Error(),
+				})
+				return
+			}
+			body["requestStatus"] = status
+			body["requestCompleted"] = found && status == "completed"
+		}
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 func sanitizeLedgerIndexSource(cfg Config) string {

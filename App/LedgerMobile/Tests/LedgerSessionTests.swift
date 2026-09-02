@@ -851,6 +851,64 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(result, Self.importCommitResult)
     }
 
+    func testImportIndexTrackingCompletesWhenTargetRequestIsIndexedByNewerRevision() async {
+        let suiteName = "ledger-mobile-import-index-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let targetGitSHA = "new-index-revision"
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            indexInfoPayload: LedgerIndexInfo(
+                enabled: true,
+                active: true,
+                gitSHA: "newer-index-revision",
+                indexedAt: "2026-09-01T08:30:00Z",
+                requestCompleted: true
+            )
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        session.startImportIndexTracking(
+            result: LedgerImportCommitResult(
+                ok: true,
+                outputFile: "transactions/2026/imports/import.bean",
+                includeFile: "transactions/2026/09.bean",
+                documentFile: nil,
+                count: 2,
+                beanText: nil,
+                readModelPending: true,
+                indexGitSHA: targetGitSHA,
+                runtimeCleanupError: nil
+            ),
+            providerLabel: "支付宝",
+            baselineGitSHA: "old-index-revision"
+        )
+
+        for _ in 0..<100 where session.importIndexProgress?.phase != .indexed {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(
+            session.importIndexProgress,
+            LedgerImportIndexProgress(providerLabel: "支付宝", entryCount: 2, phase: .indexed)
+        )
+        let indexInfoCalls = await api.indexInfoCallCount()
+        XCTAssertGreaterThan(indexInfoCalls, 0)
+        await session.lock()
+        XCTAssertNil(session.importIndexProgress)
+    }
+
+    func testImportLiveActivityURLRoutesToImportHistory() {
+        let session = LedgerSession()
+
+        session.openWidgetURL(URL(string: "ledger://imports")!)
+
+        XCTAssertEqual(session.primaryDestinationID, "imports")
+    }
+
     private static let payload = LedgerBootstrap(
         start: "2026-08-01",
         end: "2026-08-31",
@@ -973,6 +1031,7 @@ final class LedgerSessionTests: XCTestCase {
         count: 1,
         beanText: nil,
         readModelPending: false,
+        indexGitSHA: nil,
         runtimeCleanupError: nil
     )
 }
@@ -1045,6 +1104,7 @@ private actor SessionMockAPI: LedgerAPI {
     let importProvidersPayload: [LedgerImportProviderInfo]
     let importPreviewPayload: LedgerImportPreview?
     let importCommitPayload: LedgerImportCommitResult?
+    let indexInfoPayload: LedgerIndexInfo?
     let importDocumentsShouldFail: Bool
     let lockShouldFail: Bool
     let accountDetailErrorStatus: Int?
@@ -1076,6 +1136,7 @@ private actor SessionMockAPI: LedgerAPI {
     private var importProviderCalls = 0
     private var requestedImportPreview: ImportPreviewCall?
     private var requestedImportCommit: ImportCommitCall?
+    private var indexInfoCalls = 0
 
     init(
         healthStatus: HealthStatus = HealthStatus(
@@ -1090,6 +1151,7 @@ private actor SessionMockAPI: LedgerAPI {
         importProvidersPayload: [LedgerImportProviderInfo] = [],
         importPreviewPayload: LedgerImportPreview? = nil,
         importCommitPayload: LedgerImportCommitResult? = nil,
+        indexInfoPayload: LedgerIndexInfo? = nil,
         importDocumentsShouldFail: Bool = false,
         lockShouldFail: Bool = false,
         accountDetailErrorStatus: Int? = nil,
@@ -1112,6 +1174,7 @@ private actor SessionMockAPI: LedgerAPI {
         self.importProvidersPayload = importProvidersPayload
         self.importPreviewPayload = importPreviewPayload
         self.importCommitPayload = importCommitPayload
+        self.indexInfoPayload = indexInfoPayload
         self.importDocumentsShouldFail = importDocumentsShouldFail
         self.lockShouldFail = lockShouldFail
         self.accountDetailErrorStatus = accountDetailErrorStatus
@@ -1270,6 +1333,14 @@ private actor SessionMockAPI: LedgerAPI {
         return importCommitPayload
     }
 
+    func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        indexInfoCalls += 1
+        guard let indexInfoPayload else {
+            throw LedgerAPIError.incompatibleServer("missing index info fixture")
+        }
+        return indexInfoPayload
+    }
+
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
         requestedAccountDetails.append(AccountDetailCall(account: account, currency: currency, start: start, end: end))
         if accountDetailDelayNanoseconds > 0 {
@@ -1415,6 +1486,10 @@ private actor SessionMockAPI: LedgerAPI {
             preview: requestedImportPreview,
             commit: requestedImportCommit
         )
+    }
+
+    func indexInfoCallCount() -> Int {
+        indexInfoCalls
     }
 
     private func waitForAnalysisResponse() async throws {

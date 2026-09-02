@@ -115,8 +115,20 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
             documentFile: committedImportDocument?.path,
             count: request.entries.count,
             beanText: nil,
-            readModelPending: false,
+            readModelPending: true,
+            indexGitSHA: "safe-preview-indexed",
             runtimeCleanupError: nil
+        )
+    }
+
+    func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        let currentGitSHA = committedImportDocument == nil ? "safe-preview-baseline" : "safe-preview-indexed"
+        return LedgerIndexInfo(
+            enabled: true,
+            active: true,
+            gitSHA: currentGitSHA,
+            indexedAt: "2026-08-31T14:30:00Z",
+            requestCompleted: targetGitSHA == nil ? nil : targetGitSHA == currentGitSHA
         )
     }
 

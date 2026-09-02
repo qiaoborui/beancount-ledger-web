@@ -101,6 +101,7 @@ protocol LedgerAPI: Sendable {
         baseURL: URL,
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult
+    func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
     func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
@@ -148,6 +149,10 @@ extension LedgerAPI {
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+    }
+
+    func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持索引状态查询")
     }
 
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
@@ -364,6 +369,27 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             method: "POST",
             body: request
         )
+    }
+
+    func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/api/ledger/index-info"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970 * 1_000)))
+        ]
+        if let targetGitSHA = targetGitSHA?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !targetGitSHA.isEmpty {
+            queryItems.append(URLQueryItem(name: "gitSHA", value: targetGitSHA))
+        }
+        components?.queryItems = queryItems
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await self.request(request)
     }
 
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {

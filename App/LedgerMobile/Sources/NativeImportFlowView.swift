@@ -424,10 +424,45 @@ struct NativeImportFlowView: View {
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                         .multilineTextAlignment(.center)
-                    Text(result.readModelPending == true ? "账本写入完成，索引正在后台更新。" : "账本和导入记录已经更新。")
+                    Text(completionDetail(result))
                         .font(.system(size: 13))
                         .foregroundStyle(LedgerPalette.secondary)
                         .multilineTextAlignment(.center)
+                }
+
+                if result.readModelPending == true, let progress = session.importIndexProgress {
+                    LedgerPanel {
+                        HStack(spacing: LedgerSpacing.md) {
+                            Group {
+                                if progress.phase == .indexed {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(LedgerPalette.success)
+                                } else {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(LedgerPalette.cobalt)
+                                }
+                            }
+                            .frame(width: 36, height: 36)
+                            .background(
+                                (progress.phase == .indexed ? LedgerPalette.success : LedgerPalette.cobalt)
+                                    .opacity(0.12)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(progress.phase == .indexed ? "索引已完成" : "正在更新索引")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text(progress.phase == .indexed ? "最新数据已经可以查询。" : "系统允许实时活动时会显示在灵动岛。")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(LedgerSpacing.lg)
+                    }
+                    .accessibilityIdentifier("import-index-progress")
                 }
 
                 if let documentFile = result.documentFile {
@@ -477,6 +512,13 @@ struct NativeImportFlowView: View {
     private var selectedProviderLabel: String {
         guard let providerOverride else { return "自动识别" }
         return providerLabel(providerOverride)
+    }
+
+    private func completionDetail(_ result: LedgerImportCommitResult) -> String {
+        guard result.readModelPending == true else { return "账本和导入记录已经更新。" }
+        return session.importIndexProgress?.phase == .indexed
+            ? "账本写入和索引更新已经完成。"
+            : "账本写入完成，正在等待索引更新。"
     }
 
     private func importAccountChoices(for entry: LedgerImportEntry) -> [ImportAccountChoice] {
@@ -596,9 +638,15 @@ struct NativeImportFlowView: View {
         errorMessage = nil
         defer { isCommitting = false }
         do {
+            let baselineGitSHA = try? await session.indexInfo().gitSHA
             let result = try await session.commitImport(preview: preview, entries: selectedEntries)
             guard !Task.isCancelled else { return }
             commitResult = result
+            session.startImportIndexTracking(
+                result: result,
+                providerLabel: providerLabel(preview.provider),
+                baselineGitSHA: baselineGitSHA
+            )
             onCommitted(result)
         } catch is CancellationError {
             return

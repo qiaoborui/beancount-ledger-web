@@ -308,5 +308,25 @@ struct LedgerImportCommitResult: Decodable, Equatable, Sendable {
     let count: Int
     let beanText: String?
     let readModelPending: Bool?
+    let indexGitSHA: String?
     let runtimeCleanupError: String?
+}
+
+struct LedgerIndexInfo: Decodable, Equatable, Sendable {
+    let enabled: Bool
+    let active: Bool?
+    let gitSHA: String?
+    let indexedAt: String?
+    let requestCompleted: Bool?
+}
+
+enum LedgerImportIndexPhase: Equatable, Sendable {
+    case indexing
+    case indexed
+}
+
+struct LedgerImportIndexProgress: Equatable, Sendable {
+    let providerLabel: String
+    let entryCount: Int
+    let phase: LedgerImportIndexPhase
 }

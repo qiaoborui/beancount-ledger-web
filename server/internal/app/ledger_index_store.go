@@ -468,6 +468,22 @@ WHERE source_key = $1 AND status = 'pending' AND id <= $2`, s.sourceKey, boundar
 	return err
 }
 
+func (s *LedgerIndexStore) IndexRequestStatus(ctx context.Context, gitSHA string) (string, bool, error) {
+	gitSHA = strings.TrimSpace(gitSHA)
+	if gitSHA == "" {
+		return "", false, nil
+	}
+	var status string
+	err := s.db.QueryRowContext(ctx, `
+SELECT status
+FROM ledger_index_requests
+WHERE source_key = $1 AND git_sha = $2`, s.sourceKey, gitSHA).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return status, err == nil, err
+}
+
 func (s *LedgerIndexStore) ActiveRevision(ctx context.Context) (LedgerIndexRevision, bool, error) {
 	return s.activeRevision(ctx)
 }

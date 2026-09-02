@@ -8,5 +8,6 @@ struct LedgerWidgetBundle: WidgetBundle {
         AccountBalanceWidget()
         ExpenseCalendarWidget()
         ImportStatusWidget()
+        ImportIndexLiveActivity()
     }
 }

@@ -33,6 +33,7 @@ targets:
             CFBundleURLSchemes:
               - ledger
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
+        NSSupportsLiveActivities: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -74,6 +75,7 @@ targets:
       - WidgetExtension
       - path: Sources/LedgerWidgetSnapshot.swift
       - path: Sources/MoneyText.swift
+      - path: Sources/ImportIndexActivityAttributes.swift
     info:
       path: WidgetExtension/Info.plist
       properties:

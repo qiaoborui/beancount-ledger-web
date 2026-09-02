@@ -314,6 +314,9 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["native-import-complete"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["已写入 2 条交易"].exists)
         XCTAssertTrue(app.staticTexts["归档位置"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["import-index-progress"].waitForExistence(timeout: 3)
+        )
         capture("import-flow-03-complete")
 
         app.buttons["完成"].tap()

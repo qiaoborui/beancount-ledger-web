@@ -324,6 +324,41 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(result.documentFile, "transactions/2026/documents/imports/statement.xlsx")
     }
 
+    func testIndexInfoBypassesCachesAndDecodesActiveRevision() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/index-info")
+            XCTAssertNotNil(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "t" })?.value)
+            XCTAssertEqual(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "gitSHA" })?.value,
+                "target-index-revision"
+            )
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            return Self.response(
+                for: request,
+                body: #"{"enabled":true,"active":true,"gitSHA":"new-index-revision","indexedAt":"2026-09-01T08:30:00Z","requestCompleted":true}"#
+            )
+        }
+
+        let info = try await makeClient().indexInfo(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            targetGitSHA: "target-index-revision"
+        )
+
+        XCTAssertEqual(
+            info,
+            LedgerIndexInfo(
+                enabled: true,
+                active: true,
+                gitSHA: "new-index-revision",
+                indexedAt: "2026-09-01T08:30:00Z",
+                requestCompleted: true
+            )
+        )
+    }
+
     func testAccountDetailEncodesAccountAndDecodesRows() async throws {
         MockURLProtocol.requestHandler = { request in
             let components = try XCTUnwrap(

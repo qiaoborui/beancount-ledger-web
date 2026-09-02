@@ -60,15 +60,20 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var privacyShielded = true
     @Published private(set) var isBiometricSettingBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
+    @Published private(set) var importIndexProgress: LedgerImportIndexProgress?
 
     private let api: any LedgerAPI
     private let biometricStore: any BiometricCredentialStore
     private let passkeyAuthenticator: any PasskeyAuthenticating
     private let widgetSnapshotStore: LedgerWidgetSnapshotStore
+    private let importIndexActivity: ImportIndexActivityCoordinator
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
     private var applicationActive = true
     private var requestGeneration = 0
+    private var importIndexTask: Task<Void, Never>?
+    private var importIndexGeneration = 0
+    private var importIndexRestoreInFlight = false
     private static let serverKey = "ledger.mobile.server-origin"
     private static let locallyLockedOriginsKey = "ledger.mobile.locally-locked-origins"
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
@@ -83,6 +88,7 @@ final class LedgerSession: ObservableObject {
         biometricStore: (any BiometricCredentialStore)? = nil,
         passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
         widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared,
+        importIndexActivity: ImportIndexActivityCoordinator = ImportIndexActivityCoordinator(),
         ledgerNow: @escaping () -> Date = Date.init
     ) {
         let initialRange = LedgerDateRange.current(.month, now: ledgerNow())
@@ -93,6 +99,7 @@ final class LedgerSession: ObservableObject {
         self.biometricStore = biometricStore ?? SystemBiometricCredentialStore()
         self.passkeyAuthenticator = passkeyAuthenticator ?? SystemPasskeyAuthenticationService()
         self.widgetSnapshotStore = widgetSnapshotStore
+        self.importIndexActivity = importIndexActivity
 
         if let api {
             self.api = api
@@ -455,6 +462,45 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func indexInfo(targetGitSHA: String? = nil) async throws -> LedgerIndexInfo {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.indexInfo(baseURL: serverURL, targetGitSHA: targetGitSHA)
+        }
+    }
+
+    func startImportIndexTracking(
+        result: LedgerImportCommitResult,
+        providerLabel: String,
+        baselineGitSHA: String?
+    ) {
+        importIndexGeneration &+= 1
+        let trackingGeneration = importIndexGeneration
+        importIndexTask?.cancel()
+        importIndexTask = nil
+        importIndexProgress = LedgerImportIndexProgress(
+            providerLabel: providerLabel,
+            entryCount: result.count,
+            phase: result.readModelPending == true ? .indexing : .indexed
+        )
+
+        guard result.readModelPending == true else {
+            Task { await importIndexActivity.end(immediately: true) }
+            return
+        }
+
+        let targetGitSHA = normalizedGitSHA(result.indexGitSHA)
+        let baseline = normalizedGitSHA(baselineGitSHA)
+        guard targetGitSHA != nil || baseline != nil else { return }
+        beginImportIndexPolling(
+            providerLabel: providerLabel,
+            entryCount: result.count,
+            targetGitSHA: targetGitSHA,
+            baselineGitSHA: baseline,
+            startsActivity: true,
+            trackingGeneration: trackingGeneration
+        )
+    }
+
     func runBQL(query: String) async throws -> BQLResult {
         let currency = ledger?.valuationCurrency ?? "CNY"
         return try await performSensitiveRequest { api, serverURL in
@@ -553,6 +599,7 @@ final class LedgerSession: ObservableObject {
     func lock() async {
         guard let serverURL else { return }
         let generation = invalidateRequests()
+        stopImportIndexTracking()
         isRangeLoading = false
         isValuationCurrencyLoading = false
         rangePickerPresented = false
@@ -576,6 +623,7 @@ final class LedgerSession: ObservableObject {
     func logout() {
         guard let serverURL else { return }
         _ = invalidateRequests()
+        stopImportIndexTracking()
         clearWidgetSnapshot()
         clearAuthenticationCookies(for: serverURL)
         setLocallyLocked(false, for: serverURL)
@@ -593,6 +641,7 @@ final class LedgerSession: ObservableObject {
     func changeServer() {
         let previousServerURL = serverURL
         _ = invalidateRequests()
+        stopImportIndexTracking()
         clearWidgetSnapshot()
         if let previousServerURL {
             biometricStore.deleteCredential(for: previousServerURL)
@@ -643,6 +692,7 @@ final class LedgerSession: ObservableObject {
         clearBackgroundDate(for: serverURL)
         amountsVisible = phase == .ready
         privacyShielded = false
+        Task { await restoreImportIndexTrackingIfNeeded() }
     }
 
     func toggleAmounts() {
@@ -654,6 +704,8 @@ final class LedgerSession: ObservableObject {
         switch url.host?.lowercased() {
         case "accounts":
             primaryDestinationID = "accounts"
+        case "imports":
+            primaryDestinationID = "imports"
         case "overview":
             primaryDestinationID = "overview"
         default:
@@ -739,12 +791,131 @@ final class LedgerSession: ObservableObject {
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready
+        Task { await restoreImportIndexTrackingIfNeeded() }
         await publishWidgetSnapshot(
             ledger: payload,
             serverURL: serverURL,
             valuationCurrency: payload.valuationCurrency,
             generation: generation
         )
+    }
+
+    private func beginImportIndexPolling(
+        providerLabel: String,
+        entryCount: Int,
+        targetGitSHA: String?,
+        baselineGitSHA: String?,
+        startsActivity: Bool,
+        trackingGeneration: Int
+    ) {
+        importIndexTask = Task { [weak self] in
+            guard let self else { return }
+            if startsActivity {
+                await self.importIndexActivity.start(
+                    providerLabel: providerLabel,
+                    entryCount: entryCount,
+                    targetGitSHA: targetGitSHA,
+                    baselineGitSHA: baselineGitSHA
+                )
+            }
+            guard !Task.isCancelled, self.importIndexGeneration == trackingGeneration else { return }
+            var attempts = 0
+            while !Task.isCancelled, attempts < 600 {
+                attempts += 1
+                let info = try? await self.indexInfo(targetGitSHA: targetGitSHA)
+                guard !Task.isCancelled, self.importIndexGeneration == trackingGeneration else { return }
+                if let info,
+                   self.indexHasAdvanced(
+                       info,
+                       targetGitSHA: targetGitSHA,
+                       baselineGitSHA: baselineGitSHA
+                   ) {
+                    self.importIndexProgress = LedgerImportIndexProgress(
+                        providerLabel: providerLabel,
+                        entryCount: entryCount,
+                        phase: .indexed
+                    )
+                    await self.importIndexActivity.complete()
+                    if self.importIndexGeneration == trackingGeneration {
+                        self.importIndexTask = nil
+                    }
+                    return
+                }
+                if attempts.isMultiple(of: 20) {
+                    await self.importIndexActivity.updateIndexing()
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+            if self.importIndexGeneration == trackingGeneration {
+                self.importIndexTask = nil
+            }
+        }
+    }
+
+    private func restoreImportIndexTrackingIfNeeded() async {
+        guard applicationActive, phase == .ready, importIndexTask == nil,
+              !importIndexRestoreInFlight else { return }
+        importIndexRestoreInFlight = true
+        let trackingGeneration = importIndexGeneration
+        defer { importIndexRestoreInFlight = false }
+        guard let pending = await importIndexActivity.restorePending(),
+              trackingGeneration == importIndexGeneration else { return }
+        if pending.phase == "indexed" {
+            await importIndexActivity.complete()
+            return
+        }
+        let targetGitSHA = normalizedGitSHA(pending.targetGitSHA)
+        let baselineGitSHA = normalizedGitSHA(pending.baselineGitSHA)
+        guard targetGitSHA != nil || baselineGitSHA != nil else {
+            await importIndexActivity.end(immediately: true)
+            return
+        }
+        importIndexProgress = LedgerImportIndexProgress(
+            providerLabel: pending.providerLabel,
+            entryCount: pending.entryCount,
+            phase: .indexing
+        )
+        beginImportIndexPolling(
+            providerLabel: pending.providerLabel,
+            entryCount: pending.entryCount,
+            targetGitSHA: targetGitSHA,
+            baselineGitSHA: baselineGitSHA,
+            startsActivity: false,
+            trackingGeneration: trackingGeneration
+        )
+    }
+
+    private func indexHasAdvanced(
+        _ info: LedgerIndexInfo,
+        targetGitSHA: String?,
+        baselineGitSHA: String?
+    ) -> Bool {
+        guard info.enabled, info.active == true else { return false }
+        if info.requestCompleted == true {
+            return true
+        }
+        guard let current = normalizedGitSHA(info.gitSHA) else { return false }
+        if let targetGitSHA {
+            return current.caseInsensitiveCompare(targetGitSHA) == .orderedSame
+        }
+        if let baselineGitSHA {
+            return current.caseInsensitiveCompare(baselineGitSHA) != .orderedSame
+        }
+        return false
+    }
+
+    private func normalizedGitSHA(_ value: String?) -> String? {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized, !normalized.isEmpty else { return nil }
+        return normalized
+    }
+
+    private func stopImportIndexTracking() {
+        importIndexGeneration &+= 1
+        importIndexTask?.cancel()
+        importIndexTask = nil
+        importIndexProgress = nil
+        Task { await importIndexActivity.end(immediately: true) }
     }
 
     private func publishWidgetSnapshot(
@@ -948,6 +1119,7 @@ final class LedgerSession: ObservableObject {
     private func lockLocallyAfterBackground(for serverURL: URL) {
         guard phase == .ready else { return }
         _ = invalidateRequests()
+        stopImportIndexTracking()
         setLocallyLocked(true, for: serverURL)
         clearSensitiveCookie(for: serverURL)
         ledger = nil
