@@ -383,6 +383,29 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["已为 1 条交易添加标签。"].waitForExistence(timeout: 4))
     }
 
+    func testBulkTagSelectionKeepsAmountClearOfSelectionControl() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        if isPad {
+            app.buttons["sidebar-transactions"].tap()
+        } else {
+            app.tabBars.buttons["交易"].tap()
+        }
+
+        app.buttons["transaction-tag-selection"].tap()
+        XCTAssertTrue(app.buttons["transaction-select-row-88"].waitForExistence(timeout: 3))
+
+        let amount = app.descendants(matching: .any)["transaction-card-amount-88"]
+        let selection = app.descendants(matching: .any)["transaction-card-selection-88"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 3))
+        XCTAssertTrue(selection.waitForExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(amount.frame.maxX, selection.frame.minX)
+    }
+
     func testChartAxesPreserveTimeSpacingAndTouchShowsSelections() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
@@ -602,9 +625,11 @@ final class LedgerMobileUITests: XCTestCase {
             historyMenu.tap()
             app.buttons["重命名"].tap()
             XCTAssertTrue(app.alerts["重命名查询"].waitForExistence(timeout: 3))
+#if !targetEnvironment(macCatalyst)
             XCUIDevice.shared.press(.home)
             app.activate()
             XCTAssertFalse(app.alerts["重命名查询"].waitForExistence(timeout: 1))
+#endif
         }
 
         if app.tabBars.firstMatch.exists {
