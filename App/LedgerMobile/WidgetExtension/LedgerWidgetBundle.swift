@@ -8,6 +8,8 @@ struct LedgerWidgetBundle: WidgetBundle {
         AccountBalanceWidget()
         ExpenseCalendarWidget()
         ImportStatusWidget()
+#if !targetEnvironment(macCatalyst)
         ImportIndexLiveActivity()
+#endif
     }
 }

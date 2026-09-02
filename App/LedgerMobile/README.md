@@ -75,6 +75,27 @@ Apple Silicon Mac can run the same iPad build through Designed for iPad. After
 in Xcode. Regenerating the project restores the intended iOS platform settings
 if Xcode's recommended-settings migration added a native macOS target locally.
 
+For a standalone Mac app, build the Mac Catalyst destination. The first build
+may create Catalyst development provisioning profiles through the Apple account
+configured in Xcode:
+
+```bash
+cd App/LedgerMobile
+xcodegen generate
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -configuration Debug \
+    -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac' \
+    -derivedDataPath /tmp/ledger-mobile-catalyst-derived \
+    -allowProvisioningUpdates \
+    build
+```
+
+The Catalyst build includes the regular widgets. Live Activities and Dynamic
+Island remain available in the iOS build.
+
 ## Visual QA
 
 `--safe-preview` is compiled only into Debug builds. It skips account login and
