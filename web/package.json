@@ -50,5 +50,10 @@
     "typescript": "^5.7.2",
     "vite": "^8.0.16",
     "vitest": "^4.1.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "browserslist": "4.28.7"
+    }
   }
 }

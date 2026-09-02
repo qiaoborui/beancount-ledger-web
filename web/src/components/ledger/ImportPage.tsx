@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileArchive, FileSpreadsheet, FileText, FileUp, Inbox, Loader2, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Tag, Trash2, UploadCloud } from "lucide-react";
 import { ApiResponseError, fetchJson } from "@/lib/clientFetch";
 import i18n from "@/i18n";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
@@ -67,6 +67,7 @@ type ImportEntry = {
   fundingAccount: string;
   amount: number;
   currency: string;
+  tags?: string[];
   metadata: Record<string, string>;
   postings: ImportPosting[];
 };
@@ -309,6 +310,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
   const [selectedEntryId, setSelectedEntryId] = useState("");
+  const [selectedTagEntryIds, setSelectedTagEntryIds] = useState<Set<string>>(new Set());
+  const [bulkTagInput, setBulkTagInput] = useState("");
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [importDocuments, setImportDocuments] = useState<ImportDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
@@ -323,6 +326,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     return accounts.filter((account) => account.active);
   }, [preview]);
   const selectedEntry = useMemo(() => entries.find((entry) => entry.id === selectedEntryId) ?? entries[0] ?? null, [entries, selectedEntryId]);
+  const selectedTagEntryCount = selectedTagEntryIds.size;
+  const allEntriesSelectedForTags = entries.length > 0 && entries.every((entry) => selectedTagEntryIds.has(entry.id));
 
   const selectedProvider = providerChoices.find((choice) => choice.value === providerOverride) ?? providerChoices[0];
   const hasCommitted = commitResult?.ok === true;
@@ -429,6 +434,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setPreview(null);
     setEntries([]);
     setSelectedEntryId("");
+    setSelectedTagEntryIds(new Set());
+    setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
     setReviewOpen(false);
@@ -444,6 +451,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setPreview(null);
     setEntries([]);
     setSelectedEntryId("");
+    setSelectedTagEntryIds(new Set());
+    setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
     setReviewOpen(false);
@@ -463,6 +472,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setPreview(null);
     setEntries([]);
     setSelectedEntryId("");
+    setSelectedTagEntryIds(new Set());
+    setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
     try {
@@ -524,11 +535,53 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   }
 
   function removeEntry(id: string) {
+    setSelectedTagEntryIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setEntries((current) => {
       const next = current.filter((entry) => entry.id !== id);
       if (selectedEntryId === id) setSelectedEntryId(next[0]?.id ?? "");
       return next;
     });
+  }
+
+  function toggleTagEntry(id: string, checked: boolean) {
+    setSelectedTagEntryIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAllTagEntries(checked: boolean) {
+    setSelectedTagEntryIds(checked ? new Set(entries.map((entry) => entry.id)) : new Set());
+  }
+
+  function applyBulkImportTags(mode: "add" | "remove") {
+    const tags = normalizeImportTags(bulkTagInput.split(/[\s,]+/));
+    if (!selectedTagEntryIds.size) {
+      showToast("info", i18n.t("importPage.selectTransactionsForTags"));
+      return;
+    }
+    if (!tags.length || tags.length > 50 || tags.some((tag) => tag.length > 64 || !importTagPattern.test(tag))) {
+      showToast("error", i18n.t("importPage.tagFormatError"));
+      return;
+    }
+    const selected = selectedTagEntryIds;
+    const changed = new Set(tags);
+    setEntries((current) => current.map((entry) => {
+      if (!selected.has(entry.id)) return entry;
+      const existing = normalizeImportTags(entry.tags ?? []);
+      return {
+        ...entry,
+        tags: mode === "add" ? normalizeImportTags([...existing, ...tags]) : existing.filter((tag) => !changed.has(tag)),
+      };
+    }));
+    setBulkTagInput("");
+    showToast("success", i18n.t(mode === "add" ? "importPage.tagsAdded" : "importPage.tagsRemoved", { count: selected.size }));
   }
 
   function selectEntryOffset(offset: number) {
@@ -620,6 +673,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       setPreview(data.preview);
       setEntries(data.preview.entries);
       setSelectedEntryId(data.preview.entries[0]?.id ?? "");
+      setSelectedTagEntryIds(new Set());
+      setBulkTagInput("");
       setCommitResult(null);
       setSuccessDialogOpen(false);
       setDraftSavedAt(Date.now());
@@ -1062,6 +1117,42 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </Alert>
               ) : null}
 
+              {!hasCommitted && entries.length > 0 ? (
+                <div className="flex min-w-0 flex-col gap-2 border border-line bg-panel p-3 sm:flex-row sm:items-center">
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Checkbox
+                      id="import-select-all-tags"
+                      className="relative after:absolute after:-inset-3"
+                      checked={allEntriesSelectedForTags ? true : selectedTagEntryCount > 0 ? "indeterminate" : false}
+                      onCheckedChange={(checked) => toggleAllTagEntries(checked === true)}
+                      disabled={committing}
+                    />
+                    <Label htmlFor="import-select-all-tags" className="cursor-pointer text-sm text-ink">
+                      {i18n.t("importPage.selectedForTags", { count: selectedTagEntryCount })}
+                    </Label>
+                  </div>
+                  <div className="grid min-w-0 flex-1 grid-cols-2 items-center gap-2 sm:ml-2 sm:flex">
+                    <div className="relative col-span-2 min-w-0 flex-1">
+                      <Tag className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
+                      <Input
+                        className="h-11 min-w-0 bg-paper pl-9 sm:h-9"
+                        value={bulkTagInput}
+                        onChange={(event) => setBulkTagInput(event.target.value)}
+                        placeholder={i18n.t("importPage.bulkTagPlaceholder")}
+                        aria-label={i18n.t("importPage.bulkTagPlaceholder")}
+                        maxLength={1024}
+                        disabled={committing}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") applyBulkImportTags("add");
+                        }}
+                      />
+                    </div>
+                    <Button type="button" size="sm" className="h-11 sm:h-9" onClick={() => applyBulkImportTags("add")} disabled={committing || selectedTagEntryCount === 0}>{i18n.t("importPage.addTags")}</Button>
+                    <Button type="button" size="sm" variant="outline" className="h-11 sm:h-9" onClick={() => applyBulkImportTags("remove")} disabled={committing || selectedTagEntryCount === 0}>{i18n.t("importPage.removeTags")}</Button>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="grid min-w-0 gap-px border border-line bg-line xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,0.72fr)_minmax(560px,1.28fr)] xl:items-stretch xl:overflow-hidden 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(680px,1.3fr)]">
                 <section className="hidden min-w-0 overflow-hidden bg-panel xl:order-1 xl:flex xl:min-h-0 xl:flex-col">
                   <div className="flex min-w-0 flex-col gap-2 border-b border-line bg-paper px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1084,11 +1175,20 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                           <article
                             key={entry.id}
                             className={cn(
-                              "relative grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-center transition",
+                              "relative grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center transition",
                               selected ? "bg-[var(--selected-bg)]" : "bg-panel hover:bg-paper",
                             )}
                           >
                             {selected ? <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-brand" aria-hidden="true" /> : null}
+                            <div className="grid h-11 place-items-center">
+                              <Checkbox
+                                checked={selectedTagEntryIds.has(entry.id)}
+                                className="relative after:absolute after:-inset-3"
+                                onCheckedChange={(checked) => toggleTagEntry(entry.id, checked === true)}
+                                aria-label={i18n.t("importPage.selectTransactionForTags", { payee: entry.payee || entry.narration })}
+                                disabled={committing || hasCommitted}
+                              />
+                            </div>
                             <button type="button" className="min-w-0 px-3 py-2.5 pl-4 text-left" onClick={() => selectReviewEntry(entry.id)}>
                               <div className="grid min-w-0 gap-2 md:grid-cols-[5rem_minmax(0,1fr)_8rem] md:items-center">
                                 <div className="flex min-w-0 items-center gap-2 md:block">
@@ -1098,9 +1198,10 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                 <div className="min-w-0">
                                   <div className="flex min-w-0 items-center gap-2">
                                     <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || i18n.t("importPage.unnamedMerchant")}</span>
-                                    {entry.source ? <span className="shrink-0 rounded-full border border-brand/35 px-1.5 py-0.5 text-[10px] text-brand">{entry.source}</span> : null}
+                                    {entry.source ? <span className="shrink-0 rounded-full border border-brand/35 px-1.5 py-0.5 text-xs text-brand">{entry.source}</span> : null}
                                   </div>
                                   <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || i18n.t("importPage.noTitle")}</div>
+                                  {(entry.tags?.length ?? 0) > 0 ? <div className="mt-1 flex min-w-0 flex-wrap gap-1">{entry.tags?.map((tag) => <span key={tag} className="rounded-full bg-tag px-1.5 py-0.5 text-xs text-olive">#{tag}</span>)}</div> : null}
                                 </div>
                                 <div className="text-left md:text-right">
                                   <div className="font-serif text-lg font-medium leading-none text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
@@ -1196,7 +1297,16 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                       {entries.map((entry, index) => {
                         const selected = selectedEntry?.id === entry.id;
                         return (
-                          <article key={entry.id} className={cn("grid min-w-0 grid-cols-[minmax(0,1fr)_2.5rem] items-center", selected ? "bg-[var(--selected-bg)]" : "bg-panel")}>
+                          <article key={entry.id} className={cn("grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center", selected ? "bg-[var(--selected-bg)]" : "bg-panel")}>
+                            <div className="grid h-11 place-items-center">
+                              <Checkbox
+                                checked={selectedTagEntryIds.has(entry.id)}
+                                className="relative after:absolute after:-inset-3"
+                                onCheckedChange={(checked) => toggleTagEntry(entry.id, checked === true)}
+                                aria-label={i18n.t("importPage.selectTransactionForTags", { payee: entry.payee || entry.narration })}
+                                disabled={committing || hasCommitted}
+                              />
+                            </div>
                             <button type="button" className="min-w-0 px-3 py-2 text-left" onClick={() => selectReviewEntry(entry.id)}>
                               <div className="flex min-w-0 items-center justify-between gap-3">
                                 <div className="min-w-0">
@@ -1205,6 +1315,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                     <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || i18n.t("importPage.unnamedMerchant")}</span>
                                   </div>
                                   <div className="mt-0.5 truncate text-xs text-stone">{entry.date} · {entry.narration || i18n.t("importPage.noTitle")}</div>
+                                  {(entry.tags?.length ?? 0) > 0 ? <div className="mt-1 truncate text-xs text-olive">{entry.tags?.map((tag) => `#${tag}`).join(" ")}</div> : null}
                                 </div>
                                 <div className="shrink-0 text-right font-serif text-sm font-medium text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
                               </div>
@@ -1502,12 +1613,18 @@ export function summarizeImportPostings(postings: ImportPosting[]) {
 }
 
 export function importEntryHasReviewError(entry: ImportEntry) {
-  return entry.postings.length < 2 || entry.postings.some((posting) => (
+  return (entry.tags ?? []).length > 50 || (entry.tags ?? []).some((tag) => tag.length > 64 || !importTagPattern.test(tag)) || entry.postings.length < 2 || entry.postings.some((posting) => (
     !posting.account.trim()
     || !posting.amount.trim()
     || !Number.isFinite(Number(posting.amount))
     || !posting.currency.trim()
   ));
+}
+
+const importTagPattern = /^[A-Za-z0-9_-]+$/;
+
+function normalizeImportTags(tags: string[]) {
+  return [...new Set(tags.map((tag) => tag.trim().replace(/^#+/, "")).filter(Boolean))];
 }
 
 function ImportEntryEditor({
@@ -1532,6 +1649,11 @@ function ImportEntryEditor({
   onPostingRemove: (index: number) => void;
 }) {
   const flow = importFlowForEntry(entry);
+  const tagSignature = (entry.tags ?? []).join("\u0000");
+  const [tagText, setTagText] = useState(() => (entry.tags ?? []).map((tag) => `#${tag}`).join(" "));
+  useEffect(() => {
+    setTagText((entry.tags ?? []).map((tag) => `#${tag}`).join(" "));
+  }, [entry.id, tagSignature]);
   const postingSummary = summarizeImportPostings(entry.postings);
   const metaItems = [
     { label: i18n.t("importPage.methodLabel"), value: entry.method || "-" },
@@ -1587,6 +1709,22 @@ function ImportEntryEditor({
         <Label className="mt-3 block min-w-0">
           <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.narrationLabel")}</span>
           <Input className="h-10 min-w-0 bg-panel" value={entry.narration} onChange={(event) => onEntryChange({ narration: event.target.value })} disabled={disabled} />
+        </Label>
+        <Label className="mt-3 block min-w-0">
+          <span className="mb-1.5 block text-xs text-stone">{i18n.t("importPage.tagsLabel")}</span>
+          <Input
+            className="h-10 min-w-0 bg-panel"
+            value={tagText}
+            onChange={(event) => {
+              setTagText(event.target.value);
+              onEntryChange({ tags: normalizeImportTags(event.target.value.split(/[\s,]+/)) });
+            }}
+            disabled={disabled}
+            placeholder="#travel #trip-2026-hokkaido"
+            maxLength={1024}
+            aria-invalid={(entry.tags ?? []).some((tag) => !importTagPattern.test(tag))}
+          />
+          <span className="mt-1 block text-xs leading-5 text-stone">{i18n.t("importPage.tagsHint")}</span>
         </Label>
       </section>
 

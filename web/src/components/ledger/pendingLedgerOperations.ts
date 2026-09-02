@@ -40,10 +40,19 @@ export type PendingDeleteTransactionOperation = {
   reason: string;
 } & PendingLedgerOperationBase;
 
+export type PendingAddTransactionTagsOperation = {
+  id: string;
+  createdAt: number;
+  kind: "add-transaction-tags";
+  sources: Txn["source"][];
+  tags: string[];
+} & PendingLedgerOperationBase;
+
 export type PendingLedgerOperation =
   | PendingAppendOperation
   | PendingUpdateTransactionOperation
-  | PendingDeleteTransactionOperation;
+  | PendingDeleteTransactionOperation
+  | PendingAddTransactionTagsOperation;
 
 type LegacyPendingWrite = {
   id: string;
@@ -52,7 +61,7 @@ type LegacyPendingWrite = {
 };
 
 export function sourceKey(source: Txn["source"]) {
-  return source.hash ? `${source.file}#${source.hash}` : `${source.file}:${source.line}`;
+  return JSON.stringify([source.file, source.line, source.hash ?? ""]);
 }
 
 function isTransactionOperation(operation: PendingLedgerOperation): operation is PendingUpdateTransactionOperation | PendingDeleteTransactionOperation {
@@ -60,9 +69,66 @@ function isTransactionOperation(operation: PendingLedgerOperation): operation is
 }
 
 export function mergePendingOperation(operations: PendingLedgerOperation[], operation: PendingLedgerOperation) {
+  if (operation.kind === "add-transaction-tags") {
+    const pending = new Map(operation.sources.map((source) => [sourceKey(source), source]));
+    const merged: PendingLedgerOperation[] = [];
+    for (const item of operations) {
+      if (item.kind === "update-transaction") {
+        const key = sourceKey(item.source);
+        if (!pending.has(key)) merged.push(item);
+        else {
+          pending.delete(key);
+          merged.push({ ...item, entry: { ...item.entry, tags: [...new Set([...(item.entry.tags ?? []), ...operation.tags])] } });
+        }
+        continue;
+      }
+      if (item.kind === "delete-transaction") {
+        pending.delete(sourceKey(item.source));
+        merged.push(item);
+        continue;
+      }
+      if (item.kind !== "add-transaction-tags") {
+        merged.push(item);
+        continue;
+      }
+      const overlap = item.sources.filter((source) => pending.has(sourceKey(source)));
+      if (!overlap.length) {
+        merged.push(item);
+        continue;
+      }
+      for (const source of overlap) pending.delete(sourceKey(source));
+      const remaining = item.sources.filter((source) => !overlap.some((candidate) => sourceKey(candidate) === sourceKey(source)));
+      if (remaining.length) merged.push({ ...item, sources: remaining });
+      merged.push({
+        ...item,
+        id: remaining.length ? `${item.id}:${operation.id}` : item.id,
+        sources: overlap,
+        tags: [...new Set([...item.tags, ...operation.tags])],
+      });
+    }
+    const sources = [...pending.values()];
+    return sources.length ? [...merged, { ...operation, sources }] : merged;
+  }
   if (!isTransactionOperation(operation)) return [...operations, operation];
   const key = sourceKey(operation.source);
-  return [...operations.filter((item) => !isTransactionOperation(item) || sourceKey(item.source) !== key), operation];
+  let nextOperation = operation;
+  const remaining: PendingLedgerOperation[] = [];
+  for (const item of operations) {
+    if (item.kind === "add-transaction-tags") {
+      if (!item.sources.some((source) => sourceKey(source) === key)) {
+        remaining.push(item);
+        continue;
+      }
+      if (operation.kind === "update-transaction") {
+        nextOperation = { ...operation, entry: { ...operation.entry, tags: [...new Set([...(operation.entry.tags ?? []), ...item.tags])] } };
+      }
+      const sources = item.sources.filter((source) => sourceKey(source) !== key);
+      if (sources.length) remaining.push({ ...item, sources });
+      continue;
+    }
+    if (!isTransactionOperation(item) || sourceKey(item.source) !== key) remaining.push(item);
+  }
+  return [...remaining, nextOperation];
 }
 
 export function normalizePendingLedgerOperations(operations: unknown): PendingLedgerOperation[] {
@@ -75,6 +141,7 @@ export function normalizePendingLedgerOperations(operations: unknown): PendingLe
     if (operation.kind === "append" && operation.entry) normalized.push({ ...operation, status } as PendingAppendOperation);
     if (operation.kind === "update-transaction" && operation.source && operation.entry) normalized.push({ ...operation, status } as PendingUpdateTransactionOperation);
     if (operation.kind === "delete-transaction" && operation.source && typeof operation.reason === "string") normalized.push({ ...operation, status } as PendingDeleteTransactionOperation);
+    if (operation.kind === "add-transaction-tags" && Array.isArray(operation.sources) && operation.sources.length && Array.isArray(operation.tags) && operation.tags.length) normalized.push({ ...operation, status } as PendingAddTransactionTagsOperation);
   }
   return normalized;
 }
@@ -149,6 +216,16 @@ export function applyPendingLedgerOperations(txns: Txn[], operations: PendingLed
       if (operation.entry.kind !== "transaction") continue;
       const next = entryToPendingAppendTxn(operation.entry, operation.id);
       if (inRange(next, range)) rows = insertPendingAppend(rows, next);
+      continue;
+    }
+
+    if (operation.kind === "add-transaction-tags") {
+      const keys = new Set(operation.sources.map(sourceKey));
+      rows = rows.map((txn) => keys.has(sourceKey(txn.source)) ? {
+        ...txn,
+        tags: [...new Set([...(txn.tags ?? []), ...operation.tags])],
+        pending: { kind: "add-transaction-tags", operationId: operation.id },
+      } : txn);
       continue;
     }
 

@@ -34,13 +34,13 @@ alipay:
     - category: 医疗健康
       targetAccount: Expenses:Health:Pharmacy
     - category: 酒店旅游
-      targetAccount: Expenses:Travel
+      targetAccount: Expenses:Accommodation:Hotel
     - category: 交通出行
       targetAccount: Expenses:Transport:Taxi
     - category: 爱车养车
       targetAccount: Expenses:Transport:Parking
     - category: 文化休闲
-      targetAccount: Expenses:Travel
+      targetAccount: Expenses:Entertainment
 
     - peer: 咖啡,奶茶,饮品
       targetAccount: Expenses:Food:Drinks
@@ -60,10 +60,18 @@ alipay:
       targetAccount: Expenses:Transport:Taxi
     - peer: 停车,停车场
       targetAccount: Expenses:Transport:Parking
-    - peer: 火车,酒店,民宿,门票
-      targetAccount: Expenses:Travel
-    - item: 火车票,酒店订单,门票
-      targetAccount: Expenses:Travel
+    - peer: 火车,高铁
+      targetAccount: Expenses:Transport:Public
+    - peer: 酒店,民宿
+      targetAccount: Expenses:Accommodation:Hotel
+    - peer: 景区,门票
+      targetAccount: Expenses:Entertainment
+    - item: 火车票,高铁票
+      targetAccount: Expenses:Transport:Public
+    - item: 酒店订单,民宿订单
+      targetAccount: Expenses:Accommodation:Hotel
+    - item: 景区门票
+      targetAccount: Expenses:Entertainment
     - peer: 手机话费,通信运营商
       targetAccount: Expenses:Communication:Mobile
     - peer: AI 服务,App Store,订阅,云服务

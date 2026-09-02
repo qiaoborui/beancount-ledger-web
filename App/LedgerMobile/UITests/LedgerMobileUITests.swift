@@ -63,8 +63,13 @@ final class LedgerMobileUITests: XCTestCase {
 
         app.buttons["筛选交易"].tap()
         XCTAssertTrue(app.navigationBars["筛选交易"].waitForExistence(timeout: 3))
+        let learningTag = app.buttons["transaction-tag-filter-learning"]
+        XCTAssertTrue(learningTag.waitForExistence(timeout: 3))
+        learningTag.tap()
         capture("04-transaction-filters")
         app.buttons["完成"].tap()
+        XCTAssertTrue(app.staticTexts["#learning"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["1 / 10 笔"].exists)
 
         let firstTransaction = app.staticTexts["城市书房"].firstMatch
         XCTAssertTrue(firstTransaction.waitForExistence(timeout: 3))

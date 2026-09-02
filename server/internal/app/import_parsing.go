@@ -86,6 +86,7 @@ func previewEntryFromBeanEntry(beanEntry BeanEntry, index int) (ImportEntry, err
 		FundingAccount:  funding.Account,
 		Amount:          amount,
 		Currency:        currency,
+		Tags:            append([]string(nil), beanEntry.Tags...),
 		Metadata:        metadata,
 		Postings:        postings,
 	}, nil

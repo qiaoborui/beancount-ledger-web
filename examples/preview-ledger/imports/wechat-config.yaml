@@ -51,8 +51,10 @@ wechat:
       targetAccount: Expenses:Health:Pharmacy
     - peer: 健身,运动
       targetAccount: Expenses:Health:Fitness
-    - peer: 旅游,酒店,客栈,民宿,门票
-      targetAccount: Expenses:Travel
+    - peer: 酒店,客栈,民宿
+      targetAccount: Expenses:Accommodation:Hotel
+    - peer: 旅游平台,景区,门票
+      targetAccount: Expenses:Entertainment
     - peer: AI 服务,Apple,App Store,iCloud,云服务
       targetAccount: Expenses:Digital:Subscription
     - type: 支出

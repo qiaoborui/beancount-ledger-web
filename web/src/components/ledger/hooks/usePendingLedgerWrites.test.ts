@@ -22,6 +22,7 @@ vi.mock("@/lib/indexedLedgerCache", () => ({
 
 import { discardPendingLedgerOperation, hasPendingOperationsToSync, isPendingLedgerConflict, readPendingLedgerOperations, syncOperation } from "./usePendingLedgerWrites";
 import type { PendingLedgerOperation } from "../pendingLedgerOperations";
+import i18n from "@/i18n";
 
 const pendingOperationsKey = "ledger_pending_operations";
 const indexedPendingOperationsKey = "ledger_pending_operations:v2";
@@ -123,6 +124,21 @@ describe("syncOperation", () => {
     expect(body.source).toEqual({ file: "/ledger/transactions/2026/05.bean", line: 12, hash: "old-hash" });
   });
 
+  it("syncs bulk tags with one grouped request", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ ok: true }, true));
+    vi.stubGlobal("fetch", fetchMock);
+    const sources = [
+      { file: "/ledger/transactions/2026/05.bean", line: 12, hash: "hash-12" },
+      { file: "/ledger/transactions/2026/05.bean", line: 24, hash: "hash-24" },
+    ];
+
+    await syncOperation({ id: "tags-1", createdAt: 1, kind: "add-transaction-tags", sources, tags: ["travel"] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/ledger/transactions/tags");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ sources, tags: ["travel"] });
+  });
+
   it("keeps the transaction hash when a delete needs confirmation", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(response({ error: "找不到原交易，账本可能已被修改，请刷新后重试" }, false));
     vi.stubGlobal("fetch", fetchMock);
@@ -146,6 +162,17 @@ describe("syncOperation", () => {
     expect(isPendingLedgerConflict("找不到原交易，账本可能已被修改，请刷新后重试")).toBe(true);
     expect(isPendingLedgerConflict("交易来源不唯一，账本可能已被修改，请刷新后重试")).toBe(true);
     expect(isPendingLedgerConflict("连接超时")).toBe(false);
+  });
+
+  it("classifies server conflicts while the interface uses English", async () => {
+    const previousLanguage = i18n.language;
+    await i18n.changeLanguage("en-US");
+    try {
+      expect(isPendingLedgerConflict("找不到原交易，账本可能已被修改，请刷新后重试")).toBe(true);
+      expect(isPendingLedgerConflict("交易来源不唯一，账本可能已被修改，请刷新后重试")).toBe(true);
+    } finally {
+      await i18n.changeLanguage(previousLanguage);
+    }
   });
 
   it("rejects pending writes that belong to another ledger", async () => {

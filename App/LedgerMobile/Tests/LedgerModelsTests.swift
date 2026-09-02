@@ -335,6 +335,26 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertFalse(LedgerTransactionFilter(kind: .income).matches(expense))
         XCTAssertTrue(LedgerTransactionFilter(account: "Assets:Bank:Daily").matches(income))
         XCTAssertFalse(LedgerTransactionFilter(account: "Liabilities:CreditCard:Visa").matches(income))
+        XCTAssertTrue(LedgerTransactionFilter(tags: ["travel", "dining"]).matches(expense))
+        XCTAssertFalse(LedgerTransactionFilter(tags: ["travel"]).matches(expense))
+        XCTAssertFalse(LedgerTransactionFilter(tags: ["dining"]).matches(income))
+        XCTAssertTrue(LedgerTransactionFilter(tags: ["dining"]).isActive)
+        XCTAssertFalse(
+            LedgerTransactionFilter(
+                query: "海底",
+                kind: .expense,
+                account: "Assets:Bank:Daily",
+                tags: ["travel"]
+            ).matches(expense)
+        )
+        XCTAssertTrue(
+            LedgerTransactionFilter(
+                query: "晚餐",
+                kind: .expense,
+                account: "Expenses:Food:Dining",
+                tags: ["dining"]
+            ).matches(expense)
+        )
     }
 
     func testCompactMoneyUsesChineseAndInternationalUnits() {

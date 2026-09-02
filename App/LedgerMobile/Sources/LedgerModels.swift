@@ -1111,11 +1111,13 @@ struct LedgerTransactionFilter: Equatable, Sendable {
     var query = ""
     var kind = TransactionKindFilter.all
     var account: String?
+    var tags: Set<String> = []
 
     var isActive: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || kind != .all
             || account != nil
+            || !tags.isEmpty
     }
 
     func matches(_ transaction: LedgerTransaction) -> Bool {
@@ -1135,6 +1137,11 @@ struct LedgerTransactionFilter: Equatable, Sendable {
 
         if let account, !transaction.postings.contains(where: { $0.account == account }) {
             return false
+        }
+
+        if !tags.isEmpty {
+            let transactionTags = Set(transaction.tags ?? [])
+            guard !transactionTags.isDisjoint(with: tags) else { return false }
         }
 
         let words = query

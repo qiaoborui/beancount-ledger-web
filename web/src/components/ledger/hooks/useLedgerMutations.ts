@@ -10,7 +10,7 @@ function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void }) {
+export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void; enqueueAddTransactionTags: (sources: Txn["source"][], tags: string[]) => void }) {
   const [assertion, setAssertion] = useState<BalanceAssertion>({
     kind: "balance",
     date: new Date().toISOString().slice(0, 10),
@@ -54,6 +54,12 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
     showToast("success", i18n.t("ledgerMutations.transactionHiddenLocal"));
   }
 
+  async function addTransactionTags(sources: Txn["source"][], tags: string[]) {
+    enqueueAddTransactionTags(sources, tags);
+    haptic(8);
+    showToast("success", i18n.t("ledgerMutations.transactionTagsSavedLocal", { count: sources.length }));
+  }
+
   async function reverseTransaction(source: Txn["source"], date: string) {
     const res = await apiFetch("/api/ledger/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, date }) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
@@ -72,5 +78,5 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
     load(true);
   }
 
-  return { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount };
+  return { assertion, setAssertion, appendAssertion, updateTransaction, deleteTransaction, addTransactionTags, reverseTransaction, reconcileAccount };
 }

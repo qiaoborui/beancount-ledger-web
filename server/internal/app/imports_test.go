@@ -1917,6 +1917,29 @@ func TestCmbCheckingFXImportHelpers(t *testing.T) {
 	}
 }
 
+func TestImportPreviewAndRenderPreserveTags(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, cache: NewLedgerCache(cfg)}
+	entries, err := parsePreviewEntries(strings.Join([]string{
+		`2026-05-03 * "Airline" "Ticket" #travel #trip-2026-hokkaido`,
+		"  Expenses:Food 12.00 CNY",
+		"  Assets:Cash -12.00 CNY",
+	}, "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || strings.Join(entries[0].Tags, ",") != "travel,trip-2026-hokkaido" {
+		t.Fatalf("preview lost tags: %#v", entries)
+	}
+	rendered, err := server.validateAndRenderImportEntries(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, `"Ticket" #travel #trip-2026-hokkaido`) {
+		t.Fatalf("rendered import lost tags:\n%s", rendered)
+	}
+}
+
 func TestCcbCreditEmailImportHelpers(t *testing.T) {
 	cfg := testLedger(t)
 	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "ccb-credit-card-config.yaml"), strings.Join([]string{

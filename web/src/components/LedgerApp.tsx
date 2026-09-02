@@ -425,10 +425,10 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
     return () => window.removeEventListener(apiEndpointSettingsChangeEvent, handleEndpointChange);
   }, [load, setUnlocked, showToast]);
 
-  const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, syncPendingWrites, syncingPendingWrites, discardPendingOperation } = usePendingLedgerWrites({ load, showToast, ledgerVersion });
+  const { pendingOperations, pendingWriteCount, pendingWriteSummary, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags, syncPendingWrites, syncingPendingWrites, discardPendingOperation } = usePendingLedgerWrites({ load, showToast, ledgerVersion });
   const pendingConflict = useMemo(() => pendingOperations.find((operation) => operation.id === conflictOperationId && operation.status === "conflict") ?? null, [conflictOperationId, pendingOperations]);
   const { nl, setNl, previews, parseStatus, parseMessage, appendStatus, entryOpen, setEntryOpen, manual, setManual, parseNl, previewManualEntry, removePreview, appendPreviews, appendEntry } = useEntryActions({ load, showToast, enqueuePendingWrites });
-  const { updateTransaction, deleteTransaction, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete });
+  const { updateTransaction, deleteTransaction, addTransactionTags, reverseTransaction, reconcileAccount } = useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags });
   const { accountLabelMap, accountPageAccounts, expenseAccounts, incomeAccounts, paymentAccounts, visibleBalances, netWorthChart } = useLedgerDerivedData({ summary, accounts, balances, accountBalances, netWorthRows, page, valuationCurrency });
   const dataValuationCurrency = summary?.currency ?? incomeStatement?.valuationCurrency ?? valuationCurrency;
   const incomeStatementCurrency = incomeStatement?.valuationCurrency ?? dataValuationCurrency;
@@ -755,6 +755,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   const guardedAppendPreviews = () => { appendPreviews(); };
   const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { updateTransaction(...args); };
   const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { deleteTransaction(...args); };
+  const guardedAddTransactionTags = (...args: Parameters<typeof addTransactionTags>) => { addTransactionTags(...args); };
   const guardedReverseTransaction = (...args: Parameters<typeof reverseTransaction>) => { if (guardOnline()) reverseTransaction(...args); };
   const guardedReconcileAccount = (...args: Parameters<typeof reconcileAccount>) => { if (guardOnline()) reconcileAccount(...args); };
   const guardedImportRefresh = () => {
@@ -887,6 +888,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             setViewMode={setTxnViewMode}
             onUpdate={guardedUpdateTransaction}
             onDelete={guardedDeleteTransaction}
+            onAddTags={guardedAddTransactionTags}
             onReverse={guardedReverseTransaction}
             showToast={showToast}
           />
@@ -918,7 +920,7 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingConflict && <p className="rounded-lg bg-tag px-3 py-2 text-sm text-warm">
-            {pendingConflict.kind === "append" ? t("ledgerApp.conflictAppend") : pendingConflict.kind === "update-transaction" ? t("ledgerApp.conflictUpdate", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` }) : t("ledgerApp.conflictDelete", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` })}
+            {pendingConflict.kind === "append" ? t("ledgerApp.conflictAppend") : pendingConflict.kind === "update-transaction" ? t("ledgerApp.conflictUpdate", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` }) : pendingConflict.kind === "add-transaction-tags" ? t("ledgerApp.conflictBulkTags", { count: pendingConflict.sources.length }) : t("ledgerApp.conflictDelete", { source: `${pendingConflict.source.file}:${pendingConflict.source.line}` })}
           </p>}
           <AlertDialogFooter>
             <AlertDialogCancel>{t("ledgerApp.keepLocalChange")}</AlertDialogCancel>
@@ -971,7 +973,7 @@ function TransactionQuickViews({ views, onSelect }: { views: typeof TRANSACTION_
     <section className="hidden min-h-12 items-center justify-between gap-3 border-b border-line bg-tag px-3 py-2 lg:flex md:px-4">
       <div>
         <div className="text-xs font-medium text-ink">{t("ledgerApp.commonViews")}</div>
-        <div className="mt-0.5 text-[10px] text-stone">{t("ledgerApp.commonViewsHint")}</div>
+        <div className="mt-0.5 text-xs text-stone">{t("ledgerApp.commonViewsHint")}</div>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
         {views.map((view) => (

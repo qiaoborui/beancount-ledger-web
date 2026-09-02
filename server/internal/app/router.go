@@ -442,6 +442,22 @@ func (s *Server) updateTransaction(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) addTransactionTags(c *gin.Context) {
+	if !requireAuth(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
+	var input AddTransactionTagsRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	if err := s.txService.AddTags(input.Sources, input.Tags); err != nil {
+		errorJSON(c, ledgerWriteErrorStatus(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (s *Server) deleteTransaction(c *gin.Context) {
 	if !requireAuth(c) {
 		return

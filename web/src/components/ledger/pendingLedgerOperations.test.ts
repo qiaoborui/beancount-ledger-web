@@ -90,6 +90,68 @@ describe("pending ledger operations", () => {
     expect(rows.map((row) => row.source.line)).toEqual([9]);
   });
 
+  it("projects one grouped tag operation across all selected transactions", () => {
+    const first = txn(3, { tags: ["work"] });
+    const second = txn(9);
+    const rows = applyPendingLedgerOperations([first, second], [{
+      id: "tags-1",
+      createdAt: 1,
+      kind: "add-transaction-tags",
+      sources: [first.source, second.source],
+      tags: ["travel", "trip-2026-hokkaido"],
+    }]);
+
+    expect(rows[0].tags).toEqual(["work", "travel", "trip-2026-hokkaido"]);
+    expect(rows[1].tags).toEqual(["travel", "trip-2026-hokkaido"]);
+    expect(rows[0].pending).toEqual({ kind: "add-transaction-tags", operationId: "tags-1" });
+  });
+
+  it("keeps line-distinct transactions with the same hash in one grouped tag operation", () => {
+    const first = txn(3, { source: { file: "/ledger/2026.bean", line: 3, hash: "same-hash" } });
+    const second = txn(9, { source: { file: "/ledger/2026.bean", line: 9, hash: "same-hash" } });
+    const operations = mergePendingOperation([], {
+      id: "tags-1",
+      createdAt: 1,
+      kind: "add-transaction-tags",
+      sources: [first.source, second.source],
+      tags: ["travel"],
+    });
+    const rows = applyPendingLedgerOperations([first, second], operations);
+
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ kind: "add-transaction-tags", sources: [first.source, second.source] });
+    expect(rows.map((row) => row.tags)).toEqual([["travel"], ["travel"]]);
+  });
+
+  it("folds pending batch tags into a later full transaction update", () => {
+    const source = txn(3).source;
+    const tagged = mergePendingOperation([], { id: "tags-1", createdAt: 1, kind: "add-transaction-tags", sources: [source], tags: ["travel"] });
+    const merged = mergePendingOperation(tagged, updateOperation("update-1", source, { tags: ["food"] }));
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ kind: "update-transaction", entry: { tags: ["food", "travel"] } });
+  });
+
+  it("folds a later tag batch into an existing pending update", () => {
+    const source = txn(3).source;
+    const updated = mergePendingOperation([], updateOperation("update-1", source, { tags: ["food"] }));
+    const merged = mergePendingOperation(updated, { id: "tags-1", createdAt: 2, kind: "add-transaction-tags", sources: [source], tags: ["travel"] });
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ kind: "update-transaction", entry: { tags: ["food", "travel"] } });
+  });
+
+  it("splits overlapping tag batches without applying new tags to unrelated rows", () => {
+    const first = txn(3);
+    const second = txn(9);
+    const initial = mergePendingOperation([], { id: "tags-1", createdAt: 1, kind: "add-transaction-tags", sources: [first.source, second.source], tags: ["travel"] });
+    const merged = mergePendingOperation(initial, { id: "tags-2", createdAt: 2, kind: "add-transaction-tags", sources: [first.source], tags: ["work"] });
+    const rows = applyPendingLedgerOperations([first, second], merged);
+
+    expect(rows[0].tags).toEqual(["travel", "work"]);
+    expect(rows[1].tags).toEqual(["travel"]);
+  });
+
   it("keeps only the latest operation for the same transaction", () => {
     const source = txn(3).source;
     const first = updateOperation("op-1", source, { narration: "First" });
