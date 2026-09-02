@@ -530,6 +530,9 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 		return nil, err
 	}
 	result := ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}
+	if written.GitSHA != "" {
+		result["indexGitSHA"] = written.GitSHA
+	}
 	if err := s.cleanupImportRuntime(ctx, importID); err != nil {
 		result["runtimeCleanupError"] = err.Error()
 	}
@@ -991,11 +994,12 @@ type writtenImportFiles struct {
 	OutputFile   string
 	MonthFile    string
 	DocumentFile string
+	GitSHA       string
 }
 
 func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID string) (writtenImportFiles, error) {
 	written := writtenImportFiles{MonthFile: monthFile}
-	err := s.writer.RunTransactionWithSource(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
+	gitSHA, err := s.writer.RunTransactionWithSourceResult(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
 		var err error
 		marker := "; import-id: " + importID
 		if existing, readErr := tx.ReadFile(outputFile); readErr == nil && strings.Contains(string(existing), marker) {
@@ -1054,5 +1058,6 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 		}
 		return nil
 	})
+	written.GitSHA = gitSHA
 	return written, err
 }

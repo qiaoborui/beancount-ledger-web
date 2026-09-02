@@ -3,6 +3,17 @@ import SwiftUI
 struct MoreView: View {
     @EnvironmentObject private var session: LedgerSession
 
+    private var importLinkPresented: Binding<Bool> {
+        Binding(
+            get: { session.primaryDestinationID == LedgerDestination.imports.rawValue },
+            set: { presented in
+                if !presented, session.primaryDestinationID == LedgerDestination.imports.rawValue {
+                    session.primaryDestinationID = LedgerDestination.settings.rawValue
+                }
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -160,6 +171,9 @@ struct MoreView: View {
             }
             .background(LedgerPalette.canvas)
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: importLinkPresented) {
+                ImportHistoryView()
+            }
         }
     }
 }

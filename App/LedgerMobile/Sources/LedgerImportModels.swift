@@ -96,6 +96,8 @@ struct LedgerImportPosting: Codable, Equatable, Identifiable, Sendable {
 }
 
 struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
+    static let maximumEditableMainAmount = 9_000_000_000_000_000.0
+
     let id: String
     let date: String
     let flag: String
@@ -113,6 +115,7 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
     let fundingAccount: String
     let amount: Double
     let currency: String
+    var tags: [String]? = nil
     let metadata: [String: String]
     let postings: [LedgerImportPosting]
 
@@ -134,8 +137,118 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
         case fundingAccount
         case amount
         case currency
+        case tags
         case metadata
         case postings
+    }
+
+    var supportsMainAmountEditing: Bool {
+        guard postings.count == 2,
+              categoryAccount != fundingAccount,
+              postings.allSatisfy({ posting in
+                  posting.currency == currency
+                      && posting.priceKind == nil
+                      && posting.priceAmount == nil
+                      && posting.priceCurrency == nil
+                      && Double(posting.amount) != nil
+                      && Self.hasAtMostTwoFractionDigits(posting.amount)
+              }) else { return false }
+        let accounts = Set(postings.map(\.account))
+        return accounts.contains(categoryAccount) && accounts.contains(fundingAccount)
+    }
+
+    func applyingReviewEdits(
+        date: String,
+        flag: String,
+        payee: String,
+        narration: String,
+        amount: Double,
+        categoryAccount: String,
+        fundingAccount: String
+    ) -> LedgerImportEntry {
+        let categoryIndex = postings.firstIndex { $0.account == self.categoryAccount }
+        let fundingIndex = postings.firstIndex { $0.account == self.fundingAccount }
+        var updatedPostings = postings.map { posting in
+            posting.replacing(
+                account: posting.account == self.categoryAccount
+                    ? categoryAccount
+                    : posting.account == self.fundingAccount
+                        ? fundingAccount
+                        : posting.account
+            )
+        }
+        var updatedAmount = self.amount
+
+        if supportsMainAmountEditing,
+           amount.isFinite,
+           amount > 0,
+           amount <= Self.maximumEditableMainAmount,
+           let categoryIndex,
+           let fundingIndex,
+           let originalFundingAmount = Double(postings[fundingIndex].amount) {
+            let fundingSign = originalFundingAmount < 0 ? -1.0 : 1.0
+            let fundingAmount = fundingSign * amount
+            updatedPostings[fundingIndex] = updatedPostings[fundingIndex].replacing(
+                amount: Self.decimalText(fundingAmount)
+            )
+            updatedPostings[categoryIndex] = updatedPostings[categoryIndex].replacing(
+                amount: Self.decimalText(-fundingAmount)
+            )
+            updatedAmount = amount
+        }
+
+        return LedgerImportEntry(
+            id: id,
+            date: date,
+            flag: flag,
+            payee: payee.trimmingCharacters(in: .whitespacesAndNewlines),
+            narration: narration.trimmingCharacters(in: .whitespacesAndNewlines),
+            source: source,
+            orderID: orderID,
+            merchantID: merchantID,
+            payTime: payTime,
+            method: method,
+            transactionType: transactionType,
+            status: status,
+            type: type,
+            categoryAccount: categoryAccount,
+            fundingAccount: fundingAccount,
+            amount: updatedAmount,
+            currency: currency,
+            tags: tags,
+            metadata: metadata,
+            postings: updatedPostings
+        )
+    }
+
+    private static func decimalText(_ value: Double) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private static func hasAtMostTwoFractionDigits(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unsigned = trimmed.first == "-" || trimmed.first == "+" ? trimmed.dropFirst() : trimmed[...]
+        let components = unsigned.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count <= 2,
+              let whole = components.first,
+              !whole.isEmpty,
+              whole.allSatisfy(\.isWholeNumber) else { return false }
+        guard components.count == 2 else { return true }
+        let fraction = components[1]
+        return (1...2).contains(fraction.count) && fraction.allSatisfy(\.isWholeNumber)
+    }
+}
+
+private extension LedgerImportPosting {
+    func replacing(account: String? = nil, amount: String? = nil) -> LedgerImportPosting {
+        LedgerImportPosting(
+            account: account ?? self.account,
+            amount: amount ?? self.amount,
+            currency: currency,
+            priceKind: priceKind,
+            priceAmount: priceAmount,
+            priceCurrency: priceCurrency
+        )
     }
 }
 
@@ -195,5 +308,25 @@ struct LedgerImportCommitResult: Decodable, Equatable, Sendable {
     let count: Int
     let beanText: String?
     let readModelPending: Bool?
+    let indexGitSHA: String?
     let runtimeCleanupError: String?
+}
+
+struct LedgerIndexInfo: Decodable, Equatable, Sendable {
+    let enabled: Bool
+    let active: Bool?
+    let gitSHA: String?
+    let indexedAt: String?
+    let requestCompleted: Bool?
+}
+
+enum LedgerImportIndexPhase: Equatable, Sendable {
+    case indexing
+    case indexed
+}
+
+struct LedgerImportIndexProgress: Equatable, Sendable {
+    let providerLabel: String
+    let entryCount: Int
+    let phase: LedgerImportIndexPhase
 }

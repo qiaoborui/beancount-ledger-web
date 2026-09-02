@@ -32,7 +32,7 @@ let package = Package(
                 "TimeRangePicker.swift",
                 "TransactionViews.swift",
             ],
-            sources: ["APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift"]
+            sources: ["APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "ImportIndexActivityAttributes.swift", "ImportIndexActivityCoordinator.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift"]
         ),
         .testTarget(
             name: "LedgerMobileTests",

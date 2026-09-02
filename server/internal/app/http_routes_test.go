@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,56 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
+
+type testLedgerIndexRequestStatusPort struct {
+	testLedgerIndexPort
+	status string
+	found  bool
+}
+
+func (p testLedgerIndexRequestStatusPort) IndexRequestStatus(context.Context, string) (string, bool, error) {
+	return p.status, p.found, nil
+}
+
+func TestIndexInfoReportsRequestedRevisionCompletion(t *testing.T) {
+	indexedAt := time.Date(2026, time.September, 2, 8, 30, 0, 0, time.UTC)
+	server := &Server{
+		cfg: Config{LedgerReadModel: "postgres"},
+		indexStore: testLedgerIndexRequestStatusPort{
+			testLedgerIndexPort: testLedgerIndexPort{revision: LedgerIndexRevision{
+				ID:        1,
+				GitSHA:    "newer-revision",
+				IndexedAt: indexedAt,
+			}},
+			status: "completed",
+			found:  true,
+		},
+	}
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodGet, "/api/ledger/index-info?gitSHA=target-revision", nil)
+
+	server.indexInfo(ginContext)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("index info status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		GitSHA           string `json:"gitSHA"`
+		RequestStatus    string `json:"requestStatus"`
+		RequestCompleted bool   `json:"requestCompleted"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.GitSHA != "newer-revision" || body.RequestStatus != "completed" || !body.RequestCompleted {
+		t.Fatalf("unexpected index info: %#v", body)
+	}
+}
 
 func TestRouterAuthAndSummary(t *testing.T) {
 	cfg := testLedger(t)
@@ -50,6 +100,10 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	bootstrap := requestWithCookies(router, http.MethodGet, "/api/ledger/bootstrap?start=2026-05-01&end=2026-06-01", "", login.Result().Cookies())
 	if got := bootstrap.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("ledger/bootstrap Cache-Control=%q", got)
+	}
+	indexInfo := requestWithCookies(router, http.MethodGet, "/api/ledger/index-info", "", login.Result().Cookies())
+	if got := indexInfo.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("ledger/index-info Cache-Control=%q", got)
 	}
 	var body struct {
 		Summary struct {

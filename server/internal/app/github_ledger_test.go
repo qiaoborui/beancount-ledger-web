@@ -85,6 +85,9 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if written.GitSHA != "new-commit-1" {
+		t.Fatalf("written git SHA=%q, want new-commit-1", written.GitSHA)
+	}
 	if filepath.ToSlash(written.OutputFile) != filepath.ToSlash(filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "alipay.bean")) {
 		t.Fatalf("written output=%q", written.OutputFile)
 	}
