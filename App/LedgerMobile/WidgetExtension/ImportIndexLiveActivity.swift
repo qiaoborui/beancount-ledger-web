@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import ActivityKit
 import SwiftUI
 import WidgetKit
@@ -159,3 +160,4 @@ struct ImportIndexLiveActivity: Widget {
         "\(title(phase))，\(detail(context))，进度\(badgeText(phase))"
     }
 }
+#endif

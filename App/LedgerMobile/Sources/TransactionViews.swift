@@ -556,6 +556,12 @@ private struct TransactionFilterSheet: View {
 
 private struct TransactionCard: View {
     let transaction: LedgerTransaction
+    let selectionState: Bool?
+
+    init(transaction: LedgerTransaction, selectionState: Bool? = nil) {
+        self.transaction = transaction
+        self.selectionState = selectionState
+    }
 
     private var presentation: TransactionPresentation {
         TransactionPresentation(transaction: transaction)
@@ -583,6 +589,16 @@ private struct TransactionCard: View {
                     color: amountColor(presentation.kind)
                 )
                 .lineLimit(1)
+                .layoutPriority(1)
+                .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
+
+                if let selectionState {
+                    Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(selectionState ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                        .frame(width: 32, height: 32)
+                        .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
+                }
             }
 
             if !presentation.subtitle.isEmpty {
@@ -636,16 +652,7 @@ private struct TransactionSelectableCard: View {
     let selected: Bool
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            TransactionCard(transaction: transaction)
-            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(selected ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                .padding(LedgerSpacing.md)
-                .background(LedgerPalette.panel.opacity(0.86))
-                .clipShape(Circle())
-                .padding(4)
-        }
+        TransactionCard(transaction: transaction, selectionState: selected)
         .overlay {
             RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(selected ? LedgerPalette.cobalt : Color.clear, lineWidth: 2)
