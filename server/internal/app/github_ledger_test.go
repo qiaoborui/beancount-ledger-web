@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestGitHubAPIWriterCommitsWithoutLocalCheckout(t *testing.T) {
@@ -243,10 +245,17 @@ func TestGitHubAPIAddTransactionTagsUsesOneCommitAcrossFiles(t *testing.T) {
 	defer fake.server.Close()
 
 	writer := NewLedgerWriter(githubAPITestConfig(t, fake), nil)
-	err := writer.AddTransactionTags([]TransactionSource{
+	sources := []TransactionSource{
 		{File: "transactions/2026/05.bean", Line: 1, Hash: transactionHash(strings.Split(first, "\n"))},
 		{File: "transactions/2026/06.bean", Line: 1, Hash: transactionHash(strings.Split(second, "\n"))},
-	}, []string{"travel", "trip-2026-hokkaido"})
+	}
+	service := NewTransactionServiceWithSnapshot(nil, writer, func() (*LedgerSnapshot, error) {
+		return &LedgerSnapshot{Transactions: []Transaction{
+			{Tags: nil, Source: sources[0]},
+			{Tags: []string{"travel"}, Source: sources[1]},
+		}}, nil
+	})
+	err := service.AddTags(sources, []string{"travel", "trip-2026-hokkaido"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +269,98 @@ func TestGitHubAPIAddTransactionTagsUsesOneCommitAcrossFiles(t *testing.T) {
 		if strings.Contains(blob, "Hotel") && strings.Count(blob, "#travel") != 1 {
 			t.Fatalf("existing tag was duplicated: %q", blob)
 		}
+	}
+	if got := fake.contentReadCounts(); len(got) != 2 || got["transactions/2026/05.bean"] != 1 || got["transactions/2026/06.bean"] != 1 {
+		t.Fatalf("content reads=%#v, want only one read per modified transaction file", got)
+	}
+}
+
+func TestGitHubAPIMissingFileReadIsCached(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{})
+	defer fake.server.Close()
+
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := client.beginTransaction(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(client.cfg.LedgerRoot, "transactions", "2026", "missing.bean")
+	for range 2 {
+		exists, err := tx.exists(missing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exists {
+			t.Fatal("missing file unexpectedly exists")
+		}
+	}
+	if got := fake.contentReadCounts()["transactions/2026/missing.bean"]; got != 1 {
+		t.Fatalf("missing file reads=%d, want 1", got)
+	}
+}
+
+func TestGitHubAPICommitCreatesBlobsConcurrently(t *testing.T) {
+	var activeBlobs atomic.Int32
+	var maxActiveBlobs atomic.Int32
+	var blobSequence atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/ledger/git/blobs":
+			active := activeBlobs.Add(1)
+			defer activeBlobs.Add(-1)
+			for {
+				observed := maxActiveBlobs.Load()
+				if active <= observed || maxActiveBlobs.CompareAndSwap(observed, active) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			writeJSON(t, w, map[string]any{"sha": fmt.Sprintf("blob-%d", blobSequence.Add(1))})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/ledger/git/trees":
+			writeJSON(t, w, map[string]any{"sha": "new-tree"})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/ledger/git/commits":
+			writeJSON(t, w, map[string]any{"sha": "new-commit", "tree": map[string]any{"sha": "new-tree"}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/ledger/git/refs/heads/main":
+			writeJSON(t, w, map[string]any{"ref": "refs/heads/main", "object": map[string]any{"sha": "new-commit"}})
+		default:
+			t.Errorf("unexpected github api request: %s %s", r.Method, r.URL.String())
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, err := newGitHubLedgerClient(Config{
+		LedgerRoot:         filepath.Join(t.TempDir(), "repo"),
+		LedgerGitBranch:    "main",
+		LedgerGitHubOwner:  "owner",
+		LedgerGitHubRepo:   "ledger",
+		LedgerGitHubToken:  "token",
+		LedgerGitHubAPIURL: server.URL + "/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &githubLedgerTransaction{
+		ctx:           t.Context(),
+		ledger:        client,
+		baseCommitSHA: "base-commit",
+		baseTreeSHA:   "base-tree",
+		cache:         map[string]fileSnapshot{},
+		writes: map[string][]byte{
+			"transactions/2026/05.bean": []byte("may"),
+			"transactions/2026/06.bean": []byte("june"),
+			"transactions/2026/07.bean": []byte("july"),
+		},
+	}
+	if _, err := tx.commit("test concurrent blobs"); err != nil {
+		t.Fatal(err)
+	}
+	if got := maxActiveBlobs.Load(); got < 2 {
+		t.Fatalf("max concurrent blob requests=%d, want at least 2", got)
 	}
 }
 
@@ -354,14 +455,25 @@ type fakeGitHubLedgerAPI struct {
 	treeBlobs                      map[string]string
 	updatedRef                     string
 	commitCount                    int
+	contentReads                   map[string]int
 	failNextContentReadAfterCommit bool
 }
 
 func newFakeGitHubLedgerAPI(t *testing.T, files map[string]string) *fakeGitHubLedgerAPI {
 	t.Helper()
-	api := &fakeGitHubLedgerAPI{t: t, files: files, blobs: map[string]string{}, treeBlobs: map[string]string{}}
+	api := &fakeGitHubLedgerAPI{t: t, files: files, blobs: map[string]string{}, treeBlobs: map[string]string{}, contentReads: map[string]int{}}
 	api.server = httptest.NewServer(http.HandlerFunc(api.handle))
 	return api
+}
+
+func (api *fakeGitHubLedgerAPI) contentReadCounts() map[string]int {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	counts := make(map[string]int, len(api.contentReads))
+	for path, count := range api.contentReads {
+		counts[path] = count
+	}
+	return counts
 }
 
 func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +493,7 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/repos/owner/ledger/contents/")
+		api.contentReads[path]++
 		content, ok := api.files[path]
 		if !ok {
 			http.NotFound(w, r)

@@ -313,8 +313,9 @@ func TestTransactionWritersSupportParsedFlagsAndDateForms(t *testing.T) {
 	}, "\n")
 	mustWrite(t, file, block+"\n")
 	writer := NewLedgerWriter(cfg, nil)
+	service := NewTransactionService(NewLedgerCache(cfg), writer)
 	source := TransactionSource{File: "transactions/2026/05.bean", Line: 1, Hash: transactionHash(strings.Split(block, "\n"))}
-	if err := writer.AddTransactionTags([]TransactionSource{source}, []string{"travel"}); err != nil {
+	if err := service.AddTags([]TransactionSource{source}, []string{"travel"}); err != nil {
 		t.Fatalf("add tags to parsed transaction flag/date: %v", err)
 	}
 

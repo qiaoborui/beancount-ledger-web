@@ -32,7 +32,11 @@ func (s *TransactionService) Update(source TransactionSource, entry LedgerEntry)
 }
 
 func (s *TransactionService) AddTags(sources []TransactionSource, tags []string) error {
-	return s.writer.AddTransactionTags(sources, tags)
+	snapshot, err := s.snapshot()
+	if err != nil {
+		return err
+	}
+	return s.writer.addTransactionTagsFromSnapshot(sources, tags, snapshot)
 }
 
 func (s *TransactionService) Delete(source TransactionSource, reason string) error {

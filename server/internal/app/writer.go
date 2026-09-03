@@ -216,10 +216,14 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 	}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
+		attemptStarted := time.Now()
 		timeout := githubLedgerWriteTimeout()
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		beginStarted := time.Now()
 		remoteTx, err := client.beginTransaction(ctx)
+		beginElapsed := time.Since(beginStarted)
 		if err != nil {
+			w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, 0, nil, err)
 			cancel()
 			if isContextTimeout(err) {
 				return "", ledgerWriteTimeoutError(timeout, err)
@@ -227,15 +231,19 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			return "", err
 		}
 		tx := &LedgerWriteTransaction{snapshots: map[string]fileSnapshot{}, github: remoteTx}
+		applyStarted := time.Now()
 		if err := apply(tx); err != nil {
+			w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, time.Since(applyStarted), remoteTx, err)
 			cancel()
 			if isContextTimeout(err) {
 				return "", ledgerWriteTimeoutError(timeout, err)
 			}
 			return "", err
 		}
+		applyElapsed := time.Since(applyStarted)
 		gitSHA, err := remoteTx.commit(ledgerCommitMessage(source))
 		if err != nil {
+			w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, applyElapsed, remoteTx, err)
 			cancel()
 			if isContextTimeout(err) {
 				return "", ledgerWriteTimeoutError(timeout, err)
@@ -243,6 +251,7 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			lastErr = err
 			continue
 		}
+		w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, applyElapsed, remoteTx, nil)
 		cancel()
 		if w.cfg.LedgerIndexNotifyEnabled && gitSHA != "" {
 			if err := w.enqueueLedgerIndexRequest(context.Background(), gitSHA); err != nil {
@@ -261,6 +270,36 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 		lastErr = errors.New("github api ledger write failed")
 	}
 	return "", lastErr
+}
+
+func (w *LedgerWriter) logGitHubAPITransaction(source string, attempt int, started time.Time, beginElapsed, applyElapsed time.Duration, tx *githubLedgerTransaction, writeErr error) {
+	metrics := githubLedgerTransactionMetrics{}
+	writtenFiles := 0
+	if tx != nil {
+		metrics = tx.metricsSnapshot()
+		writtenFiles = len(tx.writes)
+	}
+	attrs := []slog.Attr{
+		slog.String("source", source),
+		slog.Int("attempt", attempt),
+		slog.Duration("total_elapsed", time.Since(started)),
+		slog.Duration("begin_elapsed", beginElapsed),
+		slog.Duration("read_api_elapsed_sum", metrics.readElapsed),
+		slog.Int("read_requests", metrics.readRequests),
+		slog.Duration("apply_elapsed", applyElapsed),
+		slog.Duration("blob_elapsed", metrics.blobElapsed),
+		slog.Int("blob_requests", metrics.blobRequests),
+		slog.Duration("tree_elapsed", metrics.treeElapsed),
+		slog.Duration("commit_elapsed", metrics.commitElapsed),
+		slog.Duration("ref_elapsed", metrics.refElapsed),
+		slog.Int("written_files", writtenFiles),
+	}
+	level := slog.LevelInfo
+	if writeErr != nil {
+		level = slog.LevelWarn
+		attrs = append(attrs, slog.Any("error", writeErr))
+	}
+	w.loggerOr().LogAttrs(context.Background(), level, "github ledger write", attrs...)
 }
 
 func (w *LedgerWriter) enqueueLedgerIndexRequest(ctx context.Context, gitSHA string) error {
@@ -320,6 +359,13 @@ func (tx *LedgerWriteTransaction) ReadFile(file string) ([]byte, error) {
 		return tx.github.readFile(file)
 	}
 	return os.ReadFile(file)
+}
+
+func (tx *LedgerWriteTransaction) PrefetchFiles(files []string) error {
+	if tx.github == nil {
+		return nil
+	}
+	return tx.github.prefetch(files)
 }
 
 func (tx *LedgerWriteTransaction) ReadLedgerLines(entry string, seen map[string]bool) ([]BeanLine, error) {
@@ -567,7 +613,15 @@ func normalizeTransactionTags(tags []string) []string {
 	return normalized
 }
 
-func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []string) error {
+func (w *LedgerWriter) addTransactionTagsFromSnapshot(sources []TransactionSource, tags []string, snapshot *LedgerSnapshot) error {
+	effectiveTags, err := transactionEffectiveTagsFromSnapshot(w.cfg, snapshot)
+	if err != nil {
+		return err
+	}
+	return w.addTransactionTags(sources, tags, effectiveTags)
+}
+
+func (w *LedgerWriter) addTransactionTags(sources []TransactionSource, tags []string, effectiveTags map[transactionTagIdentity][]string) error {
 	tags = normalizeTransactionTags(tags)
 	if len(tags) == 0 {
 		return errors.New("至少需要一个标签")
@@ -600,8 +654,7 @@ func (w *LedgerWriter) AddTransactionTags(sources []TransactionSource, tags []st
 	}
 	sort.Strings(files)
 	return w.RunTransactionWithSource(ledgerWriteSourceTransactionTags, func(tx *LedgerWriteTransaction) error {
-		effectiveTags, err := transactionEffectiveTags(tx, w.cfg)
-		if err != nil {
+		if err := tx.PrefetchFiles(files); err != nil {
 			return err
 		}
 		for _, file := range files {
@@ -652,23 +705,21 @@ type transactionTagIdentity struct {
 	hash string
 }
 
-func transactionEffectiveTags(tx *LedgerWriteTransaction, cfg Config) (map[transactionTagIdentity][]string, error) {
-	lines, err := tx.ReadLedgerLines(mainBeanPath(cfg), map[string]bool{})
-	if err != nil {
-		return nil, err
+func transactionEffectiveTagsFromSnapshot(cfg Config, snapshot *LedgerSnapshot) (map[transactionTagIdentity][]string, error) {
+	if snapshot == nil {
+		return nil, errors.New("ledger snapshot is unavailable")
 	}
-	entries := ParseBeanLines(lines).Entries
-	result := make(map[transactionTagIdentity][]string, len(entries))
-	for _, entry := range entries {
-		if entry.Kind != "transaction" {
-			continue
+	result := make(map[transactionTagIdentity][]string, len(snapshot.Transactions))
+	for _, transaction := range snapshot.Transactions {
+		file, err := editableLedgerFile(cfg, transaction.Source.File)
+		if err != nil {
+			return nil, err
 		}
-		identity := transactionTagIdentity{
-			file: filepath.Clean(entry.File),
-			line: entry.Line,
-			hash: transactionHash(entry.RawLines),
-		}
-		result[identity] = normalizeTransactionTags(entry.Tags)
+		result[transactionTagIdentity{
+			file: filepath.Clean(file),
+			line: transaction.Source.Line,
+			hash: transaction.Source.Hash,
+		}] = normalizeTransactionTags(transaction.Tags)
 	}
 	return result, nil
 }

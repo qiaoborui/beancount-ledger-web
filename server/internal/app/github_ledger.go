@@ -12,10 +12,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v74/github"
+	"golang.org/x/sync/errgroup"
 )
+
+const githubLedgerAPIConcurrency = 6
 
 type githubLedgerClient struct {
 	cfg    Config
@@ -32,6 +36,18 @@ type githubLedgerTransaction struct {
 	baseTreeSHA   string
 	cache         map[string]fileSnapshot
 	writes        map[string][]byte
+	metricsMu     sync.Mutex
+	metrics       githubLedgerTransactionMetrics
+}
+
+type githubLedgerTransactionMetrics struct {
+	readRequests  int
+	readElapsed   time.Duration
+	blobRequests  int
+	blobElapsed   time.Duration
+	treeElapsed   time.Duration
+	commitElapsed time.Duration
+	refElapsed    time.Duration
 }
 
 type fileInfo struct {
@@ -211,6 +227,10 @@ func (tx *githubLedgerTransaction) readFile(file string) ([]byte, error) {
 		return append([]byte(nil), snap.content...), nil
 	}
 	content, err := tx.readBaseFile(rel)
+	if errors.Is(err, os.ErrNotExist) {
+		tx.cache[rel] = fileSnapshot{existed: false}
+		return nil, os.ErrNotExist
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +239,18 @@ func (tx *githubLedgerTransaction) readFile(file string) ([]byte, error) {
 }
 
 func (tx *githubLedgerTransaction) readBaseFile(rel string) ([]byte, error) {
-	fileContent, _, _, err := tx.ledger.client.Repositories.GetContents(tx.ctx, tx.ledger.owner, tx.ledger.repo, rel, &github.RepositoryContentGetOptions{Ref: tx.baseCommitSHA})
+	return tx.readBaseFileContext(tx.ctx, rel)
+}
+
+func (tx *githubLedgerTransaction) readBaseFileContext(ctx context.Context, rel string) ([]byte, error) {
+	started := time.Now()
+	defer func() {
+		tx.metricsMu.Lock()
+		tx.metrics.readRequests++
+		tx.metrics.readElapsed += time.Since(started)
+		tx.metricsMu.Unlock()
+	}()
+	fileContent, _, _, err := tx.ledger.client.Repositories.GetContents(ctx, tx.ledger.owner, tx.ledger.repo, rel, &github.RepositoryContentGetOptions{Ref: tx.baseCommitSHA})
 	if err != nil {
 		if isGitHubNotFound(err) {
 			return nil, os.ErrNotExist
@@ -234,6 +265,61 @@ func (tx *githubLedgerTransaction) readBaseFile(rel string) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(text), nil
+}
+
+func (tx *githubLedgerTransaction) prefetch(files []string) error {
+	rels := make([]string, 0, len(files))
+	seen := map[string]bool{}
+	for _, file := range files {
+		rel, err := tx.relPath(file)
+		if err != nil {
+			return err
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		if _, ok := tx.writes[rel]; ok {
+			continue
+		}
+		if _, ok := tx.cache[rel]; ok {
+			continue
+		}
+		rels = append(rels, rel)
+	}
+	if len(rels) == 0 {
+		return nil
+	}
+
+	fetched := make(map[string]fileSnapshot, len(rels))
+	var fetchedMu sync.Mutex
+	group, ctx := errgroup.WithContext(tx.ctx)
+	group.SetLimit(githubLedgerAPIConcurrency)
+	for _, rel := range rels {
+		rel := rel
+		group.Go(func() error {
+			content, err := tx.readBaseFileContext(ctx, rel)
+			snapshot := fileSnapshot{existed: true, content: append([]byte(nil), content...)}
+			if errors.Is(err, os.ErrNotExist) {
+				snapshot = fileSnapshot{existed: false}
+				err = nil
+			}
+			if err != nil {
+				return err
+			}
+			fetchedMu.Lock()
+			fetched[rel] = snapshot
+			fetchedMu.Unlock()
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
+	}
+	for rel, snapshot := range fetched {
+		tx.cache[rel] = snapshot
+	}
+	return nil
 }
 
 func (tx *githubLedgerTransaction) snapshot(file string) error {
@@ -307,19 +393,34 @@ func (tx *githubLedgerTransaction) commit(message string) (string, error) {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	entries := make([]*github.TreeEntry, 0, len(paths))
-	for _, path := range paths {
-		content := base64.StdEncoding.EncodeToString(tx.writes[path])
-		encoding := "base64"
-		blob, _, err := tx.ledger.client.Git.CreateBlob(tx.ctx, tx.ledger.owner, tx.ledger.repo, &github.Blob{Content: &content, Encoding: &encoding})
-		if err != nil {
-			return "", err
-		}
-		mode, typ := "100644", "blob"
-		sha := blob.GetSHA()
-		entries = append(entries, &github.TreeEntry{Path: &path, Mode: &mode, Type: &typ, SHA: &sha})
+	entries := make([]*github.TreeEntry, len(paths))
+	blobStarted := time.Now()
+	group, ctx := errgroup.WithContext(tx.ctx)
+	group.SetLimit(githubLedgerAPIConcurrency)
+	for index, path := range paths {
+		index, path := index, path
+		group.Go(func() error {
+			content := base64.StdEncoding.EncodeToString(tx.writes[path])
+			encoding := "base64"
+			blob, _, err := tx.ledger.client.Git.CreateBlob(ctx, tx.ledger.owner, tx.ledger.repo, &github.Blob{Content: &content, Encoding: &encoding})
+			if err != nil {
+				return err
+			}
+			mode, typ := "100644", "blob"
+			sha := blob.GetSHA()
+			entries[index] = &github.TreeEntry{Path: &path, Mode: &mode, Type: &typ, SHA: &sha}
+			return nil
+		})
 	}
+	blobErr := group.Wait()
+	tx.metrics.blobRequests = len(paths)
+	tx.metrics.blobElapsed = time.Since(blobStarted)
+	if blobErr != nil {
+		return "", blobErr
+	}
+	treeStarted := time.Now()
 	tree, _, err := tx.ledger.client.Git.CreateTree(tx.ctx, tx.ledger.owner, tx.ledger.repo, tx.baseTreeSHA, entries)
+	tx.metrics.treeElapsed = time.Since(treeStarted)
 	if err != nil {
 		return "", err
 	}
@@ -333,21 +434,31 @@ func (tx *githubLedgerTransaction) commit(message string) (string, error) {
 		commit.Author = author
 		commit.Committer = author
 	}
+	commitStarted := time.Now()
 	created, _, err := tx.ledger.client.Git.CreateCommit(tx.ctx, tx.ledger.owner, tx.ledger.repo, commit, nil)
+	tx.metrics.commitElapsed = time.Since(commitStarted)
 	if err != nil {
 		return "", err
 	}
 	refName := "refs/heads/" + tx.ledger.branch
+	refStarted := time.Now()
 	_, _, err = tx.ledger.client.Git.UpdateRef(tx.ctx, tx.ledger.owner, tx.ledger.repo, &github.Reference{
 		Ref: &refName,
 		Object: &github.GitObject{
 			SHA: created.SHA,
 		},
 	}, false)
+	tx.metrics.refElapsed = time.Since(refStarted)
 	if err != nil {
 		return "", err
 	}
 	return created.GetSHA(), nil
+}
+
+func (tx *githubLedgerTransaction) metricsSnapshot() githubLedgerTransactionMetrics {
+	tx.metricsMu.Lock()
+	defer tx.metricsMu.Unlock()
+	return tx.metrics
 }
 
 func (tx *githubLedgerTransaction) relPath(file string) (string, error) {
