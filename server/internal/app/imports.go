@@ -1000,6 +1000,13 @@ type writtenImportFiles struct {
 func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID string) (writtenImportFiles, error) {
 	written := writtenImportFiles{MonthFile: monthFile}
 	gitSHA, err := s.writer.RunTransactionWithSourceResult(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
+		prefetchFiles := []string{mainBeanPath(s.cfg), monthFile, outputFile}
+		if documentFile != "" {
+			prefetchFiles = append(prefetchFiles, documentFile)
+		}
+		if err := tx.PrefetchFiles(prefetchFiles); err != nil {
+			return err
+		}
 		var err error
 		marker := "; import-id: " + importID
 		if existing, readErr := tx.ReadFile(outputFile); readErr == nil && strings.Contains(string(existing), marker) {
