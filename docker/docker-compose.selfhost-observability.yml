@@ -1,0 +1,7 @@
+services:
+  server:
+    environment:
+      METRICS_ADDR: "${METRICS_ADDR:?set METRICS_ADDR in observability.env}"
+      METRICS_ALLOW_NON_LOOPBACK: "${METRICS_ALLOW_NON_LOOPBACK:?set METRICS_ALLOW_NON_LOOPBACK in observability.env}"
+    ports:
+      - "127.0.0.1:9091:9091"

@@ -19,6 +19,35 @@ self-hosted Compose server, bind `:9091` inside the container, set
 Compose network or publish only `127.0.0.1:9091:9091` through a local override.
 Do not publish the port on all host interfaces.
 
+For a host managed by `beancount-ledger-deploy-run`, install the opt-in files
+once so later immutable-image deployments preserve the listener and loopback
+port mapping:
+
+```bash
+sudo install -m 644 -o root -g root \
+  docker/docker-compose.selfhost-observability.yml \
+  /etc/beancount-ledger-selfhost/compose.observability.yml
+sudo install -m 600 -o root -g root \
+  docker/selfhost-observability.env \
+  /etc/beancount-ledger-selfhost/observability.env
+sudo install -m 755 -o root -g root \
+  scripts/selfhost/beancount-ledger-deploy-run \
+  /usr/local/sbin/beancount-ledger-deploy-run
+sudo docker compose \
+  -p beancount-ledger-selfhost \
+  --env-file /etc/beancount-ledger-selfhost/runtime.env \
+  --env-file /var/lib/beancount-ledger-deploy/releases/current.env \
+  --env-file /etc/beancount-ledger-selfhost/observability.env \
+  -f /etc/beancount-ledger-selfhost/compose.yml \
+  -f /etc/beancount-ledger-selfhost/compose.observability.yml \
+  up -d --no-deps --no-build server
+```
+
+The deployer treats these files as an all-or-nothing pair, validates their root
+ownership and modes, and includes them during normal deployment, recovery, and
+rollback. Removing both files and redeploying returns the server to disabled
+metrics.
+
 On Linux, start the local Prometheus and Grafana stack from the repository root:
 
 ```bash
