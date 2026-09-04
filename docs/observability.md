@@ -40,6 +40,19 @@ PROMETHEUS_PORT=19090 GRAFANA_PORT=13001 \
   docker compose -f docker/docker-compose.observability.yml up -d
 ```
 
+Grafana can be exposed to one trusted LAN interface without exposing Prometheus
+or the application metrics listener. Set the host's exact LAN address rather
+than `0.0.0.0`:
+
+```bash
+GRAFANA_BIND_ADDRESS=192.168.31.47 GRAFANA_PORT=13001 \
+  docker compose -f docker/docker-compose.observability.yml up -d grafana
+```
+
+Grafana uses anonymous Viewer access in this local stack. Only use this setting
+on a trusted LAN, keep the host firewall restricted, and return to the default
+loopback binding when LAN access is no longer needed.
+
 Grafana automatically provisions the Prometheus datasource and the
 `Ledger Web / Beancount Ledger Web · Overview` dashboard. The dashboard covers
 throughput, 4xx/5xx rate, p50/p95/p99 request latency, in-flight requests, p95 by

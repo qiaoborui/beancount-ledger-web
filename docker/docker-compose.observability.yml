@@ -21,7 +21,7 @@ services:
     depends_on:
       - prometheus
     environment:
-      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_ADDR: "${GRAFANA_BIND_ADDRESS:-127.0.0.1}"
       GF_SERVER_HTTP_PORT: "${GRAFANA_PORT:-3001}"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
