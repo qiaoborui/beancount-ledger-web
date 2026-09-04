@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -384,7 +385,183 @@ func BenchmarkGitHubAPIReadLedgerFile(b *testing.B) {
 	b.ReportMetric(float64(fake.totalRequestCount())/float64(b.N), "requests/op")
 }
 
+func BenchmarkGitHubAPIRestCommit(b *testing.B) {
+	fake := newFakeGitHubLedgerAPI(b, map[string]string{})
+	defer fake.server.Close()
+	fake.requestDelay = time.Millisecond
+	client, err := newGitHubLedgerClient(githubAPITestConfig(b, fake))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for range b.N {
+		tx := &githubLedgerTransaction{
+			ctx:           b.Context(),
+			ledger:        client,
+			baseCommitSHA: "base-commit",
+			baseTreeSHA:   "base-tree",
+			cache:         map[string]fileSnapshot{},
+			writes: map[string][]byte{
+				"main.bean":                           []byte("main"),
+				"transactions/2026/09.bean":           []byte("month"),
+				"transactions/2026/imports/test.bean": []byte("import"),
+			},
+		}
+		before := fake.totalRequestCount()
+		if _, err := tx.commit("benchmark"); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(float64(fake.totalRequestCount()-before), "requests/op")
+	}
+}
+
+func TestGitHubAPIGraphQLCommitUsesOneAtomicRequest(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.useGraphQLCommit = true
+	tx := &githubLedgerTransaction{
+		ctx:           t.Context(),
+		ledger:        client,
+		baseCommitSHA: "base-commit",
+		baseTreeSHA:   "base-tree",
+		cache:         map[string]fileSnapshot{},
+		writes: map[string][]byte{
+			"main.bean":                 []byte("main"),
+			"transactions/2026/09.bean": []byte("month"),
+		},
+	}
+	sha, err := tx.commit("test atomic mutation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha != "new-commit-1" {
+		t.Fatalf("commit SHA=%q", sha)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("commit requests=%d, want 1", got)
+	}
+	if fake.graphQLExpectedHead != "base-commit" || fake.graphQLRepository != "owner/ledger" || fake.graphQLBranch != "main" {
+		t.Fatalf("unexpected commit target: head=%q repository=%q branch=%q", fake.graphQLExpectedHead, fake.graphQLRepository, fake.graphQLBranch)
+	}
+	if fake.files["main.bean"] != "main" || fake.files["transactions/2026/09.bean"] != "month" {
+		t.Fatalf("atomic additions not applied: %#v", fake.files)
+	}
+}
+
+func TestGitHubAPIGraphQLCommitIsLimitedToPublicGitHub(t *testing.T) {
+	client, err := newGitHubLedgerClient(Config{
+		LedgerRoot:        t.TempDir(),
+		LedgerGitBranch:   "main",
+		LedgerGitHubOwner: "owner",
+		LedgerGitHubRepo:  "ledger",
+		LedgerGitHubToken: "token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !client.useGraphQLCommit {
+		t.Fatal("public GitHub API should use atomic GraphQL commits")
+	}
+
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{})
+	defer fake.server.Close()
+	customClient, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if customClient.useGraphQLCommit {
+		t.Fatal("custom and GitHub Enterprise API URLs should retain Git Data REST commits")
+	}
+}
+
+func TestGitHubAPIGraphQLCommitRejectsStaleHead(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"main.bean": "before"})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.useGraphQLCommit = true
+	tx := &githubLedgerTransaction{
+		ctx:           t.Context(),
+		ledger:        client,
+		baseCommitSHA: "stale-commit",
+		cache:         map[string]fileSnapshot{},
+		writes:        map[string][]byte{"main.bean": []byte("after")},
+	}
+	if _, err := tx.commit("stale write"); err == nil || !strings.Contains(err.Error(), "expected head") {
+		t.Fatalf("stale commit error=%v", err)
+	}
+	if fake.files["main.bean"] != "before" || fake.commitCount != 0 {
+		t.Fatalf("stale commit changed repository: files=%#v commits=%d", fake.files, fake.commitCount)
+	}
+}
+
+func TestGitHubAPIGraphQLCommitFallsBackForLargePayload(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.useGraphQLCommit = true
+	content := bytes.Repeat([]byte("x"), githubGraphQLCommitMaxEncodedFileBytes)
+	tx := &githubLedgerTransaction{
+		ctx:           t.Context(),
+		ledger:        client,
+		baseCommitSHA: "base-commit",
+		baseTreeSHA:   "base-tree",
+		cache:         map[string]fileSnapshot{},
+		writes:        map[string][]byte{"statement.pdf": content},
+	}
+	if _, err := tx.commit("large import"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.graphQLExpectedHead != "" {
+		t.Fatal("large payload should retain the Git Data REST commit path")
+	}
+	if got := fake.files["statement.pdf"]; got != string(content) {
+		t.Fatalf("large payload was not committed: got %d bytes", len(got))
+	}
+}
+
+func BenchmarkGitHubAPIGraphQLCommit(b *testing.B) {
+	fake := newFakeGitHubLedgerAPI(b, map[string]string{})
+	defer fake.server.Close()
+	fake.requestDelay = time.Millisecond
+	client, err := newGitHubLedgerClient(githubAPITestConfig(b, fake))
+	if err != nil {
+		b.Fatal(err)
+	}
+	client.useGraphQLCommit = true
+	b.ResetTimer()
+	for range b.N {
+		tx := &githubLedgerTransaction{
+			ctx:           b.Context(),
+			ledger:        client,
+			baseCommitSHA: "base-commit",
+			baseTreeSHA:   "base-tree",
+			cache:         map[string]fileSnapshot{},
+			writes: map[string][]byte{
+				"main.bean":                           []byte("main"),
+				"transactions/2026/09.bean":           []byte("month"),
+				"transactions/2026/imports/test.bean": []byte("import"),
+			},
+		}
+		before := fake.totalRequestCount()
+		if _, err := tx.commit("benchmark"); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(float64(fake.totalRequestCount()-before), "requests/op")
+	}
+}
+
 func TestGitHubAPICommitCreatesBlobsConcurrently(t *testing.T) {
+	t.Setenv("LEDGER_GIT_AUTHOR_NAME", "Ledger Test")
 	var activeBlobs atomic.Int32
 	var maxActiveBlobs atomic.Int32
 	var blobSequence atomic.Int32
@@ -426,6 +603,7 @@ func TestGitHubAPICommitCreatesBlobsConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.useGraphQLCommit = true
 	tx := &githubLedgerTransaction{
 		ctx:           t.Context(),
 		ledger:        client,
@@ -563,6 +741,9 @@ type fakeGitHubLedgerAPI struct {
 	commitCount                    int
 	contentReads                   map[string]int
 	failNextContentReadAfterCommit bool
+	graphQLExpectedHead            string
+	graphQLRepository              string
+	graphQLBranch                  string
 }
 
 func newFakeGitHubLedgerAPI(t testing.TB, files map[string]string) *fakeGitHubLedgerAPI {
@@ -589,10 +770,10 @@ func (api *fakeGitHubLedgerAPI) totalRequestCount() int {
 }
 
 func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
+	time.Sleep(api.requestDelay)
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	api.totalRequests++
-	time.Sleep(api.requestDelay)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/git/ref/heads/main":
@@ -622,6 +803,42 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(api.t, w, map[string]any{"type": "file", "path": path, "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
+	case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+		var body struct {
+			Variables struct {
+				Input struct {
+					Branch struct {
+						Repository string `json:"repositoryNameWithOwner"`
+						Name       string `json:"branchName"`
+					} `json:"branch"`
+					FileChanges struct {
+						Additions []githubGraphQLFileAddition `json:"additions"`
+					} `json:"fileChanges"`
+					ExpectedHeadOID string `json:"expectedHeadOid"`
+				} `json:"input"`
+			} `json:"variables"`
+		}
+		decodeJSON(api.t, r, &body)
+		api.graphQLExpectedHead = body.Variables.Input.ExpectedHeadOID
+		api.graphQLRepository = body.Variables.Input.Branch.Repository
+		api.graphQLBranch = body.Variables.Input.Branch.Name
+		if api.graphQLExpectedHead != "base-commit" {
+			writeJSON(api.t, w, map[string]any{"errors": []map[string]any{{"message": "expected head does not match"}}})
+			return
+		}
+		api.treePaths = api.treePaths[:0]
+		for _, addition := range body.Variables.Input.FileChanges.Additions {
+			raw, err := base64.StdEncoding.DecodeString(addition.Contents)
+			if err != nil {
+				api.t.Fatal(err)
+			}
+			api.treePaths = append(api.treePaths, addition.Path)
+			api.files[addition.Path] = string(raw)
+		}
+		api.commitCount++
+		sha := fmt.Sprintf("new-commit-%d", api.commitCount)
+		api.updatedRef = "refs/heads/main"
+		writeJSON(api.t, w, map[string]any{"data": map[string]any{"createCommitOnBranch": map[string]any{"commit": map[string]any{"oid": sha}}}})
 	case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/ledger/git/blobs":
 		var body struct {
 			Content  string `json:"content"`

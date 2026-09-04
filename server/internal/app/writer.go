@@ -292,6 +292,7 @@ func (w *LedgerWriter) logGitHubAPITransaction(source string, attempt int, start
 		slog.Duration("tree_elapsed", metrics.treeElapsed),
 		slog.Duration("commit_elapsed", metrics.commitElapsed),
 		slog.Duration("ref_elapsed", metrics.refElapsed),
+		slog.Duration("mutation_elapsed", metrics.mutationElapsed),
 		slog.Int("written_files", writtenFiles),
 	}
 	level := slog.LevelInfo
