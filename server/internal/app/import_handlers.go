@@ -55,7 +55,7 @@ func (s *Server) importsDocuments(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	documents, err := s.listImportDocuments()
+	documents, err := s.listImportDocuments(c.Request.Context())
 	if err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return

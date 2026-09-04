@@ -2,8 +2,10 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestGitHubAPIWriterCommitsWithoutLocalCheckout(t *testing.T) {
@@ -66,6 +70,9 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 		LedgerGitHubAPIURL: fake.server.URL + "/",
 	}
 	server := &Server{cfg: cfg, writer: NewLedgerWriter(cfg, nil)}
+	server.importDocuments.documents = []ImportDocument{{Path: "stale"}}
+	server.importDocuments.key = githubImportDocumentsCacheKey(cfg)
+	server.importDocuments.loadedAt = time.Now()
 	sourceFile := filepath.Join(t.TempDir(), "statement.csv")
 	mustWrite(t, sourceFile, "date,payee,amount\n2026-06-01,Shop,8.00\n")
 	beanText := strings.Join([]string{
@@ -90,6 +97,9 @@ func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 	}
 	if written.GitSHA != "new-commit-1" {
 		t.Fatalf("written git SHA=%q, want new-commit-1", written.GitSHA)
+	}
+	if !server.importDocuments.loadedAt.IsZero() || server.importDocuments.documents != nil {
+		t.Fatal("successful import write did not invalidate the document cache")
 	}
 	if filepath.ToSlash(written.OutputFile) != filepath.ToSlash(filepath.Join(cfg.LedgerRoot, "transactions", "2026", "imports", "alipay.bean")) {
 		t.Fatalf("written output=%q", written.OutputFile)
@@ -363,6 +373,182 @@ func TestGitHubAPIListImportDocumentsUsesOneRequest(t *testing.T) {
 	if got := fake.totalRequestCount(); got != 1 {
 		t.Fatalf("list import documents requests = %d, want 1", got)
 	}
+}
+
+func TestServerListImportDocumentsCachesAndExpires(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"transactions/2026/documents/imports/statement.pdf": "test",
+	})
+	defer fake.server.Close()
+	metrics := NewMetrics()
+	server := &Server{cfg: githubAPITestConfig(t, fake), metrics: metrics}
+
+	first, err := server.listImportDocuments(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("documents = %#v, want one", first)
+	}
+	first[0].Path = "mutated-by-caller"
+	second, err := server.listImportDocuments(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := second[0].Path; got != "transactions/2026/documents/imports/statement.pdf" {
+		t.Fatalf("cached document path = %q", got)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("cached list requests = %d, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.cacheRequests.WithLabelValues(cacheGitHubImportDocs, cacheResultHit)); got != 1 {
+		t.Fatalf("cache hits = %v, want 1", got)
+	}
+
+	server.cfg.LedgerGitHubToken = "rotated-token"
+	if _, err := server.listImportDocuments(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	server.importDocuments.mu.Lock()
+	server.importDocuments.loadedAt = time.Now().Add(-githubImportDocumentsCacheTTL)
+	server.importDocuments.mu.Unlock()
+	if _, err := server.listImportDocuments(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 3 {
+		t.Fatalf("refreshed list requests = %d, want 3", got)
+	}
+	if got := testutil.ToFloat64(metrics.cacheRequests.WithLabelValues(cacheGitHubImportDocs, cacheResultMiss)); got != 3 {
+		t.Fatalf("cache misses = %v, want 3", got)
+	}
+}
+
+func TestServerListImportDocumentsCoalescesConcurrentRequests(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fail=%t", fail), func(t *testing.T) {
+			fake := newFakeGitHubLedgerAPI(t, map[string]string{
+				"transactions/2026/documents/imports/statement.pdf": "test",
+			})
+			defer fake.server.Close()
+			fake.requestDelay = 25 * time.Millisecond
+			fake.failTree = fail
+			server := &Server{cfg: githubAPITestConfig(t, fake)}
+
+			const callers = 8
+			start := make(chan struct{})
+			errs := make(chan error, callers)
+			var wg sync.WaitGroup
+			for range callers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					_, err := server.listImportDocuments(t.Context())
+					errs <- err
+				}()
+			}
+			close(start)
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if (err != nil) != fail {
+					t.Fatalf("list error = %v, fail=%t", err, fail)
+				}
+			}
+			if got := fake.totalRequestCount(); got != 1 {
+				t.Fatalf("concurrent list requests = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestServerListImportDocumentsInvalidationDoesNotWaitForRefresh(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"transactions/2026/documents/imports/statement.pdf": "test",
+	})
+	defer fake.server.Close()
+	fake.treeStarted = make(chan struct{})
+	fake.releaseTree = make(chan struct{})
+	server := &Server{cfg: githubAPITestConfig(t, fake)}
+	result := make(chan error, 1)
+	go func() {
+		_, err := server.listImportDocuments(t.Context())
+		result <- err
+	}()
+	<-fake.treeStarted
+
+	invalidated := make(chan struct{})
+	go func() {
+		server.invalidateImportDocumentsCache()
+		close(invalidated)
+	}()
+	select {
+	case <-invalidated:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("cache invalidation waited for the GitHub refresh")
+	}
+	close(fake.releaseTree)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	server.importDocuments.mu.Lock()
+	hasCachedDocuments := server.importDocuments.documents != nil
+	server.importDocuments.mu.Unlock()
+	if hasCachedDocuments {
+		t.Fatal("refresh that started before invalidation repopulated the cache")
+	}
+	if _, err := server.listImportDocuments(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 2 {
+		t.Fatalf("requests after invalidation = %d, want 2", got)
+	}
+}
+
+func TestServerListImportDocumentsWaitHonorsCancellation(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"transactions/2026/documents/imports/statement.pdf": "test",
+	})
+	defer fake.server.Close()
+	fake.treeStarted = make(chan struct{})
+	fake.releaseTree = make(chan struct{})
+	server := &Server{cfg: githubAPITestConfig(t, fake)}
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		_, err := server.listImportDocuments(ctx)
+		result <- err
+	}()
+	<-fake.treeStarted
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("list error = %v, want context canceled", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("canceled caller remained blocked on the shared refresh")
+	}
+	close(fake.releaseTree)
+}
+
+func BenchmarkGitHubAPIListImportDocuments(b *testing.B) {
+	fake := newFakeGitHubLedgerAPI(b, map[string]string{
+		"transactions/2026/documents/imports/statement.pdf": "test",
+	})
+	defer fake.server.Close()
+	fake.requestDelay = time.Millisecond
+	server := &Server{cfg: githubAPITestConfig(b, fake)}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := server.listImportDocuments(b.Context()); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(fake.totalRequestCount())/float64(b.N), "requests/op")
 }
 
 func BenchmarkGitHubAPIReadLedgerFile(b *testing.B) {
@@ -732,6 +918,10 @@ type fakeGitHubLedgerAPI struct {
 	mu                             sync.Mutex
 	totalRequests                  int
 	requestDelay                   time.Duration
+	failTree                       bool
+	treeStarted                    chan struct{}
+	releaseTree                    chan struct{}
+	treeStartedOnce                sync.Once
 	files                          map[string]string
 	blobs                          map[string]string
 	blobSeq                        int
@@ -771,6 +961,11 @@ func (api *fakeGitHubLedgerAPI) totalRequestCount() int {
 
 func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(api.requestDelay)
+	isTreeRequest := r.Method == http.MethodGet && (r.URL.Path == "/repos/owner/ledger/git/trees/main" || r.URL.Path == "/repos/owner/ledger/git/trees/base-tree")
+	if isTreeRequest && api.treeStarted != nil {
+		api.treeStartedOnce.Do(func() { close(api.treeStarted) })
+		<-api.releaseTree
+	}
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	api.totalRequests++
@@ -783,6 +978,11 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/commits/main":
 		writeJSON(api.t, w, map[string]any{"sha": "base-commit", "commit": map[string]any{"tree": map[string]any{"sha": "base-tree"}}})
 	case r.Method == http.MethodGet && (r.URL.Path == "/repos/owner/ledger/git/trees/main" || r.URL.Path == "/repos/owner/ledger/git/trees/base-tree"):
+		if api.failTree {
+			w.WriteHeader(http.StatusBadGateway)
+			writeJSON(api.t, w, map[string]any{"message": "temporary tree failure"})
+			return
+		}
 		entries := make([]map[string]any, 0, len(api.files))
 		for path, content := range api.files {
 			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": sha256Hex([]byte(content)), "size": len(content)})

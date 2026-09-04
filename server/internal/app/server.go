@@ -46,6 +46,7 @@ type Server struct {
 	limiter              RateLimiter
 	agentModel           AgentModelClient
 	metrics              *Metrics
+	importDocuments      githubImportDocumentsCache
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
