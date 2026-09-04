@@ -190,6 +190,8 @@ struct LedgerToolbarButton<Label: View>: View {
                         .stroke(LedgerPalette.line, lineWidth: 1)
                 }
         }
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel(accessibilityLabel)
     }
@@ -380,15 +382,38 @@ struct AmountLabel: View {
     }
 }
 
+enum LedgerStatusStyle {
+    case pending
+    case confirmed
+    case failure
+
+    var color: Color {
+        switch self {
+        case .pending: LedgerPalette.cobalt
+        case .confirmed: LedgerPalette.success
+        case .failure: LedgerPalette.risk
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .pending: "clock.arrow.circlepath"
+        case .confirmed: "checkmark.circle.fill"
+        case .failure: "exclamationmark.triangle.fill"
+        }
+    }
+}
+
 struct StatusBanner: View {
     let message: String
+    var style: LedgerStatusStyle = .failure
     let onDismiss: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: style.systemImage)
                 .font(.system(size: 14))
-                .foregroundStyle(LedgerPalette.risk)
+                .foregroundStyle(style.color)
             Text(message)
                 .font(.system(size: 12))
                 .foregroundStyle(LedgerPalette.warm)
@@ -396,7 +421,7 @@ struct StatusBanner: View {
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .foregroundStyle(LedgerPalette.secondary)
             .accessibilityLabel("关闭提示")
@@ -406,8 +431,9 @@ struct StatusBanner: View {
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.risk.opacity(0.42), lineWidth: 1)
+                .stroke(style.color.opacity(0.42), lineWidth: 1)
         }
+        .accessibilityLiveRegion(.polite)
     }
 }
 

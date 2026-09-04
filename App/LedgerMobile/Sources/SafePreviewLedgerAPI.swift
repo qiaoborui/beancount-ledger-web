@@ -23,6 +23,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     private var importCommitAttempts = 0
     private var gmailConnected = true
     private var gmailPending = SafePreviewLedgerData.gmailPendingImports
+    private var transactionEntries: [String: LedgerTransactionEntry] = [:]
+    private var transactionTags: [String: [String]] = [:]
 
     func health(baseURL: URL) async throws -> HealthStatus {
         HealthStatus(
@@ -60,12 +62,18 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         today: String,
         valuationCurrency: String
     ) async throws -> LedgerBootstrap {
-        SafePreviewLedgerData.bootstrap(
+        let payload = SafePreviewLedgerData.bootstrap(
             start: start,
             end: end,
             today: today,
             valuationCurrency: valuationCurrency
         )
+        let transactions = payload.transactions.map { transaction in
+            let key = transactionKey(transaction.source)
+            let edited = transactionEntries[key].map { transaction.projecting(entry: $0) } ?? transaction
+            return edited.projecting(addingTags: transactionTags[key] ?? [])
+        }
+        return payload.replacingTransactions(with: transactions)
     }
 
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
@@ -214,13 +222,33 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         baseURL: URL,
         source: TransactionSource,
         entry: LedgerTransactionEntry
-    ) async throws {}
+    ) async throws {
+        try await delayTransactionWriteIfRequested()
+        transactionEntries[transactionKey(source)] = entry
+    }
 
     func addTransactionTags(
         baseURL: URL,
         sources: [TransactionSource],
         tags: [String]
-    ) async throws {}
+    ) async throws {
+        try await delayTransactionWriteIfRequested()
+        for source in sources {
+            let key = transactionKey(source)
+            var merged = transactionTags[key] ?? []
+            for tag in tags where !merged.contains(tag) { merged.append(tag) }
+            transactionTags[key] = merged
+        }
+    }
+
+    private func delayTransactionWriteIfRequested() async throws {
+        guard ProcessInfo.processInfo.arguments.contains("--safe-slow-transaction-write") else { return }
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+    }
+
+    private func transactionKey(_ source: TransactionSource) -> String {
+        "\(source.file):\(source.line)"
+    }
 
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
         if targetGitSHA == nil,

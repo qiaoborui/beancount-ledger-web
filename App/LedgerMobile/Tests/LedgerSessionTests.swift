@@ -855,15 +855,10 @@ final class LedgerSessionTests: XCTestCase {
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let api = SessionMockAPI(payload: Self.payload)
+        let api = SessionMockAPI(payload: Self.transactionPayload)
         let session = LedgerSession(api: api, defaults: defaults)
         await session.resume()
-        let source = TransactionSource(
-            file: "transactions/2026/08.bean",
-            line: 18,
-            hash: "expense-hash",
-            gitSHA: "abc123"
-        )
+        let source = Self.editableTransaction.source
         let entry = LedgerTransactionEntry(
             date: "2026-08-20",
             payee: "海底捞",
@@ -877,15 +872,277 @@ final class LedgerSessionTests: XCTestCase {
         )
 
         try await session.updateTransaction(source: source, entry: entry)
-        try await session.addTransactionTags(sources: [source], tags: ["travel"])
-
         let writes = await api.transactionWrites()
         XCTAssertEqual(writes.update?.source, source)
         XCTAssertEqual(writes.update?.entry.tags, ["dining"])
-        XCTAssertEqual(writes.tags?.sources, [source])
-        XCTAssertEqual(writes.tags?.tags, ["travel"])
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "海底捞")
+    }
+
+    func testTransactionEditProjectsBeforeDelayedWriteCompletesAndSurvivesStaleRefresh() async throws {
+        let suiteName = "ledger-mobile-delayed-edit-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            transactionWriteDelayNanoseconds: 250_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let source = Self.editableTransaction.source
+        let entry = LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "新城市书房",
+            narration: "九月阅读计划",
+            metadata: [:],
+            tags: ["learning", "travel"],
+            postings: Self.editableTransaction.editableEntry!.postings
+        )
+
+        let write = Task { try await session.updateTransaction(source: source, entry: entry) }
+        for _ in 0..<100 {
+            let counts = await api.transactionWriteCounts()
+            if counts.started == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        XCTAssertEqual(session.ledger?.transactions.first?.payee, "城市书房")
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "新城市书房")
+        XCTAssertEqual(session.transactionMutationPhase(for: session.ledger!.transactions[0]), .pending)
+        let countsBeforeCompletion = await api.transactionWriteCounts()
+        XCTAssertEqual(countsBeforeCompletion.completed, 0)
+
+        do {
+            try await session.updateTransaction(source: source, entry: entry)
+            XCTFail("duplicate submission should be rejected")
+        } catch {
+            XCTAssertEqual(error as? LedgerTransactionMutationError, .alreadyInProgress)
+        }
+        let countsAfterDuplicate = await api.transactionWriteCounts()
+        XCTAssertEqual(countsAfterDuplicate.started, 1)
+
+        await session.refresh()
+        XCTAssertEqual(session.ledger?.transactions.first?.payee, "城市书房")
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "新城市书房")
+        XCTAssertEqual(session.transactionMutationPhase(for: session.ledger!.transactions[0]), .pending)
+
+        try await write.value
+        for _ in 0..<100 {
+            if session.ledger?.transactions.first?.source.hash == "confirmed-1" { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertEqual(session.ledger?.transactions.first?.source.hash, "confirmed-1")
+        XCTAssertEqual(session.ledger?.transactions.first?.source.line, source.line + 1)
+        XCTAssertNil(session.transactionMutationPhase(for: session.ledger!.transactions[0]))
+    }
+
+    func testBulkTagsProjectThenRollbackWithRetryContextOnFailure() async throws {
+        let suiteName = "ledger-mobile-tag-rollback-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            transactionWriteDelayNanoseconds: 150_000_000,
+            transactionWritesShouldFail: true
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let source = Self.editableTransaction.source
+
+        let write = Task { try await session.addTransactionTags(sources: [source], tags: ["reviewed"]) }
+        for _ in 0..<100 {
+            let counts = await api.transactionWriteCounts()
+            if counts.started == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        XCTAssertEqual(session.ledger?.transactions.first?.tags, ["learning"])
+        XCTAssertTrue(session.visibleTransactions.first?.tags?.contains("reviewed") == true)
+        XCTAssertEqual(session.transactionMutationPhase(for: session.ledger!.transactions[0]), .pending)
+        do {
+            try await write.value
+            XCTFail("failed server write should throw")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("账本来源已变化"))
+        }
+
+        XCTAssertEqual(session.visibleTransactions.first?.tags, ["learning"])
+        guard case let .failed(message)? = session.transactionMutationPhase(for: session.ledger!.transactions[0]) else {
+            return XCTFail("rollback should retain a failed state for retry UI")
+        }
+        XCTAssertTrue(message.contains("账本来源已变化"))
+    }
+
+    func testDisjointTransactionWritesCanRemainPendingConcurrently() async throws {
+        let suiteName = "ledger-mobile-concurrent-write-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            transactionWriteDelayNanoseconds: 150_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let edited = LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "新城市书房",
+            narration: "读书",
+            metadata: [:],
+            tags: ["learning"],
+            postings: Self.editableTransaction.editableEntry!.postings
+        )
+
+        async let edit: Void = session.updateTransaction(source: Self.editableTransaction.source, entry: edited)
+        async let tags: Void = session.addTransactionTags(
+            sources: [Self.secondEditableTransaction.source],
+            tags: ["reviewed"]
+        )
+        for _ in 0..<100 {
+            let counts = await api.transactionWriteCounts()
+            if counts.started == 2 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        let concurrentCounts = await api.transactionWriteCounts()
+        XCTAssertEqual(concurrentCounts.started, 2)
+        XCTAssertEqual(session.ledger?.transactions[0].payee, "城市书房")
+        XCTAssertEqual(session.visibleTransactions[0].payee, "新城市书房")
+        XCTAssertTrue(session.visibleTransactions[1].tags?.contains("reviewed") == true)
+        _ = try await (edit, tags)
+    }
+
+    func testConfirmedWriteResumesReconciliationAfterRangeLoadFinishes() async throws {
+        let suiteName = "ledger-mobile-write-range-reconciliation-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            bootstrapDelaysByStart: ["2026-07-01": 150_000_000],
+            transactionWriteDelayNanoseconds: 20_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let july = LedgerDateRange.month(year: 2026, month: 7)
+        let rangeLoad = Task { await session.applyRange(july) }
+        for _ in 0..<100 {
+            if session.isRangeLoading { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        let entry = LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "范围加载期间写入",
+            narration: "完成后继续收敛",
+            metadata: [:],
+            tags: ["learning"],
+            postings: Self.editableTransaction.editableEntry!.postings
+        )
+
+        try await session.updateTransaction(source: Self.editableTransaction.source, entry: entry)
+        XCTAssertTrue(session.isRangeLoading)
+        await rangeLoad.value
+        for _ in 0..<100 {
+            let calls = await api.callCounts()
+            if calls.bootstrap >= 3 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
         let calls = await api.callCounts()
-        XCTAssertEqual(calls.bootstrap, 3)
+        XCTAssertGreaterThanOrEqual(calls.bootstrap, 3)
+        XCTAssertFalse(session.isRangeLoading)
+    }
+
+    func testWriteCompletionFromPreviousSessionEpochIsDiscarded() async throws {
+        let suiteName = "ledger-mobile-write-session-epoch-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            transactionWriteDelayNanoseconds: 250_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let entry = LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "旧会话编辑",
+            narration: "不应进入新会话状态",
+            metadata: [:],
+            tags: ["learning"],
+            postings: Self.editableTransaction.editableEntry!.postings
+        )
+
+        let write = Task {
+            try await session.updateTransaction(source: Self.editableTransaction.source, entry: entry)
+        }
+        for _ in 0..<100 {
+            let counts = await api.transactionWriteCounts()
+            if counts.started == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        session.logout()
+        session.password = "ledger-password"
+        await session.login()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "城市书房")
+
+        do {
+            try await write.value
+            XCTFail("a prior session write must not publish completion into the new session")
+        } catch is CancellationError {
+            // Expected: the server request belongs to an invalidated session epoch.
+        }
+        XCTAssertTrue(session.transactionMutationStates.isEmpty)
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "城市书房")
+    }
+
+    func testFailedWriteMarksDetailSourceUnavailableAfterExternalSupersession() async throws {
+        let suiteName = "ledger-mobile-write-supersession-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.transactionPayload,
+            transactionWriteDelayNanoseconds: 150_000_000,
+            transactionWritesShouldFail: true
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let source = Self.editableTransaction.source
+        let entry = LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "不会提交的编辑",
+            narration: "保留重试草稿",
+            metadata: [:],
+            tags: ["learning"],
+            postings: Self.editableTransaction.editableEntry!.postings
+        )
+
+        let write = Task { try await session.updateTransaction(source: source, entry: entry) }
+        for _ in 0..<100 {
+            let counts = await api.transactionWriteCounts()
+            if counts.started == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        await api.supersedeTransactionSource(source)
+        await session.refresh()
+
+        guard case let .visible(pending) = session.transactionResolution(for: source) else {
+            return XCTFail("pending detail should retain its local projection")
+        }
+        XCTAssertEqual(pending.payee, "不会提交的编辑")
+
+        do {
+            try await write.value
+            XCTFail("the controlled write should fail")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("账本来源已变化"))
+        }
+        XCTAssertEqual(session.transactionResolution(for: source), .unavailable)
+        XCTAssertEqual(session.visibleTransactions.first?.payee, "城市书房")
     }
 
     func testGmailAutomationUsesReadySessionWithoutBypassingPendingPreview() async throws {
@@ -1110,6 +1367,73 @@ final class LedgerSessionTests: XCTestCase {
         sensitiveUnlocked: true
     )
 
+    private static let editableTransaction = LedgerTransaction(
+        date: "2026-08-18",
+        payee: "城市书房",
+        narration: "读书",
+        tags: ["learning"],
+        postings: [
+            LedgerPosting(account: "Expenses:Education:Books", amount: 8_500, currency: "CNY"),
+            LedgerPosting(account: "Assets:Bank:Daily", amount: -8_500, currency: "CNY"),
+        ],
+        editableEntry: LedgerTransactionEntry(
+            date: "2026-08-18",
+            payee: "城市书房",
+            narration: "读书",
+            metadata: [:],
+            tags: ["learning"],
+            postings: [
+                LedgerTransactionEntryPosting(account: "Expenses:Education:Books", amount: "85.00", currency: "CNY"),
+                LedgerTransactionEntryPosting(account: "Assets:Bank:Daily", amount: "-85.00", currency: "CNY"),
+            ]
+        ),
+        source: TransactionSource(
+            file: "transactions/2026/08.bean",
+            line: 18,
+            hash: "expense-hash",
+            gitSHA: "abc123"
+        )
+    )
+
+    private static let secondEditableTransaction = LedgerTransaction(
+        date: "2026-08-19",
+        payee: "青禾市场",
+        narration: "食材",
+        tags: ["groceries"],
+        postings: [
+            LedgerPosting(account: "Expenses:Food:Groceries", amount: 4_200, currency: "CNY"),
+            LedgerPosting(account: "Assets:Bank:Daily", amount: -4_200, currency: "CNY"),
+        ],
+        editableEntry: LedgerTransactionEntry(
+            date: "2026-08-19",
+            payee: "青禾市场",
+            narration: "食材",
+            metadata: [:],
+            tags: ["groceries"],
+            postings: [
+                LedgerTransactionEntryPosting(account: "Expenses:Food:Groceries", amount: "42.00", currency: "CNY"),
+                LedgerTransactionEntryPosting(account: "Assets:Bank:Daily", amount: "-42.00", currency: "CNY"),
+            ]
+        ),
+        source: TransactionSource(
+            file: "transactions/2026/08.bean",
+            line: 26,
+            hash: "groceries-hash",
+            gitSHA: "abc123"
+        )
+    )
+
+    private static let transactionPayload = LedgerBootstrap(
+        start: "2026-08-01",
+        end: "2026-08-31",
+        summary: LedgerSummary(currency: "CNY", income: 0, expense: 12_700, net: -12_700),
+        accountBalances: [],
+        transactions: [editableTransaction, secondEditableTransaction],
+        accounts: [],
+        valuationCurrency: "CNY",
+        sensitiveUnlocked: true
+    )
+
     private static let widgetReport = LedgerHomeReport(
         start: "2026-08-01",
         end: "2026-09-01",
@@ -1323,6 +1647,8 @@ private actor SessionMockAPI: LedgerAPI {
     let bootstrapDelays: [String: UInt64]
     let bootstrapDelaysByStart: [String: UInt64]
     let bootstrapErrorStatuses: [String: Int]
+    let transactionWriteDelayNanoseconds: UInt64
+    let transactionWritesShouldFail: Bool
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
@@ -1344,6 +1670,9 @@ private actor SessionMockAPI: LedgerAPI {
     private var requestedImportCommit: ImportCommitCall?
     private var requestedTransactionUpdate: LedgerTransactionUpdateRequest?
     private var requestedTransactionTags: LedgerTransactionTagsRequest?
+    private var serverTransactions: [LedgerTransaction]
+    private var transactionWriteStartedCount = 0
+    private var transactionWriteCompletedCount = 0
     private var indexInfoCalls = 0
     private var gmailSyncPendingIDs: [String] = []
     private var gmailDetailIDs: [String] = []
@@ -1379,7 +1708,9 @@ private actor SessionMockAPI: LedgerAPI {
         bqlDelayNanoseconds: UInt64 = 0,
         bootstrapDelays: [String: UInt64] = [:],
         bootstrapDelaysByStart: [String: UInt64] = [:],
-        bootstrapErrorStatuses: [String: Int] = [:]
+        bootstrapErrorStatuses: [String: Int] = [:],
+        transactionWriteDelayNanoseconds: UInt64 = 0,
+        transactionWritesShouldFail: Bool = false
     ) {
         self.healthStatus = healthStatus
         currentAuthStatus = authStatus
@@ -1406,6 +1737,9 @@ private actor SessionMockAPI: LedgerAPI {
         self.bootstrapDelays = bootstrapDelays
         self.bootstrapDelaysByStart = bootstrapDelaysByStart
         self.bootstrapErrorStatuses = bootstrapErrorStatuses
+        self.transactionWriteDelayNanoseconds = transactionWriteDelayNanoseconds
+        self.transactionWritesShouldFail = transactionWritesShouldFail
+        serverTransactions = payload.transactions
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -1474,7 +1808,9 @@ private actor SessionMockAPI: LedgerAPI {
         if let status = bootstrapErrorStatuses[valuationCurrency] {
             throw LedgerAPIError.server(status: status, message: "Sensitive data locked")
         }
-        if valuationCurrency == payload.valuationCurrency { return payload }
+        if valuationCurrency == payload.valuationCurrency {
+            return payload.replacingTransactions(with: serverTransactions)
+        }
         return LedgerBootstrap(
             start: payload.start,
             end: payload.end,
@@ -1485,7 +1821,7 @@ private actor SessionMockAPI: LedgerAPI {
                 net: payload.summary.net
             ),
             accountBalances: payload.accountBalances,
-            transactions: payload.transactions,
+            transactions: serverTransactions,
             accounts: payload.accounts,
             commodities: payload.commodities,
             prices: payload.prices,
@@ -1598,7 +1934,13 @@ private actor SessionMockAPI: LedgerAPI {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws {
+        transactionWriteStartedCount += 1
         requestedTransactionUpdate = LedgerTransactionUpdateRequest(source: source, entry: entry)
+        try await finishTransactionWrite()
+        guard let index = serverTransactions.firstIndex(where: { $0.source == source }) else { return }
+        serverTransactions[index] = serverTransactions[index]
+            .projecting(entry: entry)
+            .confirmingServerSource(sequence: transactionWriteCompletedCount)
     }
 
     func addTransactionTags(
@@ -1606,7 +1948,15 @@ private actor SessionMockAPI: LedgerAPI {
         sources: [TransactionSource],
         tags: [String]
     ) async throws {
+        transactionWriteStartedCount += 1
         requestedTransactionTags = LedgerTransactionTagsRequest(sources: sources, tags: tags)
+        try await finishTransactionWrite()
+        for source in sources {
+            guard let index = serverTransactions.firstIndex(where: { $0.source == source }) else { continue }
+            serverTransactions[index] = serverTransactions[index]
+                .projecting(addingTags: tags)
+                .confirmingServerSource(sequence: transactionWriteCompletedCount)
+        }
     }
 
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
@@ -1768,6 +2118,15 @@ private actor SessionMockAPI: LedgerAPI {
         TransactionWrites(update: requestedTransactionUpdate, tags: requestedTransactionTags)
     }
 
+    func transactionWriteCounts() -> (started: Int, completed: Int) {
+        (transactionWriteStartedCount, transactionWriteCompletedCount)
+    }
+
+    func supersedeTransactionSource(_ source: TransactionSource) {
+        guard let index = serverTransactions.firstIndex(where: { $0.source == source }) else { return }
+        serverTransactions[index] = serverTransactions[index].confirmingServerSource(sequence: 99)
+    }
+
     func gmailRequests() -> GmailRequests {
         GmailRequests(
             syncPendingIDs: gmailSyncPendingIDs,
@@ -1788,6 +2147,36 @@ private actor SessionMockAPI: LedgerAPI {
         if let analysisErrorStatus {
             throw LedgerAPIError.server(status: analysisErrorStatus, message: "Sensitive data locked")
         }
+    }
+
+    private func finishTransactionWrite() async throws {
+        if transactionWriteDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: transactionWriteDelayNanoseconds)
+        }
+        if transactionWritesShouldFail {
+            throw LedgerAPIError.server(status: 409, message: "账本来源已变化")
+        }
+        transactionWriteCompletedCount += 1
+    }
+}
+
+private extension LedgerTransaction {
+    func confirmingServerSource(sequence: Int) -> LedgerTransaction {
+        LedgerTransaction(
+            date: date,
+            payee: payee,
+            narration: narration,
+            metadata: metadata,
+            tags: tags,
+            postings: postings,
+            editableEntry: editableEntry,
+            source: TransactionSource(
+                file: source.file,
+                line: source.line + 1,
+                hash: "confirmed-\(sequence)",
+                gitSHA: "server-\(sequence)"
+            )
+        )
     }
 }
 

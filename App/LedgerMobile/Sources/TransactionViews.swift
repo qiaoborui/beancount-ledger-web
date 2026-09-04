@@ -70,9 +70,11 @@ struct TransactionsView: View {
     @State private var selectedTransactionIDs: Set<String> = []
     @State private var tagEditorPresented = false
     @State private var actionMessage: String?
+    @State private var actionMessageStyle: LedgerStatusStyle = .failure
+    @State private var confirmationFeedback = 0
 
     private var transactions: [LedgerTransaction] {
-        session.ledger?.transactions ?? []
+        session.visibleTransactions
     }
 
     private var filteredTransactions: [LedgerTransaction] {
@@ -181,7 +183,7 @@ struct TransactionsView: View {
                             }
 
                             if let actionMessage {
-                                StatusBanner(message: actionMessage) { self.actionMessage = nil }
+                                StatusBanner(message: actionMessage, style: actionMessageStyle) { self.actionMessage = nil }
                                     .padding(.horizontal, LedgerSpacing.lg)
                                     .padding(.bottom, LedgerSpacing.md)
                             }
@@ -219,7 +221,10 @@ struct TransactionsView: View {
                                                 NavigationLink {
                                                     TransactionDetailView(transaction: transaction)
                                                 } label: {
-                                                    TransactionCard(transaction: transaction)
+                                                    TransactionCard(
+                                                        transaction: transaction,
+                                                        mutationPhase: session.transactionMutationPhase(for: transaction)
+                                                    )
                                                 }
                                                 .buttonStyle(PressScaleButtonStyle())
                                                 .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
@@ -292,6 +297,7 @@ struct TransactionsView: View {
             .onChange(of: transactions.map(\.id)) { _, ids in
                 selectedTransactionIDs.formIntersection(ids)
             }
+            .sensoryFeedback(.success, trigger: confirmationFeedback)
         }
     }
 
@@ -302,10 +308,12 @@ struct TransactionsView: View {
 
     private func isTagEligible(_ transaction: LedgerTransaction) -> Bool {
         transaction.source.hash?.isEmpty == false
+            && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
     }
 
     private func toggleTagSelection(_ transaction: LedgerTransaction) {
         guard isTagEligible(transaction) else {
+            actionMessageStyle = .failure
             actionMessage = "该交易缺少并发校验信息，请刷新后重试。"
             return
         }
@@ -314,6 +322,7 @@ struct TransactionsView: View {
         } else if selectedTransactionIDs.count < TransactionTagSelectionRules.maximumCount {
             selectedTransactionIDs.insert(transaction.id)
         } else {
+            actionMessageStyle = .failure
             actionMessage = "一次最多选择 200 条交易。"
         }
     }
@@ -326,6 +335,7 @@ struct TransactionsView: View {
             let updated = TransactionTagSelectionRules.adding(eligible.map(\.id), to: selectedTransactionIDs)
             if updated.count == TransactionTagSelectionRules.maximumCount,
                eligible.contains(where: { !updated.contains($0.id) }) {
+                actionMessageStyle = .failure
                 actionMessage = "一次最多选择 200 条交易。"
             }
             selectedTransactionIDs = updated
@@ -338,7 +348,9 @@ struct TransactionsView: View {
         try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
         selectedTransactionIDs.removeAll()
         selectingTags = false
-        actionMessage = "已为 \(selected.count) 条交易添加标签。"
+        confirmationFeedback &+= 1
+        actionMessageStyle = .confirmed
+        actionMessage = "服务器已验证，并为 \(selected.count) 条交易添加标签。"
     }
 }
 
@@ -557,10 +569,16 @@ private struct TransactionFilterSheet: View {
 private struct TransactionCard: View {
     let transaction: LedgerTransaction
     let selectionState: Bool?
+    let mutationPhase: LedgerTransactionMutationPhase?
 
-    init(transaction: LedgerTransaction, selectionState: Bool? = nil) {
+    init(
+        transaction: LedgerTransaction,
+        selectionState: Bool? = nil,
+        mutationPhase: LedgerTransactionMutationPhase? = nil
+    ) {
         self.transaction = transaction
         self.selectionState = selectionState
+        self.mutationPhase = mutationPhase
     }
 
     private var presentation: TransactionPresentation {
@@ -619,6 +637,10 @@ private struct TransactionCard: View {
             .font(.system(size: 11))
             .foregroundStyle(LedgerPalette.secondary)
 
+            if let mutationPhase {
+                TransactionMutationBadge(phase: mutationPhase)
+            }
+
             if let tags = transaction.tags, !tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -644,6 +666,25 @@ private struct TransactionCard: View {
                 .stroke(LedgerPalette.line, lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+    }
+}
+
+private struct TransactionMutationBadge: View {
+    let phase: LedgerTransactionMutationPhase
+
+    private var presentation: (title: String, image: String, color: Color) {
+        switch phase {
+        case .pending: ("等待服务器确认", "clock.arrow.circlepath", LedgerPalette.cobalt)
+        case .confirmed: ("服务器已确认 · 同步中", "checkmark.circle", LedgerPalette.success)
+        case .failed: ("未保存 · 已恢复", "arrow.uturn.backward.circle", LedgerPalette.risk)
+        }
+    }
+
+    var body: some View {
+        Label(presentation.title, systemImage: presentation.image)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(presentation.color)
+            .accessibilityIdentifier("transaction-mutation-state")
     }
 }
 
@@ -742,7 +783,7 @@ private struct TransactionTagEditorSheet: View {
                 Button {
                     Task { await apply() }
                 } label: {
-                    PrimaryButtonLabel(title: "添加标签", loading: applying)
+                    PrimaryButtonLabel(title: applying ? "正在验证标签" : "添加标签", loading: applying)
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .disabled(applying)
@@ -769,7 +810,7 @@ private struct TransactionTagEditorSheet: View {
             try await onApply(tags)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "添加失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
         }
         applying = false
     }
@@ -777,10 +818,15 @@ private struct TransactionTagEditorSheet: View {
 
 struct TransactionDetailView: View {
     @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
 
     @State private var transaction: LedgerTransaction
     @State private var editorPresented = false
     @State private var savedMessage: String?
+    @State private var confirmationFeedback = 0
+    @State private var confirmedEntry: LedgerTransactionEntry?
+    @State private var confirmedSourceFile: String?
+    @State private var sourceUnavailable = false
 
     init(transaction: LedgerTransaction) {
         _transaction = State(initialValue: transaction)
@@ -883,13 +929,29 @@ struct TransactionDetailView: View {
                 }
 
                 if let savedMessage {
-                    StatusBanner(message: savedMessage) { self.savedMessage = nil }
+                    StatusBanner(message: savedMessage, style: .confirmed) { self.savedMessage = nil }
                         .padding(LedgerSpacing.lg)
                 }
             }
             .padding(.bottom, LedgerSpacing.xxl)
         }
+        .accessibilityHidden(sourceUnavailable)
         .background(LedgerPalette.canvas)
+        .overlay {
+            if sourceUnavailable {
+                ContentUnavailableView {
+                    Label("交易来源已变化", systemImage: "arrow.triangle.branch")
+                } description: {
+                    Text("无法安全确认这仍是同一笔交易。服务器数据已保留，请返回流水列表重新打开。")
+                } actions: {
+                    Button("返回流水列表") { dismiss() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(LedgerPalette.canvas)
+            }
+        }
         .navigationTitle("交易详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -899,7 +961,12 @@ struct TransactionDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("编辑") { editorPresented = true }
                     .fontWeight(.semibold)
-                    .disabled(transaction.source.hash?.isEmpty != false || transaction.editableEntry == nil)
+                    .disabled(
+                        transaction.source.hash?.isEmpty != false
+                            || transaction.editableEntry == nil
+                            || sourceUnavailable
+                            || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
+                    )
                     .accessibilityIdentifier("transaction-edit")
             }
         }
@@ -909,62 +976,47 @@ struct TransactionDetailView: View {
                 accounts: session.ledger?.accounts ?? [],
                 commodities: session.ledger?.commodities ?? [],
                 onSave: { entry in
-                    let previousSource = transaction.source
+                    let sourceFile = transaction.source.file
                     try await session.updateTransaction(source: transaction.source, entry: entry)
-                    if let refreshed = session.ledger?.transactions.first(where: {
-                        $0.source.file == previousSource.file
-                            && $0.source.line == previousSource.line
-                            && $0.represents(entry)
-                    }) {
-                        transaction = refreshed
-                        savedMessage = "交易已保存。"
-                    } else {
-                        transaction = transaction.applying(entry, invalidatingSourceHash: true)
-                        savedMessage = "交易已保存。请返回流水列表刷新后继续编辑。"
-                    }
+                    confirmedEntry = entry
+                    confirmedSourceFile = sourceFile
+                    transaction = transaction.projecting(entry: entry)
+                    synchronizeTransaction(with: session.ledger)
+                    confirmationFeedback &+= 1
+                    savedMessage = "服务器已验证并保存，正在同步最新账本版本。"
                 }
             )
             .ledgerPrivacyProtectedSheet()
         }
-    }
-}
-
-private extension LedgerTransaction {
-    func applying(_ entry: LedgerTransactionEntry, invalidatingSourceHash: Bool = false) -> LedgerTransaction {
-        LedgerTransaction(
-            date: entry.date,
-            payee: entry.payee,
-            narration: entry.narration,
-            metadata: entry.metadata.isEmpty ? nil : entry.metadata,
-            tags: entry.tags.isEmpty ? nil : entry.tags,
-            postings: entry.postings.map { posting in
-                LedgerPosting(
-                    account: posting.account,
-                    amount: TransactionAmountParser.minorUnits(posting.amount) ?? 0,
-                    currency: posting.currency
-                )
-            },
-            editableEntry: entry,
-            source: invalidatingSourceHash
-                ? TransactionSource(file: source.file, line: source.line, hash: nil, gitSHA: nil)
-                : source
-        )
-    }
-
-    func represents(_ entry: LedgerTransactionEntry) -> Bool {
-        if editableEntry == entry { return true }
-        guard date == entry.date,
-              payee == entry.payee,
-              narration == entry.narration,
-              metadata ?? [:] == entry.metadata,
-              tags ?? [] == entry.tags,
-              postings.count == entry.postings.count else { return false }
-
-        return zip(postings, entry.postings).allSatisfy { posting, edited in
-            posting.account == edited.account
-                && posting.amount == TransactionAmountParser.minorUnits(edited.amount)
-                && (posting.currency ?? "CNY") == edited.currency
+        .onReceive(session.$ledger) { ledger in
+            synchronizeTransaction(with: ledger)
         }
+        .onReceive(session.$transactionMutationStates) { _ in
+            synchronizeTransaction(with: session.ledger)
+        }
+        .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    private func synchronizeTransaction(with ledger: LedgerBootstrap?) {
+        guard let ledger else { return }
+        if case let .visible(resolved) = session.transactionResolution(for: transaction.source) {
+            transaction = resolved
+            sourceUnavailable = false
+            return
+        }
+        if let confirmedEntry, let confirmedSourceFile {
+            let matches = ledger.transactions.filter {
+                $0.source.file == confirmedSourceFile && $0.represents(confirmedEntry)
+            }
+            if matches.count == 1 {
+                transaction = matches[0]
+                self.confirmedEntry = nil
+                self.confirmedSourceFile = nil
+                sourceUnavailable = false
+                return
+            }
+        }
+        sourceUnavailable = true
     }
 }
 
@@ -1149,7 +1201,7 @@ private struct TransactionEditorView: View {
                     Button {
                         Task { await save() }
                     } label: {
-                        PrimaryButtonLabel(title: "保存修改", loading: saving)
+                        PrimaryButtonLabel(title: saving ? "正在验证并保存" : "保存修改", loading: saving)
                     }
                     .buttonStyle(PressScaleButtonStyle())
                     .disabled(saving)
@@ -1335,7 +1387,7 @@ private struct TransactionEditorView: View {
             try await onSave(entry)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "保存失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
         }
         saving = false
     }
