@@ -302,6 +302,88 @@ func TestGitHubAPIMissingFileReadIsCached(t *testing.T) {
 	}
 }
 
+func TestGitHubAPIBeginTransactionUsesOneRequest(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.beginTransaction(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("begin transaction requests = %d, want 1", got)
+	}
+}
+
+func TestGitHubAPIReadLedgerFileUsesOneRequest(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"main.bean": "option \"title\" \"Test\"\n"})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.readLedgerFile(t.Context(), "main.bean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("read ledger file requests = %d, want 1", got)
+	}
+}
+
+func TestGitHubAPIListEditorFilesUsesOneRequest(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{"main.bean": "option \"title\" \"Test\"\n"})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.listEditorFiles(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("list editor files requests = %d, want 1", got)
+	}
+}
+
+func TestGitHubAPIListImportDocumentsUsesOneRequest(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"transactions/2026/documents/imports/statement.pdf": "test",
+	})
+	defer fake.server.Close()
+	client, err := newGitHubLedgerClient(githubAPITestConfig(t, fake))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.listImportDocuments(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("list import documents requests = %d, want 1", got)
+	}
+}
+
+func BenchmarkGitHubAPIReadLedgerFile(b *testing.B) {
+	fake := newFakeGitHubLedgerAPI(b, map[string]string{"main.bean": "option \"title\" \"Test\"\n"})
+	defer fake.server.Close()
+	fake.requestDelay = time.Millisecond
+	client, err := newGitHubLedgerClient(githubAPITestConfig(b, fake))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := client.readLedgerFile(b.Context(), "main.bean"); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(fake.totalRequestCount())/float64(b.N), "requests/op")
+}
+
 func TestGitHubAPICommitCreatesBlobsConcurrently(t *testing.T) {
 	var activeBlobs atomic.Int32
 	var maxActiveBlobs atomic.Int32
@@ -430,7 +512,29 @@ func TestGitHubAPIImportConfigReadsFromGitHub(t *testing.T) {
 	}
 }
 
-func githubAPITestConfig(t *testing.T, fake *fakeGitHubLedgerAPI) Config {
+func TestGitHubAPIImportRequirementsDoNotPreflightConfig(t *testing.T) {
+	fake := newFakeGitHubLedgerAPI(t, map[string]string{
+		"imports/wechat-config.yaml": "title: Test\n",
+	})
+	defer fake.server.Close()
+
+	server := &Server{cfg: githubAPITestConfig(t, fake)}
+	importer, err := server.ensureImportRequirements("wechat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 0 {
+		t.Fatalf("requirement preflight requests = %d, want 0", got)
+	}
+	if _, err := loadDEGModuleConfig(t.Context(), server, importer.ProviderConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.totalRequestCount(); got != 1 {
+		t.Fatalf("config load requests = %d, want 1", got)
+	}
+}
+
+func githubAPITestConfig(t testing.TB, fake *fakeGitHubLedgerAPI) Config {
 	t.Helper()
 	return Config{
 		LedgerRoot:         filepath.Join(t.TempDir(), "repo"),
@@ -445,9 +549,11 @@ func githubAPITestConfig(t *testing.T, fake *fakeGitHubLedgerAPI) Config {
 }
 
 type fakeGitHubLedgerAPI struct {
-	t                              *testing.T
+	t                              testing.TB
 	server                         *httptest.Server
 	mu                             sync.Mutex
+	totalRequests                  int
+	requestDelay                   time.Duration
 	files                          map[string]string
 	blobs                          map[string]string
 	blobSeq                        int
@@ -459,7 +565,7 @@ type fakeGitHubLedgerAPI struct {
 	failNextContentReadAfterCommit bool
 }
 
-func newFakeGitHubLedgerAPI(t *testing.T, files map[string]string) *fakeGitHubLedgerAPI {
+func newFakeGitHubLedgerAPI(t testing.TB, files map[string]string) *fakeGitHubLedgerAPI {
 	t.Helper()
 	api := &fakeGitHubLedgerAPI{t: t, files: files, blobs: map[string]string{}, treeBlobs: map[string]string{}, contentReads: map[string]int{}}
 	api.server = httptest.NewServer(http.HandlerFunc(api.handle))
@@ -476,15 +582,31 @@ func (api *fakeGitHubLedgerAPI) contentReadCounts() map[string]int {
 	return counts
 }
 
+func (api *fakeGitHubLedgerAPI) totalRequestCount() int {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	return api.totalRequests
+}
+
 func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 	api.mu.Lock()
 	defer api.mu.Unlock()
+	api.totalRequests++
+	time.Sleep(api.requestDelay)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/git/ref/heads/main":
 		writeJSON(api.t, w, map[string]any{"ref": "refs/heads/main", "object": map[string]any{"type": "commit", "sha": "base-commit"}})
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/git/commits/base-commit":
 		writeJSON(api.t, w, map[string]any{"sha": "base-commit", "tree": map[string]any{"sha": "base-tree"}})
+	case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/ledger/commits/main":
+		writeJSON(api.t, w, map[string]any{"sha": "base-commit", "commit": map[string]any{"tree": map[string]any{"sha": "base-tree"}}})
+	case r.Method == http.MethodGet && (r.URL.Path == "/repos/owner/ledger/git/trees/main" || r.URL.Path == "/repos/owner/ledger/git/trees/base-tree"):
+		entries := make([]map[string]any, 0, len(api.files))
+		for path, content := range api.files {
+			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": sha256Hex([]byte(content)), "size": len(content)})
+		}
+		writeJSON(api.t, w, map[string]any{"sha": "base-tree", "truncated": false, "tree": entries})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/owner/ledger/contents/"):
 		if api.failNextContentReadAfterCommit && api.commitCount > 0 {
 			api.failNextContentReadAfterCommit = false
@@ -547,14 +669,14 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
+func writeJSON(t testing.TB, w http.ResponseWriter, value any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func decodeJSON(t *testing.T, r *http.Request, value any) {
+func decodeJSON(t testing.TB, r *http.Request, value any) {
 	t.Helper()
 	if err := json.NewDecoder(r.Body).Decode(value); err != nil {
 		t.Fatal(err)
