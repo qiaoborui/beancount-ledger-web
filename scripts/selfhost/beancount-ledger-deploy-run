@@ -5,6 +5,8 @@ umask 077
 config_dir=/etc/beancount-ledger-selfhost
 compose_file="${config_dir}/compose.yml"
 runtime_env="${config_dir}/runtime.env"
+observability_compose_file="${config_dir}/compose.observability.yml"
+observability_env="${config_dir}/observability.env"
 caddyfile="${config_dir}/Caddyfile"
 contract_file="${config_dir}/deploy-contract"
 state_dir=/var/lib/beancount-ledger-deploy
@@ -34,13 +36,25 @@ log() {
 
 compose() {
   local release_env="$1"
+  local -a observability_args=()
   shift
+  if [[ -e "$observability_compose_file" || -e "$observability_env" ]]; then
+    if [[ ! -f "$observability_compose_file" || ! -f "$observability_env" ]]; then
+      echo "observability override files must be installed together" >&2
+      return 1
+    fi
+    observability_args=(
+      --env-file "$observability_env"
+      -f "$observability_compose_file"
+    )
+  fi
   timeout --foreground "${DEPLOY_COMMAND_TIMEOUT_SECONDS:-$compose_timeout_seconds}" \
     docker compose \
     -p "$project" \
     --env-file "$runtime_env" \
     --env-file "$release_env" \
     -f "$compose_file" \
+    "${observability_args[@]}" \
     "$@"
 }
 
@@ -140,6 +154,17 @@ validate_fixed_host() {
         || "$(stat -c '%U:%G:%a' "$current_env")" != "root:root:600" ]]; then
     echo "fixed deployment files have unsafe ownership or modes" >&2
     return 1
+  fi
+  if [[ -e "$observability_compose_file" || -e "$observability_env" ]]; then
+    if [[ ! -f "$observability_compose_file" || ! -f "$observability_env" ]]; then
+      echo "observability override files must be installed together" >&2
+      return 1
+    fi
+    if [[ "$(stat -c '%U:%G:%a' "$observability_compose_file")" != "root:root:644" \
+          || "$(stat -c '%U:%G:%a' "$observability_env")" != "root:root:600" ]]; then
+      echo "observability override files have unsafe ownership or modes" >&2
+      return 1
+    fi
   fi
   if [[ "$(<"$contract_file")" != "$host_contract" ]]; then
     echo "installed host contract is unsupported" >&2

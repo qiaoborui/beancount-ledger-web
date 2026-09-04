@@ -7,10 +7,37 @@ ci="${2:-.github/workflows/ci.yml}"
 compose="${3:-docker/docker-compose.selfhost.yml}"
 dockerfile="${4:-docker/Dockerfile}"
 runbook="${5:-docs/headscale-local-cicd.md}"
+observability_compose="${6:-docker/docker-compose.selfhost-observability.yml}"
+observability_env="${7:-docker/selfhost-observability.env}"
 
-for file in "$workflow" "$ci" "$compose" "$dockerfile" "$runbook"; do
+for file in "$workflow" "$ci" "$compose" "$dockerfile" "$runbook" "$observability_compose" "$observability_env"; do
   if [[ ! -f "$file" ]]; then
     echo "required self-host deployment file is missing: ${file}" >&2
+    exit 1
+  fi
+done
+
+observability_config="$(docker compose \
+  --env-file .env.selfhost.example \
+  --env-file "$observability_env" \
+  -f "$compose" \
+  -f "$observability_compose" \
+  config --format json)"
+if ! jq -e '
+  .services.server.environment.METRICS_ADDR == ":9091"
+  and .services.server.environment.METRICS_ALLOW_NON_LOOPBACK == "true"
+  and ([.services.server.ports[] | select(.target == 9091)] | length) == 1
+  and ([.services.server.ports[] | select(.target == 9091)][0]
+    | .published == "9091" and .host_ip == "127.0.0.1" and .protocol == "tcp")
+' >/dev/null <<< "$observability_config"; then
+  echo "self-host observability override must publish enabled metrics on loopback only" >&2
+  exit 1
+fi
+for required in \
+  'METRICS_ADDR: "${METRICS_ADDR:?set METRICS_ADDR in observability.env}"' \
+  'METRICS_ALLOW_NON_LOOPBACK: "${METRICS_ALLOW_NON_LOOPBACK:?set METRICS_ALLOW_NON_LOOPBACK in observability.env}"'; do
+  if ! grep -Fq -- "$required" "$observability_compose"; then
+    echo "self-host observability override must be self-contained: ${required}" >&2
     exit 1
   fi
 done
@@ -50,6 +77,18 @@ if ! grep -Fq 'compose "$maintenance_env" up -d --no-build database zip-worker s
   echo "maintenance validation must start only services that can run behind the 503 guard" >&2
   exit 1
 fi
+for required in \
+  'observability_compose_file="${config_dir}/compose.observability.yml"' \
+  'observability_env="${config_dir}/observability.env"' \
+  '--env-file "$observability_env"' \
+  '-f "$observability_compose_file"' \
+  'observability override files must be installed together' \
+  'observability override files have unsafe ownership or modes'; do
+  if ! grep -Fq -- "$required" scripts/selfhost/beancount-ledger-deploy-run; then
+    echo "self-host deployer does not preserve the optional observability override: ${required}" >&2
+    exit 1
+  fi
+done
 if grep -Fq 'compose "$maintenance_env" up -d --no-build database server agent indexer frontend' scripts/selfhost/beancount-ledger-deploy-run \
   || grep -Fq 'wait_for_healthy_service "$maintenance_env" agent' scripts/selfhost/beancount-ledger-deploy-run; then
   echo "agent cannot become ready while the server is in deployment maintenance mode" >&2
