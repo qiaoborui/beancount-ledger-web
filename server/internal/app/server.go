@@ -46,6 +46,8 @@ type Server struct {
 	limiter              RateLimiter
 	agentModel           AgentModelClient
 	metrics              *Metrics
+	gmailEventsOnce      sync.Once
+	gmailEvents          *gmailPendingEventHub
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
@@ -106,6 +108,11 @@ func (s *Server) loggerOr() *slog.Logger {
 func (s *Server) configReadLock() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
+		if c.Request.Method == http.MethodGet && path == "/api/ledger/imports/pending/events" {
+			s.refreshConfigIfNeeded(c.Request.Context())
+			c.Next()
+			return
+		}
 		if (c.Request.Method == http.MethodPost && path == "/api/setup/install") ||
 			(c.Request.Method == http.MethodPut && path == "/api/runtime-config") {
 			c.Next()
@@ -239,6 +246,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledgerRead30s.GET("/imports/documents", s.importsDocuments)
 	ledgerRead30s.GET("/imports/documents/file", s.importsDocumentFile)
 	ledger.GET("/imports/pending", noStore(), s.gmailPendingImports)
+	ledger.GET("/imports/pending/events", noStore(), s.gmailPendingEvents)
 	ledger.GET("/imports/pending/:id", noStore(), s.gmailPendingImport)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)

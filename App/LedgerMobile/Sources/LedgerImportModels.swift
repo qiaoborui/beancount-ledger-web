@@ -10,7 +10,7 @@ struct LedgerImportProviderInfo: Decodable, Equatable, Identifiable, Sendable {
 }
 
 enum LedgerMobileImportCapabilities {
-    static let supportsAutomaticEmailImport = false
+    static let supportsAutomaticEmailImport = true
 
     static let supportedManualFileExtensions = [
         ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
@@ -19,8 +19,7 @@ enum LedgerMobileImportCapabilities {
     private static let supportedManualFileExtensionSet = Set(supportedManualFileExtensions)
 
     static func fileImportProviders(from providers: [LedgerImportProviderInfo]) -> [LedgerImportProviderInfo] {
-        guard !supportsAutomaticEmailImport else { return providers }
-        return providers.filter { !isAutomaticEmailProvider($0) }
+        providers
     }
 
     static func supportedExtensions(from providers: [LedgerImportProviderInfo]) -> Set<String> {
@@ -31,23 +30,105 @@ enum LedgerMobileImportCapabilities {
             : Set(providerExtensions).union([".zip"])
     }
 
-    private static func isAutomaticEmailProvider(_ provider: LedgerImportProviderInfo) -> Bool {
-        let id = provider.id.lowercased()
-        let engine = provider.engine?.lowercased() ?? ""
-        return id == "gmail"
-            || id.hasPrefix("gmail-")
-            || id.contains("email-auto")
-            || id.contains("mail-auto")
-            || engine == "gmail"
-            || engine.hasPrefix("gmail-")
-    }
-
     private static func normalizedExtensions(_ values: [String]) -> [String] {
         Array(Set(values.map { value in
             let normalized = value.lowercased()
             return normalized.hasPrefix(".") ? normalized : "." + normalized
         })).sorted()
     }
+}
+
+struct LedgerGmailStatus: Decodable, Equatable, Sendable {
+    let configured: Bool
+    let deliveryMode: String
+    let connected: Bool
+    let email: String?
+    let label: String?
+    let watchExpiration: Int64?
+    let lastSyncAt: String?
+    let lastError: String?
+    let allowedSenders: [String]
+    let oauthRedirectURL: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case configured
+        case deliveryMode
+        case connected
+        case email
+        case label
+        case watchExpiration
+        case lastSyncAt
+        case lastError
+        case allowedSenders
+        case oauthRedirectURL = "oauthRedirectUrl"
+    }
+
+    var usesServerPush: Bool { deliveryMode.lowercased() == "webhook" }
+}
+
+struct LedgerGmailPendingImport: Decodable, Equatable, Identifiable, Sendable {
+    let id: String
+    let importID: String?
+    let messageID: String
+    let threadID: String?
+    let sender: String
+    let subject: String
+    let receivedAt: String
+    let filename: String
+    let provider: String?
+    let candidateCount: Int
+    let status: String
+    let error: String?
+    let createdAt: String
+    let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case importID = "importId"
+        case messageID = "messageId"
+        case threadID = "threadId"
+        case sender
+        case subject
+        case receivedAt
+        case filename
+        case provider
+        case candidateCount
+        case status
+        case error
+        case createdAt
+        case updatedAt
+    }
+
+    var isReviewable: Bool { status == "ready" }
+    var isRetryable: Bool { status == "failed" }
+    var isVisible: Bool { status != "committed" && status != "dismissed" }
+}
+
+struct LedgerGmailPendingDetail: Decodable, Equatable, Sendable {
+    let item: LedgerGmailPendingImport
+    let preview: LedgerImportPreview?
+}
+
+struct LedgerGmailConnectResponse: Decodable, Equatable, Sendable {
+    let url: URL
+}
+
+struct LedgerGmailSyncResult: Decodable, Equatable, Sendable {
+    let ok: Bool
+    let processed: Int?
+    let retryPending: Bool?
+    let item: LedgerGmailPendingImport?
+}
+
+struct LedgerGmailOAuthResult: Equatable, Sendable {
+    enum Status: String, Equatable, Sendable {
+        case connected
+        case error
+    }
+
+    let id: UUID
+    let status: Status
+    let reason: String?
 }
 
 enum LedgerImportCommitFailureDisposition: Equatable {
@@ -402,6 +483,7 @@ struct LedgerImportCommitResult: Decodable, Equatable, Sendable {
     let readModelPending: Bool?
     let indexGitSHA: String?
     let runtimeCleanupError: String?
+    let gmailPendingStatusWarning: String?
 }
 
 struct LedgerIndexInfo: Decodable, Equatable, Sendable {

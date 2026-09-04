@@ -224,7 +224,36 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["招商银行信用卡"].exists)
         XCTAssertTrue(app.buttons["import-select-file"].exists)
         XCTAssertTrue(app.staticTexts["支持 CSV、Excel、PDF、邮件和 ZIP，单个文件最大 10MB。"].exists)
-        XCTAssertFalse(app.staticTexts["Gmail 自动账单"].exists)
+        XCTAssertTrue(app.staticTexts["Gmail 自动账单"].exists)
+
+        let connectedAccount = app.staticTexts["已连接 ledger.preview@gmail.com"]
+        for _ in 0..<3 where !connectedAccount.exists { content.swipeUp() }
+        XCTAssertTrue(connectedAccount.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label BEGINSWITH %@", "Gmail 推送")
+            ).firstMatch.exists
+        )
+        XCTAssertTrue(app.buttons["gmail-sync"].exists)
+
+        let readyReview = app.buttons["gmail-review-safe-gmail-ready"]
+        for _ in 0..<3 where !readyReview.isHittable { content.swipeUp() }
+        waitUntilHittable(readyReview)
+        readyReview.tap()
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.scrollViews["native-import-preview"].exists)
+        XCTAssertTrue(app.buttons["import-commit"].exists)
+        app.buttons["关闭"].tap()
+        XCTAssertTrue(content.waitForExistence(timeout: 3))
+
+        let failedMenu = app.buttons["gmail-failed-menu-safe-gmail-failed"]
+        for _ in 0..<3 where !failedMenu.isHittable { content.swipeUp() }
+        waitUntilHittable(failedMenu)
+        failedMenu.tap()
+        app.buttons["重新处理"].tap()
+        XCTAssertTrue(
+            app.staticTexts["已重新处理“待重试账单”。"].waitForExistence(timeout: 4)
+        )
 
         let archivedEmail = app.staticTexts["ccb-credit-2026-08.eml"]
         for _ in 0..<5 where !archivedEmail.exists { content.swipeUp() }

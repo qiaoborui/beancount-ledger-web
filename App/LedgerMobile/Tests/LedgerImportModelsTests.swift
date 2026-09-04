@@ -12,7 +12,7 @@ final class LedgerImportModelsTests: XCTestCase {
         XCTAssertEqual(LedgerImportSelectedFile(name: "账单", data: Data([1])).fileExtension, "")
     }
 
-    func testNativeCapabilityRemovesAutomaticEmailWithoutHidingManualStatementFormats() throws {
+    func testNativeCapabilityIncludesAutomaticEmailWithoutHidingManualStatementFormats() throws {
         let providers = [
             LedgerImportProviderInfo(
                 id: "ccb-credit",
@@ -33,8 +33,8 @@ final class LedgerImportModelsTests: XCTestCase {
         ]
         let nativeProviders = LedgerMobileImportCapabilities.fileImportProviders(from: providers)
 
-        XCTAssertFalse(LedgerMobileImportCapabilities.supportsAutomaticEmailImport)
-        XCTAssertEqual(nativeProviders.map(\.id), ["ccb-credit"])
+        XCTAssertTrue(LedgerMobileImportCapabilities.supportsAutomaticEmailImport)
+        XCTAssertEqual(nativeProviders.map(\.id), ["ccb-credit", "gmail-auto"])
         XCTAssertEqual(nativeProviders[0].extensions, ["eml", ".PDF", ".csv"])
         XCTAssertEqual(nativeProviders[0].detail, "邮件或 PDF")
         XCTAssertNoThrow(try LedgerImportFileValidator.validate(
@@ -59,7 +59,7 @@ final class LedgerImportModelsTests: XCTestCase {
         ))
     }
 
-    func testEmailArchiveHistoryRemainsVisibleAfterNativeEmailImportRemoval() {
+    func testEmailArchiveHistoryRemainsVisibleWithNativeGmailAutomation() {
         let emailArchive = LedgerImportDocument(
             path: "transactions/2026/documents/imports/statement.eml",
             name: "statement.eml",
@@ -73,6 +73,38 @@ final class LedgerImportModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(LedgerImportHistory.sortedDocuments([emailArchive]), [emailArchive])
+    }
+
+    func testGmailPendingStatusOnlyExposesActionableItems() {
+        let ready = gmailPending(status: "ready")
+        let failed = gmailPending(status: "failed")
+        let committed = gmailPending(status: "committed")
+
+        XCTAssertTrue(ready.isReviewable)
+        XCTAssertFalse(ready.isRetryable)
+        XCTAssertTrue(ready.isVisible)
+        XCTAssertTrue(failed.isRetryable)
+        XCTAssertTrue(failed.isVisible)
+        XCTAssertFalse(committed.isVisible)
+    }
+
+    private func gmailPending(status: String) -> LedgerGmailPendingImport {
+        LedgerGmailPendingImport(
+            id: "pending-\(status)",
+            importID: "import-\(status)",
+            messageID: "message-\(status)",
+            threadID: nil,
+            sender: "billing@example.com",
+            subject: "账单",
+            receivedAt: "2026-09-01T08:00:00Z",
+            filename: "statement.pdf",
+            provider: "cmb",
+            candidateCount: 2,
+            status: status,
+            error: nil,
+            createdAt: "2026-09-01T08:00:00Z",
+            updatedAt: "2026-09-01T08:00:00Z"
+        )
     }
 
     func testCommitFailureDispositionProtectsUnknownWriteOutcomes() {
@@ -92,6 +124,17 @@ final class LedgerImportModelsTests: XCTestCase {
             LedgerImportCommitFailureDisposition(error: LedgerAPIError.server(status: 400, message: "invalid")),
             .failed
         )
+    }
+
+    func testCommittedGmailImportKeepsSuccessfulResultWithStatusWarning() throws {
+        let result = try JSONDecoder().decode(
+            LedgerImportCommitResult.self,
+            from: Data(#"{"ok":true,"count":1,"gmailPendingStatusWarning":"账本已写入，服务器会自动核对"}"#.utf8)
+        )
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.gmailPendingStatusWarning, "账本已写入，服务器会自动核对")
     }
 
     func testCommitReconciliationRequiresExactImportIDSuffix() throws {

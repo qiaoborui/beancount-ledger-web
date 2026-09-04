@@ -7,6 +7,7 @@ struct NativeImportFlowView: View {
     let file: LedgerImportSelectedFile
     let providers: [LedgerImportProviderInfo]
     let onCommitted: (LedgerImportCommitResult) -> Void
+    private let startsWithPreview: Bool
 
     @State private var providerOverride: String?
     @State private var alipayFundRounding = false
@@ -28,6 +29,31 @@ struct NativeImportFlowView: View {
     @State private var commitWasReconciled = false
     @State private var editedEntryStatus: String?
     @State private var editSaveFeedback = 0
+
+    init(
+        file: LedgerImportSelectedFile,
+        providers: [LedgerImportProviderInfo],
+        onCommitted: @escaping (LedgerImportCommitResult) -> Void
+    ) {
+        self.file = file
+        self.providers = providers
+        self.onCommitted = onCommitted
+        startsWithPreview = false
+    }
+
+    init(
+        preview: LedgerImportPreview,
+        providers: [LedgerImportProviderInfo],
+        onCommitted: @escaping (LedgerImportCommitResult) -> Void
+    ) {
+        file = LedgerImportSelectedFile(name: preview.originalFilename, data: Data())
+        self.providers = providers
+        self.onCommitted = onCommitted
+        startsWithPreview = true
+        _preview = State(initialValue: preview)
+        _reviewedEntries = State(initialValue: preview.entries)
+        _includedEntryIDs = State(initialValue: Set(preview.entries.map(\.id)))
+    }
 
     private var selectedEntries: [LedgerImportEntry] {
         reviewedEntries.filter { includedEntryIDs.contains($0.id) }
@@ -58,17 +84,21 @@ struct NativeImportFlowView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if preview != nil, commitResult == nil {
-                        Button("返回") {
-                            self.preview = nil
-                            reviewedEntries = []
-                            includedEntryIDs = []
-                            selectedTagEntryIDs = []
-                            bulkTagInput = ""
-                            errorMessage = nil
-                            commitErrorMessage = nil
-                            commitOutcomeNeedsReconciliation = false
-                            commitWasReconciled = false
-                            editedEntryStatus = nil
+                        Button(startsWithPreview ? "关闭" : "返回") {
+                            if startsWithPreview {
+                                dismiss()
+                            } else {
+                                self.preview = nil
+                                reviewedEntries = []
+                                includedEntryIDs = []
+                                selectedTagEntryIDs = []
+                                bulkTagInput = ""
+                                errorMessage = nil
+                                commitErrorMessage = nil
+                                commitOutcomeNeedsReconciliation = false
+                                commitWasReconciled = false
+                                editedEntryStatus = nil
+                            }
                         }
                         .disabled(isCommitting)
                     } else if commitResult == nil {
@@ -591,6 +621,10 @@ struct NativeImportFlowView: View {
                     StatusBanner(message: cleanupError) { cleanupWarningDismissed = true }
                 }
 
+                if let warning = result.gmailPendingStatusWarning, !cleanupWarningDismissed {
+                    StatusBanner(message: warning) { cleanupWarningDismissed = true }
+                }
+
                 Button {
                     dismiss()
                 } label: {
@@ -858,7 +892,8 @@ struct NativeImportFlowView: View {
                 beanText: nil,
                 readModelPending: nil,
                 indexGitSHA: nil,
-                runtimeCleanupError: nil
+                runtimeCleanupError: nil,
+                gmailPendingStatusWarning: nil
             )
             commitWasReconciled = true
             commitOutcomeNeedsReconciliation = false

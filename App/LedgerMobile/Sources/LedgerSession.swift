@@ -61,6 +61,7 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var isBiometricSettingBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
     @Published private(set) var importIndexProgress: LedgerImportIndexProgress?
+    @Published private(set) var gmailOAuthResult: LedgerGmailOAuthResult?
 
     private let api: any LedgerAPI
     private let biometricStore: any BiometricCredentialStore
@@ -79,6 +80,7 @@ final class LedgerSession: ObservableObject {
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
     private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
+    private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
     private static let sessionCookieName = "ledger_session"
     private static let sensitiveCookieName = "ledger_sensitive_until"
 
@@ -446,6 +448,63 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func gmailAutomation() async throws -> (LedgerGmailStatus, [LedgerGmailPendingImport]) {
+        try await performSensitiveRequest { api, serverURL in
+            async let status = api.gmailStatus(baseURL: serverURL)
+            async let pending = api.gmailPendingImports(baseURL: serverURL)
+            return try await (status, pending)
+        }
+    }
+
+    func connectGmail() async throws -> URL {
+        let url = try await performSensitiveRequest { api, serverURL in
+            let response = try await api.gmailConnect(baseURL: serverURL)
+            return response.url
+        }
+        guard let serverURL,
+              let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+              .first(where: { $0.name == "state" })?.value,
+              !state.isEmpty else {
+            throw LedgerAPIError.invalidResponse
+        }
+        storePendingGmailOAuthState(state, for: serverURL)
+        gmailOAuthResult = nil
+        return url
+    }
+
+    func syncGmail(pendingID: String? = nil) async throws -> LedgerGmailSyncResult {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.gmailSync(baseURL: serverURL, pendingID: pendingID)
+        }
+    }
+
+    func disconnectGmail() async throws {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.gmailDisconnect(baseURL: serverURL)
+        }
+        if let serverURL { clearPendingGmailOAuthState(for: serverURL) }
+        gmailOAuthResult = nil
+    }
+
+    func gmailPendingImport(id: String) async throws -> LedgerGmailPendingDetail {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.gmailPendingImport(baseURL: serverURL, id: id)
+        }
+    }
+
+    func dismissGmailPendingImport(id: String) async throws {
+        try await performSensitiveRequest { api, serverURL in
+            try await api.dismissGmailPendingImport(baseURL: serverURL, id: id)
+        }
+    }
+
+    func gmailPendingEvents() throws -> AsyncThrowingStream<Void, Error> {
+        guard phase == .ready, let serverURL else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        return api.gmailPendingEvents(baseURL: serverURL)
+    }
+
     func previewImport(
         file: LedgerImportSelectedFile,
         provider: String?,
@@ -669,6 +728,8 @@ final class LedgerSession: ObservableObject {
         clearAuthenticationCookies(for: serverURL)
         setLocallyLocked(false, for: serverURL)
         clearBackgroundDate(for: serverURL)
+        clearPendingGmailOAuthState(for: serverURL)
+        gmailOAuthResult = nil
         ledger = nil
         password = ""
         amountsVisible = false
@@ -689,7 +750,9 @@ final class LedgerSession: ObservableObject {
             clearAuthenticationCookies(for: previousServerURL)
             setLocallyLocked(false, for: previousServerURL)
             clearBackgroundDate(for: previousServerURL)
+            clearPendingGmailOAuthState(for: previousServerURL)
         }
+        gmailOAuthResult = nil
         defaults.removeObject(forKey: Self.serverKey)
         ledger = nil
         self.serverURL = nil
@@ -747,11 +810,31 @@ final class LedgerSession: ObservableObject {
             primaryDestinationID = "accounts"
         case "imports":
             primaryDestinationID = "imports"
+        case "gmail-import":
+            primaryDestinationID = "imports"
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            guard let serverURL,
+                  let returnedState = query.first(where: { $0.name == "state" })?.value,
+                  consumePendingGmailOAuthState(returnedState, for: serverURL) else { return }
+            let statusValue = query.first(where: { $0.name == "gmail" })?.value ?? ""
+            let status = LedgerGmailOAuthResult.Status(rawValue: statusValue) ?? .error
+            let reasonValue = query.first(where: { $0.name == "reason" })?.value
+            let reason = ["cancelled", "callback_failed"].contains(reasonValue ?? "") ? reasonValue : nil
+            gmailOAuthResult = LedgerGmailOAuthResult(
+                id: UUID(),
+                status: status,
+                reason: reason
+            )
         case "overview":
             primaryDestinationID = "overview"
         default:
             break
         }
+    }
+
+    func consumeGmailOAuthResult(id: UUID) {
+        guard gmailOAuthResult?.id == id else { return }
+        gmailOAuthResult = nil
     }
 
     func dismissError() {
@@ -1041,6 +1124,51 @@ final class LedgerSession: ObservableObject {
         var currencies = defaults.dictionary(forKey: Self.valuationCurrenciesKey) as? [String: String] ?? [:]
         currencies[serverURL.absoluteString] = normalized
         defaults.set(currencies, forKey: Self.valuationCurrenciesKey)
+    }
+
+    private func storePendingGmailOAuthState(_ state: String, for serverURL: URL) {
+        var states = pendingGmailOAuthStates()
+        var values = states[serverURL.absoluteString] ?? []
+        values.removeAll { $0 == state }
+        values.append(state)
+        states[serverURL.absoluteString] = Array(values.suffix(8))
+        savePendingGmailOAuthStates(states)
+    }
+
+    private func consumePendingGmailOAuthState(_ state: String, for serverURL: URL) -> Bool {
+        var states = pendingGmailOAuthStates()
+        guard var values = states[serverURL.absoluteString],
+              let index = values.firstIndex(of: state) else { return false }
+        values.remove(at: index)
+        if values.isEmpty {
+            states.removeValue(forKey: serverURL.absoluteString)
+        } else {
+            states[serverURL.absoluteString] = values
+        }
+        savePendingGmailOAuthStates(states)
+        return true
+    }
+
+    private func clearPendingGmailOAuthState(for serverURL: URL) {
+        var states = pendingGmailOAuthStates()
+        states.removeValue(forKey: serverURL.absoluteString)
+        savePendingGmailOAuthStates(states)
+    }
+
+    private func pendingGmailOAuthStates() -> [String: [String]] {
+        guard let data = defaults.data(forKey: Self.gmailOAuthStatesKey),
+              let states = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return states
+    }
+
+    private func savePendingGmailOAuthStates(_ states: [String: [String]]) {
+        if states.isEmpty {
+            defaults.removeObject(forKey: Self.gmailOAuthStatesKey)
+        } else if let data = try? JSONEncoder().encode(states) {
+            defaults.set(data, forKey: Self.gmailOAuthStatesKey)
+        }
     }
 
     private func performSensitiveRequest<Value: Sendable>(

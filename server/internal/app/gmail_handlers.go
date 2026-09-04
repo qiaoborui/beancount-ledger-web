@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,13 @@ import (
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
+
+const maxGmailOAuthStates = 8
+
+type gmailOAuthStateSet struct {
+	Version int               `json:"version"`
+	Items   []gmailOAuthState `json:"items"`
+}
 
 func (s *Server) gmailStatus(c *gin.Context) {
 	if !requireAuth(c) {
@@ -54,9 +62,20 @@ func (s *Server) gmailConnectStart(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
+	client := strings.TrimSpace(c.Query("client"))
+	if client != "" && client != "ios" {
+		errorJSON(c, http.StatusBadRequest, errors.New("unsupported Gmail OAuth client"))
+		return
+	}
 	state := randomID() + randomID()
-	oauthState := gmailOAuthState{Value: state, ExpiresAt: time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano)}
-	if err := s.gmailState().SaveOAuthState(c.Request.Context(), oauthState); err != nil {
+	if client == "ios" {
+		state = "ios." + state
+	}
+	oauthState := gmailOAuthState{
+		Value:     state,
+		ExpiresAt: time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := s.appendGmailOAuthState(c.Request.Context(), oauthState); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
@@ -65,61 +84,63 @@ func (s *Server) gmailConnectStart(c *gin.Context) {
 }
 
 func (s *Server) gmailOAuthCallback(c *gin.Context) {
-	if !requireSensitive(c) {
+	receivedState := c.Query("state")
+	expected, err := s.findGmailOAuthState(c.Request.Context(), receivedState)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	client := gmailOAuthClient(expected.Value)
+	if client != "ios" && !requireSensitive(c) {
+		return
+	}
+	expected, err = s.consumeGmailOAuthState(c.Request.Context(), receivedState)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
 	if callbackError := strings.TrimSpace(c.Query("error")); callbackError != "" {
-		c.Redirect(http.StatusFound, "/import?gmail=error&reason="+url.QueryEscape(callbackError))
-		return
-	}
-	expected, ok, err := s.gmailState().OAuthState(c.Request.Context())
-	if err != nil || !ok {
-		errorJSON(c, http.StatusBadRequest, errors.New("Gmail OAuth state 不存在或已过期"))
-		return
-	}
-	expiresAt, err := time.Parse(time.RFC3339Nano, expected.ExpiresAt)
-	if err != nil || time.Now().UTC().After(expiresAt) || subtle.ConstantTimeCompare([]byte(expected.Value), []byte(c.Query("state"))) != 1 {
-		errorJSON(c, http.StatusBadRequest, errors.New("Gmail OAuth state 无效"))
+		redirectGmailOAuthResult(c, client, expected.Value, "error", callbackError)
 		return
 	}
 	code := strings.TrimSpace(c.Query("code"))
 	if code == "" {
-		errorJSON(c, http.StatusBadRequest, errors.New("Gmail OAuth code is required"))
+		failGmailOAuthCallback(c, client, expected.Value, errors.New("Gmail OAuth code is required"))
 		return
 	}
 	token, err := gmailOAuthConfig(s.cfg).Exchange(c.Request.Context(), code)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
 	if token.RefreshToken == "" {
-		errorJSON(c, http.StatusBadRequest, errors.New("Google 未返回 refresh token，请撤销旧授权后重新连接"))
+		failGmailOAuthCallback(c, client, expected.Value, errors.New("Google 未返回 refresh token，请撤销旧授权后重新连接"))
 		return
 	}
 	service, err := gmail.NewService(c.Request.Context(), option.WithTokenSource(oauth2.StaticTokenSource(token)))
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
 	api := &googleGmailAPI{service: service}
 	profile, err := api.Profile(c.Request.Context())
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
 	labels, err := api.Labels(c.Request.Context())
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
 	labelID, found := findGmailLabel(labels, s.cfg.GmailLabel)
 	if !found {
-		errorJSON(c, http.StatusBadRequest, errors.New("Gmail 中找不到 Label: "+s.cfg.GmailLabel))
+		failGmailOAuthCallback(c, client, expected.Value, errors.New("Gmail 中找不到 Label: "+s.cfg.GmailLabel))
 		return
 	}
 	encryptedRefreshToken, err := encryptGmailSecret(s.cfg, token.RefreshToken)
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
 	connection, err := s.gmailConnectionFromOAuth(c.Request.Context(), api, profile, encryptedRefreshToken, labelID)
@@ -132,11 +153,131 @@ func (s *Server) gmailOAuthCallback(c *gin.Context) {
 		})
 	}
 	if err != nil {
-		errorJSON(c, http.StatusBadRequest, err)
+		failGmailOAuthCallback(c, client, expected.Value, err)
 		return
 	}
-	_ = s.gmailState().DeleteOAuthState(c.Request.Context())
-	c.Redirect(http.StatusFound, "/import?gmail=connected")
+	redirectGmailOAuthResult(c, client, expected.Value, "connected", "")
+}
+
+func (s *Server) appendGmailOAuthState(ctx context.Context, pending gmailOAuthState) error {
+	return s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+		stored, ok, err := s.gmailState().OAuthState(lockCtx)
+		if err != nil {
+			return err
+		}
+		items := []gmailOAuthState{}
+		if ok {
+			items = activeGmailOAuthStates(stored, time.Now().UTC())
+		}
+		if len(items) >= maxGmailOAuthStates {
+			items = items[len(items)-(maxGmailOAuthStates-1):]
+		}
+		items = append(items, pending)
+		return s.saveGmailOAuthStates(lockCtx, items)
+	})
+}
+
+func (s *Server) findGmailOAuthState(ctx context.Context, received string) (gmailOAuthState, error) {
+	stored, ok, err := s.gmailState().OAuthState(ctx)
+	if err != nil || !ok {
+		return gmailOAuthState{}, errors.New("Gmail OAuth state 不存在或已过期")
+	}
+	for _, expected := range activeGmailOAuthStates(stored, time.Now().UTC()) {
+		if subtle.ConstantTimeCompare([]byte(expected.Value), []byte(received)) == 1 {
+			return expected, nil
+		}
+	}
+	return gmailOAuthState{}, errors.New("Gmail OAuth state 无效")
+}
+
+func (s *Server) consumeGmailOAuthState(ctx context.Context, received string) (gmailOAuthState, error) {
+	var consumed gmailOAuthState
+	err := s.gmailState().WithLock(ctx, "gmail-state", func(lockCtx context.Context) error {
+		stored, ok, err := s.gmailState().OAuthState(lockCtx)
+		if err != nil || !ok {
+			return errors.New("Gmail OAuth state 不存在或已过期")
+		}
+		items := activeGmailOAuthStates(stored, time.Now().UTC())
+		remaining := make([]gmailOAuthState, 0, len(items))
+		for _, expected := range items {
+			if consumed.Value == "" && subtle.ConstantTimeCompare([]byte(expected.Value), []byte(received)) == 1 {
+				consumed = expected
+				continue
+			}
+			remaining = append(remaining, expected)
+		}
+		if consumed.Value == "" {
+			return errors.New("Gmail OAuth state 无效")
+		}
+		if len(remaining) == 0 {
+			return s.gmailState().DeleteOAuthState(lockCtx)
+		}
+		return s.saveGmailOAuthStates(lockCtx, remaining)
+	})
+	return consumed, err
+}
+
+func activeGmailOAuthStates(stored gmailOAuthState, now time.Time) []gmailOAuthState {
+	items := []gmailOAuthState{stored}
+	var set gmailOAuthStateSet
+	if json.Unmarshal([]byte(stored.Value), &set) == nil && set.Version == 1 {
+		items = set.Items
+	}
+	active := make([]gmailOAuthState, 0, len(items))
+	for _, item := range items {
+		expiresAt, err := time.Parse(time.RFC3339Nano, item.ExpiresAt)
+		if err == nil && now.Before(expiresAt) && item.Value != "" {
+			active = append(active, item)
+		}
+	}
+	return active
+}
+
+func (s *Server) saveGmailOAuthStates(ctx context.Context, items []gmailOAuthState) error {
+	latestExpiry := items[0].ExpiresAt
+	for _, item := range items[1:] {
+		if item.ExpiresAt > latestExpiry {
+			latestExpiry = item.ExpiresAt
+		}
+	}
+	encoded, err := json.Marshal(gmailOAuthStateSet{Version: 1, Items: items})
+	if err != nil {
+		return err
+	}
+	return s.gmailState().SaveOAuthState(ctx, gmailOAuthState{Value: string(encoded), ExpiresAt: latestExpiry})
+}
+
+func gmailOAuthClient(state string) string {
+	if strings.HasPrefix(state, "ios.") {
+		return "ios"
+	}
+	return "web"
+}
+
+func failGmailOAuthCallback(c *gin.Context, client, state string, err error) {
+	if client == "ios" {
+		redirectGmailOAuthResult(c, client, state, "error", "callback_failed")
+		return
+	}
+	errorJSON(c, http.StatusBadRequest, err)
+}
+
+func redirectGmailOAuthResult(c *gin.Context, client, state, status, reason string) {
+	query := url.Values{"gmail": []string{status}}
+	if client == "ios" {
+		query.Set("state", state)
+		if reason == "access_denied" {
+			query.Set("reason", "cancelled")
+		} else if reason != "" {
+			query.Set("reason", "callback_failed")
+		}
+		c.Redirect(http.StatusFound, "ledger://gmail-import?"+query.Encode())
+		return
+	}
+	if reason != "" {
+		query.Set("reason", reason)
+	}
+	c.Redirect(http.StatusFound, "/import?"+query.Encode())
 }
 
 func (s *Server) gmailRenew(c *gin.Context) {

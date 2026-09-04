@@ -21,6 +21,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     private var history: [BQLHistoryRecord] = []
     private var committedImportDocument: LedgerImportDocument?
     private var importCommitAttempts = 0
+    private var gmailConnected = true
+    private var gmailPending = SafePreviewLedgerData.gmailPendingImports
 
     func health(baseURL: URL) async throws -> HealthStatus {
         HealthStatus(
@@ -81,6 +83,80 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         SafePreviewLedgerData.importProviders
     }
 
+    func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus {
+        LedgerGmailStatus(
+            configured: true,
+            deliveryMode: "webhook",
+            connected: gmailConnected,
+            email: gmailConnected ? "ledger.preview@gmail.com" : nil,
+            label: "Bills",
+            watchExpiration: 1_788_768_000_000,
+            lastSyncAt: "2026-08-31T14:30:00Z",
+            lastError: nil,
+            allowedSenders: ["statement@example.com"],
+            oauthRedirectURL: "https://preview.ledger.invalid/api/integrations/gmail/callback"
+        )
+    }
+
+    func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse {
+        LedgerGmailConnectResponse(url: URL(string: "https://accounts.google.com/o/oauth2/auth?state=ios.safe-preview")!)
+    }
+
+    func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult {
+        if let pendingID,
+           let index = gmailPending.firstIndex(where: { $0.id == pendingID }),
+           gmailPending[index].isRetryable {
+            let failed = gmailPending[index]
+            gmailPending[index] = LedgerGmailPendingImport(
+                id: failed.id,
+                importID: failed.importID,
+                messageID: failed.messageID,
+                threadID: failed.threadID,
+                sender: failed.sender,
+                subject: failed.subject,
+                receivedAt: failed.receivedAt,
+                filename: failed.filename,
+                provider: "wechat",
+                candidateCount: 2,
+                status: "ready",
+                error: nil,
+                createdAt: failed.createdAt,
+                updatedAt: "2026-08-31T14:30:00Z"
+            )
+        }
+        return LedgerGmailSyncResult(ok: true, processed: pendingID == nil ? 1 : nil, retryPending: false, item: nil)
+    }
+
+    func gmailDisconnect(baseURL: URL) async throws {
+        gmailConnected = false
+    }
+
+    func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport] {
+        gmailPending
+    }
+
+    func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail {
+        guard let item = gmailPending.first(where: { $0.id == id }) else {
+            throw LedgerAPIError.server(status: 404, message: "待核对账单不存在")
+        }
+        return LedgerGmailPendingDetail(
+            item: item,
+            preview: item.isReviewable
+                ? SafePreviewLedgerData.importPreview(filename: item.filename, provider: item.provider ?? "wechat")
+                : nil
+        )
+    }
+
+    func dismissGmailPendingImport(baseURL: URL, id: String) async throws {
+        gmailPending.removeAll { $0.id == id }
+    }
+
+    nonisolated func gmailPendingEvents(baseURL: URL) -> AsyncThrowingStream<Void, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(())
+        }
+    }
+
     func previewImport(
         baseURL: URL,
         file: LedgerImportSelectedFile,
@@ -129,7 +205,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
             beanText: nil,
             readModelPending: true,
             indexGitSHA: "safe-preview-indexed",
-            runtimeCleanupError: nil
+            runtimeCleanupError: nil,
+            gmailPendingStatusWarning: nil
         )
     }
 
@@ -396,6 +473,43 @@ private enum SafePreviewLedgerData {
             extensions: [".eml"],
             accept: ".eml",
             engine: "gmail"
+        ),
+    ]
+
+    static let gmailReadyPendingImport = LedgerGmailPendingImport(
+        id: "safe-gmail-ready",
+        importID: "safe-gmail-import",
+        messageID: "safe-message-ready",
+        threadID: "safe-thread-ready",
+        sender: "statement@example.com",
+        subject: "八月信用卡电子账单",
+        receivedAt: "2026-08-31T14:20:00Z",
+        filename: "statement-2026-08.xlsx",
+        provider: "wechat",
+        candidateCount: 2,
+        status: "ready",
+        error: nil,
+        createdAt: "2026-08-31T14:20:00Z",
+        updatedAt: "2026-08-31T14:30:00Z"
+    )
+
+    static let gmailPendingImports = [
+        gmailReadyPendingImport,
+        LedgerGmailPendingImport(
+            id: "safe-gmail-failed",
+            importID: "safe-gmail-failed-import",
+            messageID: "safe-message-failed",
+            threadID: nil,
+            sender: "alerts@example.com",
+            subject: "待重试账单",
+            receivedAt: "2026-08-30T09:00:00Z",
+            filename: "failed-statement.pdf",
+            provider: nil,
+            candidateCount: 0,
+            status: "failed",
+            error: "附件暂时无法下载，可重新处理或忽略。",
+            createdAt: "2026-08-30T09:00:00Z",
+            updatedAt: "2026-08-30T09:01:00Z"
         ),
     ]
 

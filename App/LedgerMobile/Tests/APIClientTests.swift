@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import XCTest
 @testable import LedgerMobile
 
@@ -6,6 +9,16 @@ final class APIClientTests: XCTestCase {
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
         super.tearDown()
+    }
+
+    func testGmailEventSessionUsesLongResourceBudget() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 40
+        let client = LedgerAPIClient(session: URLSession(configuration: configuration))
+
+        XCTAssertEqual(client.gmailEventResourceTimeoutForTesting, 7 * 24 * 60 * 60)
+        XCTAssertEqual(LedgerAPIClient.gmailEventResourceTimeout, 7 * 24 * 60 * 60)
+        XCTAssertGreaterThan(LedgerAPIClient.gmailEventResourceTimeout, 40)
     }
 
     func testHealthUsesExpectedEndpointAndDecodesCapabilities() async throws {
@@ -232,6 +245,90 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(providers.first?.id, "ccb-credit")
         XCTAssertEqual(providers.first?.extensions, [".eml", ".pdf", ".csv"])
         XCTAssertEqual(providers.first?.engine, "native-ccb-credit")
+    }
+
+    func testGmailAutomationUsesNativeAPIEndpointsAndDecodesPendingPreview() async throws {
+        var requestIndex = 0
+        MockURLProtocol.requestHandler = { request in
+            requestIndex += 1
+            switch requestIndex {
+            case 1:
+                XCTAssertEqual(request.url?.path, "/api/integrations/gmail/status")
+                XCTAssertEqual(request.httpMethod, "GET")
+                return Self.response(
+                    for: request,
+                    body: #"{"configured":true,"deliveryMode":"webhook","connected":true,"email":"ledger@example.com","label":"Bills","watchExpiration":1788768000000,"lastSyncAt":"2026-09-01T08:00:00Z","lastError":null,"allowedSenders":["billing@example.com"],"oauthRedirectUrl":"https://ledger.example.com/api/integrations/gmail/callback"}"#
+                )
+            case 2:
+                XCTAssertEqual(request.url?.path, "/api/integrations/gmail/connect")
+                XCTAssertEqual(request.url?.query, "client=ios")
+                XCTAssertEqual(request.httpMethod, "POST")
+                return Self.response(for: request, body: #"{"url":"https://accounts.google.com/o/oauth2/auth"}"#)
+            case 3:
+                XCTAssertEqual(request.url?.path, "/api/ledger/imports/pending")
+                XCTAssertEqual(request.httpMethod, "GET")
+                return Self.response(for: request, body: #"{"items":[{"id":"pending-1","importId":"import-1","messageId":"message-1","sender":"billing@example.com","subject":"August statement","receivedAt":"2026-09-01T08:00:00Z","filename":"statement.pdf","provider":"cmb","candidateCount":2,"status":"ready","createdAt":"2026-09-01T08:00:00Z","updatedAt":"2026-09-01T08:01:00Z"}]}"#)
+            case 4:
+                XCTAssertEqual(request.url?.path, "/api/ledger/imports/pending/pending-1")
+                XCTAssertEqual(request.httpMethod, "GET")
+                return Self.response(
+                    for: request,
+                    body: #"{"item":{"id":"pending-1","importId":"import-1","messageId":"message-1","sender":"billing@example.com","subject":"August statement","receivedAt":"2026-09-01T08:00:00Z","filename":"statement.pdf","provider":"cmb","candidateCount":2,"status":"ready","createdAt":"2026-09-01T08:00:00Z","updatedAt":"2026-09-01T08:01:00Z"},"preview":{"importId":"import-1","provider":"cmb","providerDetection":{"provider":"cmb","reason":"sender","confidence":"high"},"originalFilename":"statement.pdf","dedupReport":"无重复","entries":[],"candidateCount":0,"rawRowCount":0,"filteredRowCount":0,"generatedCount":0,"excludedRowCount":0,"skippedDuplicateCount":0,"warnings":[]}}"#
+                )
+            case 5:
+                let components = try XCTUnwrap(
+                    URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+                )
+                XCTAssertEqual(components.path, "/api/integrations/gmail/sync")
+                XCTAssertEqual(components.queryItems, [URLQueryItem(name: "pendingId", value: "pending-1")])
+                XCTAssertEqual(request.httpMethod, "POST")
+                return Self.response(for: request, body: #"{"ok":true,"processed":1,"retryPending":false}"#)
+            case 6:
+                XCTAssertEqual(request.url?.path, "/api/ledger/imports/pending/pending-1")
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                return Self.response(for: request, body: #"{"ok":true}"#)
+            default:
+                XCTAssertEqual(request.url?.path, "/api/integrations/gmail")
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                return Self.response(for: request, body: #"{"ok":true}"#)
+            }
+        }
+
+        let client = makeClient()
+        let baseURL = URL(string: "https://ledger.example.com")!
+        let status = try await client.gmailStatus(baseURL: baseURL)
+        let connect = try await client.gmailConnect(baseURL: baseURL)
+        let pending = try await client.gmailPendingImports(baseURL: baseURL)
+        let detail = try await client.gmailPendingImport(baseURL: baseURL, id: "pending-1")
+        let sync = try await client.gmailSync(baseURL: baseURL, pendingID: "pending-1")
+        try await client.dismissGmailPendingImport(baseURL: baseURL, id: "pending-1")
+        try await client.gmailDisconnect(baseURL: baseURL)
+
+        XCTAssertTrue(status.usesServerPush)
+        XCTAssertEqual(status.email, "ledger@example.com")
+        XCTAssertEqual(connect.url.host, "accounts.google.com")
+        XCTAssertEqual(pending.first?.status, "ready")
+        XCTAssertEqual(detail.preview?.importID, "import-1")
+        XCTAssertEqual(sync.processed, 1)
+        XCTAssertEqual(requestIndex, 7)
+    }
+
+    func testGmailPendingIdentifierCannotEscapeNativeEndpoint() async {
+        MockURLProtocol.requestHandler = { request in
+            XCTFail("unsafe pending identifier should be rejected before request: \(request)")
+            return Self.response(for: request, body: "{}")
+        }
+
+        do {
+            _ = try await makeClient().gmailPendingImport(
+                baseURL: URL(string: "https://ledger.example.com")!,
+                id: "../../integrations/gmail"
+            )
+            XCTFail("expected invalid response")
+        } catch LedgerAPIError.invalidResponse {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
     }
 
     func testImportPreviewBuildsMultipartBodyAndSanitizesFilename() async throws {
