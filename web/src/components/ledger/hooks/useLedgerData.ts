@@ -120,10 +120,6 @@ export function shouldShowOfflineLedgerNotice(previousKey: string | null, nextKe
   return previousKey !== nextKey;
 }
 
-export function shouldFetchFullBootstrap() {
-  return true;
-}
-
 export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensitiveUnlockChange, onAuthChange, onPasskeyRegistered, showToast }: { timeRange: TimeRange; unlocked: boolean; valuationCurrency: string; onSensitiveUnlockChange: (unlocked: boolean) => void; onAuthChange: (authenticated: boolean) => void; onPasskeyRegistered: (registered: boolean) => void; showToast: (kind: "info" | "success" | "error", text: string) => void }) {
   const initialCacheRef = useRef<LedgerCache | null | undefined>(undefined);
   if (initialCacheRef.current === undefined) initialCacheRef.current = readDisplayLedgerCache(timeRange, unlocked, valuationCurrency);
@@ -265,27 +261,25 @@ export function useLedgerData({ timeRange, unlocked, valuationCurrency, onSensit
         }
 
         // Phase 2: full bootstrap in background for rich data (net worth, credit cards, etc.)
-        if (shouldFetchFullBootstrap()) {
-          const fullQuery = new URLSearchParams(timeRangeToParams(range));
-          fullQuery.set("valuationCurrency", valuationCurrency);
-          fullQuery.set("today", comparisonDate);
-          const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`, { cache: "no-store" });
-          if (apiEndpointLedgerScope() !== ledgerScope) return;
-          const fullVersion = fullData.ledgerVersion ?? version;
-          const {
-            cache: fullCache,
-            cacheUnlocked: fullCacheUnlocked,
-            responseValuationCurrency: fullResponseValuationCurrency,
-          } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion, Date.now(), comparisonDate);
-          if (clientUnlocked && bootstrapSensitiveUnlockState(fullData) === false) {
-            latestContextRef.current = { range, unlocked: false, valuationCurrency, ledgerScope };
-            sessionStorage.removeItem("ledger_unlocked");
-            onSensitiveUnlockChange(false);
-          }
-          applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency, ledgerScope);
-          if (fullCacheUnlocked && comparisonDate === localToday()) {
-            writeLedgerCache(range, fullCache, fullResponseValuationCurrency, ledgerScope);
-          }
+        const fullQuery = new URLSearchParams(timeRangeToParams(range));
+        fullQuery.set("valuationCurrency", valuationCurrency);
+        fullQuery.set("today", comparisonDate);
+        const fullData = await fetchJson<LedgerBootstrapResponse>(`/api/ledger/bootstrap?${fullQuery}`, { cache: "no-store" });
+        if (apiEndpointLedgerScope() !== ledgerScope) return;
+        const fullVersion = fullData.ledgerVersion ?? version;
+        const {
+          cache: fullCache,
+          cacheUnlocked: fullCacheUnlocked,
+          responseValuationCurrency: fullResponseValuationCurrency,
+        } = buildLedgerCacheFromBootstrap(fullData, clientUnlocked, valuationCurrency, fullVersion, Date.now(), comparisonDate);
+        if (clientUnlocked && bootstrapSensitiveUnlockState(fullData) === false) {
+          latestContextRef.current = { range, unlocked: false, valuationCurrency, ledgerScope };
+          sessionStorage.removeItem("ledger_unlocked");
+          onSensitiveUnlockChange(false);
+        }
+        applyCache(fullCache, fullCacheUnlocked, range, fullResponseValuationCurrency, valuationCurrency, ledgerScope);
+        if (fullCacheUnlocked && comparisonDate === localToday()) {
+          writeLedgerCache(range, fullCache, fullResponseValuationCurrency, ledgerScope);
         }
       } finally {
         if (!isBackground) setLoadingFresh(false);

@@ -146,10 +146,11 @@ func (s *LedgerReadService) Version(ctx context.Context) (LedgerVersion, error) 
 var ErrLedgerReadModelUnavailable = errors.New("ledger read model has no active revision; run ledger-indexer first")
 
 func (s *LedgerReadService) Bootstrap(start, end string, unlocked bool, options LedgerReadOptions) (BootstrapResult, error) {
-	snapshot, err := s.SnapshotLite(context.Background())
+	loadSnapshot := s.SnapshotLite
 	if unlocked {
-		snapshot, err = s.Snapshot(context.Background())
+		loadSnapshot = s.Snapshot
 	}
+	snapshot, err := loadSnapshot(context.Background())
 	if err != nil {
 		return BootstrapResult{}, err
 	}

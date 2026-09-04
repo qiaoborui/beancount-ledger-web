@@ -4,7 +4,39 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
+
+type bootstrapIndexPort struct {
+	snapshot      *LedgerSnapshot
+	snapshotDelay time.Duration
+	fullLoads     int64
+	liteLoads     int64
+}
+
+func (p *bootstrapIndexPort) ActiveRevision(context.Context) (LedgerIndexRevision, bool, error) {
+	return LedgerIndexRevision{ID: 1, LedgerVersion: p.snapshot.LedgerVersion}, true, nil
+}
+
+func (p *bootstrapIndexPort) ActiveSnapshot(context.Context) (*LedgerSnapshot, bool, error) {
+	p.fullLoads++
+	time.Sleep(p.snapshotDelay)
+	return p.snapshot, true, nil
+}
+
+func (p *bootstrapIndexPort) ActiveSnapshotLite(context.Context) (*LedgerSnapshot, bool, error) {
+	p.liteLoads++
+	time.Sleep(p.snapshotDelay)
+	return p.snapshot, true, nil
+}
+
+func (*bootstrapIndexPort) TransactionsForRevision(context.Context, int64, string, string) ([]Transaction, error) {
+	return nil, nil
+}
+
+func (*bootstrapIndexPort) BalancesForRevision(context.Context, int64) (map[string]int, []BalanceAssertion, error) {
+	return nil, nil, nil
+}
 
 func TestLedgerReadServiceTransactionsRespectSensitiveUnlock(t *testing.T) {
 	service := NewLedgerReadService(NewLedgerCache(testLedger(t)))
@@ -484,6 +516,36 @@ func TestLedgerBootstrapKeepsNestedIncomeStatementShape(t *testing.T) {
 	}
 }
 
+func TestLedgerReadServiceBootstrapLoadsOnlyRequiredSnapshot(t *testing.T) {
+	snapshot := &LedgerSnapshot{LedgerVersion: LedgerVersion{Version: "test"}}
+	prepareLedgerSnapshot(snapshot)
+
+	tests := []struct {
+		name          string
+		unlocked      bool
+		wantFullLoads int64
+		wantLiteLoads int64
+	}{
+		{name: "locked", wantLiteLoads: 1},
+		{name: "unlocked", unlocked: true, wantFullLoads: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			index := &bootstrapIndexPort{snapshot: snapshot}
+			service := NewLedgerReadServiceWithIndex(nil, index, nil, true)
+			if _, err := service.Bootstrap("2026-05-01", "2026-06-01", tt.unlocked, LedgerReadOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if got := index.fullLoads; got != tt.wantFullLoads {
+				t.Fatalf("full snapshot loads = %d, want %d", got, tt.wantFullLoads)
+			}
+			if got := index.liteLoads; got != tt.wantLiteLoads {
+				t.Fatalf("lite snapshot loads = %d, want %d", got, tt.wantLiteLoads)
+			}
+		})
+	}
+}
+
 func BenchmarkBuildLedgerTransactionsCached(b *testing.B) {
 	snapshot := benchmarkLedgerSnapshot(2000)
 
@@ -519,6 +581,28 @@ func BenchmarkFilterLedgerTransactionsSortEachCall(b *testing.B) {
 			b.Fatal("missing transactions")
 		}
 	}
+}
+
+func BenchmarkLedgerReadServiceUnlockedBootstrap(b *testing.B) {
+	snapshot := &LedgerSnapshot{LedgerVersion: LedgerVersion{Version: "benchmark"}}
+	prepareLedgerSnapshot(snapshot)
+	// Model a conservative storage round trip so duplicate snapshot loads stay visible.
+	const snapshotDelay = time.Millisecond
+	var fullLoads, liteLoads int64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		index := &bootstrapIndexPort{snapshot: snapshot, snapshotDelay: snapshotDelay}
+		service := NewLedgerReadServiceWithIndex(nil, index, nil, true)
+		if _, err := service.Bootstrap("2026-05-01", "2026-06-01", true, LedgerReadOptions{}); err != nil {
+			b.Fatal(err)
+		}
+		fullLoads += index.fullLoads
+		liteLoads += index.liteLoads
+	}
+	b.ReportMetric(float64(fullLoads)/float64(b.N), "full-loads/op")
+	b.ReportMetric(float64(liteLoads)/float64(b.N), "lite-loads/op")
 }
 
 func benchmarkLedgerSnapshot(count int) *LedgerSnapshot {

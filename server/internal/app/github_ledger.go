@@ -94,19 +94,15 @@ func newGitHubLedgerClient(cfg Config) (*githubLedgerClient, error) {
 }
 
 func (c *githubLedgerClient) beginTransaction(ctx context.Context) (*githubLedgerTransaction, error) {
-	ref, _, err := c.client.Git.GetRef(ctx, c.owner, c.repo, "heads/"+c.branch)
+	commit, _, err := c.client.Repositories.GetCommit(ctx, c.owner, c.repo, c.branch, nil)
 	if err != nil {
 		return nil, err
 	}
-	baseSHA := ref.GetObject().GetSHA()
+	baseSHA := commit.GetSHA()
 	if baseSHA == "" {
 		return nil, errors.New("github branch ref has no commit SHA")
 	}
-	commit, _, err := c.client.Git.GetCommit(ctx, c.owner, c.repo, baseSHA)
-	if err != nil {
-		return nil, err
-	}
-	treeSHA := commit.GetTree().GetSHA()
+	treeSHA := commit.GetCommit().GetTree().GetSHA()
 	if treeSHA == "" {
 		return nil, errors.New("github branch commit has no tree SHA")
 	}
@@ -121,11 +117,7 @@ func (c *githubLedgerClient) beginTransaction(ctx context.Context) (*githubLedge
 }
 
 func (c *githubLedgerClient) listEditorFiles(ctx context.Context) ([]LedgerEditorFile, error) {
-	tx, err := c.beginTransaction(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tree, _, err := c.client.Git.GetTree(ctx, c.owner, c.repo, tx.baseTreeSHA, true)
+	tree, _, err := c.client.Git.GetTree(ctx, c.owner, c.repo, c.branch, true)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +143,7 @@ func (c *githubLedgerClient) listEditorFiles(ctx context.Context) ([]LedgerEdito
 }
 
 func (c *githubLedgerClient) readEditorFile(ctx context.Context, rel string) (string, fileInfo, string, error) {
-	tx, err := c.beginTransaction(ctx)
-	if err != nil {
-		return "", fileInfo{}, "", err
-	}
-	content, err := tx.readFile(filepath.Join(c.cfg.LedgerRoot, filepath.FromSlash(rel)))
+	content, err := c.readLedgerFile(ctx, rel)
 	if err != nil {
 		return "", fileInfo{}, "", err
 	}
@@ -168,11 +156,7 @@ func (c *githubLedgerClient) readEditorFile(ctx context.Context, rel string) (st
 }
 
 func (c *githubLedgerClient) listImportDocuments(ctx context.Context) ([]ImportDocument, error) {
-	tx, err := c.beginTransaction(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tree, _, err := c.client.Git.GetTree(ctx, c.owner, c.repo, tx.baseTreeSHA, true)
+	tree, _, err := c.client.Git.GetTree(ctx, c.owner, c.repo, c.branch, true)
 	if err != nil {
 		return nil, err
 	}
@@ -205,9 +189,11 @@ func (c *githubLedgerClient) listImportDocuments(ctx context.Context) ([]ImportD
 }
 
 func (c *githubLedgerClient) readLedgerFile(ctx context.Context, rel string) ([]byte, error) {
-	tx, err := c.beginTransaction(ctx)
-	if err != nil {
-		return nil, err
+	tx := &githubLedgerTransaction{
+		ctx:           ctx,
+		ledger:        c,
+		baseCommitSHA: c.branch,
+		cache:         map[string]fileSnapshot{},
 	}
 	return tx.readFile(filepath.Join(c.cfg.LedgerRoot, filepath.FromSlash(rel)))
 }

@@ -735,7 +735,9 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 	}
 	cfg := importer.ProviderConfig()
 	if githubAPIEnabled(s.cfg) {
-		return importer, s.ensureGitHubImportRequirementFiles(context.Background(), importer.ImportEngine().RequiredFiles(cfg))
+		// GitHub-backed engines read and validate their config during generation;
+		// main.bean and the local dedup script are not used by this path.
+		return importer, nil
 	}
 	required := importer.ImportEngine().RequiredFiles(cfg)
 	for _, relative := range required {
@@ -759,27 +761,6 @@ func (s *Server) readLedgerFileContent(ctx context.Context, relative string) ([]
 		return client.readLedgerFile(ctx, relative)
 	}
 	return os.ReadFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
-}
-
-func (s *Server) ensureGitHubImportRequirementFiles(ctx context.Context, required []string) error {
-	client, err := newGitHubLedgerClient(s.cfg)
-	if err != nil {
-		return err
-	}
-	remoteTx, err := client.beginTransaction(ctx)
-	if err != nil {
-		return err
-	}
-	for _, relative := range required {
-		relative = filepath.ToSlash(filepath.Clean(relative))
-		if relative == "." || relative == "main.bean" || relative == "scripts/dedup_import.py" {
-			continue
-		}
-		if _, err := remoteTx.readFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative))); err != nil {
-			return fmt.Errorf("账本缺少必要文件: %s", relative)
-		}
-	}
-	return nil
 }
 
 func (s *Server) prepareCmbInput(inputFile, originalFilename, importID string) (preparedImportInput, error) {
