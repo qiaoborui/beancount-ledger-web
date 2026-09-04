@@ -50,6 +50,7 @@ type applicationDependencies struct {
 	reconcileService     *ReconciliationService
 	txService            *TransactionService
 	limiter              RateLimiter
+	metrics              *Metrics
 	closers              []io.Closer
 }
 
@@ -89,6 +90,7 @@ func NewApplicationWithLogger(cfg Config, logger *slog.Logger) (*Application, er
 		reconcileService:     dependencies.reconcileService,
 		txService:            dependencies.txService,
 		limiter:              dependencies.limiter,
+		metrics:              dependencies.metrics,
 	}
 	return newApplication(newRouter(dependencies.cfg, server), server, dependencies.closers), nil
 }
@@ -151,8 +153,11 @@ func buildApplicationDependenciesWithLogger(cfg Config, logger *slog.Logger) (*a
 	dependencies.indexStoreErr = storageAdapters.indexStoreErr
 	dependencies.limiter = storageAdapters.limiter
 
-	dependencies.cache = NewLedgerCache(cfg)
-	readService := NewLedgerReadServiceWithIndex(dependencies.cache, dependencies.indexStore, dependencies.indexStoreErr, cfg.ReadModelStrict)
+	if cfg.MetricsAddr != "" {
+		dependencies.metrics = NewMetrics()
+	}
+	dependencies.cache = NewLedgerCacheWithMetrics(cfg, dependencies.metrics)
+	readService := NewLedgerReadServiceWithIndexAndMetrics(dependencies.cache, dependencies.indexStore, dependencies.indexStoreErr, cfg.ReadModelStrict, dependencies.metrics)
 	dependencies.queryPort = readService
 	dependencies.snapshotPort = readService
 	dependencies.writer = NewLedgerWriterWithRuntimeStoreAndCommodities(cfg, dependencies.cache, dependencies.runtimeStore, func() ([]string, error) {
@@ -208,6 +213,16 @@ func newApplication(router *gin.Engine, server *Server, closers []io.Closer) *Ap
 
 func (a *Application) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	a.router.ServeHTTP(writer, request)
+}
+
+// MetricsHandler returns the isolated Prometheus handler when metrics are
+// enabled. The caller serves it on Config.MetricsAddr, never on the public
+// application router.
+func (a *Application) MetricsHandler() http.Handler {
+	if a == nil || a.server == nil || a.server.metrics == nil {
+		return nil
+	}
+	return a.server.metrics.Handler()
 }
 
 // StartGmailPolling starts the self-hosted, outbound-only Gmail scheduler when

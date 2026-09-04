@@ -45,12 +45,18 @@ type Server struct {
 	txService            *TransactionService
 	limiter              RateLimiter
 	agentModel           AgentModelClient
+	metrics              *Metrics
 }
 
 func newRouter(cfg Config, server *Server) *gin.Engine {
 	router := gin.New()
 	logger := server.loggerOr()
-	router.Use(requestLoggingMiddleware(logger), recoveryMiddleware(logger), corsMiddleware(), sameOriginMiddleware(), maintenanceModeGuard(cfg.MaintenanceMode), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
+	middleware := []gin.HandlerFunc{requestLoggingMiddleware(logger)}
+	if server.metrics != nil {
+		middleware = append(middleware, server.metrics.requestMiddleware())
+	}
+	middleware = append(middleware, recoveryMiddleware(logger), corsMiddleware(), sameOriginMiddleware(), maintenanceModeGuard(cfg.MaintenanceMode), server.configReadLock(), gzip.Gzip(gzip.DefaultCompression))
+	router.Use(middleware...)
 	router.GET("/.well-known/webauthn", server.webAuthnRelatedOrigins)
 	router.GET("/.well-known/apple-app-site-association", server.appleAppSiteAssociation)
 	mcpHandler := server.mcpHandler()

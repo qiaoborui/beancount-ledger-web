@@ -96,6 +96,7 @@ ledger, secrets, imports, and runtime data outside this repository.
 - [Ledger layout](docs/ledger-layout.md)
 - [Privacy](docs/privacy.md)
 - [Backend architecture](docs/backend-architecture.md)
+- [Prometheus and Grafana observability](docs/observability.md)
 - [Native iOS client](App/LedgerMobile/README.md)
 
 ## License

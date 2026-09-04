@@ -20,6 +20,7 @@ type LedgerReadService struct {
 	cachedFull     bool
 	cachedRevision LedgerIndexRevision
 	cachedRevAt    time.Time
+	metrics        *Metrics
 }
 
 func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
@@ -27,7 +28,11 @@ func NewLedgerReadService(cache *LedgerCache) *LedgerReadService {
 }
 
 func NewLedgerReadServiceWithIndex(cache *LedgerCache, indexStore LedgerIndexPort, indexErr error, strict bool) *LedgerReadService {
-	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict}
+	return NewLedgerReadServiceWithIndexAndMetrics(cache, indexStore, indexErr, strict, nil)
+}
+
+func NewLedgerReadServiceWithIndexAndMetrics(cache *LedgerCache, indexStore LedgerIndexPort, indexErr error, strict bool, metrics *Metrics) *LedgerReadService {
+	return &LedgerReadService{cache: cache, indexStore: indexStore, indexErr: indexErr, strict: strict, metrics: metrics}
 }
 
 // revisionCacheTTL controls how often we re-query ActiveRevision.
@@ -39,11 +44,15 @@ func (s *LedgerReadService) cachedActiveRevision(ctx context.Context) (LedgerInd
 	if time.Since(s.cachedRevAt) < revisionCacheTTL {
 		rev := s.cachedRevision
 		s.mu.Unlock()
+		s.metrics.observeCache(cacheReadModelRevision, cacheResultHit)
 		return rev, rev.ID != 0, nil
 	}
 	s.mu.Unlock()
 
+	s.metrics.observeCache(cacheReadModelRevision, cacheResultMiss)
+	started := time.Now()
 	rev, ok, err := s.indexStore.ActiveRevision(ctx)
+	s.metrics.observeOperation(operationReadModelRevision, operationAvailabilityResult(err, ok), started)
 	if err != nil || !ok {
 		return rev, ok, err
 	}
@@ -85,19 +94,27 @@ func (s *LedgerReadService) snapshot(ctx context.Context, includeBeanPayloads bo
 		if s.cachedSnapshot != nil && s.cachedVersion == revision.LedgerVersion.Version && (!includeBeanPayloads || s.cachedFull) {
 			cached := s.cachedSnapshot
 			s.mu.Unlock()
+			s.metrics.observeCache(cacheReadModelSnapshot, cacheResultHit)
 			return cached, nil
 		}
 		s.mu.Unlock()
+		s.metrics.observeCache(cacheReadModelSnapshot, cacheResultMiss)
 		// Version changed — reload full snapshot.
 		snapCtx, snapCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer snapCancel()
 		var snapshot *LedgerSnapshot
 		var loaded bool
+		operation := operationReadModelSnapshotLite
+		if includeBeanPayloads {
+			operation = operationReadModelSnapshotFull
+		}
+		started := time.Now()
 		if includeBeanPayloads {
 			snapshot, loaded, err = s.indexStore.ActiveSnapshot(snapCtx)
 		} else {
 			snapshot, loaded, err = s.indexStore.ActiveSnapshotLite(snapCtx)
 		}
+		s.metrics.observeOperation(operation, operationAvailabilityResult(err, loaded), started)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +207,9 @@ func (s *LedgerReadService) Transactions(start, end string, unlocked bool, rawQu
 			return TransactionQueryResult{}, err
 		}
 		if ok {
+			started := time.Now()
 			txns, err := s.indexStore.TransactionsForRevision(indexCtx, revision.ID, effectiveStart, effectiveEnd)
+			s.metrics.observeOperation(operationReadModelTransactions, operationResult(err), started)
 			if err != nil {
 				return TransactionQueryResult{}, err
 			}
@@ -222,7 +241,10 @@ func (s *LedgerReadService) Balances(ctx context.Context) (map[string]int, []Bal
 			return nil, nil, err
 		}
 		if ok {
-			return s.indexStore.BalancesForRevision(indexCtx, revision.ID)
+			started := time.Now()
+			balances, assertions, err := s.indexStore.BalancesForRevision(indexCtx, revision.ID)
+			s.metrics.observeOperation(operationReadModelBalances, operationResult(err), started)
+			return balances, assertions, err
 		}
 		if s.strict {
 			return nil, nil, ErrLedgerReadModelUnavailable

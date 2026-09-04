@@ -48,6 +48,44 @@ func TestLoadConfigReadsNotificationRefreshInterval(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsMetricsSettings(t *testing.T) {
+	t.Setenv("METRICS_ADDR", "127.0.0.1:9091")
+	t.Setenv("METRICS_ALLOW_NON_LOOPBACK", "true")
+
+	cfg := LoadConfig()
+	if cfg.MetricsAddr != "127.0.0.1:9091" || !cfg.MetricsAllowNonLoopback {
+		t.Fatalf("metrics addr=%q allow non-loopback=%v", cfg.MetricsAddr, cfg.MetricsAllowNonLoopback)
+	}
+}
+
+func TestValidateMetricsConfig(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		cfg     Config
+		wantErr string
+	}{
+		{name: "disabled"},
+		{name: "ipv4 loopback", cfg: Config{MetricsAddr: "127.0.0.1:9091"}},
+		{name: "ipv6 loopback", cfg: Config{MetricsAddr: "[::1]:9091"}},
+		{name: "localhost", cfg: Config{MetricsAddr: "localhost:9091"}},
+		{name: "missing port", cfg: Config{MetricsAddr: "127.0.0.1"}, wantErr: "host:port"},
+		{name: "invalid port", cfg: Config{MetricsAddr: "127.0.0.1:70000"}, wantErr: "between 1 and 65535"},
+		{name: "wildcard rejected", cfg: Config{MetricsAddr: ":9091"}, wantErr: "METRICS_ALLOW_NON_LOOPBACK"},
+		{name: "public rejected", cfg: Config{MetricsAddr: "0.0.0.0:9091"}, wantErr: "METRICS_ALLOW_NON_LOOPBACK"},
+		{name: "explicit non-loopback", cfg: Config{MetricsAddr: ":9091", MetricsAllowNonLoopback: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateMetricsConfig(test.cfg)
+			if test.wantErr == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("error=%v, want text %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadSelfHostedConfigReadsMaintenanceMode(t *testing.T) {
 	t.Setenv("LEDGER_MAINTENANCE_MODE", "true")
 

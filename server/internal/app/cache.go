@@ -44,10 +44,15 @@ type LedgerCache struct {
 	snapshot      *LedgerSnapshot
 	version       LedgerVersion
 	versionReadAt time.Time
+	metrics       *Metrics
 }
 
 func NewLedgerCache(cfg Config) *LedgerCache {
-	return &LedgerCache{cfg: cfg}
+	return NewLedgerCacheWithMetrics(cfg, nil)
+}
+
+func NewLedgerCacheWithMetrics(cfg Config, metrics *Metrics) *LedgerCache {
+	return &LedgerCache{cfg: cfg, metrics: metrics}
 }
 
 func (c *LedgerCache) Version() (LedgerVersion, error) {
@@ -65,13 +70,23 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.snapshot != nil && c.snapshot.Version == version.Version {
+		c.metrics.observeCache(cacheFilesystemSnapshot, cacheResultHit)
 		return c.snapshot, nil
 	}
+	c.metrics.observeCache(cacheFilesystemSnapshot, cacheResultMiss)
+	loadStarted := time.Now()
 	lines, err := ReadLedgerLines(mainBeanPath(c.cfg), map[string]bool{})
 	if err != nil {
+		c.metrics.observeOperation(operationFilesystemSnapshot, operationResultError, loadStarted)
 		return nil, err
 	}
+	parseStarted := time.Now()
 	compiled := CompileBeanLines(lines)
+	parseResult := operationResultSuccess
+	if len(compiled.Errors) > 0 {
+		parseResult = operationResultWithParseErrors
+	}
+	c.metrics.observeOperation(operationBeanCompile, parseResult, parseStarted)
 	entries := compiled.Entries
 	txns := TransactionsFromBeanEntries(entries)
 	accounts := AccountsFromBeanEntries(entries)
@@ -100,6 +115,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	prepareLedgerSnapshot(snapshot)
 	c.snapshot = snapshot
+	c.metrics.observeOperation(operationFilesystemSnapshot, operationResultSuccess, loadStarted)
 	return snapshot, nil
 }
 
