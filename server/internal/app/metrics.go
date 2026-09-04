@@ -15,6 +15,7 @@ const metricsNamespace = "beancount_ledger_web"
 
 const (
 	cacheFilesystemSnapshot = "filesystem_snapshot"
+	cacheGitHubImportDocs   = "github_import_documents"
 	cacheReadModelRevision  = "read_model_revision"
 	cacheReadModelSnapshot  = "read_model_snapshot"
 

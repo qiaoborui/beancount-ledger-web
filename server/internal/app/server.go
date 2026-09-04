@@ -46,6 +46,7 @@ type Server struct {
 	limiter              RateLimiter
 	agentModel           AgentModelClient
 	metrics              *Metrics
+	importDocuments      githubImportDocumentsCache
 	gmailEventsOnce      sync.Once
 	gmailEvents          *gmailPendingEventHub
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -12,7 +13,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type ImportEntry struct {
@@ -539,13 +543,42 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	return result, nil
 }
 
-func (s *Server) listImportDocuments() ([]ImportDocument, error) {
+func (s *Server) listImportDocuments(ctx context.Context) ([]ImportDocument, error) {
 	if githubAPIEnabled(s.cfg) {
-		client, err := newGitHubLedgerClient(s.cfg)
-		if err != nil {
-			return nil, err
+		cfg := s.cfg
+		key := githubImportDocumentsCacheKey(s.cfg)
+		documents, generation, ok := s.importDocuments.lookup(key)
+		if ok {
+			s.metrics.observeCache(cacheGitHubImportDocs, cacheResultHit)
+			return documents, nil
 		}
-		return client.listImportDocuments(context.Background())
+		s.metrics.observeCache(cacheGitHubImportDocs, cacheResultMiss)
+		request := s.importDocuments.refresh.DoChan(fmt.Sprintf("%x:%d", key, generation), func() (any, error) {
+			if documents, _, ok := s.importDocuments.lookup(key); ok {
+				return documents, nil
+			}
+			client, err := newGitHubLedgerClient(cfg)
+			if err != nil {
+				return nil, err
+			}
+			requestCtx, cancel := context.WithTimeout(context.Background(), githubImportDocumentsReadTimeout)
+			defer cancel()
+			documents, err := client.listImportDocuments(requestCtx)
+			if err != nil {
+				return nil, err
+			}
+			s.importDocuments.store(key, generation, documents)
+			return documents, nil
+		})
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-request:
+			if result.Err != nil {
+				return nil, result.Err
+			}
+			return append([]ImportDocument(nil), result.Val.([]ImportDocument)...), nil
+		}
 	}
 	root := transactionsDir(s.cfg)
 	documents := []ImportDocument{}
@@ -591,6 +624,60 @@ func (s *Server) listImportDocuments() ([]ImportDocument, error) {
 		return documents[i].ModTime > documents[j].ModTime
 	})
 	return documents, nil
+}
+
+const (
+	githubImportDocumentsCacheTTL    = 30 * time.Second
+	githubImportDocumentsReadTimeout = 10 * time.Second
+)
+
+type githubImportDocumentsCache struct {
+	mu         sync.Mutex
+	documents  []ImportDocument
+	key        [sha256.Size]byte
+	loadedAt   time.Time
+	generation uint64
+	refresh    singleflight.Group
+}
+
+func (c *githubImportDocumentsCache) lookup(key [sha256.Size]byte) ([]ImportDocument, uint64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.key == key && !c.loadedAt.IsZero() && time.Since(c.loadedAt) < githubImportDocumentsCacheTTL {
+		return append([]ImportDocument(nil), c.documents...), c.generation, true
+	}
+	return nil, c.generation, false
+}
+
+func (c *githubImportDocumentsCache) store(key [sha256.Size]byte, generation uint64, documents []ImportDocument) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation != generation {
+		return
+	}
+	c.documents = append([]ImportDocument(nil), documents...)
+	c.key = key
+	c.loadedAt = time.Now()
+}
+
+func githubImportDocumentsCacheKey(cfg Config) [sha256.Size]byte {
+	return sha256.Sum256([]byte(strings.Join([]string{
+		cfg.LedgerStorage,
+		cfg.LedgerGitHubAPIURL,
+		cfg.LedgerGitHubOwner,
+		cfg.LedgerGitHubRepo,
+		cfg.LedgerGitBranch,
+		cfg.LedgerGitHubToken,
+	}, "\x00")))
+}
+
+func (s *Server) invalidateImportDocumentsCache() {
+	s.importDocuments.mu.Lock()
+	defer s.importDocuments.mu.Unlock()
+	s.importDocuments.documents = nil
+	s.importDocuments.key = [sha256.Size]byte{}
+	s.importDocuments.loadedAt = time.Time{}
+	s.importDocuments.generation++
 }
 
 func importDocumentInfo(path, year, name string, size int64, modTime time.Time) ImportDocument {
@@ -1047,5 +1134,8 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 		return nil
 	})
 	written.GitSHA = gitSHA
+	if err == nil && written.DocumentFile != "" {
+		s.invalidateImportDocumentsCache()
+	}
 	return written, err
 }
