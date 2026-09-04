@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, shouldFetchFullBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
+import { bootstrapSensitiveUnlockState, buildLedgerCacheFromBootstrap, shouldShowOfflineLedgerNotice, type LedgerBootstrapResponse } from "./useLedgerData";
 import { maskSensitiveLedgerCache } from "../storage";
 import type { LedgerVersion, Txn } from "../types";
 
@@ -98,12 +98,6 @@ describe("shouldShowOfflineLedgerNotice", () => {
     expect(shouldShowOfflineLedgerNotice(null, "month=CURRENT:CNY:cached")).toBe(true);
     expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:cached")).toBe(false);
     expect(shouldShowOfflineLedgerNotice("month=CURRENT:CNY:cached", "month=CURRENT:CNY:empty")).toBe(true);
-  });
-});
-
-describe("shouldFetchFullBootstrap", () => {
-  it("always hydrates full data after the lite bootstrap", () => {
-    expect(shouldFetchFullBootstrap()).toBe(true);
   });
 });
 
