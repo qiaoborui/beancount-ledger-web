@@ -20,6 +20,7 @@ extension LedgerSession {
 private actor SafePreviewLedgerAPI: LedgerAPI {
     private var history: [BQLHistoryRecord] = []
     private var committedImportDocument: LedgerImportDocument?
+    private var importCommitAttempts = 0
 
     func health(baseURL: URL) async throws -> HealthStatus {
         HealthStatus(
@@ -97,6 +98,14 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         baseURL: URL,
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult {
+        importCommitAttempts += 1
+        if ProcessInfo.processInfo.arguments.contains("--safe-import-observe-commit") {
+            try await Task.sleep(nanoseconds: 600_000_000)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--safe-import-fail-first-commit"),
+           importCommitAttempts == 1 {
+            throw LedgerAPIError.incompatibleServer("安全预览模拟保存失败")
+        }
         committedImportDocument = LedgerImportDocument(
             path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
             name: "2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
@@ -108,6 +117,9 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
             size: 118_640,
             modTime: "2026-08-31T14:30:00Z"
         )
+        if ProcessInfo.processInfo.arguments.contains("--safe-import-lose-success-response") {
+            throw LedgerAPIError.transport("安全预览模拟响应中断")
+        }
         return LedgerImportCommitResult(
             ok: true,
             outputFile: "transactions/2026/imports/2026-08-01_2026-08-30-\(request.provider).bean",
@@ -134,6 +146,10 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     ) async throws {}
 
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        if targetGitSHA == nil,
+           ProcessInfo.processInfo.arguments.contains("--safe-import-block-index-baseline") {
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+        }
         let currentGitSHA = committedImportDocument == nil ? "safe-preview-baseline" : "safe-preview-indexed"
         return LedgerIndexInfo(
             enabled: true,
@@ -292,6 +308,17 @@ private enum SafePreviewLedgerData {
 
     static let importDocuments = [
         LedgerImportDocument(
+            path: "transactions/2026/documents/imports/ccb-credit-2026-08.eml",
+            name: "ccb-credit-2026-08.eml",
+            year: "2026",
+            ext: ".eml",
+            provider: "ccb-credit",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-31",
+            size: 212_480,
+            modTime: "2026-09-01T08:00:00Z"
+        ),
+        LedgerImportDocument(
             path: "transactions/2026/documents/imports/alipay-2026-08.csv",
             name: "alipay-2026-08.csv",
             year: "2026",
@@ -361,6 +388,14 @@ private enum SafePreviewLedgerData {
             extensions: [".pdf", ".csv"],
             accept: ".pdf,.csv",
             engine: "deg-module"
+        ),
+        LedgerImportProviderInfo(
+            id: "gmail-auto",
+            label: "Gmail 自动账单",
+            detail: "自动同步邮件账单",
+            extensions: [".eml"],
+            accept: ".eml",
+            engine: "gmail"
         ),
     ]
 

@@ -514,6 +514,13 @@ final class LedgerSession: ObservableObject {
         let trackingGeneration = importIndexGeneration
         importIndexTask?.cancel()
         importIndexTask = nil
+        let targetGitSHA = normalizedGitSHA(result.indexGitSHA)
+        let baseline = normalizedGitSHA(baselineGitSHA)
+        if result.readModelPending == true, targetGitSHA == nil, baseline == nil {
+            importIndexProgress = nil
+            Task { await importIndexActivity.end(immediately: true) }
+            return
+        }
         importIndexProgress = LedgerImportIndexProgress(
             providerLabel: providerLabel,
             entryCount: result.count,
@@ -525,9 +532,6 @@ final class LedgerSession: ObservableObject {
             return
         }
 
-        let targetGitSHA = normalizedGitSHA(result.indexGitSHA)
-        let baseline = normalizedGitSHA(baselineGitSHA)
-        guard targetGitSHA != nil || baseline != nil else { return }
         beginImportIndexPolling(
             providerLabel: providerLabel,
             entryCount: result.count,

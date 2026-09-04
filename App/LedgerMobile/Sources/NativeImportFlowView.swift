@@ -23,6 +23,11 @@ struct NativeImportFlowView: View {
     @State private var isCommitting = false
     @State private var confirmationPresented = false
     @State private var cleanupWarningDismissed = false
+    @State private var commitErrorMessage: String?
+    @State private var commitOutcomeNeedsReconciliation = false
+    @State private var commitWasReconciled = false
+    @State private var editedEntryStatus: String?
+    @State private var editSaveFeedback = 0
 
     private var selectedEntries: [LedgerImportEntry] {
         reviewedEntries.filter { includedEntryIDs.contains($0.id) }
@@ -60,6 +65,10 @@ struct NativeImportFlowView: View {
                             selectedTagEntryIDs = []
                             bulkTagInput = ""
                             errorMessage = nil
+                            commitErrorMessage = nil
+                            commitOutcomeNeedsReconciliation = false
+                            commitWasReconciled = false
+                            editedEntryStatus = nil
                         }
                         .disabled(isCommitting)
                     } else if commitResult == nil {
@@ -73,7 +82,7 @@ struct NativeImportFlowView: View {
         .privacySensitive()
         .alert("确认写入账本？", isPresented: $confirmationPresented) {
             Button(commitActionTitle) {
-                Task { await commit() }
+                startCommit()
             }
             Button("继续核对", role: .cancel) {}
         } message: {
@@ -89,6 +98,7 @@ struct NativeImportFlowView: View {
             )
             .ledgerPrivacyProtectedSheet()
         }
+        .sensoryFeedback(.success, trigger: editSaveFeedback)
     }
 
     private var preparationView: some View {
@@ -277,6 +287,7 @@ struct NativeImportFlowView: View {
             .padding(.top, LedgerSpacing.xl)
             .padding(.bottom, 112)
             .ledgerAdaptivePageWidth()
+            .disabled(isCommitting)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             commitBar(preview)
@@ -362,7 +373,7 @@ struct NativeImportFlowView: View {
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .buttonStyle(PressScaleButtonStyle())
             }
 
@@ -398,7 +409,7 @@ struct NativeImportFlowView: View {
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
             }
             LedgerPanel {
                 VStack(alignment: .leading, spacing: LedgerSpacing.md) {
@@ -410,13 +421,13 @@ struct NativeImportFlowView: View {
                     HStack(spacing: LedgerSpacing.sm) {
                         Button("添加标签") { applyBulkTags(mode: .add) }
                             .foregroundStyle(LedgerPalette.onBrand)
-                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                             .background(LedgerPalette.cobalt)
                             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                             .accessibilityIdentifier("import-bulk-tag-add")
                         Button("移除标签") { applyBulkTags(mode: .remove) }
                             .foregroundStyle(LedgerPalette.olive)
-                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                             .background(LedgerPalette.tag)
                             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                             .accessibilityIdentifier("import-bulk-tag-remove")
@@ -440,6 +451,23 @@ struct NativeImportFlowView: View {
 
     private func commitBar(_ preview: LedgerImportPreview) -> some View {
         VStack(spacing: LedgerSpacing.sm) {
+            if let editedEntryStatus {
+                Label(editedEntryStatus, systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(LedgerPalette.success)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("import-edit-saved-status")
+            }
+
+            if let commitErrorMessage {
+                Label(commitErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(LedgerPalette.risk)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("import-commit-error")
+            }
+
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(selectedEntries.isEmpty ? "仅归档原始账单" : "准备写入 \(selectedEntries.count) 条交易")
@@ -453,13 +481,23 @@ struct NativeImportFlowView: View {
             }
 
             Button {
-                confirmationPresented = true
+                if commitOutcomeNeedsReconciliation {
+                    startCommitReconciliation()
+                } else {
+                    confirmationPresented = true
+                }
             } label: {
-                PrimaryButtonLabel(title: commitActionTitle, loading: isCommitting)
+                PrimaryButtonLabel(
+                    title: commitButtonTitle,
+                    loading: isCommitting
+                )
             }
             .buttonStyle(PressScaleButtonStyle())
             .disabled(isCommitting)
             .opacity(isCommitting ? 0.72 : 1)
+            .accessibilityLabel(commitButtonTitle)
+            .accessibilityValue(commitButtonAccessibilityValue)
+            .accessibilityHint(commitButtonAccessibilityHint)
             .accessibilityIdentifier("import-commit")
         }
         .padding(.horizontal, LedgerSpacing.lg)
@@ -574,6 +612,9 @@ struct NativeImportFlowView: View {
     }
 
     private func completionDetail(_ result: LedgerImportCommitResult) -> String {
+        if commitWasReconciled {
+            return "保存响应中断，但已通过导入归档确认账本写入完成。"
+        }
         guard result.readModelPending == true else { return "账本和导入记录已经更新。" }
         return session.importIndexProgress?.phase == .indexed
             ? "账本写入和索引更新已经完成。"
@@ -615,6 +656,9 @@ struct NativeImportFlowView: View {
     private func applyEditedEntry(_ updated: LedgerImportEntry) {
         guard let index = reviewedEntries.firstIndex(where: { $0.id == updated.id }) else { return }
         reviewedEntries[index] = updated
+        let name = updated.payee.trimmingCharacters(in: .whitespacesAndNewlines)
+        editedEntryStatus = "\(name.isEmpty ? "这条交易" : "“\(name)”")的修改已保存到本次预览"
+        editSaveFeedback &+= 1
     }
 
     private var selectedProviderDetail: String {
@@ -628,6 +672,26 @@ struct NativeImportFlowView: View {
 
     private var commitActionTitle: String {
         selectedEntries.isEmpty ? "仅归档账单" : "写入 \(selectedEntries.count) 条交易"
+    }
+
+    private var commitButtonTitle: String {
+        if isCommitting {
+            return commitOutcomeNeedsReconciliation ? "正在核对保存结果" : "正在验证并写入账本"
+        }
+        if commitOutcomeNeedsReconciliation { return "重新检查保存结果" }
+        return commitErrorMessage == nil ? commitActionTitle : "重试保存"
+    }
+
+    private var commitButtonAccessibilityValue: String {
+        if isCommitting { return "处理中" }
+        if commitOutcomeNeedsReconciliation { return "保存结果待确认" }
+        return commitErrorMessage == nil ? "可以提交" : "上次保存失败"
+    }
+
+    private var commitButtonAccessibilityHint: String {
+        if isCommitting { return "请稍候，完成后会显示保存结果" }
+        if commitOutcomeNeedsReconciliation { return "只检查导入归档，不会再次提交" }
+        return "提交前服务器会再次校验预览"
     }
 
     private var commitConfirmationDetail: String {
@@ -725,6 +789,10 @@ struct NativeImportFlowView: View {
             includedEntryIDs = Set(updated.entries.map(\.id))
             selectedTagEntryIDs = []
             bulkTagInput = ""
+            commitErrorMessage = nil
+            commitOutcomeNeedsReconciliation = false
+            commitWasReconciled = false
+            editedEntryStatus = nil
         } catch is CancellationError {
             return
         } catch {
@@ -733,27 +801,74 @@ struct NativeImportFlowView: View {
         }
     }
 
-    private func commit() async {
+    private func startCommit() {
         guard let preview, !isCommitting else { return }
+        let entries = selectedEntries
         isCommitting = true
-        errorMessage = nil
+        commitErrorMessage = nil
+        commitOutcomeNeedsReconciliation = false
+        Task { await commit(preview: preview, entries: entries) }
+    }
+
+    private func commit(preview: LedgerImportPreview, entries: [LedgerImportEntry]) async {
         defer { isCommitting = false }
         do {
-            let baselineGitSHA = try? await session.indexInfo().gitSHA
-            let result = try await session.commitImport(preview: preview, entries: selectedEntries)
+            let result = try await session.commitImport(preview: preview, entries: entries)
             guard !Task.isCancelled else { return }
             commitResult = result
             session.startImportIndexTracking(
                 result: result,
                 providerLabel: providerLabel(preview.provider),
-                baselineGitSHA: baselineGitSHA
+                baselineGitSHA: nil
             )
             onCommitted(result)
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            if LedgerImportCommitFailureDisposition(error: error) == .outcomeUnknown {
+                await reconcileCommit(preview: preview, entries: entries)
+            } else {
+                commitErrorMessage = "保存失败：\(error.localizedDescription) 你的核对修改仍在，可重试。"
+            }
         }
+    }
+
+    private func startCommitReconciliation() {
+        guard let preview, !isCommitting else { return }
+        let entries = selectedEntries
+        isCommitting = true
+        Task {
+            await reconcileCommit(preview: preview, entries: entries)
+            isCommitting = false
+        }
+    }
+
+    private func reconcileCommit(preview: LedgerImportPreview, entries: [LedgerImportEntry]) async {
+        let documents = try? await session.importDocuments()
+        guard !Task.isCancelled else { return }
+        if let document = documents.flatMap({
+            LedgerImportCommitReconciliation.archivedDocument(importID: preview.importID, in: $0)
+        }) {
+            let result = LedgerImportCommitResult(
+                ok: true,
+                outputFile: nil,
+                includeFile: nil,
+                documentFile: document.path,
+                count: entries.count,
+                beanText: nil,
+                readModelPending: nil,
+                indexGitSHA: nil,
+                runtimeCleanupError: nil
+            )
+            commitWasReconciled = true
+            commitOutcomeNeedsReconciliation = false
+            commitErrorMessage = nil
+            commitResult = result
+            onCommitted(result)
+            return
+        }
+        commitOutcomeNeedsReconciliation = true
+        commitErrorMessage = "保存结果待确认：连接中断，服务器可能已完成写入。请勿重复提交；可重新检查导入归档。"
     }
 }
 
@@ -1119,7 +1234,6 @@ private struct ImportEntryEditor: View {
         VStack(spacing: 0) {
             Rectangle().fill(LedgerPalette.line).frame(height: 1)
             Button("保存修改") {
-                focusedField = nil
                 let updated = entry.applyingReviewEdits(
                     date: Self.formatDate(date),
                     flag: flag,
@@ -1133,7 +1247,7 @@ private struct ImportEntryEditor: View {
                 onSave(updated)
                 dismiss()
             }
-            .font(.system(size: 15, weight: .semibold))
+            .font(.body.weight(.semibold))
             .foregroundStyle(LedgerPalette.onBrand)
             .frame(maxWidth: .infinity, minHeight: 46)
             .background(LedgerPalette.cobalt)
@@ -1330,7 +1444,7 @@ private struct ImportEntryReviewRow: View {
                     Image(systemName: included ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(included ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 40, height: 44)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel(included ? "排除 \(entry.payee)" : "包含 \(entry.payee)")
@@ -1340,7 +1454,7 @@ private struct ImportEntryReviewRow: View {
                     Image(systemName: tagSelected ? "tag.fill" : "tag")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(tagSelected ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 36, height: 44)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
@@ -1392,7 +1506,7 @@ private struct ImportEntryReviewRow: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(LedgerPalette.cobalt)
-                        .frame(width: 40, height: 44)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel("编辑 \(entry.payee.isEmpty ? "未命名交易" : entry.payee)")

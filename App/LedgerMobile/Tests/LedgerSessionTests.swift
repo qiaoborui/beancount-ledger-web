@@ -938,6 +938,46 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertNil(session.importIndexProgress)
     }
 
+    func testImportIndexTrackingDoesNotUseUncorrelatedRevisionWithoutTargetOrBaseline() async {
+        let suiteName = "ledger-mobile-import-index-uncorrelated-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            indexInfoPayload: LedgerIndexInfo(
+                enabled: true,
+                active: true,
+                gitSHA: "unrelated-index-revision",
+                indexedAt: "2026-09-01T08:30:00Z",
+                requestCompleted: true
+            )
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        session.startImportIndexTracking(
+            result: LedgerImportCommitResult(
+                ok: true,
+                outputFile: "transactions/2026/imports/import.bean",
+                includeFile: "transactions/2026/09.bean",
+                documentFile: nil,
+                count: 2,
+                beanText: nil,
+                readModelPending: true,
+                indexGitSHA: nil,
+                runtimeCleanupError: nil
+            ),
+            providerLabel: "支付宝",
+            baselineGitSHA: nil
+        )
+
+        XCTAssertNil(session.importIndexProgress)
+        let indexInfoCalls = await api.indexInfoCallCount()
+        XCTAssertEqual(indexInfoCalls, 0)
+    }
+
     func testImportLiveActivityURLRoutesToImportHistory() {
         let session = LedgerSession()
 

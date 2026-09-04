@@ -9,6 +9,79 @@ struct LedgerImportProviderInfo: Decodable, Equatable, Identifiable, Sendable {
     let engine: String?
 }
 
+enum LedgerMobileImportCapabilities {
+    static let supportsAutomaticEmailImport = false
+
+    static let supportedManualFileExtensions = [
+        ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
+    ]
+
+    private static let supportedManualFileExtensionSet = Set(supportedManualFileExtensions)
+
+    static func fileImportProviders(from providers: [LedgerImportProviderInfo]) -> [LedgerImportProviderInfo] {
+        guard !supportsAutomaticEmailImport else { return providers }
+        return providers.filter { !isAutomaticEmailProvider($0) }
+    }
+
+    static func supportedExtensions(from providers: [LedgerImportProviderInfo]) -> Set<String> {
+        let providerExtensions = normalizedExtensions(providers.flatMap(\.extensions))
+            .filter(supportedManualFileExtensionSet.contains)
+        return providers.isEmpty
+            ? supportedManualFileExtensionSet
+            : Set(providerExtensions).union([".zip"])
+    }
+
+    private static func isAutomaticEmailProvider(_ provider: LedgerImportProviderInfo) -> Bool {
+        let id = provider.id.lowercased()
+        let engine = provider.engine?.lowercased() ?? ""
+        return id == "gmail"
+            || id.hasPrefix("gmail-")
+            || id.contains("email-auto")
+            || id.contains("mail-auto")
+            || engine == "gmail"
+            || engine.hasPrefix("gmail-")
+    }
+
+    private static func normalizedExtensions(_ values: [String]) -> [String] {
+        Array(Set(values.map { value in
+            let normalized = value.lowercased()
+            return normalized.hasPrefix(".") ? normalized : "." + normalized
+        })).sorted()
+    }
+}
+
+enum LedgerImportCommitFailureDisposition: Equatable {
+    case failed
+    case outcomeUnknown
+
+    init(error: Error) {
+        guard let apiError = error as? LedgerAPIError else {
+            self = .failed
+            return
+        }
+        switch apiError {
+        case .transport, .decoding, .invalidResponse:
+            self = .outcomeUnknown
+        case .incompatibleServer, .server:
+            self = .failed
+        }
+    }
+}
+
+enum LedgerImportCommitReconciliation {
+    static func archivedDocument(
+        importID: String,
+        in documents: [LedgerImportDocument]
+    ) -> LedgerImportDocument? {
+        let suffix = "-" + importID
+        return documents.first { document in
+            let filename = document.name ?? document.path.map { ($0 as NSString).lastPathComponent }
+            guard let filename else { return false }
+            return (filename as NSString).deletingPathExtension.hasSuffix(suffix)
+        }
+    }
+}
+
 struct LedgerImportSelectedFile: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
@@ -51,10 +124,6 @@ enum LedgerImportFileValidationError: LocalizedError, Equatable {
 enum LedgerImportFileValidator {
     static let maximumBytes = 10 * 1024 * 1024
 
-    private static let fallbackExtensions: Set<String> = [
-        ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
-    ]
-
     static func validate(
         name: String,
         byteCount: Int,
@@ -64,10 +133,7 @@ enum LedgerImportFileValidator {
         guard byteCount <= maximumBytes else { throw LedgerImportFileValidationError.tooLarge }
         let rawExtension = (name as NSString).pathExtension.lowercased()
         let fileExtension = rawExtension.isEmpty ? "" : "." + rawExtension
-        let providerExtensions = Set(providers.flatMap(\.extensions).map { value in
-            value.hasPrefix(".") ? value.lowercased() : "." + value.lowercased()
-        })
-        let supported = providerExtensions.isEmpty ? fallbackExtensions : providerExtensions.union([".zip"])
+        let supported = LedgerMobileImportCapabilities.supportedExtensions(from: providers)
         guard supported.contains(fileExtension) else {
             throw LedgerImportFileValidationError.unsupported(fileExtension)
         }

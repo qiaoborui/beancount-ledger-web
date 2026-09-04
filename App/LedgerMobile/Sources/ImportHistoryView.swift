@@ -18,6 +18,9 @@ struct ImportHistoryView: View {
     @State private var isReadingFile = false
     @State private var debugImportFlowPresented = false
 
+    private static let supportedFileTypes = LedgerMobileImportCapabilities.supportedManualFileExtensions
+        .compactMap { UTType(filenameExtension: String($0.dropFirst())) }
+
     private var statuses: [LedgerImportChannelStatus] {
         LedgerImportHistory.channelStatuses(documents: documents)
     }
@@ -55,7 +58,7 @@ struct ImportHistoryView: View {
         }
         .fileImporter(
             isPresented: $fileImporterPresented,
-            allowedContentTypes: [.item],
+            allowedContentTypes: Self.supportedFileTypes,
             allowsMultipleSelection: false
         ) { result in
             Task { await handleFileSelection(result) }
@@ -204,7 +207,7 @@ struct ImportHistoryView: View {
             }
             .foregroundStyle(LedgerPalette.onBrand)
             .padding(.horizontal, LedgerSpacing.md)
-            .frame(maxWidth: .infinity, minHeight: 40)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .background(LedgerPalette.cobalt)
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         }
@@ -323,7 +326,7 @@ struct ImportHistoryView: View {
         do {
             let updated = try await session.importProviders()
             guard !Task.isCancelled else { return }
-            providers = updated
+            providers = LedgerMobileImportCapabilities.fileImportProviders(from: updated)
         } catch is CancellationError {
             return
         } catch {
