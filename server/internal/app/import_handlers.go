@@ -132,8 +132,7 @@ func (s *Server) importsCommit(c *gin.Context) {
 	}
 	if claimedPending {
 		if err := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "committed", ""); err != nil {
-			errorJSON(c, http.StatusInternalServerError, fmt.Errorf("账本已写入，自动账单状态同步失败，请重试: %w", err))
-			return
+			result["gmailPendingStatusWarning"] = fmt.Sprintf("账本已写入，但自动账单状态同步暂时失败；服务器会自动核对：%v", err)
 		}
 	}
 	c.JSON(http.StatusOK, result)

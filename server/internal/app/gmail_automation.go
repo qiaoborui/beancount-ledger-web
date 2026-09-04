@@ -1311,6 +1311,14 @@ func (s *Server) readGmailPending(ctx context.Context) (gmailPendingStore, error
 }
 
 func (s *Server) writeGmailPending(ctx context.Context, store gmailPendingStore) error {
+	if err := s.saveGmailPending(ctx, store); err != nil {
+		return err
+	}
+	s.gmailPendingEventHub().publish()
+	return nil
+}
+
+func (s *Server) saveGmailPending(ctx context.Context, store gmailPendingStore) error {
 	store.Version = 1
 	return s.gmailState().SavePending(ctx, store)
 }
@@ -1355,12 +1363,15 @@ func (s *Server) gmailPendingSnapshot(ctx context.Context) (gmailPendingStore, e
 				}
 			}
 		}
-		if err := s.writeGmailPending(lockCtx, latest); err != nil {
+		if err := s.saveGmailPending(lockCtx, latest); err != nil {
 			return err
 		}
 		snapshot = latest
 		return nil
 	})
+	if err == nil {
+		s.gmailPendingEventHub().publish()
+	}
 	return snapshot, err
 }
 
@@ -1369,10 +1380,6 @@ func (s *Server) recoverStaleGmailPendingUnlocked(ctx context.Context, store *gm
 	for index := range store.Items {
 		item := &store.Items[index]
 		if item.Status != "committing" && item.Status != "processing" {
-			continue
-		}
-		updatedAt, _ := time.Parse(time.RFC3339Nano, item.UpdatedAt)
-		if !updatedAt.IsZero() && time.Since(updatedAt) < 10*time.Minute {
 			continue
 		}
 		if item.Status == "committing" && item.OutputFile != "" {
@@ -1388,6 +1395,10 @@ func (s *Server) recoverStaleGmailPendingUnlocked(ctx context.Context, store *gm
 				changed = true
 				continue
 			}
+		}
+		updatedAt, _ := time.Parse(time.RFC3339Nano, item.UpdatedAt)
+		if !updatedAt.IsZero() && time.Since(updatedAt) < 10*time.Minute {
+			continue
 		}
 		preview, err := s.readImportPreview(ctx, item.ImportID)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -1447,13 +1458,17 @@ func (s *Server) reserveGmailPending(ctx context.Context, item GmailPendingImpor
 		store.Items = append(store.Items, item)
 		store.Items = pruneGmailPending(store.Items, maxGmailPendingItems)
 		reserved = true
-		return s.writeGmailPending(lockCtx, store)
+		return s.saveGmailPending(lockCtx, store)
 	})
+	if err == nil && reserved {
+		s.gmailPendingEventHub().publish()
+	}
 	return reserved, err
 }
 
 func (s *Server) finalizeGmailPending(ctx context.Context, item GmailPendingImport) error {
-	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	updated := false
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1462,11 +1477,16 @@ func (s *Server) finalizeGmailPending(ctx context.Context, item GmailPendingImpo
 			if store.Items[index].ID == item.ID {
 				item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 				store.Items[index] = item
-				return s.writeGmailPending(lockCtx, store)
+				updated = true
+				return s.saveGmailPending(lockCtx, store)
 			}
 		}
 		return os.ErrNotExist
 	})
+	if err == nil && updated {
+		s.gmailPendingEventHub().publish()
+	}
+	return err
 }
 
 func pruneGmailPending(items []GmailPendingImport, limit int) []GmailPendingImport {
@@ -1490,9 +1510,13 @@ func pruneGmailPending(items []GmailPendingImport, limit int) []GmailPendingImpo
 }
 
 func (s *Server) updateGmailPendingStatus(ctx context.Context, id, status, message string) error {
-	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		return s.updateGmailPendingStatusUnlocked(lockCtx, id, status, message)
 	})
+	if err == nil {
+		s.gmailPendingEventHub().publish()
+	}
+	return err
 }
 
 func (s *Server) updateGmailPendingStatusUnlocked(ctx context.Context, id, status, message string) error {
@@ -1509,7 +1533,7 @@ func (s *Server) updateGmailPendingStatusUnlocked(ctx context.Context, id, statu
 		item.Error = message
 		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	return s.writeGmailPending(ctx, store)
+	return s.saveGmailPending(ctx, store)
 }
 
 func (s *Server) claimGmailPendingRetry(ctx context.Context, id string) (GmailPendingImport, string, error) {
@@ -1540,10 +1564,13 @@ func (s *Server) claimGmailPendingRetry(ctx context.Context, id string) (GmailPe
 			item.Error = ""
 			item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			claimed = *item
-			return s.writeGmailPending(lockCtx, store)
+			return s.saveGmailPending(lockCtx, store)
 		}
 		return os.ErrNotExist
 	})
+	if err == nil && claimed.ID != "" {
+		s.gmailPendingEventHub().publish()
+	}
 	return claimed, previousImportID, err
 }
 
@@ -1574,10 +1601,13 @@ func (s *Server) claimGmailPendingImport(ctx context.Context, importID string) (
 			item.Error = ""
 			item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			claimed = true
-			return s.writeGmailPending(lockCtx, store)
+			return s.saveGmailPending(lockCtx, store)
 		}
 		return nil
 	})
+	if err == nil && claimed {
+		s.gmailPendingEventHub().publish()
+	}
 	return claimed, err
 }
 
@@ -1585,7 +1615,7 @@ func (s *Server) dismissGmailPendingImport(ctx context.Context, id string) error
 	if _, err := s.gmailPendingSnapshot(ctx); err != nil {
 		return err
 	}
-	return s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
+	err := s.gmailState().WithLock(ctx, "gmail-pending", func(lockCtx context.Context) error {
 		store, err := s.readGmailPending(lockCtx)
 		if err != nil {
 			return err
@@ -1604,6 +1634,10 @@ func (s *Server) dismissGmailPendingImport(ctx context.Context, id string) error
 		}
 		return s.updateGmailPendingStatusUnlocked(lockCtx, id, "dismissed", "")
 	})
+	if err == nil {
+		s.gmailPendingEventHub().publish()
+	}
+	return err
 }
 
 func pendingImportByID(store gmailPendingStore, id string) (GmailPendingImport, bool) {

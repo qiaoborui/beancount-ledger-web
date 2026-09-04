@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	pdf "github.com/ledongthuc/pdf"
 )
@@ -1456,6 +1457,96 @@ func TestImportWriteRollsBackOnBeanCheckFailure(t *testing.T) {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Fatalf("%s should have been removed after rollback, err=%v", file, err)
 		}
+	}
+}
+
+type failNthPendingSaveRepository struct {
+	gmailStateRepository
+	failOn int
+	saves  int
+}
+
+func (r *failNthPendingSaveRepository) SavePending(ctx context.Context, store gmailPendingStore) error {
+	r.saves++
+	if r.saves == r.failOn {
+		return errors.New("synthetic pending status failure")
+	}
+	return r.gmailStateRepository.SavePending(ctx, store)
+}
+
+func TestGmailPendingCommitReturnsWrittenResultWhenStatusSyncFails(t *testing.T) {
+	cfg := testLedger(t)
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), "alipay: {}\n")
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "scripts", "dedup_import.py"), "# test fixture\n")
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+	t.Setenv("APP_PASSWORD", "secret")
+
+	runtimeStore := newFilesystemRuntimeStore(cfg.RuntimeDir)
+	repository := &failNthPendingSaveRepository{
+		gmailStateRepository: newRuntimeGmailStateRepository(runtimeStore),
+		failOn:               3,
+	}
+	server := &Server{
+		cfg:             cfg,
+		runtimeStore:    runtimeStore,
+		gmailRepository: repository,
+		cache:           NewLedgerCache(cfg),
+		limiter:         NewRateLimiter(),
+	}
+	server.writer = NewLedgerWriter(cfg, server.cache)
+
+	const importID = "gmail-status-sync-failure"
+	ctx := context.Background()
+	sourceRaw := []byte("empty Gmail statement fixture\n")
+	sourceFile := previewPath(cfg, importID, "original.csv")
+	sourceFileKey, err := server.putImportFile(ctx, importID, "original", sourceRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := 0
+	if err := server.writeImportMeta(ctx, importID, importMeta{
+		Provider:           "alipay",
+		OriginalFilename:   "statement.csv",
+		InputFile:          sourceFile,
+		InputFileKey:       sourceFileKey,
+		ProviderDetection:  providerDetection{Provider: "alipay", Reason: "test", Confidence: "high"},
+		StatementHash:      sha256Hex(sourceRaw),
+		DateStart:          "2026-09-01",
+		DateEnd:            "2026-09-30",
+		ExpectedEntryCount: &expected,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := server.writeGmailPending(ctx, gmailPendingStore{Version: 1, Items: []GmailPendingImport{{
+		ID: "pending-status-sync-failure", ImportID: importID, MessageID: "message-status-sync-failure",
+		Filename: "statement.csv", Provider: "alipay", Status: "ready", CreatedAt: now, UpdatedAt: now,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	router := newRouter(cfg, server)
+	body := `{"importId":"` + importID + `","provider":"alipay","entries":[]}`
+	response := requestWithCookies(router, http.MethodPost, "/api/ledger/imports/commit", body, loginCookies(t, router))
+	if response.Code != http.StatusOK {
+		t.Fatalf("commit status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"ok":true`) || !strings.Contains(response.Body.String(), `"gmailPendingStatusWarning"`) {
+		t.Fatalf("commit did not return written result with warning: %s", response.Body.String())
+	}
+
+	snapshot, err := server.gmailPendingSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := pendingImportByID(snapshot, importID)
+	if !ok || item.Status != "committed" {
+		t.Fatalf("pending status was not reconciled from durable import: %#v", item)
 	}
 }
 
