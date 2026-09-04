@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/borui/beancount-ledger-web/server/internal/app"
+	"github.com/borui/beancount-ledger-web/server/internal/httpservice"
 	"github.com/borui/beancount-ledger-web/server/internal/logging"
 )
 
@@ -68,7 +69,18 @@ func run(logger *slog.Logger, args []string, output io.Writer) (err error) {
 	application.StartGmailPolling(ctx)
 	server := newHTTPServer(addr, application)
 	logger.Info("self-hosted ledger web listening", "addr", addr)
-	return serveHTTP(ctx, server, listener)
+	services := []httpService{{Server: server, Listener: listener}}
+	if metricsHandler := application.MetricsHandler(); metricsHandler != nil {
+		metricsListener, err := net.Listen("tcp", cfg.MetricsAddr)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("listen for metrics on %s: %w", cfg.MetricsAddr, err)
+		}
+		metricsServer := newMetricsHTTPServer(cfg.MetricsAddr, metricsHandler)
+		services = append(services, httpService{Server: metricsServer, Listener: metricsListener})
+		logger.Info("prometheus metrics listening", "addr", cfg.MetricsAddr)
+	}
+	return serveHTTPServices(ctx, services...)
 }
 
 func selfHostCommand(args []string) (string, error) {
@@ -112,29 +124,16 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener) error {
-	serveErr := make(chan error, 1)
-	go func() {
-		serveErr <- server.Serve(listener)
-	}()
-
-	select {
-	case err := <-serveErr:
-		return normalizeHTTPServerError(err)
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		shutdownErr := server.Shutdown(shutdownCtx)
-		if shutdownErr != nil {
-			shutdownErr = errors.Join(shutdownErr, server.Close())
-		}
-		return errors.Join(shutdownErr, normalizeHTTPServerError(<-serveErr))
-	}
+func newMetricsHTTPServer(addr string, handler http.Handler) *http.Server {
+	return httpservice.NewMetricsServer(addr, handler)
 }
 
-func normalizeHTTPServerError(err error) error {
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
+type httpService = httpservice.Service
+
+func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener) error {
+	return serveHTTPServices(ctx, httpService{Server: server, Listener: listener})
+}
+
+func serveHTTPServices(ctx context.Context, services ...httpService) error {
+	return httpservice.Serve(ctx, shutdownTimeout, services...)
 }

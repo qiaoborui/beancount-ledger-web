@@ -59,6 +59,8 @@ services:
       WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:-}"
       LEDGER_ENABLED_MODULES: "${LEDGER_ENABLED_MODULES:-importers}"
       LEDGER_MAINTENANCE_MODE: "${LEDGER_MAINTENANCE_MODE:-false}"
+      METRICS_ADDR: "${METRICS_ADDR:-}"
+      METRICS_ALLOW_NON_LOOPBACK: "${METRICS_ALLOW_NON_LOOPBACK:-false}"
       # Gmail polling is outbound-only and is the self-hosted default. Leave
       # the remaining Gmail values empty to keep the integration disabled.
       GMAIL_DELIVERY_MODE: "${GMAIL_DELIVERY_MODE:-poll}"

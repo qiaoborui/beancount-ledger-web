@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,6 +33,8 @@ type Config struct {
 	StaticDir                   string
 	ServeStatic                 bool
 	Port                        string
+	MetricsAddr                 string
+	MetricsAllowNonLoopback     bool
 	LedgerStorage               string
 	LedgerGitBranch             string
 	LedgerGitSHA                string
@@ -108,6 +111,8 @@ func LoadConfig() Config {
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
 		Port:                        env("PORT", "3000"),
+		MetricsAddr:                 strings.TrimSpace(os.Getenv("METRICS_ADDR")),
+		MetricsAllowNonLoopback:     envBool("METRICS_ALLOW_NON_LOOPBACK", false),
 		LedgerStorage:               storage,
 		LedgerGitBranch:             env("LEDGER_GIT_BRANCH", "main"),
 		LedgerGitSHA:                strings.TrimSpace(os.Getenv("LEDGER_GIT_SHA")),
@@ -204,6 +209,8 @@ func loadBaseConfig() Config {
 		StaticDir:                   filepath.Clean(env("STATIC_DIR", "")),
 		ServeStatic:                 envBool("SERVE_STATIC", false),
 		Port:                        env("PORT", "3000"),
+		MetricsAddr:                 strings.TrimSpace(os.Getenv("METRICS_ADDR")),
+		MetricsAllowNonLoopback:     envBool("METRICS_ALLOW_NON_LOOPBACK", false),
 		LedgerGitBranch:             env("LEDGER_GIT_BRANCH", "main"),
 		LedgerGitSHA:                strings.TrimSpace(os.Getenv("LEDGER_GIT_SHA")),
 		LedgerIndexForceRebuild:     envBool("LEDGER_INDEX_FORCE_REBUILD", false),
@@ -301,6 +308,9 @@ func notificationRefreshInterval(raw string) (time.Duration, error) {
 }
 
 func ValidateWebConfig(cfg Config) error {
+	if err := validateMetricsConfig(cfg); err != nil {
+		return err
+	}
 	if err := validateAuthTransportConfig(cfg); err != nil {
 		return err
 	}
@@ -398,6 +408,9 @@ func ValidateIndexerConfig(cfg Config) error {
 }
 
 func ValidateConfig(cfg Config) error {
+	if err := validateMetricsConfig(cfg); err != nil {
+		return err
+	}
 	if err := validateAuthTransportConfig(cfg); err != nil {
 		return err
 	}
@@ -441,6 +454,33 @@ func ValidateConfig(cfg Config) error {
 		return err
 	}
 	return nil
+}
+
+func validateMetricsConfig(cfg Config) error {
+	addr := strings.TrimSpace(cfg.MetricsAddr)
+	if addr == "" {
+		return nil
+	}
+	host, rawPort, err := net.SplitHostPort(addr)
+	if err != nil {
+		return errors.New("METRICS_ADDR must use host:port form")
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("METRICS_ADDR must contain a port between 1 and 65535")
+	}
+	if metricsHostIsLoopback(host) || cfg.MetricsAllowNonLoopback {
+		return nil
+	}
+	return errors.New("METRICS_ADDR must bind to loopback unless METRICS_ALLOW_NON_LOOPBACK=true")
+}
+
+func metricsHostIsLoopback(host string) bool {
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
 }
 
 func validateAgentServiceConfig(cfg Config, required bool) error {
