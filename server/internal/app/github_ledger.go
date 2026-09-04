@@ -19,14 +19,19 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const githubLedgerAPIConcurrency = 6
+const (
+	githubLedgerAPIConcurrency             = 6
+	githubGraphQLCommitMaxFiles            = 50
+	githubGraphQLCommitMaxEncodedFileBytes = 768 << 10
+)
 
 type githubLedgerClient struct {
-	cfg    Config
-	client *github.Client
-	owner  string
-	repo   string
-	branch string
+	cfg              Config
+	client           *github.Client
+	owner            string
+	repo             string
+	branch           string
+	useGraphQLCommit bool
 }
 
 type githubLedgerTransaction struct {
@@ -41,13 +46,14 @@ type githubLedgerTransaction struct {
 }
 
 type githubLedgerTransactionMetrics struct {
-	readRequests  int
-	readElapsed   time.Duration
-	blobRequests  int
-	blobElapsed   time.Duration
-	treeElapsed   time.Duration
-	commitElapsed time.Duration
-	refElapsed    time.Duration
+	readRequests    int
+	readElapsed     time.Duration
+	blobRequests    int
+	blobElapsed     time.Duration
+	treeElapsed     time.Duration
+	commitElapsed   time.Duration
+	refElapsed      time.Duration
+	mutationElapsed time.Duration
 }
 
 type fileInfo struct {
@@ -90,7 +96,14 @@ func newGitHubLedgerClient(cfg Config) (*githubLedgerClient, error) {
 	if cfg.LedgerGitHubToken != "" {
 		client = client.WithAuthToken(cfg.LedgerGitHubToken)
 	}
-	return &githubLedgerClient{cfg: cfg, client: client, owner: owner, repo: strings.TrimSuffix(repo, ".git"), branch: branch}, nil
+	return &githubLedgerClient{
+		cfg:              cfg,
+		client:           client,
+		owner:            owner,
+		repo:             strings.TrimSuffix(repo, ".git"),
+		branch:           branch,
+		useGraphQLCommit: strings.EqualFold(client.BaseURL.Hostname(), "api.github.com") && client.BaseURL.Path == "/",
+	}, nil
 }
 
 func (c *githubLedgerClient) beginTransaction(ctx context.Context) (*githubLedgerTransaction, error) {
@@ -370,10 +383,117 @@ func (tx *githubLedgerTransaction) uniquePath(file string) (string, error) {
 	return file, nil
 }
 
+const githubCreateCommitMutation = `mutation CreateCommit($input: CreateCommitOnBranchInput!) {
+  createCommitOnBranch(input: $input) {
+    commit { oid }
+  }
+}`
+
+type githubGraphQLFileAddition struct {
+	Path     string `json:"path"`
+	Contents string `json:"contents"`
+}
+
+type githubGraphQLCommitInput struct {
+	Branch struct {
+		RepositoryNameWithOwner string `json:"repositoryNameWithOwner"`
+		BranchName              string `json:"branchName"`
+	} `json:"branch"`
+	FileChanges struct {
+		Additions []githubGraphQLFileAddition `json:"additions"`
+	} `json:"fileChanges"`
+	Message struct {
+		Headline string `json:"headline"`
+	} `json:"message"`
+	ExpectedHeadOID string `json:"expectedHeadOid"`
+}
+
+type githubGraphQLCommitResponse struct {
+	Data struct {
+		CreateCommitOnBranch struct {
+			Commit struct {
+				OID string `json:"oid"`
+			} `json:"commit"`
+		} `json:"createCommitOnBranch"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
 func (tx *githubLedgerTransaction) commit(message string) (string, error) {
 	if len(tx.writes) == 0 {
 		return "", nil
 	}
+	if tx.canCommitGraphQL() {
+		return tx.commitGraphQL(message)
+	}
+	return tx.commitWithGitData(message)
+}
+
+func (tx *githubLedgerTransaction) canCommitGraphQL() bool {
+	if !tx.ledger.useGraphQLCommit || githubCommitAuthor() != nil || len(tx.writes) > githubGraphQLCommitMaxFiles {
+		return false
+	}
+	encodedBytes := 0
+	for _, content := range tx.writes {
+		encodedBytes += base64.StdEncoding.EncodedLen(len(content))
+		if encodedBytes > githubGraphQLCommitMaxEncodedFileBytes {
+			return false
+		}
+	}
+	return true
+}
+
+func (tx *githubLedgerTransaction) commitGraphQL(message string) (string, error) {
+	paths := make([]string, 0, len(tx.writes))
+	for path := range tx.writes {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	input := githubGraphQLCommitInput{ExpectedHeadOID: tx.baseCommitSHA}
+	input.Branch.RepositoryNameWithOwner = tx.ledger.owner + "/" + tx.ledger.repo
+	input.Branch.BranchName = tx.ledger.branch
+	input.Message.Headline = message
+	input.FileChanges.Additions = make([]githubGraphQLFileAddition, len(paths))
+	for index, path := range paths {
+		input.FileChanges.Additions[index] = githubGraphQLFileAddition{
+			Path:     path,
+			Contents: base64.StdEncoding.EncodeToString(tx.writes[path]),
+		}
+	}
+
+	request, err := tx.ledger.client.NewRequest(http.MethodPost, "graphql", map[string]any{
+		"query": githubCreateCommitMutation,
+		"variables": map[string]any{
+			"input": input,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	started := time.Now()
+	var response githubGraphQLCommitResponse
+	_, err = tx.ledger.client.Do(tx.ctx, request, &response)
+	tx.metrics.mutationElapsed = time.Since(started)
+	if err != nil {
+		return "", err
+	}
+	if len(response.Errors) > 0 {
+		messages := make([]string, 0, len(response.Errors))
+		for _, graphQLError := range response.Errors {
+			messages = append(messages, graphQLError.Message)
+		}
+		return "", fmt.Errorf("github createCommitOnBranch: %s", strings.Join(messages, "; "))
+	}
+	sha := response.Data.CreateCommitOnBranch.Commit.OID
+	if sha == "" {
+		return "", errors.New("github createCommitOnBranch returned no commit OID")
+	}
+	return sha, nil
+}
+
+func (tx *githubLedgerTransaction) commitWithGitData(message string) (string, error) {
 	paths := make([]string, 0, len(tx.writes))
 	for path := range tx.writes {
 		paths = append(paths, path)
