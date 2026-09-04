@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum ServerConfigurationError: LocalizedError, Equatable {
     case empty
@@ -90,6 +93,14 @@ protocol LedgerAPI: Sendable {
     ) async throws -> LedgerHomeReport
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo]
+    func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus
+    func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse
+    func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult
+    func gmailDisconnect(baseURL: URL) async throws
+    func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport]
+    func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail
+    func dismissGmailPendingImport(baseURL: URL, id: String) async throws
+    func gmailPendingEvents(baseURL: URL) -> AsyncThrowingStream<Void, Error>
     func previewImport(
         baseURL: URL,
         file: LedgerImportSelectedFile,
@@ -142,6 +153,40 @@ extension LedgerAPI {
 
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+    }
+
+    func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailDisconnect(baseURL: URL) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport] {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func dismissGmailPendingImport(baseURL: URL, id: String) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+    }
+
+    func gmailPendingEvents(baseURL: URL) -> AsyncThrowingStream<Void, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 实时更新"))
+        }
     }
 
     func previewImport(
@@ -220,11 +265,21 @@ extension LedgerAPI {
 
 struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
     private let session: URLSession
+    private let gmailEventSession: URLSession
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
+    static let gmailEventResourceTimeout: TimeInterval = 7 * 24 * 60 * 60
+
+    var gmailEventResourceTimeoutForTesting: TimeInterval {
+        gmailEventSession.configuration.timeoutIntervalForResource
+    }
+
     init(session: URLSession = .shared) {
         self.session = session
+        let eventConfiguration = session.configuration
+        eventConfiguration.timeoutIntervalForResource = Self.gmailEventResourceTimeout
+        gmailEventSession = URLSession(configuration: eventConfiguration)
     }
 
     func health(baseURL: URL) async throws -> HealthStatus {
@@ -340,6 +395,114 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/imports/providers"
         )
         return response.providers
+    }
+
+    func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus {
+        try await get(baseURL: baseURL, path: "/api/integrations/gmail/status")
+    }
+
+    func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/api/integrations/gmail/connect"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "client", value: "ios")]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await self.request(request)
+    }
+
+    func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/api/integrations/gmail/sync"),
+            resolvingAgainstBaseURL: false
+        )
+        if let pendingID {
+            components?.queryItems = [URLQueryItem(name: "pendingId", value: pendingID)]
+        }
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await self.request(request)
+    }
+
+    func gmailDisconnect(baseURL: URL) async throws {
+        try await sendWithoutResponse(
+            baseURL: baseURL,
+            path: "/api/integrations/gmail",
+            method: "DELETE"
+        )
+    }
+
+    func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport] {
+        let response: LedgerGmailPendingResponse = try await get(
+            baseURL: baseURL,
+            path: "/api/ledger/imports/pending"
+        )
+        return response.items
+    }
+
+    func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail {
+        try await get(baseURL: baseURL, path: try gmailPendingPath(id: id))
+    }
+
+    func dismissGmailPendingImport(baseURL: URL, id: String) async throws {
+        try await sendWithoutResponse(
+            baseURL: baseURL,
+            path: try gmailPendingPath(id: id),
+            method: "DELETE"
+        )
+    }
+
+    func gmailPendingEvents(baseURL: URL) -> AsyncThrowingStream<Void, Error> {
+        #if canImport(FoundationNetworking)
+        return AsyncThrowingStream { continuation in
+            continuation.finish(
+                throwing: LedgerAPIError.incompatibleServer("当前平台不支持 Gmail 实时更新")
+            )
+        }
+        #else
+        let session = gmailEventSession
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var request = URLRequest(
+                        url: baseURL.appending(path: "/api/ledger/imports/pending/events")
+                    )
+                    request.httpMethod = "GET"
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let (bytes, response) = try await session.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw LedgerAPIError.invalidResponse
+                    }
+                    guard (200..<300).contains(http.statusCode) else {
+                        throw LedgerAPIError.server(
+                            status: http.statusCode,
+                            message: HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                        )
+                    }
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        if line == "event: pending" {
+                            continuation.yield(())
+                        }
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        #endif
     }
 
     func previewImport(
@@ -619,6 +782,14 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             .replacingOccurrences(of: "\n", with: "_")
     }
 
+    private func gmailPendingPath(id: String) throws -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard !id.isEmpty, id.unicodeScalars.allSatisfy(allowed.contains) else {
+            throw LedgerAPIError.invalidResponse
+        }
+        return "/api/ledger/imports/pending/\(id)"
+    }
+
     private func request<Response: Decodable>(_ request: URLRequest) async throws -> Response {
         let data = try await responseData(for: request)
         do {
@@ -659,6 +830,10 @@ private struct EmptySuccess: Decodable {
 
 private struct LedgerImportProvidersResponse: Decodable {
     let providers: [LedgerImportProviderInfo]
+}
+
+private struct LedgerGmailPendingResponse: Decodable {
+    let items: [LedgerGmailPendingImport]
 }
 
 private extension Data {

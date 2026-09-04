@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,6 +145,128 @@ func TestGmailOAuthConnectionUsesProfileCursorInPollMode(t *testing.T) {
 	}
 	if api.watchCalls != 0 || connection.HistoryID != 42 || connection.WatchExpiration != 0 || connection.Email != "owner@example.com" {
 		t.Fatalf("connection=%#v watchCalls=%d", connection, api.watchCalls)
+	}
+}
+
+func TestGmailOAuthCallbackUsesExplicitNativeBoundary(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), limiter: NewRateLimiter()}
+	state := gmailOAuthState{
+		Value:     "ios.native-csrf",
+		ExpiresAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := server.gmailState().SaveOAuthState(context.Background(), state); err != nil {
+		t.Fatal(err)
+	}
+	router := newRouter(cfg, server)
+
+	response := requestWithCookies(
+		router,
+		http.MethodGet,
+		"/api/integrations/gmail/callback?state=ios.native-csrf&error=access_denied",
+		"",
+		nil,
+	)
+	if response.Code != http.StatusFound {
+		t.Fatalf("native callback status=%d body=%s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); location != "ledger://gmail-import?gmail=error&reason=cancelled&state=ios.native-csrf" {
+		t.Fatalf("native callback location=%q", location)
+	}
+	replayed := requestWithCookies(
+		newRouter(cfg, server),
+		http.MethodGet,
+		"/api/integrations/gmail/callback?state=ios.native-csrf&error=access_denied",
+		"",
+		nil,
+	)
+	if replayed.Code != http.StatusBadRequest {
+		t.Fatalf("replayed native callback status=%d body=%s", replayed.Code, replayed.Body.String())
+	}
+}
+
+func TestGmailOAuthCallbackConsumesNativeStateOnceUnderConcurrency(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), limiter: NewRateLimiter()}
+	state := gmailOAuthState{Value: "ios.concurrent-csrf", ExpiresAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)}
+	if err := server.gmailState().SaveOAuthState(context.Background(), state); err != nil {
+		t.Fatal(err)
+	}
+	router := newRouter(cfg, server)
+	responses := make(chan int, 2)
+	var group sync.WaitGroup
+	for range 2 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			response := requestWithCookies(router, http.MethodGet, "/api/integrations/gmail/callback?state=ios.concurrent-csrf&error=access_denied", "", nil)
+			responses <- response.Code
+		}()
+	}
+	group.Wait()
+	close(responses)
+	counts := map[int]int{}
+	for status := range responses {
+		counts[status]++
+	}
+	if counts[http.StatusFound] != 1 || counts[http.StatusBadRequest] != 1 {
+		t.Fatalf("concurrent callback statuses=%v", counts)
+	}
+}
+
+func TestGmailOAuthStateAllowsConcurrentWebAndNativeFlows(t *testing.T) {
+	cfg := testLedger(t)
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), limiter: NewRateLimiter()}
+	expiresAt := time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)
+	if err := server.appendGmailOAuthState(context.Background(), gmailOAuthState{Value: "web-csrf", ExpiresAt: expiresAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.appendGmailOAuthState(context.Background(), gmailOAuthState{Value: "ios.native-csrf", ExpiresAt: expiresAt}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.consumeGmailOAuthState(context.Background(), "ios.native-csrf"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.findGmailOAuthState(context.Background(), "web-csrf"); err != nil {
+		t.Fatalf("native flow consumed concurrent web state: %v", err)
+	}
+}
+
+func TestGmailOAuthCallbackKeepsWebCookieProtection(t *testing.T) {
+	cfg := testLedger(t)
+	t.Setenv("APP_PASSWORD", "secret")
+	server := &Server{cfg: cfg, runtimeStore: newFilesystemRuntimeStore(cfg.RuntimeDir), limiter: NewRateLimiter()}
+	state := gmailOAuthState{
+		Value:     "web-csrf",
+		ExpiresAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := server.gmailState().SaveOAuthState(context.Background(), state); err != nil {
+		t.Fatal(err)
+	}
+	router := newRouter(cfg, server)
+
+	response := requestWithCookies(
+		router,
+		http.MethodGet,
+		"/api/integrations/gmail/callback?state=web-csrf&error=access_denied",
+		"",
+		nil,
+	)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("web callback without cookie status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	authorized := requestWithCookies(
+		router,
+		http.MethodGet,
+		"/api/integrations/gmail/callback?state=web-csrf&error=access_denied",
+		"",
+		loginCookies(t, router),
+	)
+	if authorized.Code != http.StatusFound {
+		t.Fatalf("web callback after cookie status=%d body=%s", authorized.Code, authorized.Body.String())
 	}
 }
 
@@ -1244,6 +1367,10 @@ func TestGmailRoutesStayAuthenticatedWhenDisabled(t *testing.T) {
 	unauthenticated := requestWithCookies(router, http.MethodGet, "/api/integrations/gmail/status", "", nil)
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d", unauthenticated.Code)
+	}
+	unauthenticatedEvents := requestWithCookies(router, http.MethodGet, "/api/ledger/imports/pending/events", "", nil)
+	if unauthenticatedEvents.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated events = %d", unauthenticatedEvents.Code)
 	}
 	cookies := loginCookies(t, router)
 	sessionOnly := make([]*http.Cookie, 0, len(cookies))

@@ -432,7 +432,7 @@ struct PrimaryButtonLabel: View {
                 ProgressView().tint(LedgerPalette.onBrand)
             }
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.body.weight(.semibold))
         }
         .foregroundStyle(LedgerPalette.onBrand)
         .frame(maxWidth: .infinity, minHeight: 48)

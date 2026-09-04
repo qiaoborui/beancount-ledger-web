@@ -492,6 +492,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/ledger/imports/preview":         true,
 		"POST /api/ledger/imports/commit":          true,
 		"GET /api/ledger/imports/pending":          true,
+		"GET /api/ledger/imports/pending/events":   true,
 		"GET /api/ledger/imports/pending/:id":      true,
 		"DELETE /api/ledger/imports/pending/:id":   true,
 		"GET /api/ledger/editor/files":             true,

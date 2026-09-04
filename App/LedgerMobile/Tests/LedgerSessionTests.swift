@@ -888,6 +888,67 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.bootstrap, 3)
     }
 
+    func testGmailAutomationUsesReadySessionWithoutBypassingPendingPreview() async throws {
+        let suiteName = "ledger-mobile-gmail-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let gmailStatus = LedgerGmailStatus(
+            configured: true,
+            deliveryMode: "webhook",
+            connected: true,
+            email: "ledger@example.com",
+            label: "Bills",
+            watchExpiration: nil,
+            lastSyncAt: nil,
+            lastError: nil,
+            allowedSenders: [],
+            oauthRedirectURL: nil
+        )
+        let pending = LedgerGmailPendingImport(
+            id: "pending-1",
+            importID: Self.importPreview.importID,
+            messageID: "message-1",
+            threadID: nil,
+            sender: "billing@example.com",
+            subject: "账单",
+            receivedAt: "2026-09-01T08:00:00Z",
+            filename: "statement.zip",
+            provider: "wechat",
+            candidateCount: 2,
+            status: "ready",
+            error: nil,
+            createdAt: "2026-09-01T08:00:00Z",
+            updatedAt: "2026-09-01T08:00:00Z"
+        )
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            importPreviewPayload: Self.importPreview,
+            gmailStatusPayload: gmailStatus,
+            gmailPendingPayload: [pending]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        let (status, items) = try await session.gmailAutomation()
+        let oauthURL = try await session.connectGmail()
+        _ = try await session.syncGmail(pendingID: pending.id)
+        let detail = try await session.gmailPendingImport(id: pending.id)
+        try await session.dismissGmailPendingImport(id: pending.id)
+        try await session.disconnectGmail()
+
+        XCTAssertEqual(status, gmailStatus)
+        XCTAssertEqual(items, [pending])
+        XCTAssertEqual(oauthURL.host, "accounts.google.com")
+        XCTAssertEqual(detail.preview, Self.importPreview)
+        let requests = await api.gmailRequests()
+        XCTAssertEqual(requests.syncPendingIDs, [pending.id])
+        XCTAssertEqual(requests.detailIDs, [pending.id])
+        XCTAssertEqual(requests.dismissedIDs, [pending.id])
+        XCTAssertEqual(requests.disconnectCalls, 1)
+    }
+
     func testImportIndexTrackingCompletesWhenTargetRequestIsIndexedByNewerRevision() async {
         let suiteName = "ledger-mobile-import-index-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -918,7 +979,8 @@ final class LedgerSessionTests: XCTestCase {
                 beanText: nil,
                 readModelPending: true,
                 indexGitSHA: targetGitSHA,
-                runtimeCleanupError: nil
+                runtimeCleanupError: nil,
+                gmailPendingStatusWarning: nil
             ),
             providerLabel: "支付宝",
             baselineGitSHA: "old-index-revision"
@@ -938,12 +1000,103 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertNil(session.importIndexProgress)
     }
 
+    func testImportIndexTrackingDoesNotUseUncorrelatedRevisionWithoutTargetOrBaseline() async {
+        let suiteName = "ledger-mobile-import-index-uncorrelated-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            indexInfoPayload: LedgerIndexInfo(
+                enabled: true,
+                active: true,
+                gitSHA: "unrelated-index-revision",
+                indexedAt: "2026-09-01T08:30:00Z",
+                requestCompleted: true
+            )
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        session.startImportIndexTracking(
+            result: LedgerImportCommitResult(
+                ok: true,
+                outputFile: "transactions/2026/imports/import.bean",
+                includeFile: "transactions/2026/09.bean",
+                documentFile: nil,
+                count: 2,
+                beanText: nil,
+                readModelPending: true,
+                indexGitSHA: nil,
+                runtimeCleanupError: nil,
+                gmailPendingStatusWarning: nil
+            ),
+            providerLabel: "支付宝",
+            baselineGitSHA: nil
+        )
+
+        XCTAssertNil(session.importIndexProgress)
+        let indexInfoCalls = await api.indexInfoCallCount()
+        XCTAssertEqual(indexInfoCalls, 0)
+    }
+
     func testImportLiveActivityURLRoutesToImportHistory() {
         let session = LedgerSession()
 
         session.openWidgetURL(URL(string: "ledger://imports")!)
 
         XCTAssertEqual(session.primaryDestinationID, "imports")
+    }
+
+    func testGmailOAuthCallbackUsesNativeImportDestinationAndCorrelation() async throws {
+        let suiteName = "ledger-mobile-gmail-oauth-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+
+        session.openWidgetURL(URL(string: "ledger://gmail-import?gmail=connected&state=forged")!)
+        XCTAssertNil(session.gmailOAuthResult)
+
+        _ = try await session.connectGmail()
+
+        session.openWidgetURL(URL(string: "ledger://gmail-import?gmail=connected&state=ios.test-state")!)
+
+        XCTAssertEqual(session.primaryDestinationID, "imports")
+        XCTAssertEqual(session.gmailOAuthResult?.status, .connected)
+        XCTAssertNil(session.gmailOAuthResult?.reason)
+
+        let resultID = try XCTUnwrap(session.gmailOAuthResult?.id)
+        session.consumeGmailOAuthResult(id: resultID)
+        XCTAssertNil(session.gmailOAuthResult)
+
+        _ = try await session.connectGmail()
+        session.openWidgetURL(URL(string: "ledger://gmail-import?gmail=error&reason=cancelled&state=ios.test-state")!)
+        XCTAssertEqual(session.gmailOAuthResult?.status, .error)
+        XCTAssertEqual(session.gmailOAuthResult?.reason, "cancelled")
+    }
+
+    func testGmailOAuthCorrelationKeepsConcurrentNativeFlows() async throws {
+        let suiteName = "ledger-mobile-gmail-concurrent-oauth-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            gmailConnectStates: ["ios.first-state", "ios.second-state"]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        _ = try await session.connectGmail()
+        _ = try await session.connectGmail()
+        session.openWidgetURL(URL(string: "ledger://gmail-import?gmail=error&reason=cancelled&state=ios.first-state")!)
+        XCTAssertEqual(session.gmailOAuthResult?.reason, "cancelled")
+
+        session.openWidgetURL(URL(string: "ledger://gmail-import?gmail=connected&state=ios.second-state")!)
+        XCTAssertEqual(session.gmailOAuthResult?.status, .connected)
     }
 
     private static let payload = LedgerBootstrap(
@@ -1069,7 +1222,8 @@ final class LedgerSessionTests: XCTestCase {
         beanText: nil,
         readModelPending: false,
         indexGitSHA: nil,
-        runtimeCleanupError: nil
+        runtimeCleanupError: nil,
+        gmailPendingStatusWarning: nil
     )
 }
 
@@ -1117,6 +1271,13 @@ private actor SessionMockAPI: LedgerAPI {
         let tags: LedgerTransactionTagsRequest?
     }
 
+    struct GmailRequests: Equatable, Sendable {
+        let syncPendingIDs: [String]
+        let detailIDs: [String]
+        let dismissedIDs: [String]
+        let disconnectCalls: Int
+    }
+
     struct CallCounts: Sendable {
         let authStatus: Int
         let login: Int
@@ -1146,6 +1307,9 @@ private actor SessionMockAPI: LedgerAPI {
     let importProvidersPayload: [LedgerImportProviderInfo]
     let importPreviewPayload: LedgerImportPreview?
     let importCommitPayload: LedgerImportCommitResult?
+    let gmailStatusPayload: LedgerGmailStatus?
+    let gmailPendingPayload: [LedgerGmailPendingImport]
+    let gmailConnectStates: [String]
     let indexInfoPayload: LedgerIndexInfo?
     let importDocumentsShouldFail: Bool
     let lockShouldFail: Bool
@@ -1181,6 +1345,11 @@ private actor SessionMockAPI: LedgerAPI {
     private var requestedTransactionUpdate: LedgerTransactionUpdateRequest?
     private var requestedTransactionTags: LedgerTransactionTagsRequest?
     private var indexInfoCalls = 0
+    private var gmailSyncPendingIDs: [String] = []
+    private var gmailDetailIDs: [String] = []
+    private var gmailDismissedIDs: [String] = []
+    private var gmailDisconnectCalls = 0
+    private var gmailConnectCalls = 0
 
     init(
         healthStatus: HealthStatus = HealthStatus(
@@ -1195,6 +1364,9 @@ private actor SessionMockAPI: LedgerAPI {
         importProvidersPayload: [LedgerImportProviderInfo] = [],
         importPreviewPayload: LedgerImportPreview? = nil,
         importCommitPayload: LedgerImportCommitResult? = nil,
+        gmailStatusPayload: LedgerGmailStatus? = nil,
+        gmailPendingPayload: [LedgerGmailPendingImport] = [],
+        gmailConnectStates: [String] = ["ios.test-state"],
         indexInfoPayload: LedgerIndexInfo? = nil,
         importDocumentsShouldFail: Bool = false,
         lockShouldFail: Bool = false,
@@ -1218,6 +1390,9 @@ private actor SessionMockAPI: LedgerAPI {
         self.importProvidersPayload = importProvidersPayload
         self.importPreviewPayload = importPreviewPayload
         self.importCommitPayload = importCommitPayload
+        self.gmailStatusPayload = gmailStatusPayload
+        self.gmailPendingPayload = gmailPendingPayload
+        self.gmailConnectStates = gmailConnectStates
         self.indexInfoPayload = indexInfoPayload
         self.importDocumentsShouldFail = importDocumentsShouldFail
         self.lockShouldFail = lockShouldFail
@@ -1341,6 +1516,47 @@ private actor SessionMockAPI: LedgerAPI {
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
         importProviderCalls += 1
         return importProvidersPayload
+    }
+
+    func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus {
+        guard let gmailStatusPayload else {
+            throw LedgerAPIError.incompatibleServer("missing Gmail status fixture")
+        }
+        return gmailStatusPayload
+    }
+
+    func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse {
+        let index = min(gmailConnectCalls, gmailConnectStates.count - 1)
+        gmailConnectCalls += 1
+        let state = gmailConnectStates[index]
+        return LedgerGmailConnectResponse(
+            url: URL(string: "https://accounts.google.com/o/oauth2/auth?state=\(state)")!
+        )
+    }
+
+    func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult {
+        if let pendingID { gmailSyncPendingIDs.append(pendingID) }
+        return LedgerGmailSyncResult(ok: true, processed: nil, retryPending: false, item: nil)
+    }
+
+    func gmailDisconnect(baseURL: URL) async throws {
+        gmailDisconnectCalls += 1
+    }
+
+    func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport] {
+        gmailPendingPayload
+    }
+
+    func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail {
+        gmailDetailIDs.append(id)
+        guard let item = gmailPendingPayload.first(where: { $0.id == id }) else {
+            throw LedgerAPIError.server(status: 404, message: "missing pending fixture")
+        }
+        return LedgerGmailPendingDetail(item: item, preview: importPreviewPayload)
+    }
+
+    func dismissGmailPendingImport(baseURL: URL, id: String) async throws {
+        gmailDismissedIDs.append(id)
     }
 
     func previewImport(
@@ -1550,6 +1766,15 @@ private actor SessionMockAPI: LedgerAPI {
 
     func transactionWrites() -> TransactionWrites {
         TransactionWrites(update: requestedTransactionUpdate, tags: requestedTransactionTags)
+    }
+
+    func gmailRequests() -> GmailRequests {
+        GmailRequests(
+            syncPendingIDs: gmailSyncPendingIDs,
+            detailIDs: gmailDetailIDs,
+            dismissedIDs: gmailDismissedIDs,
+            disconnectCalls: gmailDisconnectCalls
+        )
     }
 
     func indexInfoCallCount() -> Int {

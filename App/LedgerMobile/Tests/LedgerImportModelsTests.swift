@@ -12,28 +12,162 @@ final class LedgerImportModelsTests: XCTestCase {
         XCTAssertEqual(LedgerImportSelectedFile(name: "账单", data: Data([1])).fileExtension, "")
     }
 
-    func testFileValidatorAcceptsServerExtensionsAndMaximumSize() throws {
+    func testNativeCapabilityIncludesAutomaticEmailWithoutHidingManualStatementFormats() throws {
         let providers = [
             LedgerImportProviderInfo(
                 id: "ccb-credit",
                 label: "建设银行信用卡",
                 detail: "邮件或 PDF",
-                extensions: ["eml", ".PDF"],
+                extensions: ["eml", ".PDF", ".csv"],
                 accept: ".eml / .pdf",
                 engine: "native-ccb-credit"
             ),
+            LedgerImportProviderInfo(
+                id: "gmail-auto",
+                label: "Gmail 自动账单",
+                detail: "自动同步邮件账单",
+                extensions: [".eml"],
+                accept: ".eml",
+                engine: "gmail"
+            ),
         ]
+        let nativeProviders = LedgerMobileImportCapabilities.fileImportProviders(from: providers)
 
+        XCTAssertTrue(LedgerMobileImportCapabilities.supportsAutomaticEmailImport)
+        XCTAssertEqual(nativeProviders.map(\.id), ["ccb-credit", "gmail-auto"])
+        XCTAssertEqual(nativeProviders[0].extensions, ["eml", ".PDF", ".csv"])
+        XCTAssertEqual(nativeProviders[0].detail, "邮件或 PDF")
         XCTAssertNoThrow(try LedgerImportFileValidator.validate(
-            name: "statement.EML",
+            name: "statement.PDF",
             byteCount: LedgerImportFileValidator.maximumBytes,
-            providers: providers
+            providers: nativeProviders
         ))
         XCTAssertNoThrow(try LedgerImportFileValidator.validate(
             name: "statement.zip",
             byteCount: 1,
-            providers: providers
+            providers: nativeProviders
         ))
+        XCTAssertNoThrow(try LedgerImportFileValidator.validate(
+            name: "statement.EML",
+            byteCount: 1,
+            providers: nativeProviders
+        ))
+        XCTAssertNoThrow(try LedgerImportFileValidator.validate(
+            name: "statement.html",
+            byteCount: 1,
+            providers: []
+        ))
+    }
+
+    func testEmailArchiveHistoryRemainsVisibleWithNativeGmailAutomation() {
+        let emailArchive = LedgerImportDocument(
+            path: "transactions/2026/documents/imports/statement.eml",
+            name: "statement.eml",
+            year: "2026",
+            ext: ".eml",
+            provider: "ccb-credit",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-31",
+            size: 1_024,
+            modTime: "2026-09-01T08:00:00Z"
+        )
+
+        XCTAssertEqual(LedgerImportHistory.sortedDocuments([emailArchive]), [emailArchive])
+    }
+
+    func testGmailPendingStatusOnlyExposesActionableItems() {
+        let ready = gmailPending(status: "ready")
+        let failed = gmailPending(status: "failed")
+        let committed = gmailPending(status: "committed")
+
+        XCTAssertTrue(ready.isReviewable)
+        XCTAssertFalse(ready.isRetryable)
+        XCTAssertTrue(ready.isVisible)
+        XCTAssertTrue(failed.isRetryable)
+        XCTAssertTrue(failed.isVisible)
+        XCTAssertFalse(committed.isVisible)
+    }
+
+    private func gmailPending(status: String) -> LedgerGmailPendingImport {
+        LedgerGmailPendingImport(
+            id: "pending-\(status)",
+            importID: "import-\(status)",
+            messageID: "message-\(status)",
+            threadID: nil,
+            sender: "billing@example.com",
+            subject: "账单",
+            receivedAt: "2026-09-01T08:00:00Z",
+            filename: "statement.pdf",
+            provider: "cmb",
+            candidateCount: 2,
+            status: status,
+            error: nil,
+            createdAt: "2026-09-01T08:00:00Z",
+            updatedAt: "2026-09-01T08:00:00Z"
+        )
+    }
+
+    func testCommitFailureDispositionProtectsUnknownWriteOutcomes() {
+        XCTAssertEqual(
+            LedgerImportCommitFailureDisposition(error: LedgerAPIError.transport("connection lost")),
+            .outcomeUnknown
+        )
+        XCTAssertEqual(
+            LedgerImportCommitFailureDisposition(error: LedgerAPIError.decoding("truncated JSON")),
+            .outcomeUnknown
+        )
+        XCTAssertEqual(
+            LedgerImportCommitFailureDisposition(error: LedgerAPIError.invalidResponse),
+            .outcomeUnknown
+        )
+        XCTAssertEqual(
+            LedgerImportCommitFailureDisposition(error: LedgerAPIError.server(status: 400, message: "invalid")),
+            .failed
+        )
+    }
+
+    func testCommittedGmailImportKeepsSuccessfulResultWithStatusWarning() throws {
+        let result = try JSONDecoder().decode(
+            LedgerImportCommitResult.self,
+            from: Data(#"{"ok":true,"count":1,"gmailPendingStatusWarning":"账本已写入，服务器会自动核对"}"#.utf8)
+        )
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.gmailPendingStatusWarning, "账本已写入，服务器会自动核对")
+    }
+
+    func testCommitReconciliationRequiresExactImportIDSuffix() throws {
+        let expected = LedgerImportDocument(
+            path: "transactions/2026/documents/imports/2026-08-01_2026-08-31-wechat-preview-123.xlsx",
+            name: "2026-08-01_2026-08-31-wechat-preview-123.xlsx",
+            provider: "wechat",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-31",
+            modTime: "2026-09-01T08:00:00Z"
+        )
+        let collision = LedgerImportDocument(
+            path: "transactions/2026/documents/imports/2026-08-01_2026-08-31-wechat-preview-1234.xlsx",
+            name: "2026-08-01_2026-08-31-wechat-preview-1234.xlsx",
+            provider: "wechat",
+            dateStart: "2026-08-01",
+            dateEnd: "2026-08-31",
+            modTime: "2026-09-01T08:01:00Z"
+        )
+
+        XCTAssertEqual(
+            LedgerImportCommitReconciliation.archivedDocument(
+                importID: "preview-123",
+                in: [collision, expected]
+            ),
+            expected
+        )
+        XCTAssertNil(
+            LedgerImportCommitReconciliation.archivedDocument(
+                importID: "preview-12",
+                in: [collision, expected]
+            )
+        )
     }
 
     func testFileValidatorRejectsEmptyOversizedAndUnsupportedFiles() {

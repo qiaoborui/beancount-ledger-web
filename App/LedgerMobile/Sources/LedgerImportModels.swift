@@ -9,6 +9,160 @@ struct LedgerImportProviderInfo: Decodable, Equatable, Identifiable, Sendable {
     let engine: String?
 }
 
+enum LedgerMobileImportCapabilities {
+    static let supportsAutomaticEmailImport = true
+
+    static let supportedManualFileExtensions = [
+        ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
+    ]
+
+    private static let supportedManualFileExtensionSet = Set(supportedManualFileExtensions)
+
+    static func fileImportProviders(from providers: [LedgerImportProviderInfo]) -> [LedgerImportProviderInfo] {
+        providers
+    }
+
+    static func supportedExtensions(from providers: [LedgerImportProviderInfo]) -> Set<String> {
+        let providerExtensions = normalizedExtensions(providers.flatMap(\.extensions))
+            .filter(supportedManualFileExtensionSet.contains)
+        return providers.isEmpty
+            ? supportedManualFileExtensionSet
+            : Set(providerExtensions).union([".zip"])
+    }
+
+    private static func normalizedExtensions(_ values: [String]) -> [String] {
+        Array(Set(values.map { value in
+            let normalized = value.lowercased()
+            return normalized.hasPrefix(".") ? normalized : "." + normalized
+        })).sorted()
+    }
+}
+
+struct LedgerGmailStatus: Decodable, Equatable, Sendable {
+    let configured: Bool
+    let deliveryMode: String
+    let connected: Bool
+    let email: String?
+    let label: String?
+    let watchExpiration: Int64?
+    let lastSyncAt: String?
+    let lastError: String?
+    let allowedSenders: [String]
+    let oauthRedirectURL: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case configured
+        case deliveryMode
+        case connected
+        case email
+        case label
+        case watchExpiration
+        case lastSyncAt
+        case lastError
+        case allowedSenders
+        case oauthRedirectURL = "oauthRedirectUrl"
+    }
+
+    var usesServerPush: Bool { deliveryMode.lowercased() == "webhook" }
+}
+
+struct LedgerGmailPendingImport: Decodable, Equatable, Identifiable, Sendable {
+    let id: String
+    let importID: String?
+    let messageID: String
+    let threadID: String?
+    let sender: String
+    let subject: String
+    let receivedAt: String
+    let filename: String
+    let provider: String?
+    let candidateCount: Int
+    let status: String
+    let error: String?
+    let createdAt: String
+    let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case importID = "importId"
+        case messageID = "messageId"
+        case threadID = "threadId"
+        case sender
+        case subject
+        case receivedAt
+        case filename
+        case provider
+        case candidateCount
+        case status
+        case error
+        case createdAt
+        case updatedAt
+    }
+
+    var isReviewable: Bool { status == "ready" }
+    var isRetryable: Bool { status == "failed" }
+    var isVisible: Bool { status != "committed" && status != "dismissed" }
+}
+
+struct LedgerGmailPendingDetail: Decodable, Equatable, Sendable {
+    let item: LedgerGmailPendingImport
+    let preview: LedgerImportPreview?
+}
+
+struct LedgerGmailConnectResponse: Decodable, Equatable, Sendable {
+    let url: URL
+}
+
+struct LedgerGmailSyncResult: Decodable, Equatable, Sendable {
+    let ok: Bool
+    let processed: Int?
+    let retryPending: Bool?
+    let item: LedgerGmailPendingImport?
+}
+
+struct LedgerGmailOAuthResult: Equatable, Sendable {
+    enum Status: String, Equatable, Sendable {
+        case connected
+        case error
+    }
+
+    let id: UUID
+    let status: Status
+    let reason: String?
+}
+
+enum LedgerImportCommitFailureDisposition: Equatable {
+    case failed
+    case outcomeUnknown
+
+    init(error: Error) {
+        guard let apiError = error as? LedgerAPIError else {
+            self = .failed
+            return
+        }
+        switch apiError {
+        case .transport, .decoding, .invalidResponse:
+            self = .outcomeUnknown
+        case .incompatibleServer, .server:
+            self = .failed
+        }
+    }
+}
+
+enum LedgerImportCommitReconciliation {
+    static func archivedDocument(
+        importID: String,
+        in documents: [LedgerImportDocument]
+    ) -> LedgerImportDocument? {
+        let suffix = "-" + importID
+        return documents.first { document in
+            let filename = document.name ?? document.path.map { ($0 as NSString).lastPathComponent }
+            guard let filename else { return false }
+            return (filename as NSString).deletingPathExtension.hasSuffix(suffix)
+        }
+    }
+}
+
 struct LedgerImportSelectedFile: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
@@ -51,10 +205,6 @@ enum LedgerImportFileValidationError: LocalizedError, Equatable {
 enum LedgerImportFileValidator {
     static let maximumBytes = 10 * 1024 * 1024
 
-    private static let fallbackExtensions: Set<String> = [
-        ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
-    ]
-
     static func validate(
         name: String,
         byteCount: Int,
@@ -64,10 +214,7 @@ enum LedgerImportFileValidator {
         guard byteCount <= maximumBytes else { throw LedgerImportFileValidationError.tooLarge }
         let rawExtension = (name as NSString).pathExtension.lowercased()
         let fileExtension = rawExtension.isEmpty ? "" : "." + rawExtension
-        let providerExtensions = Set(providers.flatMap(\.extensions).map { value in
-            value.hasPrefix(".") ? value.lowercased() : "." + value.lowercased()
-        })
-        let supported = providerExtensions.isEmpty ? fallbackExtensions : providerExtensions.union([".zip"])
+        let supported = LedgerMobileImportCapabilities.supportedExtensions(from: providers)
         guard supported.contains(fileExtension) else {
             throw LedgerImportFileValidationError.unsupported(fileExtension)
         }
@@ -336,6 +483,7 @@ struct LedgerImportCommitResult: Decodable, Equatable, Sendable {
     let readModelPending: Bool?
     let indexGitSHA: String?
     let runtimeCleanupError: String?
+    let gmailPendingStatusWarning: String?
 }
 
 struct LedgerIndexInfo: Decodable, Equatable, Sendable {
