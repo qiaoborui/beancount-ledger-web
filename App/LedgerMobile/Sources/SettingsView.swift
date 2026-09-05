@@ -91,7 +91,7 @@ struct SettingsView: View {
                         SettingsActionRow(
                             icon: "lock.fill",
                             title: "立即锁定",
-                            detail: "隐藏账本并清除敏感访问凭据",
+                            detail: "立即隐藏账本，下次进入需在本机验证",
                             color: LedgerPalette.cobalt
                         ) {
                             Task { await session.lock() }
@@ -148,8 +148,8 @@ struct SettingsView: View {
             return "请先在系统设置中配置生物识别"
         }
         return session.hasBiometricUnlock
-            ? "使用受 Keychain 保护的设备令牌快速解锁"
-            : "启用时会创建可在服务端撤销的设备令牌"
+            ? "使用本机 Keychain 与生物识别解锁"
+            : "仅在这台设备上启用，不注册服务端凭据"
     }
 
     private var lockIntervalBinding: Binding<LedgerLockInterval> {

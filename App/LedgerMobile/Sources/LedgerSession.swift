@@ -117,6 +117,8 @@ final class LedgerSession: ObservableObject {
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
     private var applicationActive = true
+    private var systemAuthenticationInProgress = false
+    private var biometricMigrationGeneration = 0
     private var requestGeneration = 0
     private var sessionEpoch = 0
     private var importIndexTask: Task<Void, Never>?
@@ -194,8 +196,22 @@ final class LedgerSession: ObservableObject {
         return biometricKind != .unavailable && biometricStore.containsCredential(for: serverURL)
     }
 
+    var canUseBiometricUnlock: Bool {
+        guard let serverURL else { return false }
+        return hasBiometricUnlock && isLocallyLocked(serverURL)
+    }
+
     func resume() async {
         guard phase == .checking, let serverURL else { return }
+        lockInterval = storedLockInterval(for: serverURL)
+        if isLocallyLocked(serverURL) || shouldLockAfterBackground(for: serverURL) {
+            setLocallyLocked(true, for: serverURL)
+            clearBackgroundDate(for: serverURL)
+            amountsVisible = false
+            privacyShielded = !applicationActive
+            phase = .locked(authenticated: true)
+            return
+        }
         await checkSession(at: serverURL, generation: requestGeneration)
     }
 
@@ -252,10 +268,15 @@ final class LedgerSession: ObservableObject {
         errorMessage = nil
         do {
             let options = try await api.passkeyLoginOptions(baseURL: serverURL)
-            let assertion = try await passkeyAuthenticator.authenticate(
-                options: options,
-                relyingPartyID: Self.passkeyRelyingPartyID
-            )
+            let assertion: PasskeyAssertion
+            systemAuthenticationInProgress = true
+            do {
+                defer { systemAuthenticationInProgress = false }
+                assertion = try await passkeyAuthenticator.authenticate(
+                    options: options,
+                    relyingPartyID: Self.passkeyRelyingPartyID
+                )
+            }
             try await api.verifyPasskey(baseURL: serverURL, assertion: assertion)
             guard generation == requestGeneration else {
                 clearAuthenticationCookies(for: serverURL)
@@ -271,22 +292,49 @@ final class LedgerSession: ObservableObject {
     }
 
     func unlockWithBiometrics() async {
-        guard case let .locked(authenticated) = phase, let serverURL, hasBiometricUnlock else { return }
+        guard case let .locked(authenticated) = phase, let serverURL, canUseBiometricUnlock else { return }
         let generation = invalidateSession()
         phase = .loading
         errorMessage = nil
         do {
-            let credential = try await biometricStore.readCredential(
-                for: serverURL,
-                reason: "使用 \(biometricTitle) 解锁账本金额"
-            )
-            try await api.verifyQuickUnlock(baseURL: serverURL, credential: credential)
-            guard generation == requestGeneration else {
-                clearAuthenticationCookies(for: serverURL)
-                return
+            let credential: QuickUnlockCredential
+            systemAuthenticationInProgress = true
+            do {
+                defer { systemAuthenticationInProgress = false }
+                credential = try await biometricStore.readCredential(
+                    for: serverURL,
+                    reason: "使用 \(biometricTitle) 解锁账本金额"
+                )
+            }
+            guard generation == requestGeneration else { return }
+            let hasLegacyCredential = credential.deviceID != "local-biometric"
+            if hasLegacyCredential, ledger == nil {
+                try await api.verifyQuickUnlock(baseURL: serverURL, credential: credential)
+                guard generation == requestGeneration else {
+                    clearAuthenticationCookies(for: serverURL)
+                    return
+                }
             }
             setLocallyLocked(false, for: serverURL)
-            try await loadLedger(from: serverURL, generation: generation)
+            var serverAccessConfirmed = false
+            if ledger != nil {
+                amountsVisible = applicationActive
+                privacyShielded = !applicationActive
+                phase = .ready
+                if applicationActive {
+                    serverAccessConfirmed = await refreshWithResult()
+                }
+            } else {
+                try await loadLedger(from: serverURL, generation: generation)
+                serverAccessConfirmed = true
+            }
+            if hasLegacyCredential {
+                if serverAccessConfirmed, phase == .ready {
+                    scheduleLegacyQuickUnlockMigration(credential, for: serverURL)
+                } else if case .locked = phase {
+                    setLocallyLocked(true, for: serverURL)
+                }
+            }
         } catch {
             guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
@@ -297,22 +345,17 @@ final class LedgerSession: ObservableObject {
     func setBiometricUnlockEnabled(_ enabled: Bool) async {
         guard phase == .ready, let serverURL, !isBiometricSettingBusy else { return }
         guard enabled != hasBiometricUnlock else { return }
+        biometricMigrationGeneration &+= 1
         isBiometricSettingBusy = true
         errorMessage = nil
         defer { isBiometricSettingBusy = false }
 
         if enabled {
             do {
-                let credential = try await api.registerQuickUnlock(
-                    baseURL: serverURL,
-                    deviceName: "Ledger iOS · \(biometricTitle)"
+                try biometricStore.save(
+                    Self.localBiometricCredential(),
+                    for: serverURL
                 )
-                do {
-                    try biometricStore.save(credential, for: serverURL)
-                } catch {
-                    try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
-                    throw error
-                }
             } catch {
                 errorMessage = "\(biometricTitle) 启用失败：\(error.localizedDescription)"
             }
@@ -320,11 +363,20 @@ final class LedgerSession: ObservableObject {
         }
 
         do {
-            let credential = try await biometricStore.readCredential(
-                for: serverURL,
-                reason: "验证后停用 \(biometricTitle) 快速解锁"
-            )
-            try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+            systemAuthenticationInProgress = true
+            let credential: QuickUnlockCredential
+            do {
+                defer { systemAuthenticationInProgress = false }
+                credential = try await biometricStore.readCredential(
+                    for: serverURL,
+                    reason: "验证后停用 \(biometricTitle) 快速解锁"
+                )
+            }
+            guard phase == .ready, self.serverURL == serverURL else { return }
+            if credential.deviceID != "local-biometric" {
+                try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                guard phase == .ready, self.serverURL == serverURL else { return }
+            }
             biometricStore.deleteCredential(for: serverURL)
         } catch {
             errorMessage = "\(biometricTitle) 停用失败：\(error.localizedDescription)"
@@ -340,15 +392,22 @@ final class LedgerSession: ObservableObject {
     }
 
     func refresh() async {
-        guard let serverURL, !isRangeLoading, !isValuationCurrencyLoading else { return }
+        _ = await refreshWithResult()
+    }
+
+    private func refreshWithResult() async -> Bool {
+        guard phase == .ready, let serverURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
         do {
             try await loadLedger(from: serverURL, showLoadingState: false, generation: generation)
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration else { return false }
             errorMessage = nil
+            return true
         } catch {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration else { return false }
             errorMessage = error.localizedDescription
+            handleBootstrapSessionError(error, serverURL: serverURL)
+            return false
         }
     }
 
@@ -410,7 +469,6 @@ final class LedgerSession: ObservableObject {
                generation == requestGeneration,
                self.serverURL == serverURL,
                phase == .ready {
-                setLocallyLocked(true, for: serverURL)
                 clearSensitiveCookie(for: serverURL)
                 ledger = nil
                 amountsVisible = false
@@ -480,7 +538,6 @@ final class LedgerSession: ObservableObject {
                generation == requestGeneration,
                self.serverURL == serverURL,
                phase == .ready {
-                setLocallyLocked(true, for: serverURL)
                 clearSensitiveCookie(for: serverURL)
                 ledger = nil
                 amountsVisible = false
@@ -827,6 +884,33 @@ final class LedgerSession: ObservableObject {
         "\(source.gitSHA ?? "local"):\(source.file):\(source.line):\(source.hash ?? "")"
     }
 
+    private static func localBiometricCredential() -> QuickUnlockCredential {
+        QuickUnlockCredential(deviceID: "local-biometric", token: UUID().uuidString)
+    }
+
+    private func scheduleLegacyQuickUnlockMigration(
+        _ credential: QuickUnlockCredential,
+        for serverURL: URL
+    ) {
+        biometricMigrationGeneration &+= 1
+        let migrationGeneration = biometricMigrationGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                guard migrationGeneration == self.biometricMigrationGeneration,
+                      self.serverURL == serverURL else { return }
+                do {
+                    try self.biometricStore.save(Self.localBiometricCredential(), for: serverURL)
+                } catch {
+                    self.errorMessage = "\(self.biometricTitle) 本地迁移失败，请在设置中停用后重新启用"
+                }
+            } catch {
+                // Keep the protected legacy credential so a later local unlock can retry cleanup.
+            }
+        }
+    }
+
     func indexInfo(targetGitSHA: String? = nil) async throws -> LedgerIndexInfo {
         try await performSensitiveRequest { api, serverURL in
             try await api.indexInfo(baseURL: serverURL, targetGitSHA: targetGitSHA)
@@ -969,27 +1053,8 @@ final class LedgerSession: ObservableObject {
 
     func lock() async {
         guard let serverURL else { return }
-        let generation = invalidateSession()
-        stopImportIndexTracking()
-        isRangeLoading = false
-        isValuationCurrencyLoading = false
-        rangePickerPresented = false
-        setLocallyLocked(true, for: serverURL)
         clearBackgroundDate(for: serverURL)
-        clearSensitiveCookie(for: serverURL)
-        clearTransactionMutations()
-        ledger = nil
-        amountsVisible = false
-        privacyShielded = false
-        phase = .loading
-        do {
-            try await api.lock(baseURL: serverURL)
-            guard generation == requestGeneration else { return }
-        } catch {
-            guard generation == requestGeneration else { return }
-            errorMessage = error.localizedDescription
-        }
-        phase = .locked(authenticated: true)
+        lockLocally(for: serverURL)
     }
 
     func logout() {
@@ -1015,6 +1080,7 @@ final class LedgerSession: ObservableObject {
 
     func changeServer() {
         let previousServerURL = serverURL
+        biometricMigrationGeneration &+= 1
         _ = invalidateSession()
         stopImportIndexTracking()
         clearWidgetSnapshot()
@@ -1047,15 +1113,16 @@ final class LedgerSession: ObservableObject {
         phase = .configuration
     }
 
-    func updateActivity(isActive: Bool) {
+    func updateActivity(isActive: Bool, isBackground: Bool) async {
+        let wasActive = applicationActive
         applicationActive = isActive
         if !isActive {
             privacyShielded = true
             amountsVisible = false
-            guard phase == .ready, let serverURL else { return }
+            guard isBackground, let serverURL else { return }
             recordBackgroundDate(for: serverURL)
             if lockInterval == .immediately {
-                lockLocallyAfterBackground(for: serverURL)
+                lockLocally(for: serverURL)
             }
             return
         }
@@ -1065,12 +1132,14 @@ final class LedgerSession: ObservableObject {
             return
         }
         if shouldLockAfterBackground(for: serverURL) {
-            lockLocallyAfterBackground(for: serverURL)
+            lockLocally(for: serverURL)
         }
         clearBackgroundDate(for: serverURL)
         amountsVisible = phase == .ready
         privacyShielded = false
+        guard !wasActive, phase == .ready, !systemAuthenticationInProgress else { return }
         Task { await restoreImportIndexTrackingIfNeeded() }
+        await refresh()
     }
 
     func toggleAmounts() {
@@ -1132,18 +1201,14 @@ final class LedgerSession: ObservableObject {
             }
             passkeyAvailable = passkeyStatus?.registered == true
             lockInterval = storedLockInterval(for: serverURL)
-            if shouldLockAfterBackground(for: serverURL) {
-                setLocallyLocked(true, for: serverURL)
-                clearSensitiveCookie(for: serverURL)
-            }
             clearBackgroundDate(for: serverURL)
-            if auth.authDisabled {
-                setLocallyLocked(false, for: serverURL)
-                try await loadLedger(from: serverURL, generation: generation)
-            } else if isLocallyLocked(serverURL) {
+            if isLocallyLocked(serverURL) {
                 ledger = nil
                 amountsVisible = false
-                phase = .locked(authenticated: auth.authenticated)
+                phase = .locked(authenticated: true)
+            } else if auth.authDisabled {
+                setLocallyLocked(false, for: serverURL)
+                try await loadLedger(from: serverURL, generation: generation)
             } else if auth.authenticated && auth.sensitiveUnlocked {
                 try await loadLedger(from: serverURL, generation: generation)
             } else {
@@ -1385,7 +1450,6 @@ final class LedgerSession: ObservableObject {
             phase = .locked(authenticated: false)
         } else {
             clearSensitiveCookie(for: serverURL)
-            setLocallyLocked(true, for: serverURL)
             phase = .locked(authenticated: true)
         }
     }
@@ -1485,7 +1549,6 @@ final class LedgerSession: ObservableObject {
                     phase = .locked(authenticated: false)
                 } else {
                     clearSensitiveCookie(for: serverURL)
-                    setLocallyLocked(true, for: serverURL)
                     phase = .locked(authenticated: true)
                 }
             }
@@ -1557,9 +1620,10 @@ final class LedgerSession: ObservableObject {
         Self.nativePasskeyEnabledForCurrentBuild
     }
 
-    private func recordBackgroundDate(for serverURL: URL, now: Date = Date()) {
+    private func recordBackgroundDate(for serverURL: URL, now: Date? = nil) {
         var dates = defaults.dictionary(forKey: Self.backgroundDatesKey) as? [String: Double] ?? [:]
-        dates[serverURL.absoluteString] = now.timeIntervalSince1970
+        guard dates[serverURL.absoluteString] == nil else { return }
+        dates[serverURL.absoluteString] = (now ?? ledgerNow()).timeIntervalSince1970
         defaults.set(dates, forKey: Self.backgroundDatesKey)
     }
 
@@ -1569,21 +1633,20 @@ final class LedgerSession: ObservableObject {
         defaults.set(dates, forKey: Self.backgroundDatesKey)
     }
 
-    private func shouldLockAfterBackground(for serverURL: URL, now: Date = Date()) -> Bool {
+    private func shouldLockAfterBackground(for serverURL: URL, now: Date? = nil) -> Bool {
         let dates = defaults.dictionary(forKey: Self.backgroundDatesKey) as? [String: Double]
         guard let timestamp = dates?[serverURL.absoluteString] else { return false }
-        let elapsed = max(0, now.timeIntervalSince1970 - timestamp)
+        let elapsed = max(0, (now ?? ledgerNow()).timeIntervalSince1970 - timestamp)
         return elapsed >= TimeInterval(storedLockInterval(for: serverURL).rawValue)
     }
 
-    private func lockLocallyAfterBackground(for serverURL: URL) {
-        guard phase == .ready else { return }
+    private func lockLocally(for serverURL: URL) {
+        guard self.serverURL == serverURL else { return }
+        if case .locked = phase { return }
         _ = invalidateSession()
         stopImportIndexTracking()
         setLocallyLocked(true, for: serverURL)
-        clearSensitiveCookie(for: serverURL)
         clearTransactionMutations()
-        ledger = nil
         amountsVisible = false
         isRangeLoading = false
         isValuationCurrencyLoading = false
