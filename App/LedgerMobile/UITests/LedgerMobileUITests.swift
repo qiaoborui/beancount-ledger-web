@@ -269,6 +269,78 @@ final class LedgerMobileUITests: XCTestCase {
         capture("import-history")
     }
 
+    func testCompactTabBarCanAddReorderAndOpenDestination() throws {
+        try XCTSkipIf(isPad, "Compact tab customization only applies to compact-width navigation")
+        XCUIDevice.shared.orientation = .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+
+        app.tabBars.buttons["更多"].tap()
+        let settingsEntry = app.buttons["设置, Face ID、自动锁定、服务器与会话"]
+        for _ in 0..<3 where !settingsEntry.isHittable { app.swipeDown() }
+        waitUntilHittable(settingsEntry)
+        settingsEntry.tap()
+
+        let configurationEntry = app.buttons["settings-compact-tabs"]
+        XCTAssertTrue(configurationEntry.waitForExistence(timeout: 3))
+        capture("compact-tabs-01-settings")
+        configurationEntry.tap()
+
+        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["已显示 3/4"].exists)
+        capture("compact-tabs-02-configuration")
+
+        let configurationList = app.collectionViews["compact-tab-list"]
+        XCTAssertTrue(configurationList.waitForExistence(timeout: 3))
+
+        app.buttons["compact-tab-remove-overview"].tap()
+        XCTAssertTrue(app.staticTexts["已显示 2/4"].waitForExistence(timeout: 3))
+
+        let reorderButtons = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reorder"))
+        XCTAssertEqual(reorderButtons.count, 2)
+        let accountsReorder = reorderButtons.element(boundBy: 1)
+        let transactionsReorder = reorderButtons.element(boundBy: 0)
+        waitUntilHittable(accountsReorder)
+        waitUntilHittable(transactionsReorder)
+        accountsReorder.press(forDuration: 1.0, thenDragTo: transactionsReorder)
+        capture("compact-tabs-03-reordered")
+
+        let addAssets = app.buttons["compact-tab-add-assets"]
+        for _ in 0..<4 where !addAssets.isHittable { configurationList.swipeUp() }
+        waitUntilHittable(addAssets)
+        addAssets.tap()
+
+        let addImports = app.buttons["compact-tab-add-imports"]
+        for _ in 0..<4 where !addImports.isHittable { configurationList.swipeUp() }
+        waitUntilHittable(addImports)
+        addImports.tap()
+        XCTAssertTrue(app.staticTexts["已显示 4/4"].waitForExistence(timeout: 3))
+
+        app.buttons["compact-tab-save"].tap()
+        let settingsBack = app.navigationBars.firstMatch.buttons.firstMatch
+        waitUntilHittable(settingsBack)
+        settingsBack.tap()
+        XCTAssertTrue(app.buttons["more-overview"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.tabBars.buttons["导入"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.tabBars.buttons.count, 5)
+        XCTAssertFalse(app.tabBars.buttons["概览"].exists)
+        XCTAssertLessThan(app.tabBars.buttons["账户"].frame.minX, app.tabBars.buttons["交易"].frame.minX)
+        capture("compact-tabs-04-tab-bar")
+
+        app.tabBars.buttons["导入"].tap()
+        XCTAssertTrue(app.scrollViews["import-history-content"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["渠道状态"].exists)
+        capture("compact-tabs-05-imports")
+
+        app.tabBars.buttons["更多"].tap()
+        let overviewEntry = app.buttons["more-overview"]
+        XCTAssertTrue(overviewEntry.waitForExistence(timeout: 3))
+        overviewEntry.tap()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 3))
+    }
+
     func testNativeImportPreviewSelectionAndCommitFlow() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()

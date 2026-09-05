@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var compactTabConfigurationPresented = false
     var showsAppBar = true
 
     var body: some View {
@@ -27,6 +28,41 @@ struct SettingsView: View {
                         StatusBanner(message: error, onDismiss: session.dismissError)
                             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
                     }
+
+                    settingsSection(title: "导航", detail: "仅影响紧凑宽度") {
+                        Button {
+                            compactTabConfigurationPresented = true
+                        } label: {
+                            HStack(spacing: LedgerSpacing.md) {
+                                SettingsIcon(systemName: "rectangle.bottomthird.inset.filled")
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("底部标签栏")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(LedgerPalette.ink)
+                                    Text(session.compactTabDestinations.map(\.compactTitle).joined(separator: "、"))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                        .lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("\(session.compactTabDestinations.count)/\(LedgerDestination.compactTabLimit)")
+                                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                                    .padding(.horizontal, 8)
+                                    .frame(minHeight: 26)
+                                    .background(LedgerPalette.tag)
+                                    .clipShape(Capsule())
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                            .padding(LedgerSpacing.lg)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .accessibilityIdentifier("settings-compact-tabs")
+                    }
+                    .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
 
                     settingsSection(title: "设备安全", detail: "仅影响这台设备") {
                         SettingsToggleRow(
@@ -141,6 +177,11 @@ struct SettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $compactTabConfigurationPresented) {
+            CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
+                session.setCompactTabDestinations(destinations)
+            }
+        }
     }
 
     private var biometricDetail: String {
@@ -182,6 +223,129 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+private struct CompactTabConfigurationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var destinations: [LedgerDestination]
+
+    let onSave: ([LedgerDestination]) -> Void
+
+    init(
+        initialDestinations: [LedgerDestination],
+        onSave: @escaping ([LedgerDestination]) -> Void
+    ) {
+        _destinations = State(initialValue: LedgerDestination.normalizedCompactTabs(initialDestinations))
+        self.onSave = onSave
+    }
+
+    private var availableDestinations: [LedgerDestination] {
+        LedgerDestination.compactTabCandidates.filter { !destinations.contains($0) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(destinations) { destination in
+                        HStack(spacing: LedgerSpacing.md) {
+                            SettingsIcon(systemName: destination.systemImage)
+                            Text(destination.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Spacer(minLength: LedgerSpacing.sm)
+                            Button {
+                                remove(destination)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(destinations.count > 1 ? LedgerPalette.risk : LedgerPalette.secondary)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(destinations.count <= 1)
+                            .accessibilityLabel("移除\(destination.title)")
+                            .accessibilityIdentifier("compact-tab-remove-\(destination.rawValue)")
+                        }
+                    }
+                    .onMove { source, destination in
+                        destinations.move(fromOffsets: source, toOffset: destination)
+                    }
+                } header: {
+                    Text("已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)")
+                } footer: {
+                    Text("拖动右侧排序控件调整显示顺序，底栏会固定保留“更多”。")
+                }
+
+                Section("可添加") {
+                    ForEach(availableDestinations) { destination in
+                        Button {
+                            add(destination)
+                        } label: {
+                            HStack(spacing: LedgerSpacing.md) {
+                                SettingsIcon(systemName: destination.systemImage)
+                                Text(destination.title)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Spacer(minLength: LedgerSpacing.sm)
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(destinations.count >= LedgerDestination.compactTabLimit)
+                        .accessibilityIdentifier("compact-tab-add-\(destination.rawValue)")
+                    }
+                }
+
+                Section {
+                    Button("恢复默认") {
+                        destinations = LedgerDestination.defaultCompactTabs
+                    }
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .accessibilityIdentifier("compact-tab-reset")
+                }
+            }
+            .accessibilityIdentifier("compact-tab-list")
+            .environment(\.editMode, .constant(.active))
+            .scrollContentBackground(.hidden)
+            .background(LedgerPalette.canvas)
+            .navigationTitle("底部标签栏")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(destinations)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("compact-tab-save")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func add(_ destination: LedgerDestination) {
+        guard destinations.count < LedgerDestination.compactTabLimit,
+              !destinations.contains(destination),
+              destination != .settings else { return }
+        destinations.append(destination)
+    }
+
+    private func remove(_ destination: LedgerDestination) {
+        guard destinations.count > 1 else { return }
+        destinations.removeAll { $0 == destination }
     }
 }
 

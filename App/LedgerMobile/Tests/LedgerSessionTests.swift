@@ -107,6 +107,31 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.draftRange, LedgerDateRange.current(.quarter, now: now))
     }
 
+    func testCompactTabsLoadNormalizeAndPersistInDeviceDefaults() {
+        let suiteName = "ledger-mobile-compact-tabs-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(
+            ["imports", "imports", "unknown", "assets", "query", "accounts", "transactions"],
+            forKey: "ledger.mobile.compact-tabs"
+        )
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        XCTAssertEqual(session.compactTabDestinations, [.imports, .assets, .query, .accounts])
+
+        session.setCompactTabDestinations([.accounts, .overview, .incomeExpense, .currencies, .imports])
+
+        XCTAssertEqual(session.compactTabDestinations, [.accounts, .overview, .incomeExpense, .currencies])
+        XCTAssertEqual(
+            defaults.stringArray(forKey: "ledger.mobile.compact-tabs"),
+            ["accounts", "overview", "incomeExpense", "currencies"]
+        )
+
+        let restored = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        XCTAssertEqual(restored.compactTabDestinations, session.compactTabDestinations)
+    }
+
     func testBackgroundRefreshKeepsAmountsConcealed() async {
         let suiteName = "ledger-mobile-session-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

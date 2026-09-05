@@ -10,7 +10,7 @@ behavior.
 | Home | `GET /api/ledger/home-report`, bootstrap | Available as Overview, metric coverage is partial | Read | P0 |
 | Transactions | bootstrap, `GET /api/ledger/transactions`, `PUT /api/ledger/transactions`, `POST /api/ledger/transactions/tags` | List, search, type/account/tag filters, detail, source-safe editing, cross-filter selection, atomic bulk tagging | Read and validated write | P0 |
 | Accounts | bootstrap, `GET /api/ledger/accounts/detail` | Grouped balances, detail, related transactions | Read | P0 |
-| Settings and privacy | auth, passkey, quick unlock | Face ID/Touch ID, lock interval, sessions; passkey implementation requires paid-team signing | Device/auth | P0 |
+| Settings and privacy | auth, passkey, quick unlock | Face ID/Touch ID, lock interval, sessions, and device-local compact tab customization; passkey implementation requires paid-team signing | Device/auth | P0 |
 | Home Screen widgets | `GET /api/ledger/home-report`, bootstrap, `GET /api/ledger/imports/documents` | Monthly expense overview, expense calendar, configurable asset/liability balance, and import-status widgets | Read-only snapshot | P0 |
 | Assets | bootstrap balance and net-worth data | Web-aligned asset/liability positions, net-worth windows and trend | Read | P1 |
 | Income statement | `GET /api/ledger/income-statement` | Web-aligned period totals, category analysis, payee and payment-account ranks | Read | P1 |
@@ -25,9 +25,10 @@ behavior.
 
 Navigation parity:
 
-- iPhone uses Overview, Transactions, Accounts, and More as the stable shell.
+- iPhone defaults to Overview, Transactions, Accounts, and More. Users can select and reorder up to four primary destinations; More remains fixed.
 - iPad uses `NavigationSplitView`; destinations move into the sidebar as each
-  native screen becomes functional.
+  native screen becomes functional. Compact tab customization does not change
+  the iPad sidebar.
 - BQL is available from iPhone More and as a first-class iPad sidebar
   destination. Money result columns follow the global privacy toggle.
 - Currencies is available from iPhone More and the iPad sidebar. Valuation
