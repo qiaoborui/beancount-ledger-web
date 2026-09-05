@@ -90,9 +90,19 @@ final class SystemBiometricCredentialStore: BiometricCredentialStore {
             throw BiometricCredentialError.keychain(errSecParam)
         }
 
-        deleteCredential(for: origin)
+        let credentialData = try encoder.encode(credential)
+        let updateAttributes: [String: Any] = [kSecValueData as String: credentialData]
+        let updateStatus = SecItemUpdate(
+            baseQuery(for: origin) as CFDictionary,
+            updateAttributes as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw BiometricCredentialError.keychain(updateStatus)
+        }
+
         var query = baseQuery(for: origin)
-        query[kSecValueData as String] = try encoder.encode(credential)
+        query[kSecValueData as String] = credentialData
         query[kSecAttrAccessControl as String] = access
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else { throw BiometricCredentialError.keychain(status) }

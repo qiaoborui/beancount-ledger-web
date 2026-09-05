@@ -429,7 +429,7 @@ final class LedgerMobileUITests: XCTestCase {
     func testTransactionEditingAndBulkTaggingFlow() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
-        app.launchArguments = ["--safe-preview"]
+        app.launchArguments = ["--safe-preview", "--safe-slow-transaction-write"]
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
 
@@ -448,10 +448,16 @@ final class LedgerMobileUITests: XCTestCase {
         replaceText(in: app.textFields["transaction-edit-payee"], with: "新城市书房")
         replaceText(in: app.textFields["transaction-edit-narration"], with: "九月阅读计划")
         replaceText(in: app.textFields["transaction-edit-tags"], with: "learning travel")
+        let editStartedAt = Date()
         app.buttons["transaction-edit-save"].tap()
+        XCTAssertTrue(app.staticTexts["正在验证并保存"].waitForExistence(timeout: 0.5))
+        let editFeedbackElapsed = Date().timeIntervalSince(editStartedAt)
+        XCTAssertFalse(app.buttons["transaction-edit-save"].isEnabled)
 
         XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["新城市书房"].waitForExistence(timeout: 3))
+        let editCompleteElapsed = Date().timeIntervalSince(editStartedAt)
+        XCTAssertGreaterThanOrEqual(editCompleteElapsed, 0.9)
         XCTAssertTrue(app.staticTexts["#travel"].exists)
         app.navigationBars["交易详情"].buttons.firstMatch.tap()
 
@@ -461,8 +467,27 @@ final class LedgerMobileUITests: XCTestCase {
         selectableRow.tap()
         app.buttons["添加标签"].tap()
         replaceText(in: app.textFields["transaction-bulk-tag-input"], with: "reviewed")
+        let tagStartedAt = Date()
         app.buttons["transaction-bulk-tag-apply"].tap()
-        XCTAssertTrue(app.staticTexts["已为 1 条交易添加标签。"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["正在验证标签"].waitForExistence(timeout: 0.5))
+        let tagFeedbackElapsed = Date().timeIntervalSince(tagStartedAt)
+        XCTAssertFalse(app.buttons["transaction-bulk-tag-apply"].isEnabled)
+        XCTAssertTrue(app.staticTexts["服务器已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
+        let tagCompleteElapsed = Date().timeIntervalSince(tagStartedAt)
+        XCTAssertGreaterThanOrEqual(tagCompleteElapsed, 0.9)
+        XCTAssertTrue(app.staticTexts["#reviewed"].exists)
+        let timing = XCTAttachment(
+            string: String(
+                format: "edit-feedback=%.0fms edit-complete=%.0fms bulk-tag-feedback=%.0fms bulk-tag-complete=%.0fms",
+                editFeedbackElapsed * 1_000,
+                editCompleteElapsed * 1_000,
+                tagFeedbackElapsed * 1_000,
+                tagCompleteElapsed * 1_000
+            )
+        )
+        timing.name = "native-transaction-response-timing"
+        timing.lifetime = .keepAlways
+        add(timing)
     }
 
     func testBulkTagSelectionKeepsAmountClearOfSelectionControl() throws {

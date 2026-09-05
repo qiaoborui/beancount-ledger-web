@@ -11,15 +11,18 @@ struct RootView: View {
             switch session.phase {
             case .configuration:
                 ServerConfigurationView()
-            case .checking, .loading:
-                LoadingView()
+            case .checking:
+                MainTabView()
+                    .redacted(reason: .placeholder)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)
             case .ready:
                 MainTabView()
             }
 
-            if scenePhase != .active || session.privacyShielded {
+            if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
                 PrivacyCover()
                     .transition(.opacity)
             }
@@ -45,20 +48,6 @@ struct PrivacyCover: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LedgerPalette.canvas)
         .ignoresSafeArea()
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct LoadingView: View {
-    var body: some View {
-        VStack(spacing: LedgerSpacing.lg) {
-            LedgerBrandMark(size: 48)
-            ProgressView()
-                .tint(LedgerPalette.cobalt)
-            Text("正在连接 Ledger")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(LedgerPalette.secondary)
-        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -203,7 +192,7 @@ private struct LoginView: View {
             AuthCard(
                 title: authenticated ? "账本已锁定" : "登录 Ledger",
                 detail: authenticated
-                    ? session.hasBiometricUnlock
+                    ? session.canUseBiometricUnlock
                         ? "使用 \(session.biometricTitle) 快速恢复，通行密钥和密码可用于账户验证。"
                         : session.passkeyAvailable
                             ? "使用通行密钥恢复敏感金额，密码仍可随时使用。"
@@ -241,7 +230,7 @@ private struct LoginView: View {
                         }
                     }
 
-                    if session.hasBiometricUnlock {
+                    if session.canUseBiometricUnlock {
                         Button {
                             passwordFocused = false
                             Task { await session.unlockWithBiometrics() }
@@ -258,6 +247,7 @@ private struct LoginView: View {
                             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
+                        .disabled(session.isAuthenticationBusy)
                     }
 
                     if session.passkeyAvailable {
@@ -271,21 +261,34 @@ private struct LoginView: View {
                                 Text(authenticated ? "使用通行密钥解锁" : "使用通行密钥登录")
                                     .font(.system(size: 15, weight: .semibold))
                             }
-                            .foregroundStyle(session.hasBiometricUnlock ? LedgerPalette.cobalt : LedgerPalette.onBrand)
+                            .foregroundStyle(session.canUseBiometricUnlock ? LedgerPalette.cobalt : LedgerPalette.onBrand)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(session.hasBiometricUnlock ? LedgerPalette.panel : LedgerPalette.cobalt)
+                            .background(session.canUseBiometricUnlock ? LedgerPalette.panel : LedgerPalette.cobalt)
                             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                             .overlay {
-                                if session.hasBiometricUnlock {
+                                if session.canUseBiometricUnlock {
                                     RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
                                         .stroke(LedgerPalette.cobalt, lineWidth: 1)
                                 }
                             }
                         }
                         .buttonStyle(PressScaleButtonStyle())
+                        .disabled(session.isAuthenticationBusy)
                     }
 
-                    if session.hasBiometricUnlock || session.passkeyAvailable {
+                    if session.isAuthenticationBusy {
+                        HStack(spacing: LedgerSpacing.sm) {
+                            ProgressView()
+                                .tint(LedgerPalette.cobalt)
+                            Text("正在安全恢复账本")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    if session.canUseBiometricUnlock || session.passkeyAvailable {
                         HStack(spacing: LedgerSpacing.md) {
                             Rectangle().fill(LedgerPalette.line).frame(height: 1)
                             Text("或使用密码")
@@ -306,6 +309,7 @@ private struct LoginView: View {
                             .focused($passwordFocused)
                             .onSubmit { Task { await session.login() } }
                             .modifier(LedgerTextFieldStyle(focused: passwordFocused))
+                            .disabled(session.isAuthenticationBusy)
                     }
 
                     if let error = session.errorMessage {
@@ -331,6 +335,7 @@ private struct LoginView: View {
                         }
                     }
                     .buttonStyle(PressScaleButtonStyle())
+                    .disabled(session.isAuthenticationBusy)
 
                     Button("更换服务器") {
                         session.changeServer()
@@ -339,6 +344,7 @@ private struct LoginView: View {
                     .foregroundStyle(LedgerPalette.cobalt)
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .buttonStyle(PressScaleButtonStyle())
+                    .disabled(session.isAuthenticationBusy)
                 }
             }
         }

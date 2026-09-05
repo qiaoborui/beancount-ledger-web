@@ -91,7 +91,7 @@ struct SettingsView: View {
                         SettingsActionRow(
                             icon: "lock.fill",
                             title: "立即锁定",
-                            detail: "隐藏账本并清除敏感访问凭据",
+                            detail: "立即隐藏账本，下次进入需在本机验证",
                             color: LedgerPalette.cobalt
                         ) {
                             Task { await session.lock() }
