@@ -349,6 +349,35 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(store.credential, credential)
     }
 
+    func testWarmFaceIDRevealsCachedLedgerBeforeQuickUnlockFinishes() async throws {
+        let suiteName = "ledger-mobile-face-id-response-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "device-12345678", token: "protected-token")
+        )
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            quickUnlockVerifyDelayNanoseconds: 150_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await session.resume()
+        await session.lock()
+
+        let unlock = Task { await session.unlockWithBiometrics() }
+        for _ in 0..<100 {
+            let calls = await api.callCounts()
+            if calls.quickUnlockVerify == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotNil(session.ledger)
+        XCTAssertTrue(session.amountsVisible)
+        await unlock.value
+    }
+
     func testFaceIDEnrollmentPersistsServerQuickUnlockAcrossColdStart() async {
         let suiteName = "ledger-mobile-face-id-persistent-token-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -433,6 +462,35 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.quickUnlockRevoke, 0)
     }
 
+    func testColdFaceIDRepairsStaleQuickUnlockWithExistingSession() async {
+        let suiteName = "ledger-mobile-stale-face-id-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "stale-device", token: "stale-token")
+        )
+        let api = SessionMockAPI(payload: Self.payload, quickUnlockVerifyShouldFail: true)
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await session.resume()
+
+        await session.unlockWithBiometrics()
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotNil(session.ledger)
+        XCTAssertEqual(
+            store.credential,
+            QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")
+        )
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.bootstrap, 1)
+        XCTAssertEqual(calls.quickUnlockVerify, 1)
+        XCTAssertEqual(calls.quickUnlockRegister, 1)
+        XCTAssertEqual(calls.quickUnlockRevoke, 1)
+    }
+
     func testDisablingLocalFaceIDMarkerDoesNotCallServerRevoke() async {
         let suiteName = "ledger-mobile-local-face-id-disable-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -453,7 +511,7 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.quickUnlockRevoke, 0)
     }
 
-    func testWarmFaceIDKeepsRetryPathWhenServerRefreshLocks() async {
+    func testWarmFaceIDKeepsCachedLedgerWhenQuickUnlockAndRefreshFail() async {
         let suiteName = "ledger-mobile-face-id-retry-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
@@ -461,16 +519,21 @@ final class LedgerSessionTests: XCTestCase {
         let store = MockBiometricCredentialStore(
             credential: QuickUnlockCredential(deviceID: "legacy-device", token: "legacy-token")
         )
-        let api = SessionMockAPI(payload: Self.payload, bootstrapErrorStatusAfterFirstCall: 423)
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bootstrapErrorStatusAfterFirstCall: 423,
+            quickUnlockVerifyShouldFail: true
+        )
         let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
         await session.resume()
         await session.lock()
 
         await session.unlockWithBiometrics()
 
-        XCTAssertEqual(session.phase, .locked(authenticated: true))
-        XCTAssertNil(session.ledger)
-        XCTAssertTrue(session.canUseBiometricUnlock)
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotNil(session.ledger)
+        XCTAssertFalse(session.canUseBiometricUnlock)
+        XCTAssertTrue(session.errorMessage?.contains("Face ID 已解锁本机数据") == true)
         let calls = await api.callCounts()
         XCTAssertEqual(calls.quickUnlockVerify, 1)
         XCTAssertEqual(calls.quickUnlockRevoke, 0)
@@ -1891,6 +1954,7 @@ private actor SessionMockAPI: LedgerAPI {
 
     enum Failure: Error {
         case lock
+        case quickUnlock
     }
 
     let healthStatus: HealthStatus
@@ -1919,6 +1983,8 @@ private actor SessionMockAPI: LedgerAPI {
     let bootstrapDelaysByStart: [String: UInt64]
     let bootstrapErrorStatuses: [String: Int]
     let bootstrapErrorStatusAfterFirstCall: Int?
+    let quickUnlockVerifyShouldFail: Bool
+    let quickUnlockVerifyDelayNanoseconds: UInt64
     let quickUnlockRevokeDelayNanoseconds: UInt64
     let transactionWriteDelayNanoseconds: UInt64
     let transactionWritesShouldFail: Bool
@@ -1984,6 +2050,8 @@ private actor SessionMockAPI: LedgerAPI {
         bootstrapDelaysByStart: [String: UInt64] = [:],
         bootstrapErrorStatuses: [String: Int] = [:],
         bootstrapErrorStatusAfterFirstCall: Int? = nil,
+        quickUnlockVerifyShouldFail: Bool = false,
+        quickUnlockVerifyDelayNanoseconds: UInt64 = 0,
         quickUnlockRevokeDelayNanoseconds: UInt64 = 0,
         transactionWriteDelayNanoseconds: UInt64 = 0,
         transactionWritesShouldFail: Bool = false
@@ -2014,6 +2082,8 @@ private actor SessionMockAPI: LedgerAPI {
         self.bootstrapDelaysByStart = bootstrapDelaysByStart
         self.bootstrapErrorStatuses = bootstrapErrorStatuses
         self.bootstrapErrorStatusAfterFirstCall = bootstrapErrorStatusAfterFirstCall
+        self.quickUnlockVerifyShouldFail = quickUnlockVerifyShouldFail
+        self.quickUnlockVerifyDelayNanoseconds = quickUnlockVerifyDelayNanoseconds
         self.quickUnlockRevokeDelayNanoseconds = quickUnlockRevokeDelayNanoseconds
         self.transactionWriteDelayNanoseconds = transactionWriteDelayNanoseconds
         self.transactionWritesShouldFail = transactionWritesShouldFail
@@ -2057,6 +2127,10 @@ private actor SessionMockAPI: LedgerAPI {
 
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws {
         quickUnlockVerifyCalls += 1
+        if quickUnlockVerifyDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: quickUnlockVerifyDelayNanoseconds)
+        }
+        if quickUnlockVerifyShouldFail { throw Failure.quickUnlock }
     }
 
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws {
