@@ -341,20 +341,45 @@ final class LedgerSessionTests: XCTestCase {
 
         XCTAssertEqual(session.phase, .ready)
         XCTAssertNotNil(session.ledger)
-        for _ in 0..<100 {
-            if store.savedCredential?.deviceID == "local-biometric" { break }
-            try? await Task.sleep(nanoseconds: 2_000_000)
-        }
         let calls = await api.callCounts()
-        XCTAssertEqual(calls.quickUnlockVerify, 0)
-        XCTAssertEqual(calls.quickUnlockRevoke, 1)
+        XCTAssertEqual(calls.quickUnlockVerify, 1)
+        XCTAssertEqual(calls.quickUnlockRevoke, 0)
         XCTAssertEqual(store.readCount, 1)
         XCTAssertEqual(store.lastReadOrigin, origin)
-        XCTAssertEqual(store.savedCredential?.deviceID, "local-biometric")
+        XCTAssertEqual(store.credential, credential)
     }
 
-    func testColdLegacyFaceIDRestoresServerAccessBeforeMigratingLocally() async {
-        let suiteName = "ledger-mobile-legacy-face-id-tests-\(UUID().uuidString)"
+    func testFaceIDEnrollmentPersistsServerQuickUnlockAcrossColdStart() async {
+        let suiteName = "ledger-mobile-face-id-persistent-token-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore()
+        let api = SessionMockAPI(payload: Self.payload)
+        let firstSession = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await firstSession.resume()
+
+        await firstSession.setBiometricUnlockEnabled(true)
+        await firstSession.lock()
+
+        let restartedSession = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await restartedSession.resume()
+        XCTAssertEqual(restartedSession.phase, .locked(authenticated: true))
+
+        await restartedSession.unlockWithBiometrics()
+
+        XCTAssertEqual(restartedSession.phase, .ready)
+        XCTAssertEqual(
+            store.credential,
+            QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")
+        )
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegister, 1)
+        XCTAssertEqual(calls.quickUnlockVerify, 1)
+    }
+
+    func testColdFaceIDRestoresServerAccessWithPersistedCredential() async {
+        let suiteName = "ledger-mobile-cold-face-id-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let origin = "https://ledger.example.com"
         defaults.set(origin, forKey: "ledger.mobile.server-origin")
@@ -369,21 +394,67 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .locked(authenticated: true))
 
         await session.unlockWithBiometrics()
-        for _ in 0..<100 {
-            if store.savedCredential?.deviceID == "local-biometric" { break }
-            try? await Task.sleep(nanoseconds: 2_000_000)
-        }
 
         XCTAssertEqual(session.phase, .ready)
         XCTAssertNotNil(session.ledger)
         let calls = await api.callCounts()
         XCTAssertEqual(calls.quickUnlockVerify, 1)
-        XCTAssertEqual(calls.quickUnlockRevoke, 1)
-        XCTAssertEqual(store.savedCredential?.deviceID, "local-biometric")
+        XCTAssertEqual(calls.quickUnlockRevoke, 0)
+        XCTAssertEqual(
+            store.credential,
+            QuickUnlockCredential(deviceID: "legacy-device", token: "legacy-token")
+        )
     }
 
-    func testWarmLegacyFaceIDKeepsRetryPathWhenServerRefreshLocks() async {
-        let suiteName = "ledger-mobile-legacy-face-id-retry-tests-\(UUID().uuidString)"
+    func testColdLocalFaceIDMigratesToPersistentServerCredential() async {
+        let suiteName = "ledger-mobile-local-face-id-migration-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "local-biometric", token: "protected-marker")
+        )
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await session.resume()
+
+        await session.unlockWithBiometrics()
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(
+            store.credential,
+            QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")
+        )
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegister, 1)
+        XCTAssertEqual(calls.quickUnlockVerify, 0)
+        XCTAssertEqual(calls.quickUnlockRevoke, 0)
+    }
+
+    func testDisablingLocalFaceIDMarkerDoesNotCallServerRevoke() async {
+        let suiteName = "ledger-mobile-local-face-id-disable-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "local-biometric", token: "protected-marker")
+        )
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await session.resume()
+
+        await session.setBiometricUnlockEnabled(false)
+
+        XCTAssertFalse(session.hasBiometricUnlock)
+        XCTAssertNil(store.credential)
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRevoke, 0)
+    }
+
+    func testWarmFaceIDKeepsRetryPathWhenServerRefreshLocks() async {
+        let suiteName = "ledger-mobile-face-id-retry-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -401,9 +472,12 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertNil(session.ledger)
         XCTAssertTrue(session.canUseBiometricUnlock)
         let calls = await api.callCounts()
-        XCTAssertEqual(calls.quickUnlockVerify, 0)
+        XCTAssertEqual(calls.quickUnlockVerify, 1)
         XCTAssertEqual(calls.quickUnlockRevoke, 0)
-        XCTAssertNil(store.savedCredential)
+        XCTAssertEqual(
+            store.credential,
+            QuickUnlockCredential(deviceID: "legacy-device", token: "legacy-token")
+        )
     }
 
     func testFaceIDPromptLifecycleDoesNotRelockImmediateSession() async throws {
@@ -412,18 +486,18 @@ final class LedgerSessionTests: XCTestCase {
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = MockBiometricCredentialStore(
-            credential: QuickUnlockCredential(deviceID: "local-biometric", token: "protected-marker")
+            credential: QuickUnlockCredential(deviceID: "device-12345678", token: "protected-token")
         )
         store.readDelayNanoseconds = 100_000_000
+        let api = SessionMockAPI(payload: Self.payload)
         let session = LedgerSession(
-            api: SessionMockAPI(payload: Self.payload),
+            api: api,
             defaults: defaults,
             biometricStore: store
         )
         await session.resume()
         session.setLockInterval(.immediately)
-        await session.updateActivity(isActive: false, isBackground: false)
-        await session.updateActivity(isActive: true, isBackground: false)
+        await session.lock()
 
         let unlock = Task { await session.unlockWithBiometrics() }
         for _ in 0..<100 {
@@ -437,32 +511,8 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .ready)
         XCTAssertTrue(session.amountsVisible)
         XCTAssertFalse(session.privacyShielded)
-    }
-
-    func testDisablingFaceIDInvalidatesLegacyCredentialMigration() async throws {
-        let suiteName = "ledger-mobile-face-id-migration-race-tests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = MockBiometricCredentialStore(
-            credential: QuickUnlockCredential(deviceID: "legacy-device", token: "legacy-token")
-        )
-        let api = SessionMockAPI(
-            payload: Self.payload,
-            quickUnlockRevokeDelayNanoseconds: 100_000_000
-        )
-        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
-        await session.resume()
-        await session.lock()
-        await session.unlockWithBiometrics()
-
-        await session.setBiometricUnlockEnabled(false)
-        try await Task.sleep(nanoseconds: 120_000_000)
-
-        XCTAssertFalse(session.hasBiometricUnlock)
-        XCTAssertNil(store.credential)
         let calls = await api.callCounts()
-        XCTAssertEqual(calls.quickUnlockRevoke, 2)
+        XCTAssertEqual(calls.quickUnlockVerify, 1)
     }
 
     func testSettingsCanEnableAndDisableFaceIDCredential() async throws {
@@ -478,8 +528,14 @@ final class LedgerSessionTests: XCTestCase {
         await session.setBiometricUnlockEnabled(true)
 
         XCTAssertEqual(session.phase, .ready)
-        XCTAssertNotNil(store.savedCredential)
+        XCTAssertEqual(
+            store.savedCredential,
+            QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")
+        )
         XCTAssertTrue(session.hasBiometricUnlock)
+        var calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegister, 1)
+        XCTAssertEqual(calls.quickUnlockRevoke, 0)
 
         store.readShouldFail = true
         await session.setBiometricUnlockEnabled(false)
@@ -500,9 +556,9 @@ final class LedgerSessionTests: XCTestCase {
 
         XCTAssertEqual(session.phase, .ready)
         XCTAssertFalse(session.hasBiometricUnlock)
-        let calls = await api.callCounts()
-        XCTAssertEqual(calls.quickUnlockRegister, 0)
-        XCTAssertEqual(calls.quickUnlockRevoke, 0)
+        calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegister, 1)
+        XCTAssertEqual(calls.quickUnlockRevoke, 1)
     }
 
     func testPasskeyLoginVerifiesAssertionAndLoadsLedger() async throws {

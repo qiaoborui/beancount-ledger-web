@@ -118,7 +118,6 @@ final class LedgerSession: ObservableObject {
     private let ledgerNow: () -> Date
     private var applicationActive = true
     private var systemAuthenticationInProgress = false
-    private var biometricMigrationGeneration = 0
     private var requestGeneration = 0
     private var sessionEpoch = 0
     private var importIndexTask: Task<Void, Never>?
@@ -307,8 +306,8 @@ final class LedgerSession: ObservableObject {
                 )
             }
             guard generation == requestGeneration else { return }
-            let hasLegacyCredential = credential.deviceID != "local-biometric"
-            if hasLegacyCredential, ledger == nil {
+            let requiresCredentialMigration = credential.deviceID == "local-biometric"
+            if !requiresCredentialMigration {
                 try await api.verifyQuickUnlock(baseURL: serverURL, credential: credential)
                 guard generation == requestGeneration else {
                     clearAuthenticationCookies(for: serverURL)
@@ -328,15 +327,14 @@ final class LedgerSession: ObservableObject {
                 try await loadLedger(from: serverURL, generation: generation)
                 serverAccessConfirmed = true
             }
-            if hasLegacyCredential {
-                if serverAccessConfirmed, phase == .ready {
-                    scheduleLegacyQuickUnlockMigration(credential, for: serverURL)
-                } else if case .locked = phase {
-                    setLocallyLocked(true, for: serverURL)
-                }
+            if case .locked = phase {
+                setLocallyLocked(true, for: serverURL)
+            } else if requiresCredentialMigration, serverAccessConfirmed {
+                await migrateLocalBiometricCredential(for: serverURL)
             }
         } catch {
             guard generation == requestGeneration else { return }
+            setLocallyLocked(true, for: serverURL)
             errorMessage = error.localizedDescription
             phase = .locked(authenticated: authenticated)
         }
@@ -345,17 +343,26 @@ final class LedgerSession: ObservableObject {
     func setBiometricUnlockEnabled(_ enabled: Bool) async {
         guard phase == .ready, let serverURL, !isBiometricSettingBusy else { return }
         guard enabled != hasBiometricUnlock else { return }
-        biometricMigrationGeneration &+= 1
         isBiometricSettingBusy = true
         errorMessage = nil
         defer { isBiometricSettingBusy = false }
 
         if enabled {
             do {
-                try biometricStore.save(
-                    Self.localBiometricCredential(),
-                    for: serverURL
+                let credential = try await api.registerQuickUnlock(
+                    baseURL: serverURL,
+                    deviceName: "Ledger iOS · \(biometricTitle)"
                 )
+                guard phase == .ready, self.serverURL == serverURL else {
+                    try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                    return
+                }
+                do {
+                    try biometricStore.save(credential, for: serverURL)
+                } catch {
+                    try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                    throw error
+                }
             } catch {
                 errorMessage = "\(biometricTitle) 启用失败：\(error.localizedDescription)"
             }
@@ -884,30 +891,25 @@ final class LedgerSession: ObservableObject {
         "\(source.gitSHA ?? "local"):\(source.file):\(source.line):\(source.hash ?? "")"
     }
 
-    private static func localBiometricCredential() -> QuickUnlockCredential {
-        QuickUnlockCredential(deviceID: "local-biometric", token: UUID().uuidString)
-    }
-
-    private func scheduleLegacyQuickUnlockMigration(
-        _ credential: QuickUnlockCredential,
-        for serverURL: URL
-    ) {
-        biometricMigrationGeneration &+= 1
-        let migrationGeneration = biometricMigrationGeneration
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
-                guard migrationGeneration == self.biometricMigrationGeneration,
-                      self.serverURL == serverURL else { return }
-                do {
-                    try self.biometricStore.save(Self.localBiometricCredential(), for: serverURL)
-                } catch {
-                    self.errorMessage = "\(self.biometricTitle) 本地迁移失败，请在设置中停用后重新启用"
-                }
-            } catch {
-                // Keep the protected legacy credential so a later local unlock can retry cleanup.
+    private func migrateLocalBiometricCredential(for serverURL: URL) async {
+        do {
+            let credential = try await api.registerQuickUnlock(
+                baseURL: serverURL,
+                deviceName: "Ledger iOS · \(biometricTitle)"
+            )
+            guard phase == .ready, self.serverURL == serverURL else {
+                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                return
             }
+            do {
+                try biometricStore.save(credential, for: serverURL)
+            } catch {
+                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                throw error
+            }
+        } catch {
+            guard phase == .ready, self.serverURL == serverURL else { return }
+            errorMessage = "\(biometricTitle) 快速解锁升级失败，请保持登录后重试"
         }
     }
 
@@ -1080,7 +1082,6 @@ final class LedgerSession: ObservableObject {
 
     func changeServer() {
         let previousServerURL = serverURL
-        biometricMigrationGeneration &+= 1
         _ = invalidateSession()
         stopImportIndexTracking()
         clearWidgetSnapshot()
