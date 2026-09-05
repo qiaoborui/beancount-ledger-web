@@ -94,6 +94,7 @@ final class LedgerSession: ObservableObject {
     @Published var errorMessage: String?
     @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
+    @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
     @Published private(set) var selectedRange: LedgerDateRange
     @Published private(set) var draftRange: LedgerDateRange
     @Published private(set) var isRangeLoading = false
@@ -135,6 +136,7 @@ final class LedgerSession: ObservableObject {
     private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
+    private static let compactTabsKey = "ledger.mobile.compact-tabs"
     private static let sessionCookieName = "ledger_session"
     private static let sensitiveCookieName = "ledger_sensitive_until"
 
@@ -169,6 +171,7 @@ final class LedgerSession: ObservableObject {
         }
 
         let stored = defaults.string(forKey: Self.serverKey) ?? ""
+        compactTabDestinations = Self.storedCompactTabs(in: defaults)
         let normalized = try? ServerConfiguration.normalize(stored)
         serverInput = stored
         serverURL = normalized
@@ -1216,6 +1219,19 @@ final class LedgerSession: ObservableObject {
 
     func toggleAmounts() {
         amountsVisible.toggle()
+    }
+
+    func setCompactTabDestinations(_ destinations: [LedgerDestination]) {
+        let normalized = LedgerDestination.normalizedCompactTabs(destinations)
+        compactTabDestinations = normalized
+        defaults.set(normalized.map(\.rawValue), forKey: Self.compactTabsKey)
+    }
+
+    private static func storedCompactTabs(in defaults: UserDefaults) -> [LedgerDestination] {
+        guard let rawValues = defaults.stringArray(forKey: compactTabsKey) else {
+            return LedgerDestination.defaultCompactTabs
+        }
+        return LedgerDestination.normalizedCompactTabs(rawValues.compactMap(LedgerDestination.init(rawValue:)))
     }
 
     func openWidgetURL(_ url: URL) {
