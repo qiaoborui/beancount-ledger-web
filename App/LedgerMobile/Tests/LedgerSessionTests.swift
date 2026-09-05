@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testConfiguredSessionStartsWithPrivacySafeApplicationShell() {
+        let suiteName = "ledger-mobile-startup-shell-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        XCTAssertEqual(session.phase, .checking)
+        XCTAssertFalse(session.privacyShielded)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
+    func testLocallyLockedSessionStartsDirectlyOnUnlockScreen() {
+        let suiteName = "ledger-mobile-startup-lock-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertFalse(session.privacyShielded)
+        XCTAssertFalse(session.amountsVisible)
+    }
+
     func testInjectedLedgerClockKeepsCalendarRangesStable() {
         let suiteName = "ledger-mobile-clock-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -11,7 +11,12 @@ struct RootView: View {
             switch session.phase {
             case .configuration:
                 ServerConfigurationView()
-            case .checking, .loading:
+            case .checking:
+                MainTabView()
+                    .redacted(reason: .placeholder)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            case .loading:
                 LoadingView()
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)

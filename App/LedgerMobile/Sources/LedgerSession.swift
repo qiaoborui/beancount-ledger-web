@@ -93,7 +93,7 @@ final class LedgerSession: ObservableObject {
     @Published var serverInput: String
     @Published var password = ""
     @Published var errorMessage: String?
-    @Published var amountsVisible = true
+    @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
     @Published private(set) var selectedRange: LedgerDateRange
     @Published private(set) var draftRange: LedgerDateRange
@@ -172,9 +172,14 @@ final class LedgerSession: ObservableObject {
         serverInput = stored
         serverURL = normalized
         phase = normalized == nil ? .configuration : .checking
-        privacyShielded = normalized != nil
+        privacyShielded = false
         if let normalized {
             lockInterval = storedLockInterval(for: normalized)
+            if isLocallyLocked(normalized) || shouldLockAfterBackground(for: normalized) {
+                setLocallyLocked(true, for: normalized)
+                clearBackgroundDate(for: normalized)
+                phase = .locked(authenticated: true)
+            }
         }
     }
 
