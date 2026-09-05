@@ -433,7 +433,9 @@ struct StatusBanner: View {
             RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(style.color.opacity(0.42), lineWidth: 1)
         }
-        .accessibilityLiveRegion(.polite)
+        .onChange(of: message, initial: true) { _, newMessage in
+            UIAccessibility.post(notification: .announcement, argument: newMessage)
+        }
     }
 }
 
