@@ -17,6 +17,29 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testConfiguredSessionKeepsApplicationShellDuringBootstrap() async throws {
+        let suiteName = "ledger-mobile-startup-bootstrap-shell-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            bootstrapDelays: ["CNY": 150_000_000]
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+
+        let resume = Task { await session.resume() }
+        for _ in 0..<100 {
+            if await api.callCounts().bootstrap == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        XCTAssertEqual(session.phase, .checking)
+        XCTAssertFalse(session.amountsVisible)
+        await resume.value
+        XCTAssertEqual(session.phase, .ready)
+    }
+
     func testLocallyLockedSessionStartsDirectlyOnUnlockScreen() {
         let suiteName = "ledger-mobile-startup-lock-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -461,6 +484,36 @@ final class LedgerSessionTests: XCTestCase {
             store.credential,
             QuickUnlockCredential(deviceID: "legacy-device", token: "legacy-token")
         )
+    }
+
+    func testColdFaceIDKeepsUnlockScreenVisibleWhileServerAccessResumes() async throws {
+        let suiteName = "ledger-mobile-cold-face-id-surface-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "device-12345678", token: "protected-token")
+        )
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            quickUnlockVerifyDelayNanoseconds: 150_000_000
+        )
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+
+        let unlock = Task { await session.unlockWithBiometrics() }
+        for _ in 0..<100 {
+            if await api.callCounts().quickUnlockVerify == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertTrue(session.canUseBiometricUnlock)
+        XCTAssertTrue(session.isAuthenticationBusy)
+        await unlock.value
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertFalse(session.isAuthenticationBusy)
     }
 
     func testColdLocalFaceIDMigratesToPersistentServerCredential() async {

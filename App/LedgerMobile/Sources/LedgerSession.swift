@@ -83,7 +83,6 @@ final class LedgerSession: ObservableObject {
         case configuration
         case checking
         case locked(authenticated: Bool)
-        case loading
         case ready
     }
 
@@ -103,6 +102,7 @@ final class LedgerSession: ObservableObject {
     @Published var rangePickerPresented = false
     @Published private(set) var passkeyAvailable = false
     @Published private(set) var privacyShielded = true
+    @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
     @Published private(set) var importIndexProgress: LedgerImportIndexProgress?
@@ -235,7 +235,9 @@ final class LedgerSession: ObservableObject {
     }
 
     func login() async {
-        guard case let .locked(authenticated) = phase, let serverURL else { return }
+        guard case let .locked(authenticated) = phase,
+              let serverURL,
+              !isAuthenticationBusy else { return }
         let candidate = password
         guard !candidate.isEmpty else {
             errorMessage = "请输入账本密码"
@@ -243,7 +245,8 @@ final class LedgerSession: ObservableObject {
         }
 
         let generation = invalidateSession()
-        phase = .loading
+        isAuthenticationBusy = true
+        defer { isAuthenticationBusy = false }
         errorMessage = nil
         do {
             try await api.login(baseURL: serverURL, password: candidate)
@@ -251,9 +254,10 @@ final class LedgerSession: ObservableObject {
                 clearAuthenticationCookies(for: serverURL)
                 return
             }
-            setLocallyLocked(false, for: serverURL)
             password = ""
             try await loadLedger(from: serverURL, generation: generation)
+            guard generation == requestGeneration, phase == .ready else { return }
+            setLocallyLocked(false, for: serverURL)
         } catch {
             guard generation == requestGeneration else { return }
             password = ""
@@ -266,9 +270,11 @@ final class LedgerSession: ObservableObject {
         guard case let .locked(authenticated) = phase,
               let serverURL,
               passkeyAvailable,
-              isTrustedNativePasskeyOrigin(serverURL) else { return }
+              isTrustedNativePasskeyOrigin(serverURL),
+              !isAuthenticationBusy else { return }
         let generation = invalidateSession()
-        phase = .loading
+        isAuthenticationBusy = true
+        defer { isAuthenticationBusy = false }
         errorMessage = nil
         do {
             let options = try await api.passkeyLoginOptions(baseURL: serverURL)
@@ -286,8 +292,9 @@ final class LedgerSession: ObservableObject {
                 clearAuthenticationCookies(for: serverURL)
                 return
             }
-            setLocallyLocked(false, for: serverURL)
             try await loadLedger(from: serverURL, generation: generation)
+            guard generation == requestGeneration, phase == .ready else { return }
+            setLocallyLocked(false, for: serverURL)
         } catch {
             guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
@@ -296,9 +303,13 @@ final class LedgerSession: ObservableObject {
     }
 
     func unlockWithBiometrics() async {
-        guard case let .locked(authenticated) = phase, let serverURL, canUseBiometricUnlock else { return }
+        guard case let .locked(authenticated) = phase,
+              let serverURL,
+              canUseBiometricUnlock,
+              !isAuthenticationBusy else { return }
         let generation = invalidateSession()
-        phase = .loading
+        isAuthenticationBusy = true
+        defer { isAuthenticationBusy = false }
         errorMessage = nil
         do {
             let credential: QuickUnlockCredential
@@ -312,8 +323,8 @@ final class LedgerSession: ObservableObject {
             }
             guard generation == requestGeneration else { return }
             let usesLocalMarker = credential.deviceID == "local-biometric"
-            setLocallyLocked(false, for: serverURL)
             if ledger != nil {
+                setLocallyLocked(false, for: serverURL)
                 amountsVisible = applicationActive
                 privacyShielded = !applicationActive
                 phase = .ready
@@ -343,6 +354,9 @@ final class LedgerSession: ObservableObject {
             } else {
                 try await loadLedger(from: serverURL, generation: generation)
                 serverAccessConfirmed = phase == .ready
+                if serverAccessConfirmed {
+                    setLocallyLocked(false, for: serverURL)
+                }
             }
             if case .locked = phase {
                 setLocallyLocked(true, for: serverURL)
@@ -431,7 +445,7 @@ final class LedgerSession: ObservableObject {
         guard phase == .ready, let serverURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
         do {
-            try await loadLedger(from: serverURL, showLoadingState: false, generation: generation)
+            try await loadLedger(from: serverURL, generation: generation)
             guard generation == requestGeneration else { return false }
             errorMessage = nil
             return true
@@ -449,7 +463,6 @@ final class LedgerSession: ObservableObject {
         do {
             try await loadLedger(
                 from: serverURL,
-                showLoadingState: false,
                 generation: generation,
                 preserveCachedLedgerOnSensitiveLock: true
             )
@@ -474,7 +487,6 @@ final class LedgerSession: ObservableObject {
         do {
             try await loadLedger(
                 from: serverURL,
-                showLoadingState: false,
                 generation: generation,
                 valuationCurrency: currency
             )
@@ -1089,7 +1101,6 @@ final class LedgerSession: ObservableObject {
         do {
             try await loadLedger(
                 from: serverURL,
-                showLoadingState: false,
                 generation: generation,
                 range: range
             )
@@ -1278,13 +1289,11 @@ final class LedgerSession: ObservableObject {
 
     private func loadLedger(
         from serverURL: URL,
-        showLoadingState: Bool = true,
         generation: Int,
         range: LedgerDateRange? = nil,
         valuationCurrency: String? = nil,
         preserveCachedLedgerOnSensitiveLock: Bool = false
     ) async throws {
-        if showLoadingState { phase = .loading }
         let targetRange = range ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: serverURL)
         let payload = try await api.bootstrap(

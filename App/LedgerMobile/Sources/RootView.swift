@@ -16,8 +16,6 @@ struct RootView: View {
                     .redacted(reason: .placeholder)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-            case .loading:
-                LoadingView()
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)
             case .ready:
@@ -50,20 +48,6 @@ struct PrivacyCover: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LedgerPalette.canvas)
         .ignoresSafeArea()
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct LoadingView: View {
-    var body: some View {
-        VStack(spacing: LedgerSpacing.lg) {
-            LedgerBrandMark(size: 48)
-            ProgressView()
-                .tint(LedgerPalette.cobalt)
-            Text("正在连接 Ledger")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(LedgerPalette.secondary)
-        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -263,6 +247,7 @@ private struct LoginView: View {
                             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
+                        .disabled(session.isAuthenticationBusy)
                     }
 
                     if session.passkeyAvailable {
@@ -288,6 +273,19 @@ private struct LoginView: View {
                             }
                         }
                         .buttonStyle(PressScaleButtonStyle())
+                        .disabled(session.isAuthenticationBusy)
+                    }
+
+                    if session.isAuthenticationBusy {
+                        HStack(spacing: LedgerSpacing.sm) {
+                            ProgressView()
+                                .tint(LedgerPalette.cobalt)
+                            Text("正在安全恢复账本")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .combine)
                     }
 
                     if session.canUseBiometricUnlock || session.passkeyAvailable {
@@ -311,6 +309,7 @@ private struct LoginView: View {
                             .focused($passwordFocused)
                             .onSubmit { Task { await session.login() } }
                             .modifier(LedgerTextFieldStyle(focused: passwordFocused))
+                            .disabled(session.isAuthenticationBusy)
                     }
 
                     if let error = session.errorMessage {
@@ -336,6 +335,7 @@ private struct LoginView: View {
                         }
                     }
                     .buttonStyle(PressScaleButtonStyle())
+                    .disabled(session.isAuthenticationBusy)
 
                     Button("更换服务器") {
                         session.changeServer()
@@ -344,6 +344,7 @@ private struct LoginView: View {
                     .foregroundStyle(LedgerPalette.cobalt)
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .buttonStyle(PressScaleButtonStyle())
+                    .disabled(session.isAuthenticationBusy)
                 }
             }
         }
