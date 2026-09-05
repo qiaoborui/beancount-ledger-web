@@ -17,6 +17,40 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
+    func testInitialInactiveSceneDoesNotCoverColdStartSurface() async {
+        let suiteName = "ledger-mobile-startup-inactive-scene-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        await session.updateActivity(isActive: false, isBackground: false)
+
+        XCTAssertFalse(session.privacyShielded)
+        XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: false))
+
+        await session.updateActivity(isActive: true, isBackground: false)
+        XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: true))
+
+        await session.updateActivity(isActive: false, isBackground: false)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: false))
+    }
+
+    func testInitialBackgroundSceneArmsPrivacyCover() async {
+        let suiteName = "ledger-mobile-startup-background-scene-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        await session.updateActivity(isActive: false, isBackground: true)
+
+        XCTAssertTrue(session.privacyShielded)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: false))
+    }
+
     func testConfiguredSessionKeepsApplicationShellDuringBootstrap() async throws {
         let suiteName = "ledger-mobile-startup-bootstrap-shell-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

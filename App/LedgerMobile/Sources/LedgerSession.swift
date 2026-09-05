@@ -102,6 +102,7 @@ final class LedgerSession: ObservableObject {
     @Published var rangePickerPresented = false
     @Published private(set) var passkeyAvailable = false
     @Published private(set) var privacyShielded = true
+    @Published private(set) var privacyCoverArmed = false
     @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
@@ -1180,8 +1181,11 @@ final class LedgerSession: ObservableObject {
         let wasActive = applicationActive
         applicationActive = isActive
         if !isActive {
-            privacyShielded = true
-            amountsVisible = false
+            if privacyCoverArmed || isBackground {
+                privacyShielded = true
+                privacyCoverArmed = true
+                amountsVisible = false
+            }
             guard isBackground, let serverURL else { return }
             recordBackgroundDate(for: serverURL)
             if lockInterval == .immediately {
@@ -1200,9 +1204,14 @@ final class LedgerSession: ObservableObject {
         clearBackgroundDate(for: serverURL)
         amountsVisible = phase == .ready
         privacyShielded = false
+        privacyCoverArmed = true
         guard !wasActive, phase == .ready, !systemAuthenticationInProgress else { return }
         Task { await restoreImportIndexTrackingIfNeeded() }
         await refresh()
+    }
+
+    func presentsPrivacyCover(sceneIsActive: Bool) -> Bool {
+        privacyCoverArmed && (!sceneIsActive || privacyShielded)
     }
 
     func toggleAmounts() {

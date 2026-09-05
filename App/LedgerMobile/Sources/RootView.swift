@@ -22,7 +22,7 @@ struct RootView: View {
                 MainTabView()
             }
 
-            if scenePhase != .active || session.privacyShielded {
+            if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
                 PrivacyCover()
                     .transition(.opacity)
             }

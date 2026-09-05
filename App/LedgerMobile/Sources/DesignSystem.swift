@@ -164,7 +164,7 @@ private struct LedgerPrivacyProtectedSheet: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
             content
-            if scenePhase != .active || session.privacyShielded {
+            if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
                 PrivacyCover()
                     .zIndex(1)
             }
