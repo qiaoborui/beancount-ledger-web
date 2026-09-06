@@ -352,53 +352,6 @@ private struct LoginView: View {
     }
 }
 
-enum LedgerDestination: String, CaseIterable, Hashable {
-    case overview
-    case assets
-    case incomeExpense
-    case investments
-    case currencies
-    case query
-    case imports
-    case transactions
-    case accounts
-    case settings
-
-    var title: String {
-        switch self {
-        case .overview: "财务概览"
-        case .assets: "资产"
-        case .incomeExpense: "收支分析"
-        case .investments: "投资"
-        case .currencies: "货币与汇率"
-        case .query: "查询"
-        case .imports: "导入"
-        case .transactions: "交易账本"
-        case .accounts: "账户"
-        case .settings: "设置"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .overview: "house"
-        case .assets: "building.columns"
-        case .incomeExpense: "chart.bar.xaxis"
-        case .investments: "chart.pie"
-        case .currencies: "coloncurrencysign"
-        case .query: "cylinder.split.1x2"
-        case .imports: "tray.and.arrow.down"
-        case .transactions: "list.bullet"
-        case .accounts: "book.closed"
-        case .settings: "gearshape"
-        }
-    }
-
-    static func stored(_ rawValue: String) -> LedgerDestination {
-        LedgerDestination(rawValue: rawValue) ?? .overview
-    }
-}
-
 private struct MainTabView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -413,12 +366,8 @@ private struct MainTabView: View {
     private var compactSelection: Binding<LedgerDestination> {
         Binding(
             get: {
-                switch LedgerDestination.stored(session.primaryDestinationID) {
-                case .overview, .transactions, .accounts, .settings:
-                    return LedgerDestination.stored(session.primaryDestinationID)
-                case .assets, .incomeExpense, .investments, .currencies, .query, .imports:
-                    return .settings
-                }
+                LedgerDestination.stored(session.primaryDestinationID)
+                    .compactSelection(in: session.compactTabDestinations)
             },
             set: { session.primaryDestinationID = $0.rawValue }
         )
@@ -437,21 +386,43 @@ private struct MainTabView: View {
 
     private var compactTabs: some View {
         TabView(selection: compactSelection) {
-            OverviewView()
-                .tabItem { Label("概览", systemImage: "house") }
-                .tag(LedgerDestination.overview)
-            TransactionsView()
-                .tabItem { Label("交易", systemImage: "list.bullet") }
-                .tag(LedgerDestination.transactions)
-            AccountsView()
-                .tabItem { Label("账户", systemImage: "book.closed") }
-                .tag(LedgerDestination.accounts)
+            ForEach(session.compactTabDestinations) { destination in
+                compactDestination(destination)
+                    .tabItem { Label(destination.compactTitle, systemImage: destination.systemImage) }
+                    .tag(destination)
+            }
             MoreView()
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
         }
         .toolbarBackground(LedgerPalette.panel, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
+    }
+
+    @ViewBuilder
+    private func compactDestination(_ destination: LedgerDestination) -> some View {
+        switch destination {
+        case .overview:
+            OverviewView()
+        case .assets:
+            LedgerAnalysisView(kind: .assets, showsAppBar: true)
+        case .incomeExpense:
+            LedgerAnalysisView(kind: .incomeExpense, showsAppBar: true)
+        case .investments:
+            LedgerAnalysisView(kind: .investments, showsAppBar: true)
+        case .currencies:
+            CurrencyAnalysisView(showsAppBar: true)
+        case .query:
+            BQLQueryView(showsAppBar: true)
+        case .imports:
+            ImportHistoryView(showsAppBar: true)
+        case .transactions:
+            TransactionsView()
+        case .accounts:
+            AccountsView()
+        case .settings:
+            MoreView()
+        }
     }
 }
 

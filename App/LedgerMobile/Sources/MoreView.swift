@@ -3,11 +3,21 @@ import SwiftUI
 struct MoreView: View {
     @EnvironmentObject private var session: LedgerSession
 
-    private var importLinkPresented: Binding<Bool> {
+    private var overflowDestination: Binding<LedgerDestination?> {
         Binding(
-            get: { session.primaryDestinationID == LedgerDestination.imports.rawValue },
-            set: { presented in
-                if !presented, session.primaryDestinationID == LedgerDestination.imports.rawValue {
+            get: {
+                let destination = LedgerDestination.stored(session.primaryDestinationID)
+                guard destination != .settings,
+                      !session.compactTabDestinations.contains(destination) else { return nil }
+                return destination
+            },
+            set: { destination in
+                if let destination {
+                    session.primaryDestinationID = destination.rawValue
+                } else {
+                    let current = LedgerDestination.stored(session.primaryDestinationID)
+                    guard current != .settings,
+                          !session.compactTabDestinations.contains(current) else { return }
                     session.primaryDestinationID = LedgerDestination.settings.rawValue
                 }
             }
@@ -32,6 +42,37 @@ struct MoreView: View {
                         }
 
                         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                            Text("主要页面")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 2)
+
+                            LedgerPanel {
+                                VStack(spacing: 0) {
+                                    MoreDestinationButton(
+                                        destination: .overview,
+                                        detail: "净资产、收支与近期财务动态"
+                                    )
+
+                                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+
+                                    MoreDestinationButton(
+                                        destination: .transactions,
+                                        detail: "浏览、筛选与编辑账本流水"
+                                    )
+
+                                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
+
+                                    MoreDestinationButton(
+                                        destination: .accounts,
+                                        detail: "查看账户余额、变化与明细"
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.horizontal, LedgerSpacing.lg)
+
+                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
                             Text("财务分析")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.secondary)
@@ -40,13 +81,11 @@ struct MoreView: View {
                             LedgerPanel {
                                 VStack(spacing: 0) {
                                     ForEach(Array(LedgerAnalysisKind.allCases.enumerated()), id: \.element) { index, kind in
-                                        NavigationLink {
-                                            LedgerAnalysisView(kind: kind)
-                                        } label: {
-                                            MoreNavigationRow(icon: kind.systemImage, title: kind.title, detail: kind.detail)
-                                        }
-                                        .buttonStyle(PressScaleButtonStyle())
-                                        .accessibilityIdentifier("more-analysis-\(kind.rawValue)")
+                                        MoreDestinationButton(
+                                            destination: destination(for: kind),
+                                            detail: kind.detail,
+                                            accessibilityIdentifier: "more-analysis-\(kind.rawValue)"
+                                        )
 
                                         if index < LedgerAnalysisKind.allCases.count - 1 {
                                             Divider().overlay(LedgerPalette.line).padding(.leading, 64)
@@ -86,45 +125,27 @@ struct MoreView: View {
 
                             LedgerPanel {
                                 VStack(spacing: 0) {
-                                    NavigationLink {
-                                        ImportHistoryView()
-                                    } label: {
-                                        MoreNavigationRow(
-                                            icon: "tray.and.arrow.down",
-                                            title: "导入记录",
-                                            detail: "各渠道覆盖日期、更新状态与归档历史"
-                                        )
-                                    }
-                                    .buttonStyle(PressScaleButtonStyle())
-                                    .accessibilityIdentifier("more-imports")
+                                    MoreDestinationButton(
+                                        destination: .imports,
+                                        detail: "各渠道覆盖日期、更新状态与归档历史",
+                                        accessibilityIdentifier: "more-imports"
+                                    )
 
                                     Divider().overlay(LedgerPalette.line).padding(.leading, 64)
 
-                                    NavigationLink {
-                                        CurrencyAnalysisView()
-                                    } label: {
-                                        MoreNavigationRow(
-                                            icon: "coloncurrencysign",
-                                            title: "货币与汇率",
-                                            detail: "估值货币、汇率来源与近期变化"
-                                        )
-                                    }
-                                    .buttonStyle(PressScaleButtonStyle())
-                                    .accessibilityIdentifier("more-currencies")
+                                    MoreDestinationButton(
+                                        destination: .currencies,
+                                        detail: "估值货币、汇率来源与近期变化",
+                                        accessibilityIdentifier: "more-currencies"
+                                    )
 
                                     Divider().overlay(LedgerPalette.line).padding(.leading, 64)
 
-                                    NavigationLink {
-                                        BQLQueryView()
-                                    } label: {
-                                        MoreNavigationRow(
-                                            icon: "cylinder.split.1x2",
-                                            title: "BQL 查询",
-                                            detail: "高级筛选、聚合分析与查询历史"
-                                        )
-                                    }
-                                    .buttonStyle(PressScaleButtonStyle())
-                                    .accessibilityIdentifier("more-query")
+                                    MoreDestinationButton(
+                                        destination: .query,
+                                        detail: "高级筛选、聚合分析与查询历史",
+                                        accessibilityIdentifier: "more-query"
+                                    )
                                 }
                             }
                         }
@@ -171,10 +192,62 @@ struct MoreView: View {
             }
             .background(LedgerPalette.canvas)
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: importLinkPresented) {
-                ImportHistoryView()
+            .navigationDestination(item: overflowDestination) { destination in
+                overflowDestinationView(destination)
             }
         }
+    }
+
+    private func destination(for kind: LedgerAnalysisKind) -> LedgerDestination {
+        switch kind {
+        case .assets: .assets
+        case .incomeExpense: .incomeExpense
+        case .investments: .investments
+        }
+    }
+
+    @ViewBuilder
+    private func overflowDestinationView(_ destination: LedgerDestination) -> some View {
+        switch destination {
+        case .overview:
+            OverviewView()
+        case .assets:
+            LedgerAnalysisView(kind: .assets)
+        case .incomeExpense:
+            LedgerAnalysisView(kind: .incomeExpense)
+        case .investments:
+            LedgerAnalysisView(kind: .investments)
+        case .currencies:
+            CurrencyAnalysisView()
+        case .query:
+            BQLQueryView()
+        case .imports:
+            ImportHistoryView()
+        case .transactions:
+            TransactionsView()
+        case .accounts:
+            AccountsView()
+        case .settings:
+            SettingsView(showsAppBar: false)
+        }
+    }
+}
+
+private struct MoreDestinationButton: View {
+    @EnvironmentObject private var session: LedgerSession
+
+    let destination: LedgerDestination
+    let detail: String
+    var accessibilityIdentifier: String? = nil
+
+    var body: some View {
+        Button {
+            session.primaryDestinationID = destination.rawValue
+        } label: {
+            MoreNavigationRow(icon: destination.systemImage, title: destination.title, detail: detail)
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
     }
 }
 

@@ -2,6 +2,32 @@ import XCTest
 @testable import LedgerMobile
 
 final class LedgerModelsTests: XCTestCase {
+    func testCompactTabsPreserveOrderDeduplicateLimitAndFallback() {
+        XCTAssertEqual(
+            LedgerDestination.normalizedCompactTabs([
+                .transactions,
+                .imports,
+                .transactions,
+                .assets,
+                .query,
+                .accounts,
+            ]),
+            [.transactions, .imports, .assets, .query]
+        )
+        XCTAssertEqual(
+            LedgerDestination.normalizedCompactTabs([.settings]),
+            LedgerDestination.defaultCompactTabs
+        )
+        XCTAssertEqual(
+            LedgerDestination.overview.compactSelection(in: [.transactions, .accounts]),
+            .settings
+        )
+        XCTAssertEqual(
+            LedgerDestination.accounts.compactSelection(in: [.transactions, .accounts]),
+            .accounts
+        )
+    }
+
     func testPasskeyAssertionUsesUnpaddedBase64URLWebAuthnJSON() throws {
         let assertion = PasskeyAssertion(
             credentialID: Data([0xFB, 0xFF]),

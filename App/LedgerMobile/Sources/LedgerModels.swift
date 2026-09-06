@@ -1,5 +1,88 @@
 import Foundation
 
+enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case overview
+    case assets
+    case incomeExpense
+    case investments
+    case currencies
+    case query
+    case imports
+    case transactions
+    case accounts
+    case settings
+
+    static let compactTabLimit = 4
+    static let defaultCompactTabs: [LedgerDestination] = [.overview, .transactions, .accounts]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: "财务概览"
+        case .assets: "资产"
+        case .incomeExpense: "收支分析"
+        case .investments: "投资"
+        case .currencies: "货币与汇率"
+        case .query: "查询"
+        case .imports: "导入"
+        case .transactions: "交易账本"
+        case .accounts: "账户"
+        case .settings: "设置"
+        }
+    }
+
+    var compactTitle: String {
+        switch self {
+        case .overview: "概览"
+        case .assets: "资产"
+        case .incomeExpense: "收支"
+        case .investments: "投资"
+        case .currencies: "货币"
+        case .query: "查询"
+        case .imports: "导入"
+        case .transactions: "交易"
+        case .accounts: "账户"
+        case .settings: "更多"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: "house"
+        case .assets: "building.columns"
+        case .incomeExpense: "chart.bar.xaxis"
+        case .investments: "chart.pie"
+        case .currencies: "coloncurrencysign"
+        case .query: "cylinder.split.1x2"
+        case .imports: "tray.and.arrow.down"
+        case .transactions: "list.bullet"
+        case .accounts: "book.closed"
+        case .settings: "gearshape"
+        }
+    }
+
+    static var compactTabCandidates: [LedgerDestination] {
+        allCases.filter { $0 != .settings }
+    }
+
+    static func normalizedCompactTabs(_ destinations: [LedgerDestination]) -> [LedgerDestination] {
+        var seen = Set<LedgerDestination>()
+        let normalized = destinations
+            .filter { $0 != .settings && seen.insert($0).inserted }
+            .prefix(compactTabLimit)
+        return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
+    }
+
+    func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {
+        self == .settings || destinations.contains(self) ? self : .settings
+    }
+
+    static func stored(_ rawValue: String) -> LedgerDestination {
+        LedgerDestination(rawValue: rawValue) ?? .overview
+    }
+}
+
 enum LedgerDateRangePreset: String, CaseIterable, Equatable, Sendable {
     case month
     case quarter
