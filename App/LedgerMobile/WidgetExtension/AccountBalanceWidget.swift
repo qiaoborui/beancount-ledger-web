@@ -87,12 +87,16 @@ struct AccountBalanceProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<AccountBalanceEntry> {
         let now = Date()
+        let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
         let entry = AccountBalanceEntry(
             date: now,
-            snapshot: LedgerWidgetSnapshotStore.shared.load(),
+            snapshot: result.snapshot,
             selectedAccountID: configuration.account?.id
         )
-        return Timeline(entries: [entry], policy: .after(now.addingTimeInterval(30 * 60)))
+        return Timeline(
+            entries: [entry],
+            policy: .after(now.addingTimeInterval(result.refreshInterval))
+        )
     }
 }
 

@@ -396,10 +396,18 @@ struct QuickUnlockRegisterRequest: Encodable {
 struct QuickUnlockCredential: Codable, Equatable, Sendable {
     let deviceID: String
     let token: String
+    let expiresAt: String?
+
+    init(deviceID: String, token: String, expiresAt: String? = nil) {
+        self.deviceID = deviceID
+        self.token = token
+        self.expiresAt = expiresAt
+    }
 
     private enum CodingKeys: String, CodingKey {
         case deviceID = "deviceId"
         case token
+        case expiresAt
     }
 }
 
@@ -415,9 +423,16 @@ struct QuickUnlockVerifyRequest: Encodable {
 
 struct QuickUnlockRevokeRequest: Encodable {
     let deviceID: String
+    let token: String?
+
+    init(deviceID: String, token: String? = nil) {
+        self.deviceID = deviceID
+        self.token = token
+    }
 
     private enum CodingKeys: String, CodingKey {
         case deviceID = "deviceId"
+        case token
     }
 }
 

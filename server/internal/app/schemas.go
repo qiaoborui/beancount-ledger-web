@@ -29,6 +29,7 @@ type QuickUnlockVerifyRequest struct {
 
 type QuickUnlockRevokeRequest struct {
 	DeviceID string `json:"deviceId"`
+	Token    string `json:"token,omitempty"`
 }
 
 type PasskeyRenameRequest struct {
@@ -117,7 +118,7 @@ func (r QuickUnlockRegisterRequest) Validate() error {
 		return fmt.Errorf("deviceId is invalid")
 	}
 	switch r.Mode {
-	case "numeric", "text":
+	case quickUnlockModeNumeric, quickUnlockModeText, quickUnlockModeWidget:
 	default:
 		return fmt.Errorf("mode is invalid")
 	}
@@ -140,6 +141,9 @@ func (r QuickUnlockVerifyRequest) Validate() error {
 func (r QuickUnlockRevokeRequest) Validate() error {
 	if !deviceIDPattern.MatchString(r.DeviceID) {
 		return fmt.Errorf("deviceId is invalid")
+	}
+	if len(r.Token) > 512 {
+		return fmt.Errorf("token is too long")
 	}
 	return nil
 }

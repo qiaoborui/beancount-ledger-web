@@ -6,6 +6,10 @@
     <array>
         <string>group.com.qiaoborui.ledger.mobile</string>
     </array>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared</string>
+    </array>
     <key>com.apple.developer.associated-domains</key>
     <array>
         <string>webcredentials:beancount.borry.org</string>

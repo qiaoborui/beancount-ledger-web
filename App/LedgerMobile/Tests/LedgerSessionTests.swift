@@ -764,6 +764,120 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.quickUnlockRevoke, 1)
     }
 
+    func testFaceIDEnrollmentCreatesAndSuspendsScopedWidgetCredential() async {
+        let suiteName = "ledger-mobile-widget-credential-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let biometricStore = MockBiometricCredentialStore()
+        let widgetStore = MockWidgetCredentialStore()
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(
+            api: api,
+            defaults: defaults,
+            biometricStore: biometricStore,
+            widgetCredentialStore: widgetStore
+        )
+        await session.resume()
+
+        await session.setBiometricUnlockEnabled(true)
+
+        XCTAssertEqual(widgetStore.credential?.serverOrigin, "https://ledger.example.com")
+        XCTAssertEqual(widgetStore.credential?.deviceID, "registered-widget")
+        XCTAssertEqual(widgetStore.credential?.token, "registered-widget-token")
+        XCTAssertEqual(widgetStore.credential?.valuationCurrency, Self.payload.valuationCurrency)
+        XCTAssertEqual(widgetStore.credential?.enabled, true)
+        XCTAssertNotNil(widgetStore.credential?.expiresAt)
+        var calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegistrationModes, ["text", "widget"])
+
+        session.logout()
+        XCTAssertNil(try widgetStore.load())
+
+        session.password = "secret"
+        await session.login()
+        XCTAssertEqual(widgetStore.credential?.enabled, true)
+        calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegistrationModes, ["text", "widget", "widget"])
+    }
+
+    func testExpiredWidgetCredentialRotatesAfterUnauthorizedRevoke() async throws {
+        let suiteName = "ledger-mobile-widget-rotation-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = ISO8601DateFormatter().date(from: "2026-09-06T12:00:00Z")!
+        let biometricStore = MockBiometricCredentialStore(
+            credential: QuickUnlockCredential(deviceID: "phone-device", token: "phone-token")
+        )
+        let widgetStore = MockWidgetCredentialStore()
+        try widgetStore.save(
+            LedgerWidgetCredential(
+                serverOrigin: "https://ledger.example.com",
+                deviceID: "expired-widget",
+                token: "expired-token",
+                valuationCurrency: "CNY",
+                enabled: true,
+                expiresAt: ISO8601DateFormatter().string(from: now.addingTimeInterval(-1))
+            )
+        )
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            widgetQuickUnlockRevokeErrorStatus: 401
+        )
+        let session = LedgerSession(
+            api: api,
+            defaults: defaults,
+            biometricStore: biometricStore,
+            widgetCredentialStore: widgetStore,
+            ledgerNow: { now }
+        )
+
+        await session.resume()
+
+        XCTAssertEqual(widgetStore.credential?.deviceID, "registered-widget")
+        XCTAssertEqual(widgetStore.credential?.token, "registered-widget-token")
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegistrationModes, ["widget"])
+        XCTAssertEqual(calls.quickUnlockRevoke, 1)
+    }
+
+    func testWidgetCredentialStillRevokesWhenLocalSuspendFails() async throws {
+        let suiteName = "ledger-mobile-widget-revoke-fallback-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let widgetStore = MockWidgetCredentialStore()
+        try widgetStore.save(
+            LedgerWidgetCredential(
+                serverOrigin: "https://ledger.example.com",
+                deviceID: "active-widget",
+                token: "active-token",
+                valuationCurrency: "CNY",
+                enabled: true
+            )
+        )
+        widgetStore.suspendShouldFail = true
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(
+            api: api,
+            defaults: defaults,
+            widgetCredentialStore: widgetStore
+        )
+
+        session.logout()
+
+        for _ in 0..<100 {
+            if await api.callCounts().quickUnlockRevoke == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRevoke, 1)
+        XCTAssertNil(widgetStore.credential)
+    }
+
     func testPasskeyLoginVerifiesAssertionAndLoadsLedger() async throws {
         try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "个人团队构建未启用关联域名通行密钥")
         let suiteName = "ledger-mobile-passkey-tests-\(UUID().uuidString)"
@@ -2080,6 +2194,7 @@ private actor SessionMockAPI: LedgerAPI {
         let login: Int
         let bootstrap: Int
         let quickUnlockRegister: Int
+        let quickUnlockRegistrationModes: [String]
         let quickUnlockVerify: Int
         let quickUnlockRevoke: Int
         let passkeyStatus: Int
@@ -2126,12 +2241,14 @@ private actor SessionMockAPI: LedgerAPI {
     let quickUnlockVerifyShouldFail: Bool
     let quickUnlockVerifyDelayNanoseconds: UInt64
     let quickUnlockRevokeDelayNanoseconds: UInt64
+    let widgetQuickUnlockRevokeErrorStatus: Int?
     let transactionWriteDelayNanoseconds: UInt64
     let transactionWritesShouldFail: Bool
     private var authStatusCalls = 0
     private var loginCalls = 0
     private var bootstrapCalls = 0
     private var quickUnlockRegisterCalls = 0
+    private var quickUnlockRegistrationModes: [String] = []
     private var quickUnlockVerifyCalls = 0
     private var quickUnlockRevokeCalls = 0
     private var lockCalls = 0
@@ -2193,6 +2310,7 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockVerifyShouldFail: Bool = false,
         quickUnlockVerifyDelayNanoseconds: UInt64 = 0,
         quickUnlockRevokeDelayNanoseconds: UInt64 = 0,
+        widgetQuickUnlockRevokeErrorStatus: Int? = nil,
         transactionWriteDelayNanoseconds: UInt64 = 0,
         transactionWritesShouldFail: Bool = false
     ) {
@@ -2225,6 +2343,7 @@ private actor SessionMockAPI: LedgerAPI {
         self.quickUnlockVerifyShouldFail = quickUnlockVerifyShouldFail
         self.quickUnlockVerifyDelayNanoseconds = quickUnlockVerifyDelayNanoseconds
         self.quickUnlockRevokeDelayNanoseconds = quickUnlockRevokeDelayNanoseconds
+        self.widgetQuickUnlockRevokeErrorStatus = widgetQuickUnlockRevokeErrorStatus
         self.transactionWriteDelayNanoseconds = transactionWriteDelayNanoseconds
         self.transactionWritesShouldFail = transactionWritesShouldFail
         serverTransactions = payload.transactions
@@ -2260,8 +2379,12 @@ private actor SessionMockAPI: LedgerAPI {
         passkeyVerifyCalls += 1
     }
 
-    func registerQuickUnlock(baseURL: URL, deviceName: String) async throws -> QuickUnlockCredential {
+    func registerQuickUnlock(baseURL: URL, deviceName: String, mode: String) async throws -> QuickUnlockCredential {
         quickUnlockRegisterCalls += 1
+        quickUnlockRegistrationModes.append(mode)
+        if mode == "widget" {
+            return QuickUnlockCredential(deviceID: "registered-widget", token: "registered-widget-token")
+        }
         return QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")
     }
 
@@ -2277,6 +2400,16 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockRevokeCalls += 1
         if quickUnlockRevokeDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: quickUnlockRevokeDelayNanoseconds)
+        }
+    }
+
+    func revokeWidgetQuickUnlock(baseURL: URL, credential: LedgerWidgetCredential) async throws {
+        quickUnlockRevokeCalls += 1
+        if quickUnlockRevokeDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: quickUnlockRevokeDelayNanoseconds)
+        }
+        if let widgetQuickUnlockRevokeErrorStatus {
+            throw LedgerAPIError.server(status: widgetQuickUnlockRevokeErrorStatus, message: "Widget credential rejected")
         }
     }
 
@@ -2581,6 +2714,7 @@ private actor SessionMockAPI: LedgerAPI {
             login: loginCalls,
             bootstrap: bootstrapCalls,
             quickUnlockRegister: quickUnlockRegisterCalls,
+            quickUnlockRegistrationModes: quickUnlockRegistrationModes,
             quickUnlockVerify: quickUnlockVerifyCalls,
             quickUnlockRevoke: quickUnlockRevokeCalls,
             passkeyStatus: passkeyStatusCalls,
@@ -2738,5 +2872,37 @@ private final class MockBiometricCredentialStore: BiometricCredentialStore {
 
     func deleteCredential(for origin: URL) {
         credential = nil
+    }
+}
+
+private final class MockWidgetCredentialStore: LedgerWidgetCredentialStoring, @unchecked Sendable {
+    let isAvailable = true
+    private(set) var credential: LedgerWidgetCredential?
+    private var suspended = false
+    var suspendShouldFail = false
+
+    func load() throws -> LedgerWidgetCredential? {
+        suspended ? nil : credential
+    }
+
+    func save(_ credential: LedgerWidgetCredential) throws {
+        self.credential = credential
+        suspended = false
+    }
+
+    func suspend() throws {
+        if suspendShouldFail { throw LedgerWidgetCredentialStoreError.unavailable }
+        suspended = credential != nil
+    }
+
+    func pendingRevocation() throws -> LedgerWidgetCredential? {
+        suspended ? credential : nil
+    }
+
+    func completeRevocation(deviceID: String) throws {
+        if credential?.deviceID == deviceID {
+            credential = nil
+        }
+        suspended = false
     }
 }

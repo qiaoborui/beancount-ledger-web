@@ -14,6 +14,13 @@ import (
 )
 
 const quickUnlockTokenBytes = 32
+const quickUnlockWidgetLifetime = 90 * 24 * time.Hour
+
+const (
+	quickUnlockModeNumeric = "numeric"
+	quickUnlockModeText    = "text"
+	quickUnlockModeWidget  = "widget"
+)
 
 type quickUnlockStore struct {
 	Version int                 `json:"version"`
@@ -37,6 +44,7 @@ type quickUnlockPublicDevice struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
 }
 
 func (s *Server) quickUnlockStatus(c *gin.Context) {
@@ -49,6 +57,7 @@ func (s *Server) quickUnlockStatus(c *gin.Context) {
 		devices = append(devices, quickUnlockPublicDevice{
 			ID: device.ID, Name: device.Name, Mode: device.Mode,
 			CreatedAt: device.CreatedAt, LastUsedAt: device.LastUsedAt, RevokedAt: device.RevokedAt,
+			ExpiresAt: device.expiresAt(),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"devices": devices})
@@ -79,7 +88,7 @@ func (s *Server) quickUnlockRegister(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	device := quickUnlockDevice{
 		ID: deviceID, Name: strings.TrimSpace(input.Name), Mode: input.Mode,
 		TokenHash: quickUnlockTokenHash(token), CreatedAt: now,
@@ -91,7 +100,11 @@ func (s *Server) quickUnlockRegister(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"deviceId": device.ID, "token": token})
+	response := gin.H{"deviceId": device.ID, "token": token}
+	if expiresAt := device.expiresAt(); expiresAt != nil {
+		response["expiresAt"] = expiresAt.Format(time.RFC3339)
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) quickUnlockVerify(c *gin.Context) {
@@ -102,7 +115,7 @@ func (s *Server) quickUnlockVerify(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	if err := s.verifyQuickUnlockDevice(input.DeviceID, input.Token); err != nil {
+	if err := s.verifyQuickUnlockDevice(input.DeviceID, input.Token, quickUnlockModeNumeric, quickUnlockModeText); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Quick unlock failed"})
 		return
 	}
@@ -120,12 +133,15 @@ func (s *Server) quickUnlockRevoke(c *gin.Context) {
 	if !s.limiter.Check(c, "quick-unlock.revoke", 20, time.Minute) {
 		return
 	}
-	if !requireAuth(c) {
-		return
-	}
 	var input QuickUnlockRevokeRequest
 	if !bindJSON(c, &input) {
 		return
+	}
+	if !isAuthenticated(c) {
+		if input.Token == "" || s.verifyQuickUnlockDevice(input.DeviceID, input.Token, quickUnlockModeWidget) != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Quick unlock revoke failed"})
+			return
+		}
 	}
 	if err := s.revokeQuickUnlockDevice(input.DeviceID); err != nil {
 		errorJSON(c, http.StatusBadRequest, err)
@@ -180,9 +196,9 @@ func (s *Server) saveQuickUnlockDevice(device quickUnlockDevice) error {
 	})
 }
 
-func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
+func (s *Server) verifyQuickUnlockDevice(deviceID string, token string, allowedModes ...string) error {
 	if s.quickUnlocks != nil {
-		return s.quickUnlocks.Verify(context.Background(), deviceID, quickUnlockTokenHash(token), time.Now().UTC())
+		return s.quickUnlocks.Verify(context.Background(), deviceID, quickUnlockTokenHash(token), allowedModes, time.Now().UTC())
 	}
 	tokenHash := quickUnlockTokenHash(token)
 	return s.runtime().WithLock(context.Background(), "auth/quick-unlock", func(lockCtx context.Context) error {
@@ -193,14 +209,42 @@ func (s *Server) verifyQuickUnlockDevice(deviceID string, token string) error {
 			if device.ID != deviceID || device.RevokedAt != nil {
 				continue
 			}
+			if device.isExpired(now) {
+				return errors.New("quick unlock device expired")
+			}
 			if !quickUnlockTokenHashesEqual(device.TokenHash, tokenHash) {
 				return errors.New("quick unlock token mismatch")
+			}
+			if !quickUnlockModeAllowed(device.Mode, allowedModes) {
+				return errors.New("quick unlock mode mismatch")
 			}
 			device.LastUsedAt = &now
 			return s.writeQuickUnlockStore(lockCtx, store)
 		}
 		return errors.New("quick unlock device not found")
 	})
+}
+
+func (d quickUnlockDevice) expiresAt() *time.Time {
+	if d.Mode != quickUnlockModeWidget || d.CreatedAt.IsZero() {
+		return nil
+	}
+	expiresAt := d.CreatedAt.UTC().Add(quickUnlockWidgetLifetime)
+	return &expiresAt
+}
+
+func (d quickUnlockDevice) isExpired(now time.Time) bool {
+	expiresAt := d.expiresAt()
+	return expiresAt != nil && !now.UTC().Before(*expiresAt)
+}
+
+func quickUnlockModeAllowed(mode string, allowedModes []string) bool {
+	for _, allowed := range allowedModes {
+		if mode == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) revokeQuickUnlockDevice(deviceID string) error {

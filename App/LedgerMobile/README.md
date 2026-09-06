@@ -36,7 +36,11 @@ authentication and privacy lock.
   recency. Widget snapshots contain expense analytics, account balances, and
   reduced import metadata only; income, archived document names and paths,
   cookies, passwords, and quick-unlock tokens stay out of the App Group
-  container.
+  container. After device biometric unlock is enabled, the app provisions a
+  separate revocable read-only credential in a shared device-only Keychain so
+  WidgetKit can refresh this reduced snapshot while the main app is closed.
+  The server expires this credential after 90 days, and the app rotates it
+  during the final 14 days.
 - Keep native Ledger passkey login ready for paid-team signing; Personal Team
   builds use password login and device-level biometric quick unlock.
 - Enable Face ID or Touch ID from Settings, then unlock with a server-revocable

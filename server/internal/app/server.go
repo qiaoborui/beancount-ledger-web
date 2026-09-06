@@ -195,6 +195,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	api.POST("/quick-unlock/register", s.quickUnlockRegister)
 	api.POST("/quick-unlock/verify", s.quickUnlockVerify)
 	api.POST("/quick-unlock/revoke", s.quickUnlockRevoke)
+	api.POST("/widget/snapshot", noStore(), s.widgetSnapshot)
 
 	api.POST("/passkey/login/options", s.passkeyLoginOptions)
 	api.POST("/passkey/login/verify", s.passkeyLoginVerify)

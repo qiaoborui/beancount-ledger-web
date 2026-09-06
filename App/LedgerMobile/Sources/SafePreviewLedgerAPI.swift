@@ -48,12 +48,13 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     func verifyPasskey(baseURL: URL, assertion: PasskeyAssertion) async throws {}
     func login(baseURL: URL, password: String) async throws {}
 
-    func registerQuickUnlock(baseURL: URL, deviceName: String) async throws -> QuickUnlockCredential {
+    func registerQuickUnlock(baseURL: URL, deviceName: String, mode: String) async throws -> QuickUnlockCredential {
         QuickUnlockCredential(deviceID: "safe-preview", token: "safe-preview")
     }
 
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws {}
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws {}
+    func revokeWidgetQuickUnlock(baseURL: URL, credential: LedgerWidgetCredential) async throws {}
 
     func bootstrap(
         baseURL: URL,

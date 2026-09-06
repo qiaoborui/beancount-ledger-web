@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,6 +133,89 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 	if quickBody.DeviceID != "test-device-1" || quickBody.Token == "" {
 		t.Fatalf("unexpected quick unlock register response: %#v", quickBody)
+	}
+
+	registerWidget := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/register", `{"deviceId":"test-widget-1","name":"Phone Widget","mode":"widget"}`, login.Result().Cookies())
+	if registerWidget.Code != http.StatusOK {
+		t.Fatalf("widget credential register status=%d body=%s", registerWidget.Code, registerWidget.Body.String())
+	}
+	var widgetCredential struct {
+		DeviceID  string `json:"deviceId"`
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(registerWidget.Body.Bytes(), &widgetCredential); err != nil {
+		t.Fatal(err)
+	}
+	if widgetCredential.DeviceID != "test-widget-1" || widgetCredential.Token == "" || widgetCredential.ExpiresAt == "" {
+		t.Fatalf("unexpected widget credential response: %#v", widgetCredential)
+	}
+
+	widgetSnapshot := requestWithCookies(
+		router,
+		http.MethodPost,
+		"/api/widget/snapshot",
+		fmt.Sprintf(`{"deviceId":"%s","token":"%s","today":"%s","valuationCurrency":"CNY"}`, widgetCredential.DeviceID, widgetCredential.Token, time.Now().Format("2006-01-02")),
+		nil,
+	)
+	if widgetSnapshot.Code != http.StatusOK {
+		t.Fatalf("widget snapshot status=%d body=%s", widgetSnapshot.Code, widgetSnapshot.Body.String())
+	}
+	if cookies := widgetSnapshot.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("widget snapshot issued cookies: %#v", cookies)
+	}
+	if got := widgetSnapshot.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("widget snapshot Cache-Control=%q", got)
+	}
+	var widgetBody struct {
+		SchemaVersion int `json:"schemaVersion"`
+		Expense       struct {
+			Currency string `json:"currency"`
+		} `json:"expense"`
+		Accounts []struct {
+			Account string `json:"account"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(widgetSnapshot.Body.Bytes(), &widgetBody); err != nil {
+		t.Fatal(err)
+	}
+	if widgetBody.SchemaVersion != 2 || widgetBody.Expense.Currency != "CNY" || len(widgetBody.Accounts) == 0 {
+		t.Fatalf("unexpected widget snapshot: %#v", widgetBody)
+	}
+
+	widgetFullUnlock := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"`+widgetCredential.DeviceID+`","token":"`+widgetCredential.Token+`"}`, nil)
+	if widgetFullUnlock.Code != http.StatusUnauthorized {
+		t.Fatalf("widget credential obtained full session status=%d body=%s", widgetFullUnlock.Code, widgetFullUnlock.Body.String())
+	}
+	normalCredentialWidgetSnapshot := requestWithCookies(
+		router,
+		http.MethodPost,
+		"/api/widget/snapshot",
+		fmt.Sprintf(`{"deviceId":"%s","token":"%s","today":"%s","valuationCurrency":"CNY"}`, quickBody.DeviceID, quickBody.Token, time.Now().Format("2006-01-02")),
+		nil,
+	)
+	if normalCredentialWidgetSnapshot.Code != http.StatusUnauthorized {
+		t.Fatalf("interactive credential accessed widget endpoint status=%d body=%s", normalCredentialWidgetSnapshot.Code, normalCredentialWidgetSnapshot.Body.String())
+	}
+	widgetRevoke := requestWithCookies(
+		router,
+		http.MethodPost,
+		"/api/quick-unlock/revoke",
+		fmt.Sprintf(`{"deviceId":"%s","token":"%s"}`, widgetCredential.DeviceID, widgetCredential.Token),
+		nil,
+	)
+	if widgetRevoke.Code != http.StatusOK {
+		t.Fatalf("widget self revoke status=%d body=%s", widgetRevoke.Code, widgetRevoke.Body.String())
+	}
+	widgetSnapshotAfterRevoke := requestWithCookies(
+		router,
+		http.MethodPost,
+		"/api/widget/snapshot",
+		fmt.Sprintf(`{"deviceId":"%s","token":"%s","today":"%s","valuationCurrency":"CNY"}`, widgetCredential.DeviceID, widgetCredential.Token, time.Now().Format("2006-01-02")),
+		nil,
+	)
+	if widgetSnapshotAfterRevoke.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked widget accessed snapshot status=%d body=%s", widgetSnapshotAfterRevoke.Code, widgetSnapshotAfterRevoke.Body.String())
 	}
 
 	mergeCookies := func(groups ...[]*http.Cookie) []*http.Cookie {
@@ -445,6 +529,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/quick-unlock/register":          true,
 		"POST /api/quick-unlock/verify":            true,
 		"POST /api/quick-unlock/revoke":            true,
+		"POST /api/widget/snapshot":                true,
 		"GET /api/passkey/status":                  true,
 		"GET /api/passkey/credentials":             true,
 		"PATCH /api/passkey/credentials/:id":       true,

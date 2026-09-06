@@ -33,6 +33,7 @@ targets:
             CFBundleURLSchemes:
               - ledger
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
+        LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
@@ -75,6 +76,8 @@ targets:
     sources:
       - WidgetExtension
       - path: Sources/LedgerWidgetSnapshot.swift
+      - path: Sources/LedgerWidgetCredentialStore.swift
+      - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
       - path: Sources/ImportIndexActivityAttributes.swift
     info:
@@ -83,6 +86,7 @@ targets:
         CFBundleDisplayName: Ledger 小组件
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -134,6 +138,8 @@ targets:
       - path: WidgetExtension/ImportStatusWidget.swift
       - path: WidgetExtension/WidgetDesign.swift
       - path: Sources/LedgerWidgetSnapshot.swift
+      - path: Sources/LedgerWidgetCredentialStore.swift
+      - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
     settings:
       base:
