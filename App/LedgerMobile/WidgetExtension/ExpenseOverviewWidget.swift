@@ -21,10 +21,17 @@ struct ExpenseOverviewProvider: TimelineProvider {
         )
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<ExpenseOverviewEntry>) -> Void) {
+    func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<ExpenseOverviewEntry>) -> Void) {
         let now = Date()
-        let entry = ExpenseOverviewEntry(date: now, snapshot: LedgerWidgetSnapshotStore.shared.load())
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(30 * 60))))
+        Task {
+            let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
+            completion(
+                Timeline(
+                    entries: [ExpenseOverviewEntry(date: now, snapshot: result.snapshot)],
+                    policy: .after(now.addingTimeInterval(result.refreshInterval))
+                )
+            )
+        }
     }
 }
 

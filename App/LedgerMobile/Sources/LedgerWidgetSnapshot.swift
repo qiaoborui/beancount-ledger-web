@@ -96,7 +96,7 @@ struct LedgerWidgetImportSnapshot: Codable, Equatable, Identifiable, Sendable {
     var latestCoverageDate: String? { coverageEnd ?? coverageStart }
 }
 
-struct LedgerWidgetSnapshotStore {
+struct LedgerWidgetSnapshotStore: Sendable {
     static let appGroupIdentifier = "group.com.qiaoborui.ledger.mobile"
     static let snapshotKey = "ledger.widgets.snapshot.v1"
     static let shared = LedgerWidgetSnapshotStore()

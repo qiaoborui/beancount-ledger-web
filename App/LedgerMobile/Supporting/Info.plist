@@ -31,6 +31,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LedgerWidgetKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>使用 Face ID 解锁受保护的账本金额和财务数据。</string>
 	<key>NSSupportsLiveActivities</key>

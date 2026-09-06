@@ -75,9 +75,10 @@ protocol LedgerAPI: Sendable {
     func passkeyLoginOptions(baseURL: URL) async throws -> PasskeyRequestOptions
     func verifyPasskey(baseURL: URL, assertion: PasskeyAssertion) async throws
     func login(baseURL: URL, password: String) async throws
-    func registerQuickUnlock(baseURL: URL, deviceName: String) async throws -> QuickUnlockCredential
+    func registerQuickUnlock(baseURL: URL, deviceName: String, mode: String) async throws -> QuickUnlockCredential
     func verifyQuickUnlock(baseURL: URL, credential: QuickUnlockCredential) async throws
     func revokeQuickUnlock(baseURL: URL, deviceID: String) async throws
+    func revokeWidgetQuickUnlock(baseURL: URL, credential: LedgerWidgetCredential) async throws
     func bootstrap(
         baseURL: URL,
         start: String,
@@ -321,12 +322,12 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         )
     }
 
-    func registerQuickUnlock(baseURL: URL, deviceName: String) async throws -> QuickUnlockCredential {
+    func registerQuickUnlock(baseURL: URL, deviceName: String, mode: String) async throws -> QuickUnlockCredential {
         try await send(
             baseURL: baseURL,
             path: "/api/quick-unlock/register",
             method: "POST",
-            body: QuickUnlockRegisterRequest(mode: "text", name: deviceName)
+            body: QuickUnlockRegisterRequest(mode: mode, name: deviceName)
         )
     }
 
@@ -345,6 +346,15 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/quick-unlock/revoke",
             method: "POST",
             body: QuickUnlockRevokeRequest(deviceID: deviceID)
+        )
+    }
+
+    func revokeWidgetQuickUnlock(baseURL: URL, credential: LedgerWidgetCredential) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/quick-unlock/revoke",
+            method: "POST",
+            body: QuickUnlockRevokeRequest(deviceID: credential.deviceID, token: credential.token)
         )
     }
 

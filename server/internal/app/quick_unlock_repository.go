@@ -16,7 +16,7 @@ import (
 type quickUnlockRepository interface {
 	List(context.Context) ([]quickUnlockDevice, error)
 	Save(context.Context, quickUnlockDevice) error
-	Verify(context.Context, string, string, time.Time) error
+	Verify(context.Context, string, string, []string, time.Time) error
 	Revoke(context.Context, string, time.Time) error
 	Backfill(context.Context, []quickUnlockDevice) error
 }
@@ -61,7 +61,7 @@ func (r *entQuickUnlockRepository) Save(ctx context.Context, device quickUnlockD
 		Exec(ctx)
 }
 
-func (r *entQuickUnlockRepository) Verify(ctx context.Context, deviceID, tokenHash string, usedAt time.Time) error {
+func (r *entQuickUnlockRepository) Verify(ctx context.Context, deviceID, tokenHash string, allowedModes []string, usedAt time.Time) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
@@ -74,8 +74,15 @@ func (r *entQuickUnlockRepository) Verify(ctx context.Context, deviceID, tokenHa
 	if err != nil {
 		return err
 	}
+	device := quickUnlockDevice{Mode: row.Mode, CreatedAt: row.CreatedAt}
+	if device.isExpired(usedAt) {
+		return errors.New("quick unlock device expired")
+	}
 	if !quickUnlockTokenHashesEqual(row.TokenHash, tokenHash) {
 		return errors.New("quick unlock token mismatch")
+	}
+	if !quickUnlockModeAllowed(row.Mode, allowedModes) {
+		return errors.New("quick unlock mode mismatch")
 	}
 	if err := tx.QuickUnlockDevice.UpdateOneID(row.ID).SetLastUsedAt(usedAt).Exec(ctx); err != nil {
 		return err

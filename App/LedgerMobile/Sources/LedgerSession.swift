@@ -115,6 +115,7 @@ final class LedgerSession: ObservableObject {
     private let biometricStore: any BiometricCredentialStore
     private let passkeyAuthenticator: any PasskeyAuthenticating
     private let widgetSnapshotStore: LedgerWidgetSnapshotStore
+    private let widgetCredentialStore: any LedgerWidgetCredentialStoring
     private let importIndexActivity: ImportIndexActivityCoordinator
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
@@ -130,6 +131,7 @@ final class LedgerSession: ObservableObject {
     private var transactionReconciliationTask: Task<Void, Never>?
     private var transactionReconciliationID: UUID?
     private var transactionReconciliationRequested = false
+    private var widgetCredentialRegistrationInFlight = false
     private static let serverKey = "ledger.mobile.server-origin"
     private static let locallyLockedOriginsKey = "ledger.mobile.locally-locked-origins"
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
@@ -146,6 +148,7 @@ final class LedgerSession: ObservableObject {
         biometricStore: (any BiometricCredentialStore)? = nil,
         passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
         widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared,
+        widgetCredentialStore: (any LedgerWidgetCredentialStoring)? = nil,
         importIndexActivity: ImportIndexActivityCoordinator = ImportIndexActivityCoordinator(),
         ledgerNow: @escaping () -> Date = Date.init
     ) {
@@ -157,6 +160,7 @@ final class LedgerSession: ObservableObject {
         self.biometricStore = biometricStore ?? SystemBiometricCredentialStore()
         self.passkeyAuthenticator = passkeyAuthenticator ?? SystemPasskeyAuthenticationService()
         self.widgetSnapshotStore = widgetSnapshotStore
+        self.widgetCredentialStore = widgetCredentialStore ?? SystemLedgerWidgetCredentialStore()
         self.importIndexActivity = importIndexActivity
 
         if let api {
@@ -262,6 +266,9 @@ final class LedgerSession: ObservableObject {
             try await loadLedger(from: serverURL, generation: generation)
             guard generation == requestGeneration, phase == .ready else { return }
             setLocallyLocked(false, for: serverURL)
+            if let ledger {
+                await ensureWidgetCredential(for: serverURL, valuationCurrency: ledger.valuationCurrency)
+            }
         } catch {
             guard generation == requestGeneration else { return }
             password = ""
@@ -299,6 +306,9 @@ final class LedgerSession: ObservableObject {
             try await loadLedger(from: serverURL, generation: generation)
             guard generation == requestGeneration, phase == .ready else { return }
             setLocallyLocked(false, for: serverURL)
+            if let ledger {
+                await ensureWidgetCredential(for: serverURL, valuationCurrency: ledger.valuationCurrency)
+            }
         } catch {
             guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
@@ -367,13 +377,18 @@ final class LedgerSession: ObservableObject {
                 if quickUnlockFailed {
                     errorMessage = "Face ID 已通过，但服务器会话已过期，请输入密码重新连接"
                 }
-            } else if requiresCredentialMigration, serverAccessConfirmed {
-                await migrateLocalBiometricCredential(
-                    for: serverURL,
-                    replacingDeviceID: usesLocalMarker ? nil : credential.deviceID
-                )
-            } else if quickUnlockFailed {
-                errorMessage = "Face ID 已解锁本机数据；服务器暂未同步，刷新后可使用密码重新连接"
+            } else {
+                if requiresCredentialMigration, serverAccessConfirmed {
+                    await migrateLocalBiometricCredential(
+                        for: serverURL,
+                        replacingDeviceID: usesLocalMarker ? nil : credential.deviceID
+                    )
+                } else if quickUnlockFailed {
+                    errorMessage = "Face ID 已解锁本机数据；服务器暂未同步，刷新后可使用密码重新连接"
+                }
+                if serverAccessConfirmed, phase == .ready, let ledger {
+                    await ensureWidgetCredential(for: serverURL, valuationCurrency: ledger.valuationCurrency)
+                }
             }
         } catch {
             guard generation == requestGeneration else { return }
@@ -394,7 +409,8 @@ final class LedgerSession: ObservableObject {
             do {
                 let credential = try await api.registerQuickUnlock(
                     baseURL: serverURL,
-                    deviceName: "Ledger iOS · \(biometricTitle)"
+                    deviceName: "Ledger iOS · \(biometricTitle)",
+                    mode: "text"
                 )
                 guard phase == .ready, self.serverURL == serverURL else {
                     try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
@@ -405,6 +421,9 @@ final class LedgerSession: ObservableObject {
                 } catch {
                     try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
                     throw error
+                }
+                if let ledger {
+                    await ensureWidgetCredential(for: serverURL, valuationCurrency: ledger.valuationCurrency)
                 }
             } catch {
                 errorMessage = "\(biometricTitle) 启用失败：\(error.localizedDescription)"
@@ -423,6 +442,14 @@ final class LedgerSession: ObservableObject {
                 )
             }
             guard phase == .ready, self.serverURL == serverURL else { return }
+            if widgetCredentialStore.isAvailable,
+               let widgetCredential = try widgetCredentialStore.load(),
+               widgetCredential.serverOrigin == serverURL.absoluteString {
+                try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: widgetCredential.deviceID)
+                try widgetCredentialStore.suspend()
+                try widgetCredentialStore.completeRevocation(deviceID: widgetCredential.deviceID)
+                clearWidgetSnapshot()
+            }
             if credential.deviceID != "local-biometric" {
                 try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
                 guard phase == .ready, self.serverURL == serverURL else { return }
@@ -959,7 +986,8 @@ final class LedgerSession: ObservableObject {
         do {
             let credential = try await api.registerQuickUnlock(
                 baseURL: serverURL,
-                deviceName: "Ledger iOS · \(biometricTitle)"
+                deviceName: "Ledger iOS · \(biometricTitle)",
+                mode: "text"
             )
             guard phase == .ready, self.serverURL == serverURL else {
                 try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
@@ -978,6 +1006,137 @@ final class LedgerSession: ObservableObject {
             guard phase == .ready, self.serverURL == serverURL else { return }
             errorMessage = "\(biometricTitle) 快速解锁升级失败，请保持登录后重试"
         }
+    }
+
+    private func ensureWidgetCredential(for serverURL: URL, valuationCurrency: String) async {
+        guard widgetCredentialStore.isAvailable,
+              hasBiometricUnlock,
+              phase == .ready,
+              self.serverURL == serverURL,
+              !widgetCredentialRegistrationInFlight else { return }
+
+        await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
+        if (try? widgetCredentialStore.pendingRevocation()) != nil { return }
+
+        do {
+            if let existing = try widgetCredentialStore.load() {
+                if existing.serverOrigin == serverURL.absoluteString,
+                   !Self.widgetCredentialNeedsRotation(existing, now: ledgerNow()) {
+                    let updated = existing.updating(valuationCurrency: valuationCurrency, enabled: true)
+                    if updated != existing {
+                        try widgetCredentialStore.save(updated)
+                    }
+                    return
+                }
+                try widgetCredentialStore.suspend()
+                await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
+                if (try? widgetCredentialStore.pendingRevocation()) != nil { return }
+            }
+        } catch {
+            return
+        }
+
+        widgetCredentialRegistrationInFlight = true
+        defer { widgetCredentialRegistrationInFlight = false }
+        do {
+            let credential = try await api.registerQuickUnlock(
+                baseURL: serverURL,
+                deviceName: "Ledger Widget",
+                mode: "widget"
+            )
+            guard phase == .ready, self.serverURL == serverURL else {
+                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                return
+            }
+            do {
+                try widgetCredentialStore.save(
+                    LedgerWidgetCredential(
+                        serverOrigin: serverURL.absoluteString,
+                        deviceID: credential.deviceID,
+                        token: credential.token,
+                        valuationCurrency: valuationCurrency,
+                        enabled: true,
+                        expiresAt: credential.expiresAt ?? Self.widgetCredentialFallbackExpiration(now: ledgerNow())
+                    )
+                )
+            } catch {
+                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+            }
+        } catch {
+            // Existing app/server combinations keep the local snapshot path until the endpoint is deployed.
+        }
+    }
+
+    private func suspendWidgetCredential() {
+        let api = self.api
+        let store = widgetCredentialStore
+        let currentCredential = try? store.load()
+        do {
+            try store.suspend()
+        } catch {
+            guard let currentCredential else { return }
+            Task {
+                await Self.revokeWidgetCredential(
+                    using: api,
+                    store: store,
+                    credential: currentCredential
+                )
+            }
+            return
+        }
+        Task {
+            await Self.revokePendingWidgetCredential(using: api, store: store)
+        }
+    }
+
+    private static func revokeWidgetCredential(
+        using api: any LedgerAPI,
+        store: any LedgerWidgetCredentialStoring,
+        credential: LedgerWidgetCredential
+    ) async {
+        guard let serverURL = URL(string: credential.serverOrigin) else { return }
+        do {
+            try await api.revokeWidgetQuickUnlock(baseURL: serverURL, credential: credential)
+        } catch let error as LedgerAPIError {
+            guard case let .server(status, _) = error, status == 401 else { return }
+        } catch {
+            return
+        }
+        try? store.completeRevocation(deviceID: credential.deviceID)
+    }
+
+    private static func revokePendingWidgetCredential(
+        using api: any LedgerAPI,
+        store: any LedgerWidgetCredentialStoring
+    ) async {
+        let credential: LedgerWidgetCredential
+        do {
+            guard let pending = try store.pendingRevocation() else { return }
+            credential = pending
+        } catch {
+            return
+        }
+        guard let serverURL = URL(string: credential.serverOrigin) else { return }
+        do {
+            try await api.revokeWidgetQuickUnlock(baseURL: serverURL, credential: credential)
+        } catch let error as LedgerAPIError {
+            guard case let .server(status, _) = error, status == 401 else { return }
+        } catch {
+            return
+        }
+        try? store.completeRevocation(deviceID: credential.deviceID)
+    }
+
+    private static func widgetCredentialNeedsRotation(_ credential: LedgerWidgetCredential, now: Date) -> Bool {
+        guard let rawExpiration = credential.expiresAt,
+              let expiration = ISO8601DateFormatter().date(from: rawExpiration) else {
+            return true
+        }
+        return expiration.timeIntervalSince(now) <= 14 * 24 * 60 * 60
+    }
+
+    private static func widgetCredentialFallbackExpiration(now: Date) -> String {
+        ISO8601DateFormatter().string(from: now.addingTimeInterval(90 * 24 * 60 * 60))
     }
 
     func indexInfo(targetGitSHA: String? = nil) async throws -> LedgerIndexInfo {
@@ -1129,6 +1288,7 @@ final class LedgerSession: ObservableObject {
         guard let serverURL else { return }
         _ = invalidateSession()
         stopImportIndexTracking()
+        suspendWidgetCredential()
         clearWidgetSnapshot()
         clearAuthenticationCookies(for: serverURL)
         setLocallyLocked(false, for: serverURL)
@@ -1150,6 +1310,7 @@ final class LedgerSession: ObservableObject {
         let previousServerURL = serverURL
         _ = invalidateSession()
         stopImportIndexTracking()
+        suspendWidgetCredential()
         clearWidgetSnapshot()
         if let previousServerURL {
             biometricStore.deleteCredential(for: previousServerURL)
@@ -1491,7 +1652,11 @@ final class LedgerSession: ObservableObject {
             baseURL: serverURL
         )
         let (report, importDocuments) = await (reportRequest, importDocumentsRequest)
-        guard let report, generation == requestGeneration, self.serverURL == serverURL else {
+        guard generation == requestGeneration, self.serverURL == serverURL else {
+            return
+        }
+        await ensureWidgetCredential(for: serverURL, valuationCurrency: valuationCurrency)
+        guard let report else {
             return
         }
         let freshSnapshot = LedgerWidgetSnapshotBuilder.make(

@@ -22,7 +22,7 @@ func TestQuickUnlockUsesRepositoryWhenAvailable(t *testing.T) {
 	if err := server.saveQuickUnlockDevice(device); err != nil {
 		t.Fatal(err)
 	}
-	if err := server.verifyQuickUnlockDevice("device-2", "raw-token"); err != nil {
+	if err := server.verifyQuickUnlockDevice("device-2", "raw-token", "biometric"); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.revokeQuickUnlockDevice("device-2"); err != nil {
@@ -44,7 +44,7 @@ func TestQuickUnlockFilesystemFallbackLifecycle(t *testing.T) {
 	if err := server.saveQuickUnlockDevice(device); err != nil {
 		t.Fatal(err)
 	}
-	if err := server.verifyQuickUnlockDevice(device.ID, "raw-token"); err != nil {
+	if err := server.verifyQuickUnlockDevice(device.ID, "raw-token", quickUnlockModeNumeric); err != nil {
 		t.Fatal(err)
 	}
 	if got := server.readQuickUnlockStore(context.Background()); len(got.Devices) != 1 || got.Devices[0].LastUsedAt == nil {
@@ -53,19 +53,46 @@ func TestQuickUnlockFilesystemFallbackLifecycle(t *testing.T) {
 	if err := server.revokeQuickUnlockDevice(device.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := server.verifyQuickUnlockDevice(device.ID, "raw-token"); err == nil {
+	if err := server.verifyQuickUnlockDevice(device.ID, "raw-token", quickUnlockModeNumeric); err == nil {
 		t.Fatal("verify succeeded after revoke")
 	}
 }
 
+func TestWidgetQuickUnlockExpiresWhileInteractiveCredentialRemainsValid(t *testing.T) {
+	server := &Server{cfg: Config{RuntimeDir: t.TempDir()}, runtimeStore: newFilesystemRuntimeStore(t.TempDir())}
+	createdAt := time.Now().UTC().Add(-quickUnlockWidgetLifetime)
+	widget := quickUnlockDevice{
+		ID: "widget-device", Mode: quickUnlockModeWidget,
+		TokenHash: quickUnlockTokenHash("widget-token"), CreatedAt: createdAt,
+	}
+	if err := server.saveQuickUnlockDevice(widget); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.verifyQuickUnlockDevice(widget.ID, "widget-token", quickUnlockModeWidget); err == nil {
+		t.Fatal("expired widget credential verified")
+	}
+
+	interactive := quickUnlockDevice{
+		ID: "phone-device", Mode: quickUnlockModeText,
+		TokenHash: quickUnlockTokenHash("phone-token"), CreatedAt: createdAt,
+	}
+	if err := server.saveQuickUnlockDevice(interactive); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.verifyQuickUnlockDevice(interactive.ID, "phone-token", quickUnlockModeText); err != nil {
+		t.Fatalf("interactive credential unexpectedly expired: %v", err)
+	}
+}
+
 type recordingQuickUnlockRepository struct {
-	devices      []quickUnlockDevice
-	saved        quickUnlockDevice
-	verifiedID   string
-	verifiedHash string
-	verifiedAt   time.Time
-	revokedID    string
-	revokedAt    time.Time
+	devices       []quickUnlockDevice
+	saved         quickUnlockDevice
+	verifiedID    string
+	verifiedHash  string
+	verifiedModes []string
+	verifiedAt    time.Time
+	revokedID     string
+	revokedAt     time.Time
 }
 
 func (r *recordingQuickUnlockRepository) List(context.Context) ([]quickUnlockDevice, error) {
@@ -77,11 +104,11 @@ func (r *recordingQuickUnlockRepository) Save(_ context.Context, device quickUnl
 	return nil
 }
 
-func (r *recordingQuickUnlockRepository) Verify(_ context.Context, id, tokenHash string, usedAt time.Time) error {
+func (r *recordingQuickUnlockRepository) Verify(_ context.Context, id, tokenHash string, allowedModes []string, usedAt time.Time) error {
 	if id == "" || tokenHash == "" {
 		return errors.New("quick unlock verification input is required")
 	}
-	r.verifiedID, r.verifiedHash, r.verifiedAt = id, tokenHash, usedAt
+	r.verifiedID, r.verifiedHash, r.verifiedModes, r.verifiedAt = id, tokenHash, append([]string(nil), allowedModes...), usedAt
 	return nil
 }
 

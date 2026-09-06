@@ -127,22 +127,57 @@ final class APIClientTests: XCTestCase {
                 XCTAssertEqual(json, ["mode": "text", "name": "Ledger iPhone"])
                 return Self.response(for: request, body: #"{"deviceId":"device-12345678","token":"secret-token"}"#)
             }
-            XCTAssertEqual(request.url?.path, "/api/quick-unlock/verify")
-            XCTAssertEqual(json, ["deviceId": "device-12345678", "token": "secret-token"])
+            if requestIndex == 2 {
+                XCTAssertEqual(request.url?.path, "/api/quick-unlock/register")
+                XCTAssertEqual(json, ["mode": "widget", "name": "Ledger Widget"])
+                return Self.response(for: request, body: #"{"deviceId":"widget-12345678","token":"widget-token","expiresAt":"2026-12-05T00:00:00Z"}"#)
+            }
+            if requestIndex == 3 {
+                XCTAssertEqual(request.url?.path, "/api/quick-unlock/verify")
+                XCTAssertEqual(json, ["deviceId": "device-12345678", "token": "secret-token"])
+                return Self.response(for: request, body: #"{"ok":true}"#)
+            }
+            XCTAssertEqual(request.url?.path, "/api/quick-unlock/revoke")
+            XCTAssertEqual(json, ["deviceId": "widget-12345678", "token": "widget-token"])
             return Self.response(for: request, body: #"{"ok":true}"#)
         }
 
         let client = makeClient()
         let credential = try await client.registerQuickUnlock(
             baseURL: URL(string: "https://ledger.example.com")!,
-            deviceName: "Ledger iPhone"
+            deviceName: "Ledger iPhone",
+            mode: "text"
         )
         XCTAssertEqual(credential, QuickUnlockCredential(deviceID: "device-12345678", token: "secret-token"))
+        let widgetCredential = try await client.registerQuickUnlock(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            deviceName: "Ledger Widget",
+            mode: "widget"
+        )
+        XCTAssertEqual(
+            widgetCredential,
+            QuickUnlockCredential(
+                deviceID: "widget-12345678",
+                token: "widget-token",
+                expiresAt: "2026-12-05T00:00:00Z"
+            )
+        )
         try await client.verifyQuickUnlock(
             baseURL: URL(string: "https://ledger.example.com")!,
             credential: credential
         )
-        XCTAssertEqual(requestIndex, 2)
+        try await client.revokeWidgetQuickUnlock(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            credential: LedgerWidgetCredential(
+                serverOrigin: "https://ledger.example.com",
+                deviceID: widgetCredential.deviceID,
+                token: widgetCredential.token,
+                valuationCurrency: "CNY",
+                enabled: true,
+                expiresAt: widgetCredential.expiresAt
+            )
+        )
+        XCTAssertEqual(requestIndex, 4)
     }
 
     func testBootstrapAddsCurrentRangeQuery() async throws {

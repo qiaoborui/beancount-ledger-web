@@ -20,14 +20,17 @@ struct ImportStatusProvider: TimelineProvider {
         )
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<ImportStatusEntry>) -> Void) {
+    func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<ImportStatusEntry>) -> Void) {
         let now = Date()
-        completion(
-            Timeline(
-                entries: [ImportStatusEntry(date: now, snapshot: LedgerWidgetSnapshotStore.shared.load())],
-                policy: .after(now.addingTimeInterval(30 * 60))
+        Task {
+            let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
+            completion(
+                Timeline(
+                    entries: [ImportStatusEntry(date: now, snapshot: result.snapshot)],
+                    policy: .after(now.addingTimeInterval(result.refreshInterval))
+                )
             )
-        )
+        }
     }
 }
 
