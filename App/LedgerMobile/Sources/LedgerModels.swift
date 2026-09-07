@@ -172,6 +172,20 @@ struct LedgerDateRange: Equatable, Sendable {
         }
     }
 
+    /// Keep the period visible in narrow navigation bars, including cross-year context.
+    func toolbarTitle(relativeTo now: Date = Date()) -> String {
+        let components = Self.calendar.dateComponents([.year, .month], from: startDate)
+        let year = components.year ?? 0
+        let month = components.month ?? 1
+        let yearPrefix = year == Self.calendar.component(.year, from: now) ? "" : "\(year)/"
+        switch preset {
+        case .month: return "\(yearPrefix)\(month)月"
+        case .quarter: return "\(yearPrefix)Q\(((month - 1) / 3) + 1)"
+        case .year: return "\(year)年"
+        case .custom: return "自定义"
+        }
+    }
+
     var metricScope: String {
         switch preset {
         case .month: "月度"
@@ -1649,6 +1663,53 @@ struct LedgerTransactionFilter: Equatable, Sendable {
             .joined(separator: " ")
             .lowercased()
         return words.allSatisfy(searchable.contains)
+    }
+}
+
+/// Display-only context derived from postings; it never changes amounts or write payloads.
+struct TransactionCategoryPresentation: Equatable {
+    let label: String
+
+    init(transaction: LedgerTransaction, accountLabels: [String: String] = [:]) {
+        func displayName(_ account: String) -> String {
+            let label = accountLabels[account]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !label.isEmpty, label != account { return label }
+            let path = account.split(separator: ":").dropFirst().joined(separator: " › ")
+            return path.isEmpty ? account : path
+        }
+
+        let postings = transaction.postings.filter { $0.amount != 0 }
+        let categories = Set(postings.filter {
+            $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:")
+        }.map(\.account))
+        if categories.count > 1 {
+            label = "多分类"
+        } else if let account = categories.first {
+            label = displayName(account)
+        } else {
+            let funding = postings.filter {
+                $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
+            }
+            let outgoing = Set(funding.filter { $0.amount < 0 }.map(\.account))
+            let incoming = Set(funding.filter { $0.amount > 0 }.map(\.account))
+            if !outgoing.isEmpty, !incoming.isEmpty {
+                let from = outgoing.count == 1 ? displayName(outgoing.first!) : "多个账户"
+                let to = incoming.count == 1 ? displayName(incoming.first!) : "多个账户"
+                label = "\(from) → \(to)"
+            } else if postings.contains(where: { $0.account.hasPrefix("Equity:") }) {
+                label = "权益调整"
+            } else {
+                label = "未分类"
+            }
+        }
+    }
+
+    static func accountLabels(_ accounts: [LedgerAccount]) -> [String: String] {
+        accounts.reduce(into: [:]) { result, account in
+            let label = account.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            result[account.account] = label.isEmpty || label == account.account
+                ? (account.alias ?? account.account) : label
+        }
     }
 }
 

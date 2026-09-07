@@ -171,7 +171,7 @@ struct ImportHistoryView: View {
                 importSafetyNotice
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }

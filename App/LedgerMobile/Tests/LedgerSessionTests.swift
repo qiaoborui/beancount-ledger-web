@@ -107,6 +107,25 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.draftRange, LedgerDateRange.current(.quarter, now: now))
     }
 
+    func testRangeSteppingEditsOnlyDraftUntilConfirmation() {
+        let suiteName = "ledger-mobile-range-draft-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults, ledgerNow: { now })
+        session.presentRangePicker()
+        session.moveDraftRange(by: -1)
+        XCTAssertEqual(session.draftRange, .month(year: 2026, month: 7))
+        XCTAssertEqual(session.selectedRange, .month(year: 2026, month: 8))
+        session.dismissRangePicker()
+        session.presentRangePicker()
+        XCTAssertEqual(session.draftRange, session.selectedRange)
+        session.updateDraftStart(now)
+        let custom = session.draftRange
+        session.moveDraftRange(by: 1)
+        XCTAssertEqual(session.draftRange, custom)
+    }
+
     func testCompactTabsLoadNormalizeAndPersistInDeviceDefaults() {
         let suiteName = "ledger-mobile-compact-tabs-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

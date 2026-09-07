@@ -11,6 +11,73 @@ final class LedgerMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testNavigationTimeRangePreservesDraftAndSearchHierarchy() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        openDestination(compact: "交易", regular: "交易账本")
+        let dateButton = app.navigationBars.buttons["navigation-time-range"]
+        XCTAssertTrue(dateButton.waitForExistence(timeout: 3))
+        let search = app.searchFields["收付款对象、说明、账户或标签"]
+        XCTAssertLessThanOrEqual(dateButton.frame.maxY, search.frame.minY)
+        XCTAssertFalse(app.otherElements["page-time-range"].exists)
+        XCTAssertTrue(dateButton.label.contains("2026年8月"))
+        capture("navigation-date-and-search")
+
+        dateButton.tap()
+        app.buttons["上一周期"].tap()
+        // LabeledContent exposes its period as a combined accessibility value.
+        // Verify the committed period through the toolbar below and draft isolation in unit tests.
+        capture("navigation-date-previous-draft")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(dateButton.label.contains("2026年8月"))
+        dateButton.tap()
+        app.buttons["上一周期"].tap()
+        app.buttons["apply-time-range"].tap()
+        XCTAssertTrue(dateButton.waitForExistence(timeout: 3))
+        XCTAssertTrue(dateButton.label.contains("2026年7月"))
+        dateButton.tap()
+        app.buttons["下一周期"].tap()
+        app.buttons["apply-time-range"].tap()
+        XCTAssertTrue(app.staticTexts["transaction-category-88"].waitForExistence(timeout: 3))
+        capture("navigation-date-restored")
+    }
+
+    func testCompactLedgerShowsCategoriesAndAlignedTitles() throws {
+        try XCTSkipIf(isPad, "Compact layout geometry")
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch()
+        let overviewTitle = app.navigationBars["财务概览"].staticTexts["财务概览"]
+        XCTAssertTrue(overviewTitle.waitForExistence(timeout: 8))
+        let titleMidY = overviewTitle.frame.midY
+        capture("compact-flat-overview")
+
+        app.tabBars.buttons["交易"].tap()
+        let category = app.staticTexts["transaction-category-88"]
+        XCTAssertTrue(category.waitForExistence(timeout: 3))
+        XCTAssertEqual(category.label, "图书")
+        XCTAssertLessThanOrEqual(app.buttons["transaction-row-88"].frame.height, 80)
+        XCTAssertGreaterThanOrEqual(app.buttons["transaction-row-88"].frame.height, 64)
+        XCTAssertEqual(app.navigationBars["流水"].staticTexts["流水"].frame.midY, titleMidY, accuracy: 2)
+        XCTAssertTrue(app.buttons["transaction-row-52"].isHittable)
+        capture("compact-flat-transactions")
+
+        for (tab, title) in [("账户", "账户"), ("更多", "更多")] {
+            app.tabBars.buttons[tab].tap()
+            let heading = app.navigationBars[title].staticTexts[title]
+            XCTAssertTrue(heading.waitForExistence(timeout: 3))
+            XCTAssertEqual(heading.frame.midY, titleMidY, accuracy: 2)
+            capture("compact-flat-\(title)")
+        }
+        app.buttons["more-analysis-assets"].tap()
+        let assetsTitle = app.navigationBars["资产"].staticTexts["资产"]
+        XCTAssertTrue(assetsTitle.waitForExistence(timeout: 3))
+        XCTAssertEqual(assetsTitle.frame.midY, titleMidY, accuracy: 2)
+        capture("compact-flat-assets")
+    }
+
     func testNativeSearchRetainsFiltersAcrossTabsAndDetailNavigation() throws {
         try XCTSkipIf(isPad, "Compact stack persistence")
         app = XCUIApplication()
@@ -390,6 +457,7 @@ final class LedgerMobileUITests: XCTestCase {
         capture("compact-tabs-03-reordered")
 
         let addAssets = app.buttons["compact-tab-add-assets"]
+        configurationList.swipeUp()
         for _ in 0..<4 where !addAssets.isHittable { configurationList.swipeUp() }
         waitUntilHittable(addAssets)
         addAssets.tap()
@@ -621,6 +689,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#travel")).firstMatch.exists)
         app.navigationBars["交易详情"].buttons.firstMatch.tap()
 
+        app.buttons["transaction-actions"].tap()
         app.buttons["transaction-tag-selection"].tap()
         let selectableRow = app.buttons["transaction-select-row-88"]
         XCTAssertTrue(selectableRow.waitForExistence(timeout: 3))
@@ -635,7 +704,9 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["服务器已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
         let tagCompleteElapsed = Date().timeIntervalSince(tagStartedAt)
         XCTAssertGreaterThanOrEqual(tagCompleteElapsed, 0.9)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#reviewed")).firstMatch.exists)
+        app.buttons["完成标签选择"].tap()
+        app.buttons["transaction-row-88"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#reviewed")).firstMatch.waitForExistence(timeout: 3))
         let timing = XCTAttachment(
             string: String(
                 format: "edit-feedback=%.0fms edit-complete=%.0fms bulk-tag-feedback=%.0fms bulk-tag-complete=%.0fms",
@@ -663,6 +734,7 @@ final class LedgerMobileUITests: XCTestCase {
             app.tabBars.buttons["交易"].tap()
         }
 
+        app.buttons["transaction-actions"].tap()
         app.buttons["transaction-tag-selection"].tap()
         XCTAssertTrue(app.buttons["transaction-select-row-88"].waitForExistence(timeout: 3))
 

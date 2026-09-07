@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 enum LedgerPalette {
-    static let canvas = Color(uiColor: .systemGroupedBackground)
-    static let panel = Color(uiColor: .secondarySystemGroupedBackground)
+    static let canvas = Color(uiColor: .systemBackground)
+    static let panel = Color(uiColor: .systemBackground)
     static let raised = Color(uiColor: .tertiarySystemGroupedBackground)
     static let tag = Color.dynamic(light: 0xDDE7F5, dark: 0x0C1827)
     static let ink = Color.primary
@@ -39,6 +39,9 @@ enum LedgerRadius {
 }
 
 enum LedgerLayout {
+    static let pageTopInset: CGFloat = 8
+    static let rowVerticalInset: CGFloat = 6
+    static let transactionVerticalInset: CGFloat = 10
     static let sidebarWidth: CGFloat = 208
     static let regularContentWidth: CGFloat = 1120
     static let regularPagePadding: CGFloat = 24
@@ -82,12 +85,18 @@ struct LedgerBrandMark: View {
 private struct LedgerNavigation: ViewModifier {
     let title: String
     let isRoot: Bool
+    let showsTimeRange: Bool
 
     func body(content: Content) -> some View {
         content
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(isRoot ? .large : .inline)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if showsTimeRange {
+                    ToolbarItem(placement: .topBarLeading) {
+                        LedgerTimeRangeButton()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     PrivacyToolbarButton()
                 }
@@ -96,8 +105,18 @@ private struct LedgerNavigation: ViewModifier {
 }
 
 extension View {
-    func ledgerNavigation(_ title: String, isRoot: Bool = true) -> some View {
-        modifier(LedgerNavigation(title: title, isRoot: isRoot))
+    func ledgerNavigation(_ title: String, isRoot: Bool = true, showsTimeRange: Bool = false) -> some View {
+        modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange))
+    }
+
+    /// Reading surfaces share one continuous canvas; forms retain system grouping.
+    func ledgerReadingList() -> some View {
+        listStyle(.plain)
+            .listSectionSpacing(8)
+            .environment(\.defaultMinListHeaderHeight, 24)
+            .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(LedgerPalette.canvas)
     }
 }
 

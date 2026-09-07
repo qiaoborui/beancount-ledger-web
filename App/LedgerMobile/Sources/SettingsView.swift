@@ -89,6 +89,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .font(.subheadline)
         .ledgerNavigation("设置", isRoot: isRoot)
         .task { session.refreshWidgetRefreshStatus() }
         .confirmationDialog("更换服务器？", isPresented: $changingServerPresented, titleVisibility: .visible) {

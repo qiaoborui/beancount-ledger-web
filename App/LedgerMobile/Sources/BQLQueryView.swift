@@ -9,7 +9,7 @@ struct BQLQueryView: View {
             BQLWorkbench()
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation("BQL 查询", isRoot: isRoot)
+        .ledgerNavigation("BQL 查询", isRoot: isRoot, showsTimeRange: true)
 
     }
 }
@@ -52,14 +52,12 @@ private struct BQLWorkbench: View {
                     Text(runSummary).font(.footnote).foregroundStyle(.secondary)
                 }
 
-                LedgerTimeRangeControl()
-
                 queryAndHistory
 
                 resultsSection
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }

@@ -6,12 +6,8 @@ struct OverviewView: View {
     var isRoot = true
 
     var body: some View {
+        let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         List {
-            Section {
-                LedgerTimeRangeControl()
-            }
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
@@ -26,7 +22,7 @@ struct OverviewView: View {
                         NavigationLink {
                             TransactionDetailView(transaction: transaction)
                         } label: {
-                            TransactionRow(transaction: transaction)
+                            TransactionRow(transaction: transaction, accountLabels: accountLabels)
                         }
                     }
                     if ledger.transactions.isEmpty {
@@ -37,13 +33,15 @@ struct OverviewView: View {
                     }
                 } header: {
                     Text("最近流水")
+                        .font(.caption.weight(.medium))
+                        .textCase(nil)
                 }
             } else {
                 EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: "暂无财务数据", detail: "下拉刷新重新读取账本。")
             }
         }
-        .listStyle(.insetGrouped)
-        .ledgerNavigation("财务概览", isRoot: isRoot)
+        .ledgerReadingList()
+        .ledgerNavigation("财务概览", isRoot: isRoot, showsTimeRange: true)
         .refreshable { await session.refresh() }
     }
 }
@@ -56,7 +54,7 @@ private struct MonthlyConclusion: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("\(range.metricScope)结论").font(.headline)
+                Text("\(range.metricScope)结论").font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(ledger.transactions.count) 笔").font(.caption).foregroundStyle(.secondary)
             }
@@ -191,7 +189,7 @@ private struct OverviewPeriodMetric: View {
             AmountLabel(
                 minorUnits: minorUnits,
                 currency: currency,
-                font: primary ? .largeTitle.weight(.semibold) : .title3.weight(.semibold),
+                font: primary ? .title2.weight(.semibold) : .subheadline.weight(.semibold),
                 color: color
             )
             .tracking(primary ? -0.65 : -0.35)

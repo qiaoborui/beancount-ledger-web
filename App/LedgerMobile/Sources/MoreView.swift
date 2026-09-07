@@ -40,7 +40,8 @@ struct MoreView: View {
                 MoreDestinationButton(destination: .query, detail: "查询与历史", accessibilityIdentifier: "more-query")
             }
         }
-        .listStyle(.insetGrouped)
+        .ledgerReadingList()
+        .font(.subheadline)
         .ledgerNavigation("更多")
         .navigationDestination(item: $overflowDestination) { destination in
             LedgerDestinationView(destination: destination)

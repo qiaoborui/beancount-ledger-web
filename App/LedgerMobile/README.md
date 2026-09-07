@@ -11,8 +11,11 @@ authentication and privacy lock.
 The iPhone shell owns one navigation stack per tab, including More. Secondary
 destinations push in that stack and preserve the system back gesture. The iPad
 shell uses a system sidebar and keeps its visibility when changing destinations.
-Overview, transactions, accounts, and settings use grouped system lists and forms.
-Transactions have native search, date sections, and a swipe action for tags;
+Overview, transactions, accounts, and More use compact, continuous system lists;
+settings and editing retain grouped forms. All pages use inline navigation titles.
+Range-scoped pages keep the calendar and current period in the navigation bar,
+above search. Period stepping stays in the date picker until confirmation.
+Transactions show categories beside notes, with native search, date sections, and a swipe action for tags;
 accounts have search and expandable groups. Editing and import preparation use
 system forms, searchable account selection, and navigation-bar confirmation.
 See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy rules.

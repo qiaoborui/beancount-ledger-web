@@ -25,10 +25,6 @@ struct AccountsView: View {
     var body: some View {
         List {
             Section {
-                LedgerTimeRangeControl()
-            }
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            Section {
                 Picker("账户分类", selection: $selectedCategory) {
                     ForEach(AccountBalanceCategory.allCases) { category in
                         Text(category.title)
@@ -61,7 +57,7 @@ struct AccountsView: View {
                                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                                 : AnyLayout(HStackLayout())
                             layout {
-                                Text(section.title).font(.headline)
+                                Text(section.title).font(.subheadline.weight(.medium))
                                 if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                                 VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
                                     Text("\(section.rows.count) 个账户").font(.caption).foregroundStyle(.secondary)
@@ -86,9 +82,9 @@ struct AccountsView: View {
                 ContentUnavailableView("暂无匹配账户", systemImage: "building.columns", description: Text("切换分类或调整搜索条件。"))
             }
         }
-        .listStyle(.insetGrouped)
+        .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
-        .ledgerNavigation("账户", isRoot: isRoot)
+        .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "账户名称或路径")
         .refreshable { await session.refresh() }
     }
@@ -192,6 +188,9 @@ struct AccountDetailView: View {
         .background(LedgerPalette.canvas)
         .navigationTitle(detail?.label ?? account.split(separator: ":").last.map(String.init) ?? account)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
+        }
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -201,10 +200,10 @@ struct AccountDetailView: View {
     }
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
-        ScrollView {
+        let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+        return ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
                 AccountDetailHero(detail: detail, range: session.selectedRange)
-                LedgerTimeRangeControl()
 
                 if let errorMessage {
                     StatusBanner(message: errorMessage) {
@@ -238,7 +237,7 @@ struct AccountDetailView: View {
                                 NavigationLink {
                                     TransactionDetailView(transaction: row.transaction)
                                 } label: {
-                                    AccountHistoryRow(row: row, currency: detail.currency)
+                                    AccountHistoryRow(row: row, currency: detail.currency, accountLabels: accountLabels)
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
 
@@ -339,7 +338,7 @@ private struct AccountDetailHero: View {
                 AmountLabel(
                     minorUnits: closingBalance,
                     currency: detail.currency,
-                    font: .system(.title, design: .default, weight: .semibold),
+                    font: .title2.weight(.semibold),
                     color: detail.account.hasPrefix("Liabilities:")
                         ? LedgerPalette.expense
                         : LedgerPalette.gold
@@ -604,6 +603,7 @@ private struct AccountBalanceTrendPanel: View {
 private struct AccountHistoryRow: View {
     let row: LedgerAccountDetailRow
     let currency: String
+    let accountLabels: [String: String]
 
     private var title: String {
         if !row.payee.isEmpty { return row.payee }
@@ -621,10 +621,7 @@ private struct AccountHistoryRow: View {
                 HStack(spacing: LedgerSpacing.sm) {
                     Text(row.date)
                         .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
-                    if !row.narration.isEmpty, row.narration != title {
-                        Text(row.narration)
-                            .lineLimit(1)
-                    }
+                    TransactionContextLine(transaction: row.transaction, accountLabels: accountLabels)
                 }
                 .font(.system(.caption2, design: .default))
                 .foregroundStyle(LedgerPalette.secondary)
@@ -653,7 +650,8 @@ private struct AccountHistoryRow: View {
                 .font(.system(.caption2, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(LedgerSpacing.lg)
+        .padding(.horizontal, LedgerSpacing.lg)
+        .padding(.vertical, LedgerLayout.transactionVerticalInset)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -670,11 +668,11 @@ private struct AccountRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+        VStack(alignment: .leading, spacing: 4) {
             headingLayout {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.label)
-                        .font(.system(.subheadline, design: .default, weight: .semibold))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
                     Text(row.account)
                         .font(.system(.caption2, design: .default))
@@ -750,7 +748,7 @@ private struct AccountRowView: View {
                 }
             }
         }
-        .padding(.vertical, LedgerSpacing.md)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .accessibilityElement(children: .combine)
     }
 }

@@ -21,7 +21,7 @@ struct CurrencyAnalysisView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation("货币与汇率", isRoot: isRoot)
+        .ledgerNavigation("货币与汇率", isRoot: isRoot, showsTimeRange: true)
     }
 
     @ViewBuilder
@@ -57,8 +57,6 @@ struct CurrencyAnalysisView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                LedgerTimeRangeControl()
-
                 valuationPicker(currencies: snapshot.currencies, selected: ledger.valuationCurrency)
 
                 if snapshot.missingCount > 0 {
@@ -84,7 +82,7 @@ struct CurrencyAnalysisView: View {
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }

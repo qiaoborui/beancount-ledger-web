@@ -95,6 +95,7 @@ private struct ServerConfigurationView: View {
                 }
             }
             .navigationTitle("欢迎使用 Ledger")
+            .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
         }
     }
@@ -161,6 +162,7 @@ private struct LoginView: View {
                 }
             }
             .navigationTitle(authenticated ? "账本已锁定" : "登录 Ledger")
+            .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
         }
     }
@@ -274,6 +276,7 @@ private struct LedgerRegularShell: View {
             .listStyle(.sidebar)
             .accessibilityIdentifier("ledger-sidebar")
             .navigationTitle("Ledger")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
             NavigationStack {

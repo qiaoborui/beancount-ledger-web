@@ -385,6 +385,9 @@ private enum SafePreviewLedgerData {
         LedgerAccount(account: "Assets:Investments:IndexFund", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "全球指数基金", label: "全球指数基金", group: "wealth", active: true),
         LedgerAccount(account: "Assets:Cash:USD", openDate: "2024-03-15", closeDate: nil, currency: "USD", alias: "美元备用金", label: "美元备用金", group: "cash", active: true),
         LedgerAccount(account: "Liabilities:CreditCard", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "信用卡", label: "信用卡", group: "credit", active: true),
+        LedgerAccount(account: "Expenses:Education:Books", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "图书", label: "图书", group: "expense", active: true),
+        LedgerAccount(account: "Expenses:Food:Groceries", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "食材", label: "食材", group: "expense", active: true),
+        LedgerAccount(account: "Expenses:Food:Dining", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "餐饮", label: "餐饮", group: "expense", active: true),
     ]
 
     static let balances = [

@@ -21,6 +21,7 @@ private enum TransactionAmountParser {
 
 struct TransactionRow: View {
     let transaction: LedgerTransaction
+    var accountLabels: [String: String] = [:]
 
     private var presentation: TransactionPresentation {
         TransactionPresentation(transaction: transaction)
@@ -35,15 +36,10 @@ struct TransactionRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(presentation.title)
-                    .font(.system(.subheadline, design: .default, weight: .semibold))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(LedgerPalette.ink)
                     .lineLimit(1)
-                if !presentation.subtitle.isEmpty {
-                    Text(presentation.subtitle)
-                        .font(.system(.caption2, design: .default))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                }
+                TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -56,7 +52,7 @@ struct TransactionRow: View {
             )
             .lineLimit(1)
         }
-        .padding(.vertical, LedgerSpacing.md)
+        .padding(.vertical, LedgerLayout.transactionVerticalInset)
         .contentShape(Rectangle())
     }
 }
@@ -106,12 +102,8 @@ struct TransactionsView: View {
     }
 
     var body: some View {
+        let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         List {
-            Section {
-                LedgerTimeRangeControl()
-            }
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-
             if activeStructuredFilterCount > 0 {
                 Section {
                     TransactionFilterChips(filters: $filters)
@@ -141,7 +133,8 @@ struct TransactionsView: View {
                             } label: {
                                 TransactionSelectableCard(
                                     transaction: transaction,
-                                    selected: selectedTransactionIDs.contains(transaction.id)
+                                    selected: selectedTransactionIDs.contains(transaction.id),
+                                    accountLabels: accountLabels
                                 )
                             }
                             .buttonStyle(.plain)
@@ -152,6 +145,7 @@ struct TransactionsView: View {
                             } label: {
                                 TransactionCard(
                                     transaction: transaction,
+                                    accountLabels: accountLabels,
                                     mutationPhase: session.transactionMutationPhase(for: transaction)
                                 )
                             }
@@ -171,7 +165,10 @@ struct TransactionsView: View {
                     }
                 } header: {
                     Text(group.date)
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .textCase(nil)
                 }
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
             if !filteredTransactions.isEmpty {
                 Section {
@@ -182,19 +179,31 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
-        .listStyle(.insetGrouped)
-        .ledgerNavigation("流水", isRoot: isRoot)
+        .ledgerReadingList()
+        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
         .searchable(text: $filters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(selectingTags ? "完成" : "选择") {
-                    selectingTags.toggle()
-                    if !selectingTags { selectedTransactionIDs.removeAll() }
+            ToolbarItem(placement: .topBarTrailing) {
+                if selectingTags {
+                    Button("完成") {
+                        selectingTags = false
+                        selectedTransactionIDs.removeAll()
+                    }
+                    .accessibilityLabel("完成标签选择")
+                } else {
+                    Menu {
+                        Button("选择交易添加标签", systemImage: "checkmark.circle") {
+                            selectingTags = true
+                        }
+                        .accessibilityIdentifier("transaction-tag-selection")
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .accessibilityLabel("流水操作")
+                    .accessibilityIdentifier("transaction-actions")
                 }
-                .accessibilityLabel(selectingTags ? "完成标签选择" : "选择交易添加标签")
-                .accessibilityIdentifier("transaction-tag-selection")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { filterPresented = true } label: {
@@ -478,18 +487,53 @@ private struct TransactionFilterSheet: View {
     }
 }
 
+struct TransactionContextLine: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let transaction: LedgerTransaction
+    let accountLabels: [String: String]
+
+    var body: some View {
+        let category = TransactionCategoryPresentation(transaction: transaction, accountLabels: accountLabels).label
+        let note = transaction.payee.isEmpty ? "" : transaction.narration
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 5))
+        layout {
+            Text(category)
+                .foregroundStyle(LedgerPalette.olive)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .layoutPriority(1)
+                .accessibilityIdentifier("transaction-category-\(transaction.source.line)")
+            if !note.isEmpty {
+                Text("· \(note)")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let tags = transaction.tags, !tags.isEmpty {
+                Image(systemName: "tag")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel(tags.map { "#\($0)" }.joined(separator: " "))
+            }
+        }
+        .font(.caption)
+    }
+}
+
 private struct TransactionCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let transaction: LedgerTransaction
+    let accountLabels: [String: String]
     let selectionState: Bool?
     let mutationPhase: LedgerTransactionMutationPhase?
 
     init(
         transaction: LedgerTransaction,
+        accountLabels: [String: String] = [:],
         selectionState: Bool? = nil,
         mutationPhase: LedgerTransactionMutationPhase? = nil
     ) {
         self.transaction = transaction
+        self.accountLabels = accountLabels
         self.selectionState = selectionState
         self.mutationPhase = mutationPhase
     }
@@ -505,10 +549,10 @@ private struct TransactionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+        VStack(alignment: .leading, spacing: 6) {
             headingLayout {
                 Text(presentation.title)
-                    .font(.body.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(LedgerPalette.ink)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -516,7 +560,7 @@ private struct TransactionCard: View {
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix(presentation.kind),
-                    font: .body.weight(.semibold),
+                    font: .subheadline.weight(.semibold),
                     color: amountColor(presentation.kind)
                 )
                 .lineLimit(1)
@@ -532,26 +576,14 @@ private struct TransactionCard: View {
                 }
             }
 
-            if !presentation.subtitle.isEmpty {
-                Text(presentation.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(LedgerPalette.warm)
-                    .lineLimit(1)
-            }
+            TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
 
             if let mutationPhase {
                 TransactionMutationBadge(phase: mutationPhase)
             }
-
-            if let tags = transaction.tags, !tags.isEmpty {
-                Text(tags.map { "#\($0)" }.joined(separator: "  "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        .padding(.vertical, LedgerLayout.transactionVerticalInset)
         .contentShape(Rectangle())
     }
 }
@@ -578,9 +610,10 @@ private struct TransactionMutationBadge: View {
 private struct TransactionSelectableCard: View {
     let transaction: LedgerTransaction
     let selected: Bool
+    let accountLabels: [String: String]
 
     var body: some View {
-        TransactionCard(transaction: transaction, selectionState: selected)
+        TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .overlay {
             RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(selected ? LedgerPalette.cobalt : Color.clear, lineWidth: 2)
@@ -727,7 +760,7 @@ struct TransactionDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(presentation.title).font(.title2.weight(.semibold))
+                    Text(presentation.title).font(.headline)
                     if !presentation.subtitle.isEmpty {
                         Text(presentation.subtitle).foregroundStyle(.secondary)
                     }
@@ -735,7 +768,7 @@ struct TransactionDetailView: View {
                         minorUnits: presentation.minorUnits,
                         currency: presentation.currency,
                         prefix: amountPrefix(presentation.kind),
-                        font: .largeTitle.weight(.semibold),
+                        font: .title2.weight(.semibold),
                         color: amountColor(presentation.kind)
                     )
                 }

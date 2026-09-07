@@ -1,51 +1,29 @@
 import SwiftUI
 
-struct LedgerTimeRangeControl: View {
+struct LedgerTimeRangeButton: View {
     @EnvironmentObject private var session: LedgerSession
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 8) {
-            stepButton(direction: -1, systemImage: "chevron.left", label: "上一周期")
-            Button {
-                session.presentRangePicker()
-            } label: {
-                VStack(spacing: 3) {
-                    Label(session.selectedRange.displayTitle, systemImage: "calendar")
-                        .font(.subheadline.weight(.semibold))
-                    if !dynamicTypeSize.isAccessibilitySize {
-                        Text("\(session.selectedRange.start) 至 \(session.selectedRange.end)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(session.isRangeLoading)
-            .accessibilityLabel("选择时间范围，当前为\(session.selectedRange.displayTitle)")
-            .accessibilityValue("\(session.selectedRange.start) 至 \(session.selectedRange.end)")
-            .overlay(alignment: .trailing) {
-                if session.isRangeLoading { ProgressView().controlSize(.small) }
-            }
-            stepButton(direction: 1, systemImage: "chevron.right", label: "下一周期")
-        }
-        .accessibilityIdentifier("page-time-range")
-    }
-
-    private func stepButton(direction: Int, systemImage: String, label: String) -> some View {
         Button {
-            Task { await session.moveRange(by: direction) }
+            session.presentRangePicker()
         } label: {
-            Image(systemName: systemImage)
-                .font(.body.weight(.medium))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            HStack(spacing: 4) {
+                if session.isRangeLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "calendar")
+                }
+                Text(session.selectedRange.toolbarTitle())
+                    .lineLimit(1)
+            }
+            .font(.subheadline.weight(.medium))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
-        .disabled(session.isRangeLoading || session.selectedRange.preset == .custom)
-        .accessibilityLabel(label)
+        .disabled(session.isRangeLoading || session.isValuationCurrencyLoading)
+        .accessibilityLabel("选择时间范围，当前为\(session.selectedRange.displayTitle)")
+        .accessibilityValue("\(session.selectedRange.start) 至 \(session.selectedRange.end)")
+        .accessibilityIdentifier("navigation-time-range")
     }
 }
 
@@ -107,6 +85,22 @@ private struct LedgerTimeRangeSheet: View {
                     }
                     .pickerStyle(.segmented)
                     LabeledContent("当前选择", value: session.draftRange.displayTitle)
+                    HStack {
+                        Button {
+                            session.moveDraftRange(by: -1)
+                        } label: {
+                            Label("上一周期", systemImage: "chevron.left")
+                        }
+                        Spacer()
+                        Button {
+                            session.moveDraftRange(by: 1)
+                        } label: {
+                            Label("下一周期", systemImage: "chevron.right")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
+                    .disabled(session.draftRange.preset == .custom)
                 }
                 Section("日期") {
                     DatePicker("开始日期", selection: startBinding, displayedComponents: .date)

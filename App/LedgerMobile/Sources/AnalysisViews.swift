@@ -89,7 +89,7 @@ struct LedgerAnalysisView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation(kind.title, isRoot: isRoot)
+        .ledgerNavigation(kind.title, isRoot: isRoot, showsTimeRange: true)
         .task(id: requestKey) {
             await load(replacingContent: resource == nil)
         }
@@ -103,7 +103,6 @@ struct LedgerAnalysisView: View {
                     Color.clear
                         .frame(height: 0)
                         .id(analysisTopID)
-                    analysisHeader
 
                     if let errorMessage {
                         StatusBanner(message: errorMessage) { self.errorMessage = nil }
@@ -119,7 +118,7 @@ struct LedgerAnalysisView: View {
                     }
                 }
                 .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+                .padding(.top, LedgerLayout.pageTopInset)
                 .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
                 .ledgerAdaptivePageWidth()
             }
@@ -133,10 +132,6 @@ struct LedgerAnalysisView: View {
     }
 
     private var analysisTopID: String { "analysis-top-\(kind.rawValue)" }
-
-    private var analysisHeader: some View {
-        LedgerTimeRangeControl()
-    }
 
     private func load(replacingContent: Bool = true) async {
         if replacingContent { resource = nil }
