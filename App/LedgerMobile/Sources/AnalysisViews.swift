@@ -44,7 +44,7 @@ struct LedgerAnalysisView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let kind: LedgerAnalysisKind
-    var showsAppBar = false
+    var isRoot = false
 
     @State private var resource: LedgerAnalysisResource?
     @State private var errorMessage: String?
@@ -62,12 +62,6 @@ struct LedgerAnalysisView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsAppBar {
-                LedgerAppBar {
-                    PrivacyToolbarButton()
-                }
-            }
-
             Group {
                 if let resource {
                     content(resource)
@@ -95,11 +89,7 @@ struct LedgerAnalysisView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(showsAppBar ? "" : kind.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .ledgerNavigation(kind.title, isRoot: isRoot)
         .task(id: requestKey) {
             await load(replacingContent: resource == nil)
         }
@@ -144,37 +134,8 @@ struct LedgerAnalysisView: View {
 
     private var analysisTopID: String { "analysis-top-\(kind.rawValue)" }
 
-    @ViewBuilder
     private var analysisHeader: some View {
-        if horizontalSizeClass == .regular {
-            HStack(alignment: .bottom, spacing: LedgerSpacing.xl) {
-                analysisIntro
-                LedgerTimeRangeControl()
-                    .frame(width: 420)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                analysisIntro
-                LedgerTimeRangeControl()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var analysisIntro: some View {
-        if showsAppBar {
-            LedgerPageIntro(
-                title: kind.title,
-                detail: kind.detail,
-                meta: session.selectedRange.metricScope,
-                style: .inline
-            ) { EmptyView() }
-        } else {
-            LedgerPageContext(
-                detail: kind.detail,
-                meta: session.selectedRange.metricScope
-            )
-        }
+        LedgerTimeRangeControl()
     }
 
     private func load(replacingContent: Bool = true) async {

@@ -185,15 +185,15 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     ) async throws -> LedgerImportCommitResult {
         importCommitAttempts += 1
         if ProcessInfo.processInfo.arguments.contains("--safe-import-observe-commit") {
-            try await Task.sleep(nanoseconds: 600_000_000)
+            try await Task.sleep(nanoseconds: 3_000_000_000)
         }
         if ProcessInfo.processInfo.arguments.contains("--safe-import-fail-first-commit"),
            importCommitAttempts == 1 {
             throw LedgerAPIError.incompatibleServer("安全预览模拟保存失败")
         }
         committedImportDocument = LedgerImportDocument(
-            path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
-            name: "2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
+            path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-\(request.importID).xlsx",
+            name: "2026-08-01_2026-08-30-\(request.provider)-\(request.importID).xlsx",
             year: "2026",
             ext: ".xlsx",
             provider: request.provider,
@@ -244,7 +244,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
 
     private func delayTransactionWriteIfRequested() async throws {
         guard ProcessInfo.processInfo.arguments.contains("--safe-slow-transaction-write") else { return }
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // Keep pending UI observable across the system toolbar animation in UI tests.
+        try await Task.sleep(nanoseconds: 3_000_000_000)
     }
 
     private func transactionKey(_ source: TransactionSource) -> String {

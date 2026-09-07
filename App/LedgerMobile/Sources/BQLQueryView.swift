@@ -2,26 +2,15 @@ import Charts
 import SwiftUI
 
 struct BQLQueryView: View {
-    var showsAppBar = false
+    var isRoot = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsAppBar {
-                LedgerAppBar { PrivacyToolbarButton() }
-            }
-            BQLWorkbench(showsPageTitle: showsAppBar)
+            BQLWorkbench()
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(showsAppBar ? "" : "BQL 查询")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
-            }
-        }
+        .ledgerNavigation("BQL 查询", isRoot: isRoot)
+
     }
 }
 
@@ -43,7 +32,6 @@ private struct BQLWorkbench: View {
     @State private var mutationRecordID: String?
     @State private var runTask: Task<Void, Never>?
 
-    let showsPageTitle: Bool
 
     private var statements: [String] {
         BQLStatements.split(query)
@@ -60,17 +48,8 @@ private struct BQLWorkbench: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                if showsPageTitle {
-                    LedgerPageIntro(
-                        title: "BQL 查询",
-                        detail: "使用只读语句检索 postings 与 transactions，并复用服务器查询历史。",
-                        meta: runSummary
-                    ) { EmptyView() }
-                } else {
-                    LedgerPageContext(
-                        detail: "使用只读语句检索 postings 与 transactions，并复用服务器查询历史。",
-                        meta: runSummary
-                    )
+                if let runSummary {
+                    Text(runSummary).font(.footnote).foregroundStyle(.secondary)
                 }
 
                 LedgerTimeRangeControl()
@@ -218,10 +197,6 @@ private struct BQLWorkbench: View {
         }
         .background(LedgerPalette.panel)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 
     private var historyPanel: some View {
@@ -290,10 +265,6 @@ private struct BQLWorkbench: View {
         }
         .background(LedgerPalette.panel)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 
     private func exampleRow(_ example: BQLQueryExample) -> some View {
@@ -664,10 +635,6 @@ private struct BQLResultPanel: View {
         }
         .background(LedgerPalette.panel)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 
     private var resultModeButtons: some View {
@@ -691,10 +658,6 @@ private struct BQLResultPanel: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 
     private func supports(_ kind: BQLResultViewKind) -> Bool {

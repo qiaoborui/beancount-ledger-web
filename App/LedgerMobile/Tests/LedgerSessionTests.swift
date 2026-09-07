@@ -640,7 +640,10 @@ final class LedgerSessionTests: XCTestCase {
             credential: QuickUnlockCredential(deviceID: "local-biometric", token: "protected-marker")
         )
         let api = SessionMockAPI(payload: Self.payload)
-        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        let session = LedgerSession(
+            api: api, defaults: defaults, biometricStore: store,
+            widgetCredentialStore: MockWidgetCredentialStore(isAvailable: false)
+        )
         await session.resume()
 
         await session.setBiometricUnlockEnabled(false)
@@ -725,7 +728,10 @@ final class LedgerSessionTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = MockBiometricCredentialStore()
         let api = SessionMockAPI(payload: Self.payload)
-        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        let session = LedgerSession(
+            api: api, defaults: defaults, biometricStore: store,
+            widgetCredentialStore: MockWidgetCredentialStore(isAvailable: false)
+        )
         await session.resume()
 
         await session.setBiometricUnlockEnabled(true)
@@ -2996,7 +3002,12 @@ private final class MockBiometricCredentialStore: BiometricCredentialStore {
 }
 
 private final class MockWidgetCredentialStore: LedgerWidgetCredentialStoring, @unchecked Sendable {
-    let isAvailable = true
+    let isAvailable: Bool
+
+    init(isAvailable: Bool = true) {
+        self.isAvailable = isAvailable
+    }
+
     private(set) var credential: LedgerWidgetCredential?
     private var suspended = false
     var suspendShouldFail = false

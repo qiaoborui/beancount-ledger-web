@@ -6,6 +6,17 @@ validation, confirmation, and rollback boundaries.
 The app connects to an existing HTTPS deployment and reuses the server's cookie
 authentication and privacy lock.
 
+## Native interaction design
+
+The iPhone shell owns one navigation stack per tab, including More. Secondary
+destinations push in that stack and preserve the system back gesture. The iPad
+shell uses a system sidebar and keeps its visibility when changing destinations.
+Overview, transactions, accounts, and settings use grouped system lists and forms.
+Transactions have native search, date sections, and a swipe action for tags;
+accounts have search and expandable groups. Editing and import preparation use
+system forms, searchable account selection, and navigation-bar confirmation.
+See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy rules.
+
 ## Current scope
 
 - Verify a compatible Ledger Web HTTPS origin before accepting a password.
@@ -72,7 +83,10 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
     build-for-testing
 ```
 
-Run the portable model and session tests with `swift test` from this directory.
+Run model and session tests in the simulator with `xcodebuild test` and
+`-only-testing:LedgerMobileTests`. `swift test` also builds the portable target,
+but App Group storage tests require an environment with container access; an
+unsigned macOS command-line test process may fail those storage checks.
 
 Apple Silicon Mac can run the same iPad build through Designed for iPad. After
 `xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination
