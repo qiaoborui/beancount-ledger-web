@@ -1040,7 +1040,8 @@ final class LedgerMobileUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == true AND hittable == true"),
             object: element
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
+        // iPad remote keyboard dismissal can make one accessibility snapshot exceed 3s.
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: isPad ? 8 : 3), .completed)
     }
 
     private func waitForImportSavingState(_ element: XCUIElement, timeout: TimeInterval) {
@@ -1058,7 +1059,6 @@ final class LedgerMobileUITests: XCTestCase {
     private func replaceText(in element: XCUIElement, with replacement: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 3))
         element.tap()
-        let currentValue = (element.value as? String) ?? ""
         if isPad, element.identifier == "import-edit-amount" {
             element.press(forDuration: 1.0)
             let selectionLabel = NSPredicate(format: "label IN %@", ["Select All", "全选"])
@@ -1074,8 +1074,14 @@ final class LedgerMobileUITests: XCTestCase {
             }
         }
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
-        element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
+        // The trailing tap may activate UIKit's search clear control.
+        let currentValue = (element.value as? String) ?? ""
+        let isEmpty = currentValue.isEmpty || currentValue == element.placeholderValue
+        if !isEmpty {
+            element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
+        }
         if !replacement.isEmpty {
+            if isEmpty { element.tap() }
             element.typeText(replacement)
         }
         // UIKit exposes the placeholder as the accessibility value of an empty search field.
