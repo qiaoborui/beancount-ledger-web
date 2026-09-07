@@ -56,9 +56,10 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   The server expires this credential after 90 days, and the app rotates it
   during the final 14 days.
 - Tap a date in the medium or large expense calendar widget to open that day's
-  expense transactions. The app validates the civil date, preserves the request
-  through unlock, clears old search/account/tag filters, and returns to the
-  transaction list root. The calendar uses four intensity levels, outlines today,
+  expense transactions in a separate native sheet. The app validates the civil
+  date and preserves the request through unlock. The sheet owns its data; the
+  global date range, active page, and existing search filters stay unchanged.
+  The calendar uses four intensity levels, outlines today,
   and shows daily amounts in the large family. It reuses the existing reduced
   widget snapshot and authenticated bootstrap API.
 - Keep native Ledger passkey login ready for paid-team signing; Personal Team

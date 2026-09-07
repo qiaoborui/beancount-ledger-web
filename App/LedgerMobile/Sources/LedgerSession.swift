@@ -94,8 +94,6 @@ final class LedgerSession: ObservableObject {
     @Published var errorMessage: String?
     @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
-    @Published var transactionFilters = LedgerTransactionFilter()
-    @Published private(set) var widgetNavigationID = UUID()
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
     @Published private(set) var selectedRange: LedgerDateRange
@@ -1429,7 +1427,6 @@ final class LedgerSession: ObservableObject {
     func logout() {
         guard let serverURL else { return }
         pendingWidgetExpenseDay = nil
-        transactionFilters = LedgerTransactionFilter()
         _ = invalidateSession()
         stopImportIndexTracking()
         suspendWidgetCredential()
@@ -1452,7 +1449,6 @@ final class LedgerSession: ObservableObject {
 
     func changeServer() {
         pendingWidgetExpenseDay = nil
-        transactionFilters = LedgerTransactionFilter()
         let previousServerURL = serverURL
         _ = invalidateSession()
         stopImportIndexTracking()
@@ -1578,28 +1574,33 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    var canApplyWidgetNavigation: Bool {
+    var canPresentWidgetDay: Bool {
         pendingWidgetExpenseDay != nil && phase == .ready
-            && !isAuthenticationBusy && !isRangeLoading && !isValuationCurrencyLoading
+            && !isAuthenticationBusy
     }
 
-    func applyPendingWidgetNavigation() async {
-        guard canApplyWidgetNavigation, let day = pendingWidgetExpenseDay else { return }
-        await applyRange(LedgerDateRange(start: day, end: day, preset: .custom))
-        // A failed fetch leaves the current screen and its error visible. Tapping again retries.
-        if pendingWidgetExpenseDay == day, phase == .ready, errorMessage != nil {
-            pendingWidgetExpenseDay = nil
-        }
-    }
-
-    private func finishWidgetNavigation(in range: LedgerDateRange) {
-        guard let day = pendingWidgetExpenseDay, range.start == day, range.end == day else { return }
+    func dismissWidgetDay() {
         pendingWidgetExpenseDay = nil
-        transactionFilters = LedgerTransactionFilter(kind: .expense)
-        rangePickerPresented = false
-        draftRange = range
-        primaryDestinationID = "transactions"
-        widgetNavigationID = UUID()
+    }
+
+    /// A day drill-down owns its payload and never replaces the global range or ledger.
+    func widgetDayLedger(_ day: String) async throws -> LedgerBootstrap {
+        guard LedgerWidgetLink.isValidDay(day) else {
+            throw LedgerAPIError.incompatibleServer("无效的消费日期")
+        }
+        let range = LedgerDateRange(start: day, end: day, preset: .custom)
+        let today = LedgerDateRange.today(now: ledgerNow())
+        let currency = ledger?.valuationCurrency ?? "CNY"
+        return try await performSensitiveRequest(validatesRequestGeneration: false) { api, serverURL in
+            let payload = try await api.bootstrap(
+                baseURL: serverURL, start: range.start, end: range.queryEndExclusive,
+                today: today, valuationCurrency: currency
+            )
+            guard payload.sensitiveUnlocked else {
+                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+            }
+            return payload
+        }
     }
 
     func consumeGmailOAuthResult(id: UUID) {
@@ -1658,9 +1659,7 @@ final class LedgerSession: ObservableObject {
         valuationCurrency: String? = nil,
         preserveCachedLedgerOnSensitiveLock: Bool = false
     ) async throws {
-        let targetRange = range ?? pendingWidgetExpenseDay.map {
-            LedgerDateRange(start: $0, end: $0, preset: .custom)
-        } ?? selectedRange
+        let targetRange = range ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: serverURL)
         let payload = try await api.bootstrap(
             baseURL: serverURL,
@@ -1685,7 +1684,6 @@ final class LedgerSession: ObservableObject {
         ledger = payload
         storeValuationCurrency(payload.valuationCurrency, for: serverURL)
         selectedRange = targetRange
-        finishWidgetNavigation(in: targetRange)
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready

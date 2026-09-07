@@ -60,7 +60,7 @@ struct TransactionRow: View {
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    private var filters: LedgerTransactionFilter { session.transactionFilters }
+    @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
@@ -106,7 +106,7 @@ struct TransactionsView: View {
         List {
             if activeStructuredFilterCount > 0 {
                 Section {
-                    TransactionFilterChips(filters: $session.transactionFilters)
+                    TransactionFilterChips(filters: $filters)
                 }
             }
             if let error = session.errorMessage {
@@ -183,7 +183,7 @@ struct TransactionsView: View {
         }
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
-        .searchable(text: $session.transactionFilters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
+        .searchable(text: $filters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
@@ -219,9 +219,9 @@ struct TransactionsView: View {
         }
             .sheet(isPresented: $filterPresented) {
                 TransactionFilterSheet(
-                    kind: $session.transactionFilters.kind,
-                    account: $session.transactionFilters.account,
-                    tags: $session.transactionFilters.tags,
+                    kind: $filters.kind,
+                    account: $filters.account,
+                    tags: $filters.tags,
                     accounts: availableAccounts,
                     availableTags: availableTags,
                     onDone: { filterPresented = false }
@@ -312,6 +312,80 @@ struct TransactionsView: View {
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
         actionMessage = "服务器已验证，并为 \(selected.count) 条交易添加标签。"
+    }
+}
+
+/// Widget drill-down stays separate from the main list's time range and search state.
+struct WidgetDayTransactionsView: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    let day: String
+    @State private var payload: LedgerBootstrap?
+    @State private var loading = true
+    @State private var errorMessage: String?
+
+    private var transactions: [LedgerTransaction] {
+        (payload?.transactions ?? []).filter {
+            $0.date == day && LedgerTransactionFilter(kind: .expense).matches($0)
+        }
+    }
+
+    var body: some View {
+        List {
+            if let errorMessage {
+                Section {
+                    Text(errorMessage).foregroundStyle(.secondary)
+                    Button("重试") { Task { await load() } }
+                }
+            }
+            if loading && payload == nil {
+                ProgressView("正在读取当天支出")
+            } else if transactions.isEmpty && errorMessage == nil {
+                ContentUnavailableView("当天暂无支出", systemImage: "calendar", description: Text(day))
+            }
+            Section {
+                ForEach(transactions) { transaction in
+                    NavigationLink {
+                        TransactionDetailView(transaction: transaction, snapshotOnly: true)
+                    } label: {
+                        TransactionCard(
+                            transaction: transaction,
+                            accountLabels: TransactionCategoryPresentation.accountLabels(payload?.accounts ?? [])
+                        )
+                    }
+                }
+            } header: {
+                if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
+            }
+        }
+        .ledgerReadingList()
+        .navigationTitle("\(day) 支出")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { dismiss() }
+            }
+            ToolbarItem(placement: .topBarLeading) { PrivacyToolbarButton() }
+        }
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    @MainActor
+    private func load() async {
+        loading = true
+        errorMessage = nil
+        do {
+            let result = try await session.widgetDayLedger(day)
+            try Task.checkCancellation()
+            payload = result
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+        }
+        loading = false
     }
 }
 
@@ -746,9 +820,11 @@ struct TransactionDetailView: View {
     @State private var confirmedEntry: LedgerTransactionEntry?
     @State private var confirmedSourceFile: String?
     @State private var sourceUnavailable = false
+    private let snapshotOnly: Bool
 
-    init(transaction: LedgerTransaction) {
+    init(transaction: LedgerTransaction, snapshotOnly: Bool = false) {
         _transaction = State(initialValue: transaction)
+        self.snapshotOnly = snapshotOnly
     }
 
     private var presentation: TransactionPresentation {
@@ -832,16 +908,18 @@ struct TransactionDetailView: View {
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("编辑") { editorPresented = true }
-                    .fontWeight(.semibold)
-                    .disabled(
-                        transaction.source.hash?.isEmpty != false
-                            || transaction.editableEntry == nil
-                            || sourceUnavailable
-                            || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
-                    )
-                    .accessibilityIdentifier("transaction-edit")
+            if !snapshotOnly {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("编辑") { editorPresented = true }
+                        .fontWeight(.semibold)
+                        .disabled(
+                            transaction.source.hash?.isEmpty != false
+                                || transaction.editableEntry == nil
+                                || sourceUnavailable
+                                || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
+                        )
+                        .accessibilityIdentifier("transaction-edit")
+                }
             }
         }
         .sheet(isPresented: $editorPresented) {
@@ -873,7 +951,7 @@ struct TransactionDetailView: View {
     }
 
     private func synchronizeTransaction(with ledger: LedgerBootstrap?) {
-        guard let ledger else { return }
+        guard !snapshotOnly, let ledger else { return }
         if case let .visible(resolved) = session.transactionResolution(for: transaction.source) {
             transaction = resolved
             sourceUnavailable = false
