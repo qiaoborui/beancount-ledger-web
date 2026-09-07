@@ -182,7 +182,11 @@ struct LedgerDateRange: Equatable, Sendable {
         case .month: return "\(yearPrefix)\(month)月"
         case .quarter: return "\(yearPrefix)Q\(((month - 1) / 3) + 1)"
         case .year: return "\(year)年"
-        case .custom: return "自定义"
+        case .custom:
+            if start == end {
+                return "\(yearPrefix)\(month)/\(Self.calendar.component(.day, from: startDate))"
+            }
+            return "自定义"
         }
     }
 

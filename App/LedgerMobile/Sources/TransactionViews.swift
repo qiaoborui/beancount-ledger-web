@@ -60,7 +60,7 @@ struct TransactionRow: View {
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var filters = LedgerTransactionFilter()
+    private var filters: LedgerTransactionFilter { session.transactionFilters }
     @State private var filterPresented = false
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
@@ -106,7 +106,7 @@ struct TransactionsView: View {
         List {
             if activeStructuredFilterCount > 0 {
                 Section {
-                    TransactionFilterChips(filters: $filters)
+                    TransactionFilterChips(filters: $session.transactionFilters)
                 }
             }
             if let error = session.errorMessage {
@@ -183,7 +183,7 @@ struct TransactionsView: View {
         }
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
-        .searchable(text: $filters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
+        .searchable(text: $session.transactionFilters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
@@ -219,9 +219,9 @@ struct TransactionsView: View {
         }
             .sheet(isPresented: $filterPresented) {
                 TransactionFilterSheet(
-                    kind: $filters.kind,
-                    account: $filters.account,
-                    tags: $filters.tags,
+                    kind: $session.transactionFilters.kind,
+                    account: $session.transactionFilters.account,
+                    tags: $session.transactionFilters.tags,
                     accounts: availableAccounts,
                     availableTags: availableTags,
                     onDone: { filterPresented = false }

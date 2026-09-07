@@ -20,6 +20,7 @@ struct RootView: View {
                 LoginView(authenticated: authenticated)
             case .ready:
                 MainTabView()
+                    .id(session.widgetNavigationID)
             }
 
             if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
@@ -29,6 +30,9 @@ struct RootView: View {
         }
         .tint(LedgerPalette.cobalt)
         .animation(.easeOut(duration: 0.18), value: session.phase)
+        .onChange(of: session.canApplyWidgetNavigation, initial: true) { _, ready in
+            if ready { Task { await session.applyPendingWidgetNavigation() } }
+        }
     }
 }
 

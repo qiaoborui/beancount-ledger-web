@@ -94,6 +94,9 @@ final class LedgerSession: ObservableObject {
     @Published var errorMessage: String?
     @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
+    @Published var transactionFilters = LedgerTransactionFilter()
+    @Published private(set) var widgetNavigationID = UUID()
+    @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
     @Published private(set) var selectedRange: LedgerDateRange
     @Published private(set) var draftRange: LedgerDateRange
@@ -1425,6 +1428,8 @@ final class LedgerSession: ObservableObject {
 
     func logout() {
         guard let serverURL else { return }
+        pendingWidgetExpenseDay = nil
+        transactionFilters = LedgerTransactionFilter()
         _ = invalidateSession()
         stopImportIndexTracking()
         suspendWidgetCredential()
@@ -1446,6 +1451,8 @@ final class LedgerSession: ObservableObject {
     }
 
     func changeServer() {
+        pendingWidgetExpenseDay = nil
+        transactionFilters = LedgerTransactionFilter()
         let previousServerURL = serverURL
         _ = invalidateSession()
         stopImportIndexTracking()
@@ -1539,9 +1546,14 @@ final class LedgerSession: ObservableObject {
     func openWidgetURL(_ url: URL) {
         guard url.scheme?.lowercased() == "ledger" else { return }
         switch url.host?.lowercased() {
+        case "transactions":
+            guard let day = LedgerWidgetLink.expenseDay(from: url) else { return }
+            pendingWidgetExpenseDay = day
         case "accounts":
+            pendingWidgetExpenseDay = nil
             primaryDestinationID = "accounts"
         case "imports":
+            pendingWidgetExpenseDay = nil
             primaryDestinationID = "imports"
         case "gmail-import":
             primaryDestinationID = "imports"
@@ -1559,10 +1571,35 @@ final class LedgerSession: ObservableObject {
                 reason: reason
             )
         case "overview":
+            pendingWidgetExpenseDay = nil
             primaryDestinationID = "overview"
         default:
             break
         }
+    }
+
+    var canApplyWidgetNavigation: Bool {
+        pendingWidgetExpenseDay != nil && phase == .ready
+            && !isAuthenticationBusy && !isRangeLoading && !isValuationCurrencyLoading
+    }
+
+    func applyPendingWidgetNavigation() async {
+        guard canApplyWidgetNavigation, let day = pendingWidgetExpenseDay else { return }
+        await applyRange(LedgerDateRange(start: day, end: day, preset: .custom))
+        // A failed fetch leaves the current screen and its error visible. Tapping again retries.
+        if pendingWidgetExpenseDay == day, phase == .ready, errorMessage != nil {
+            pendingWidgetExpenseDay = nil
+        }
+    }
+
+    private func finishWidgetNavigation(in range: LedgerDateRange) {
+        guard let day = pendingWidgetExpenseDay, range.start == day, range.end == day else { return }
+        pendingWidgetExpenseDay = nil
+        transactionFilters = LedgerTransactionFilter(kind: .expense)
+        rangePickerPresented = false
+        draftRange = range
+        primaryDestinationID = "transactions"
+        widgetNavigationID = UUID()
     }
 
     func consumeGmailOAuthResult(id: UUID) {
@@ -1621,7 +1658,9 @@ final class LedgerSession: ObservableObject {
         valuationCurrency: String? = nil,
         preserveCachedLedgerOnSensitiveLock: Bool = false
     ) async throws {
-        let targetRange = range ?? selectedRange
+        let targetRange = range ?? pendingWidgetExpenseDay.map {
+            LedgerDateRange(start: $0, end: $0, preset: .custom)
+        } ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: serverURL)
         let payload = try await api.bootstrap(
             baseURL: serverURL,
@@ -1646,6 +1685,7 @@ final class LedgerSession: ObservableObject {
         ledger = payload
         storeValuationCurrency(payload.valuationCurrency, for: serverURL)
         selectedRange = targetRange
+        finishWidgetNavigation(in: targetRange)
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         phase = .ready

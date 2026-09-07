@@ -227,6 +227,24 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertEqual(layout.amounts[29], 3_000)
         XCTAssertEqual(layout.peakDay, 28)
         XCTAssertEqual(layout.spendingDayCount, 2)
+        XCTAssertEqual(layout.url(for: 29)?.absoluteString, "ledger://transactions?date=2028-02-29")
+        XCTAssertNil(layout.url(for: 30))
+    }
+
+    func testCalendarDeepLinksValidateCivilDates() {
+        for day in ["2026-12-31", "2028-02-29", "2026-09-07"] {
+            let url = LedgerWidgetLink.expenseDay(day)!
+            XCTAssertEqual(LedgerWidgetLink.expenseDay(from: url), day)
+        }
+        for value in [
+            "ledger://transactions?date=2026-02-29",
+            "ledger://transactions?date=2026-08-32",
+            "ledger://transactions?date=2026-09-07&date=2026-09-08",
+            "https://transactions?date=2026-09-07",
+            "ledger://transactions/detail?date=2026-09-07",
+        ] {
+            XCTAssertNil(LedgerWidgetLink.expenseDay(from: URL(string: value)!))
+        }
     }
 
     private func render<V: View>(

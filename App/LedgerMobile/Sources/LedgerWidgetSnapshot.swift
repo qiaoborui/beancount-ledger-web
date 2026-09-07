@@ -1,5 +1,37 @@
 import Foundation
 
+/// Shared by the app and extension. Ledger dates are civil dates, independent of time zone.
+enum LedgerWidgetLink {
+    static func expenseDay(_ date: String) -> URL? {
+        guard isValidDay(date) else { return nil }
+        return URL(string: "ledger://transactions?date=\(date)")
+    }
+
+    static func expenseDay(from url: URL) -> String? {
+        guard url.scheme?.lowercased() == "ledger", url.host == "transactions",
+              url.path.isEmpty, url.user == nil, url.password == nil, url.port == nil,
+              url.fragment == nil,
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              items.count == 1, items[0].name == "date",
+              let date = items[0].value, isValidDay(date) else { return nil }
+        return date
+    }
+
+    static func isValidDay(_ value: String) -> Bool {
+        guard value.utf8.count == 10,
+              value.utf8.enumerated().allSatisfy({ index, byte in
+                  index == 4 || index == 7 ? byte == 45 : (48...57).contains(byte)
+              }) else { return false }
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...9999).contains(parts[0]), (1...12).contains(parts[1]) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        guard let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return false }
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return components.year == parts[0] && components.month == parts[1] && components.day == parts[2]
+    }
+}
+
 struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 2
 

@@ -4,6 +4,58 @@ import XCTest
 
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testWidgetDayRouteSurvivesColdStart() async {
+        let suiteName = "ledger-widget-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-09")!)
+        await session.resume()
+        XCTAssertEqual(session.selectedRange.start, "2026-08-09")
+        XCTAssertEqual(session.selectedRange.queryEndExclusive, "2026-08-10")
+        XCTAssertEqual(session.primaryDestinationID, "transactions")
+        XCTAssertEqual(session.transactionFilters.kind, .expense)
+    }
+
+    func testWidgetDayRouteClearsFiltersAndResetsNavigation() async {
+        let suiteName = "ledger-widget-warm-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        session.transactionFilters = LedgerTransactionFilter(query: "旧搜索", kind: .income, account: "Income:Salary", tags: ["旧标签"])
+        let navigationID = session.widgetNavigationID
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-31")!)
+        await session.applyPendingWidgetNavigation()
+        XCTAssertEqual(session.selectedRange.start, "2026-08-31")
+        XCTAssertEqual(session.selectedRange.queryEndExclusive, "2026-09-01")
+        XCTAssertEqual(session.transactionFilters, LedgerTransactionFilter(kind: .expense))
+        XCTAssertNotEqual(session.widgetNavigationID, navigationID)
+        XCTAssertNil(session.pendingWidgetExpenseDay)
+    }
+
+    func testWidgetDayRouteWaitsForUnlockAndRejectsInvalidDates() async {
+        let suiteName = "ledger-widget-lock-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        for day in ["2026-02-29", "2026-13-01", "2026-08-00", "2026-8-9"] {
+            session.openWidgetURL(URL(string: "ledger://transactions?date=\(day)")!)
+            XCTAssertNil(session.pendingWidgetExpenseDay)
+        }
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2028-02-29")!)
+        await session.applyPendingWidgetNavigation()
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2028-02-29")
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertFalse(session.amountsVisible)
+        XCTAssertNil(session.ledger)
+    }
+
     func testConfiguredSessionStartsWithPrivacySafeApplicationShell() {
         let suiteName = "ledger-mobile-startup-shell-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
