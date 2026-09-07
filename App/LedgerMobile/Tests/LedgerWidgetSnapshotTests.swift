@@ -3,6 +3,54 @@ import XCTest
 @testable import LedgerMobile
 
 final class LedgerWidgetSnapshotTests: XCTestCase {
+    func testWidgetHistoryCivilDatesAndCoverage() {
+        XCTAssertEqual(LedgerWidgetDates.weekStart("2027-01-01"), "2026-12-28")
+        XCTAssertEqual(LedgerWidgetDates.weekStart("2026-09-06"), "2026-08-31")
+        XCTAssertEqual(LedgerWidgetDates.weekStart("2026-09-07"), "2026-09-07")
+        XCTAssertEqual(LedgerWidgetDates.adding(1, to: "2028-02-28"), "2028-02-29")
+        let expense = LedgerWidgetExpenseSnapshot(periodTitle: "测试", start: "2028-02-28", end: "2028-03-02",
+            currency: "CNY", amount: 80, transactionCount: 2, yearOverYearPercentage: nil, categories: [],
+            dailySeries: [.init(date: "2028-02-29", amount: 100), .init(date: "2028-02-29", amount: -20)])
+        let points = LedgerWidgetDates.series(expense, start: expense.start, end: expense.end)
+        XCTAssertEqual(points.map(\.date), ["2028-02-28", "2028-02-29", "2028-03-01"])
+        XCTAssertEqual(points.map(\.amount), [0, 80, 0])
+        XCTAssertTrue(LedgerWidgetDates.series(expense, start: "2028-02-27", end: expense.end).isEmpty)
+        XCTAssertTrue(LedgerWidgetDates.series(expense, start: expense.start, end: "2028-03-03").isEmpty)
+    }
+
+    func testWidgetInsightsRoundTripAndOldSnapshotCompatibility() throws {
+        var snapshot = Self.snapshot(updatedAt: Date(), amount: 842)
+        XCTAssertNil(LedgerWidgetPeriod.week.expense(in: snapshot))
+        XCTAssertNil(LedgerWidgetPeriod.year.expense(in: snapshot))
+        XCTAssertEqual(LedgerWidgetPeriod.month.expense(in: snapshot)?.amount, 842)
+        snapshot.insights = LedgerWidgetExpenseInsights(updatedAt: "2026-09-07T04:00:00Z",
+            week: snapshot.expense, year: snapshot.expense, history: snapshot.expense)
+        let roundTrip = try JSONDecoder().decode(LedgerWidgetSnapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(roundTrip, snapshot)
+        XCTAssertNotNil(roundTrip.insights?.date)
+        XCTAssertEqual(LedgerWidgetPeriod.week.expense(in: roundTrip)?.amount, 842)
+        XCTAssertNil(LedgerWidgetPeriod.week.currentExpense(in: roundTrip,
+            now: LedgerWidgetDates.date("2027-01-01")!))
+    }
+
+    func testWidgetOldServerKeepsInsightTimestampAndRejectsCurrencyMismatch() throws {
+        var previous = Self.snapshot(updatedAt: Date(), amount: 842)
+        previous.insights = LedgerWidgetExpenseInsights(updatedAt: "2026-09-07T04:00:00Z",
+            week: previous.expense, year: previous.expense, history: previous.expense)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(previous)) as? [String: Any])
+        json["updatedAt"] = "2026-09-08T04:00:00Z"
+        json.removeValue(forKey: "insights")
+        let remote = try JSONDecoder().decode(LedgerWidgetRemoteSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let merged = try remote.snapshot(previous: previous)
+        XCTAssertEqual(merged.insights, previous.insights)
+        XCTAssertNotEqual(merged.insights?.date, merged.updatedAt)
+        var expense = try XCTUnwrap(json["expense"] as? [String: Any])
+        expense["currency"] = "USD"
+        json["expense"] = expense
+        let foreign = try JSONDecoder().decode(LedgerWidgetRemoteSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(try foreign.snapshot(previous: previous).insights)
+    }
+
     func testBuilderKeepsExpenseAndSelectableBalancesWithoutIncomeData() throws {
         let ledger = try JSONDecoder().decode(
             LedgerBootstrap.self,

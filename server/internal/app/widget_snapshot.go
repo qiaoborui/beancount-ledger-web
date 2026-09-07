@@ -41,6 +41,14 @@ type WidgetSnapshotResponse struct {
 	Accounts         []WidgetAccountSnapshot `json:"accounts"`
 	Imports          *[]WidgetImportSnapshot `json:"imports"`
 	ImportsUpdatedAt *string                 `json:"importsUpdatedAt"`
+	Insights         *WidgetExpenseInsights  `json:"insights,omitempty"`
+}
+
+type WidgetExpenseInsights struct {
+	UpdatedAt string                `json:"updatedAt"`
+	Week      WidgetExpenseSnapshot `json:"week"`
+	Year      WidgetExpenseSnapshot `json:"year"`
+	History   WidgetExpenseSnapshot `json:"history"`
 }
 
 type WidgetExpenseSnapshot struct {
@@ -119,7 +127,25 @@ func (s *Server) widgetSnapshot(c *gin.Context) {
 		s.loggerOr().Warn("refresh widget import status", "error", documentsErr)
 	}
 
-	c.JSON(http.StatusOK, buildWidgetSnapshotResponse(snapshot, report, importSnapshots, importsUpdatedAt))
+	response := buildWidgetSnapshotResponse(snapshot, report, importSnapshots, importsUpdatedAt)
+	response.Insights = buildWidgetExpenseInsights(snapshot, input.Today, input.ValuationCurrency, report.GeneratedAt)
+	c.JSON(http.StatusOK, response)
+}
+
+func buildWidgetExpenseInsights(snapshot *LedgerSnapshot, today, currency, updatedAt string) *WidgetExpenseInsights {
+	date, _ := time.Parse("2006-01-02", today) // validated by widgetMonthRange
+	week := date.AddDate(0, 0, -(int(date.Weekday())+6)%7)
+	year := time.Date(date.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	build := func(start, end time.Time) WidgetExpenseSnapshot {
+		report := BuildHomeReportInCurrency(snapshot, start.Format("2006-01-02"), end.Format("2006-01-02"), currency)
+		return buildWidgetExpenseSnapshot(report)
+	}
+	return &WidgetExpenseInsights{
+		UpdatedAt: updatedAt,
+		Week:      build(week, week.AddDate(0, 0, 7)),
+		Year:      build(year, year.AddDate(1, 0, 0)),
+		History:   build(week.AddDate(0, 0, -77), date.AddDate(0, 0, 1)),
+	}
 }
 
 func widgetMonthRange(today string, now time.Time) (string, string, error) {
@@ -136,6 +162,17 @@ func widgetMonthRange(today string, now time.Time) (string, string, error) {
 }
 
 func buildWidgetSnapshotResponse(snapshot *LedgerSnapshot, report HomeReport, imports *[]WidgetImportSnapshot, importsUpdatedAt *string) WidgetSnapshotResponse {
+	return WidgetSnapshotResponse{
+		SchemaVersion:    widgetSnapshotSchemaVersion,
+		UpdatedAt:        report.GeneratedAt,
+		Expense:          buildWidgetExpenseSnapshot(report),
+		Accounts:         buildWidgetAccountSnapshots(snapshot, report.Start, report.End, report.Currency),
+		Imports:          imports,
+		ImportsUpdatedAt: importsUpdatedAt,
+	}
+}
+
+func buildWidgetExpenseSnapshot(report HomeReport) WidgetExpenseSnapshot {
 	categories := append([]DashboardCategorySeries(nil), report.Current.CategorySeries...)
 	sort.Slice(categories, func(i, j int) bool { return categories[i].Total > categories[j].Total })
 	categorySnapshots := make([]WidgetExpenseCategory, 0, 3)
@@ -158,23 +195,16 @@ func buildWidgetSnapshotResponse(snapshot *LedgerSnapshot, report HomeReport, im
 	}
 
 	month, _ := time.Parse("2006-01-02", report.Start)
-	return WidgetSnapshotResponse{
-		SchemaVersion: widgetSnapshotSchemaVersion,
-		UpdatedAt:     report.GeneratedAt,
-		Expense: WidgetExpenseSnapshot{
-			PeriodTitle:            fmt.Sprintf("%d年%d月", month.Year(), int(month.Month())),
-			Start:                  report.Start,
-			End:                    report.End,
-			Currency:               report.Currency,
-			Amount:                 report.Current.KPIs.Expense,
-			TransactionCount:       report.Current.KPIs.TransactionCount,
-			YearOverYearPercentage: widgetPercentageChange(report.Current.KPIs.Expense, report.Previous.KPIs.Expense),
-			Categories:             categorySnapshots,
-			DailySeries:            daily,
-		},
-		Accounts:         buildWidgetAccountSnapshots(snapshot, report.Start, report.End, report.Currency),
-		Imports:          imports,
-		ImportsUpdatedAt: importsUpdatedAt,
+	return WidgetExpenseSnapshot{
+		PeriodTitle:            fmt.Sprintf("%d年%d月", month.Year(), int(month.Month())),
+		Start:                  report.Start,
+		End:                    report.End,
+		Currency:               report.Currency,
+		Amount:                 report.Current.KPIs.Expense,
+		TransactionCount:       report.Current.KPIs.TransactionCount,
+		YearOverYearPercentage: widgetPercentageChange(report.Current.KPIs.Expense, report.Previous.KPIs.Expense),
+		Categories:             categorySnapshots,
+		DailySeries:            daily,
 	}
 }
 

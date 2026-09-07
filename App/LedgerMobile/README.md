@@ -45,7 +45,7 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
   `w`, `k`, `M`, `B`, and `亿` notation.
-- Add Home Screen widgets for current-month spending, a monthly expense
+- Add Home Screen widgets for configurable weekly/monthly/yearly spending, a monthly expense
   calendar, a user-selected asset or liability account, and per-channel import
   recency. Widget snapshots contain expense analytics, account balances, and
   reduced import metadata only; income, archived document names and paths,
@@ -62,6 +62,20 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   The calendar uses four intensity levels, outlines today,
   and shows daily amounts in the large family. It reuses the existing reduced
   widget snapshot and authenticated bootstrap API.
+- Add a medium 30-day spending trend and a separate 12-week heatmap. Both use
+  the existing daily positive-expense series (before refunds); the trend labels
+  this explicitly. Weekly/monthly/yearly overview totals retain the report's
+  net-expense calculation. Heatmap dates use the same isolated day sheet.
+- Configure weekly/monthly/yearly spending on circular, rectangular, and inline
+  Lock Screen widgets. Financial content is privacy-sensitive and uses the
+  system accessory rendering treatment. A cached period outside the current
+  device date displays a refresh prompt.
+- The optional `insights` widget payload carries week, year, and 12-week history
+  with its own timestamp. The app can populate it through existing authenticated
+  home-report APIs before the new server is deployed. Old-server background
+  refreshes and partial app refresh failures preserve the previous same-currency
+  insights and original timestamp. Background updates of these additional
+  metrics require the extended server endpoint.
 - Keep native Ledger passkey login ready for paid-team signing; Personal Team
   builds use password login and device-level biometric quick unlock.
 - Enable Face ID or Touch ID from Settings, then unlock with a server-revocable

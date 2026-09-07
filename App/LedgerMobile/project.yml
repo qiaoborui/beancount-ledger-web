@@ -135,6 +135,8 @@ targets:
       - path: WidgetExtension/AccountBalanceWidget.swift
       - path: WidgetExtension/ExpenseOverviewWidget.swift
       - path: WidgetExtension/ExpenseCalendarWidget.swift
+      - path: WidgetExtension/ExpenseHistoryWidgets.swift
+      - path: WidgetExtension/ExpenseLockScreenWidget.swift
       - path: WidgetExtension/ImportStatusWidget.swift
       - path: WidgetExtension/WidgetDesign.swift
       - path: Sources/LedgerWidgetSnapshot.swift

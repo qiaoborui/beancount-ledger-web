@@ -41,6 +41,7 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
     let accounts: [LedgerWidgetAccountSnapshot]
     let imports: [LedgerWidgetImportSnapshot]
     let importsUpdatedAt: Date?
+    var insights: LedgerWidgetExpenseInsights? = nil
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -66,6 +67,7 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
         accounts = try container.decode([LedgerWidgetAccountSnapshot].self, forKey: .accounts)
         imports = try container.decodeIfPresent([LedgerWidgetImportSnapshot].self, forKey: .imports) ?? []
         importsUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .importsUpdatedAt)
+        insights = try container.decodeIfPresent(LedgerWidgetExpenseInsights.self, forKey: .insights)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -75,6 +77,83 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
         case accounts
         case imports
         case importsUpdatedAt
+        case insights
+    }
+}
+
+/// Additive payload: old servers keep supporting the monthly overview.
+struct LedgerWidgetExpenseInsights: Codable, Equatable, Sendable {
+    let updatedAt: String
+    let week: LedgerWidgetExpenseSnapshot
+    let year: LedgerWidgetExpenseSnapshot
+    let history: LedgerWidgetExpenseSnapshot
+
+    var date: Date? { ISO8601DateFormatter().date(from: updatedAt) }
+}
+
+enum LedgerWidgetPeriod: String, Codable, CaseIterable, Sendable {
+    case week, month, year
+    var title: String {
+        switch self { case .week: "本周消费"; case .month: "本月消费"; case .year: "本年消费" }
+    }
+
+    func expense(in snapshot: LedgerWidgetSnapshot) -> LedgerWidgetExpenseSnapshot? {
+        switch self {
+        case .week: snapshot.insights?.week
+        case .month: snapshot.expense
+        case .year: snapshot.insights?.year
+        }
+    }
+
+    func currentExpense(in snapshot: LedgerWidgetSnapshot, now: Date) -> LedgerWidgetExpenseSnapshot? {
+        guard let expense = expense(in: snapshot) else { return nil }
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        let today = String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+        guard expense.start <= today, today < expense.end else { return nil }
+        return expense
+    }
+}
+
+enum LedgerWidgetDates {
+    static var calendar: Calendar {
+        var value = Calendar(identifier: .gregorian)
+        value.timeZone = TimeZone(secondsFromGMT: 0)!
+        value.firstWeekday = 2
+        return value
+    }
+
+    static func date(_ day: String) -> Date? {
+        guard LedgerWidgetLink.isValidDay(day) else { return nil }
+        let parts = day.split(separator: "-").compactMap { Int($0) }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    static func day(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+    }
+
+    static func adding(_ days: Int, to day: String) -> String {
+        guard let date = date(day), let result = calendar.date(byAdding: .day, value: days, to: date) else { return day }
+        return self.day(result)
+    }
+
+    static func weekStart(_ day: String) -> String {
+        guard let date = date(day) else { return day }
+        return adding(-((calendar.component(.weekday, from: date) + 5) % 7), to: day)
+    }
+
+    /// Expands only the explicitly covered range, retaining source values.
+    static func series(_ expense: LedgerWidgetExpenseSnapshot, start: String, end: String) -> [LedgerWidgetDailyExpense] {
+        guard start >= expense.start, end <= expense.end, start < end,
+              let first = date(start), let last = date(end),
+              let count = calendar.dateComponents([.day], from: first, to: last).day,
+              count <= 366 else { return [] }
+        let amounts = Dictionary(grouping: expense.dailySeries, by: \.date).mapValues { $0.reduce(0) { $0 + $1.amount } }
+        return (0..<count).map { offset in
+            let value = adding(offset, to: start)
+            return LedgerWidgetDailyExpense(date: value, amount: amounts[value, default: 0])
+        }
     }
 }
 

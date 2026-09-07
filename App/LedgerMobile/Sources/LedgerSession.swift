@@ -1822,6 +1822,20 @@ final class LedgerSession: ObservableObject {
     ) async {
         let widgetRefreshAttemptAt = ledgerNow()
         let month = LedgerDateRange.current(.month, now: widgetRefreshAttemptAt)
+        let today = LedgerDateRange.today(now: widgetRefreshAttemptAt)
+        let weekStart = LedgerWidgetDates.weekStart(today)
+        async let weekRequest: LedgerHomeReport? = try? await api.homeReport(
+            baseURL: serverURL, start: weekStart, end: LedgerWidgetDates.adding(7, to: weekStart),
+            valuationCurrency: valuationCurrency
+        )
+        async let yearRequest: LedgerHomeReport? = try? await api.homeReport(
+            baseURL: serverURL, start: String(today.prefix(4)) + "-01-01",
+            end: String((Int(today.prefix(4)) ?? 2026) + 1) + "-01-01", valuationCurrency: valuationCurrency
+        )
+        async let historyRequest: LedgerHomeReport? = try? await api.homeReport(
+            baseURL: serverURL, start: LedgerWidgetDates.adding(-77, to: weekStart),
+            end: LedgerWidgetDates.adding(1, to: today), valuationCurrency: valuationCurrency
+        )
         async let reportRequest: LedgerHomeReport? = try? await api.homeReport(
             baseURL: serverURL,
             start: month.start,
@@ -1831,7 +1845,7 @@ final class LedgerSession: ObservableObject {
         async let importDocumentsRequest: [LedgerImportDocument]? = try? await api.importDocuments(
             baseURL: serverURL
         )
-        let (report, importDocuments) = await (reportRequest, importDocumentsRequest)
+        let (report, importDocuments, week, year, history) = await (reportRequest, importDocumentsRequest, weekRequest, yearRequest, historyRequest)
         guard generation == requestGeneration, self.serverURL == serverURL else {
             return
         }
@@ -1845,7 +1859,7 @@ final class LedgerSession: ObservableObject {
             importDocuments: importDocuments ?? [],
             importsUpdatedAt: importDocuments == nil ? nil : Date()
         )
-        let snapshot: LedgerWidgetSnapshot
+        var snapshot: LedgerWidgetSnapshot
         if importDocuments == nil, let previous = widgetSnapshotStore.load() {
             snapshot = LedgerWidgetSnapshot(
                 updatedAt: freshSnapshot.updatedAt,
@@ -1856,6 +1870,16 @@ final class LedgerSession: ObservableObject {
             )
         } else {
             snapshot = freshSnapshot
+        }
+        if let week, let year, let history {
+            snapshot.insights = LedgerWidgetExpenseInsights(
+                updatedAt: ISO8601DateFormatter().string(from: widgetRefreshAttemptAt),
+                week: LedgerWidgetSnapshotBuilder.make(report: week, ledger: ledger).expense,
+                year: LedgerWidgetSnapshotBuilder.make(report: year, ledger: ledger).expense,
+                history: LedgerWidgetSnapshotBuilder.make(report: history, ledger: ledger).expense
+            )
+        } else if let previous = widgetSnapshotStore.load()?.insights, previous.history.currency == report.currency {
+            snapshot.insights = previous
         }
         guard (try? widgetSnapshotStore.saveIfNewer(
             snapshot,

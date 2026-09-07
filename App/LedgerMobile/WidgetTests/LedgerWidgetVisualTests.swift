@@ -247,16 +247,46 @@ final class LedgerWidgetVisualTests: XCTestCase {
         }
     }
 
+    func testRenderExpenseWidgetExpansion() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let historyEntry = ExpenseCalendarEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            try render(ExpenseTrendWidgetView(entry: historyEntry).environment(\.colorScheme, scheme),
+                size: CGSize(width: 338, height: 158), name: "trend-\(suffix)", colorScheme: scheme)
+            try render(ExpenseHeatmapWidgetView(entry: historyEntry).environment(\.colorScheme, scheme),
+                size: CGSize(width: 338, height: 158), name: "heatmap-\(suffix)", colorScheme: scheme)
+            for period in LedgerWidgetPeriod.allCases {
+                let entry = ExpenseOverviewEntry(date: snapshot.updatedAt, snapshot: snapshot, period: period)
+                try render(ExpenseOverviewWidgetView(entry: entry, familyOverride: .systemSmall).environment(\.colorScheme, scheme),
+                    size: CGSize(width: 158, height: 158), name: "overview-\(period.rawValue)-\(suffix)", colorScheme: scheme)
+                try render(ExpenseOverviewWidgetView(entry: entry, familyOverride: .systemMedium),
+                    size: CGSize(width: 338, height: 158), name: "overview-medium-\(period.rawValue)-\(suffix)", colorScheme: scheme)
+            }
+        }
+        let entry = ExpenseOverviewEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        for (family, size, name) in [
+            (WidgetFamily.accessoryCircular, CGSize(width: 64, height: 64), "lock-circular"),
+            (.accessoryRectangular, CGSize(width: 160, height: 72), "lock-rectangular"),
+            (.accessoryInline, CGSize(width: 220, height: 26), "lock-inline"),
+        ] {
+            try render(ExpenseLockScreenWidgetView(entry: entry, familyOverride: family), size: size, name: name, padding: 0)
+        }
+    }
+
     private func render<V: View>(
         _ view: V,
         size: CGSize,
-        name: String
+        name: String,
+        padding: CGFloat = 16,
+        colorScheme: ColorScheme = .light
     ) throws {
         let content = view
-            .padding(16)
+            .padding(padding)
             .frame(width: size.width, height: size.height)
             .background(LedgerWidgetColors.panel)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .environment(\.colorScheme, colorScheme)
         let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(size)
         renderer.scale = 2

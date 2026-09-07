@@ -123,7 +123,8 @@ enum LedgerWidgetText {
 }
 
 extension LedgerWidgetSnapshot {
-    static let placeholder = LedgerWidgetSnapshot(
+    static let placeholder: LedgerWidgetSnapshot = {
+        var snapshot = LedgerWidgetSnapshot(
         updatedAt: Date(),
         expense: LedgerWidgetExpenseSnapshot(
             periodTitle: "2026年8月",
@@ -193,5 +194,38 @@ extension LedgerWidgetSnapshot {
             ),
         ],
         importsUpdatedAt: Date()
-    )
+        )
+        let today = LedgerWidgetDates.day(Date())
+        let week = LedgerWidgetDates.weekStart(today)
+        let start = LedgerWidgetDates.adding(-77, to: week)
+        let end = LedgerWidgetDates.adding(1, to: today)
+        let daily = (0..<84).compactMap { index -> LedgerWidgetDailyExpense? in
+            let day = LedgerWidgetDates.adding(index, to: start)
+            guard day < end else { return nil }
+            let amount = index % 6 == 0 ? 0 : (index * 37 % 149 + 18) * 100 + index * 13 % 100
+            return LedgerWidgetDailyExpense(date: day, amount: amount)
+        }
+        func expense(start: String, end: String) -> LedgerWidgetExpenseSnapshot {
+            let points = daily.filter { $0.date >= start && $0.date < end }
+            let total = points.reduce(0) { $0 + $1.amount }
+            let categories = snapshot.expense.categories.enumerated().map { index, category in
+                LedgerWidgetExpenseCategory(account: category.account, label: category.label,
+                    amount: total * [55, 30, 15][index] / 100)
+            }
+            return LedgerWidgetExpenseSnapshot(periodTitle: "示例", start: start, end: end, currency: "CNY",
+                amount: total, transactionCount: points.filter { $0.amount > 0 }.count,
+                yearOverYearPercentage: -0.126, categories: categories, dailySeries: points)
+        }
+        snapshot.insights = LedgerWidgetExpenseInsights(updatedAt: ISO8601DateFormatter().string(from: snapshot.updatedAt),
+            week: expense(start: week, end: LedgerWidgetDates.adding(7, to: week)),
+            year: expense(start: String(today.prefix(4)) + "-01-01", end: String(Int(today.prefix(4))! + 1) + "-01-01"),
+            history: expense(start: start, end: end))
+        let month = String(today.prefix(7)) + "-01"
+        let monthEnd = LedgerWidgetDates.day(LedgerWidgetDates.calendar.date(byAdding: .month, value: 1,
+            to: LedgerWidgetDates.date(month)!)!)
+        var result = LedgerWidgetSnapshot(updatedAt: snapshot.updatedAt, expense: expense(start: month, end: monthEnd),
+            accounts: snapshot.accounts, imports: snapshot.imports, importsUpdatedAt: snapshot.importsUpdatedAt)
+        result.insights = snapshot.insights
+        return result
+    }()
 }

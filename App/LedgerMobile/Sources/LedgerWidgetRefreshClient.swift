@@ -24,6 +24,7 @@ struct LedgerWidgetRemoteSnapshot: Decodable, Sendable {
     let accounts: [LedgerWidgetAccountSnapshot]
     let imports: [LedgerWidgetImportSnapshot]?
     let importsUpdatedAt: String?
+    var insights: LedgerWidgetExpenseInsights? = nil
 
     func snapshot(previous: LedgerWidgetSnapshot?) throws -> LedgerWidgetSnapshot {
         guard (1...LedgerWidgetSnapshot.currentSchemaVersion).contains(schemaVersion),
@@ -40,13 +41,17 @@ struct LedgerWidgetRemoteSnapshot: Decodable, Sendable {
         } else {
             resolvedImportsUpdatedAt = imports == nil ? previous?.importsUpdatedAt : nil
         }
-        return LedgerWidgetSnapshot(
+        var result = LedgerWidgetSnapshot(
             updatedAt: updatedAt,
             expense: expense,
             accounts: accounts,
             imports: resolvedImports,
             importsUpdatedAt: resolvedImportsUpdatedAt
         )
+        result.insights = insights ?? previous?.insights.flatMap {
+            $0.history.currency == expense.currency ? $0 : nil
+        }
+        return result
     }
 
     private static func parseDate(_ raw: String) -> Date? {
