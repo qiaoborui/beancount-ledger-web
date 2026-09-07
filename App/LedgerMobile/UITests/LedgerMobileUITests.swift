@@ -11,6 +11,42 @@ final class LedgerMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testAccountGroupsStartCollapsedAndSupportBulkToggleAndSearch() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        openDestination(compact: "账户", regular: "账户")
+        let toggle = app.buttons["account-groups-toggle-all"]
+        let daily = app.staticTexts["日常账户"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
+        XCTAssertEqual(toggle.label, "全部展开")
+        XCTAssertFalse(daily.exists)
+        capture("accounts-default-collapsed")
+        toggle.tap()
+        XCTAssertTrue(daily.waitForExistence(timeout: 3))
+        XCTAssertEqual(toggle.label, "全部折叠")
+        app.buttons["account-group-cash"].firstMatch.tap()
+        XCTAssertFalse(daily.exists)
+        XCTAssertEqual(toggle.label, "全部展开")
+        toggle.tap()
+        XCTAssertTrue(daily.waitForExistence(timeout: 3))
+        toggle.tap()
+        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
+
+        let search = app.searchFields["账户名称或路径"]
+        search.tap()
+        search.typeText("日常\n")
+        XCTAssertTrue(daily.waitForExistence(timeout: 3))
+        toggle.tap()
+        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
+        toggle.tap()
+        XCTAssertTrue(daily.waitForExistence(timeout: 3))
+        replaceText(in: search, with: "")
+        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(toggle.label, "全部展开")
+    }
+
     func testNavigationTimeRangePreservesDraftAndSearchHierarchy() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
@@ -220,6 +256,7 @@ final class LedgerMobileUITests: XCTestCase {
 
         openDestination(compact: "账户", regular: "账户")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
+        app.buttons["account-groups-toggle-all"].tap()
         let longAccount = app.staticTexts["家庭长期储备与教育基金（含海外留学与应急资金）"]
         let accountsList = app.collectionViews["accounts-list"]
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
@@ -743,6 +780,10 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(amount.waitForExistence(timeout: 3))
         XCTAssertTrue(selection.waitForExistence(timeout: 3))
         XCTAssertLessThanOrEqual(amount.frame.maxX, selection.frame.minX)
+        let selectedRow = app.buttons["transaction-select-row-88"]
+        selectedRow.tap()
+        XCTAssertTrue(selectedRow.label.contains("已选择"))
+        capture("transaction-selected-row-highlight")
     }
 
     func testChartAxesPreserveTimeSpacingAndTouchShowsSelections() throws {

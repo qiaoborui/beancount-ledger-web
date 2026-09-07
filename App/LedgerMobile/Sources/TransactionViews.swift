@@ -138,6 +138,8 @@ struct TransactionsView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .listRowBackground(selectedTransactionIDs.contains(transaction.id)
+                                ? LedgerPalette.cobalt.opacity(0.08) : LedgerPalette.canvas)
                             .accessibilityIdentifier("transaction-select-row-\(transaction.source.line)")
                         } else {
                             NavigationLink {
@@ -614,11 +616,8 @@ private struct TransactionSelectableCard: View {
 
     var body: some View {
         TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(selected ? LedgerPalette.cobalt : Color.clear, lineWidth: 2)
-        }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)，用于添加标签")
     }
 }

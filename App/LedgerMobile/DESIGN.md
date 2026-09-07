@@ -22,6 +22,8 @@ Reading pages group through alignment, compact headings, and fine separators. Av
 Each compact tab retains its own navigation stack. Overflow destinations push within More. Sidebar selection changes the detail stack while preserving sidebar visibility. Search, date filters, tag selection, transaction editing, import review, and privacy concealment remain available. Transaction bulk selection lives in the actions menu; selection mode exposes Done directly. Financial writes retain server validation and explicit confirmation. Sheets preserve the privacy cover; keyboard dismissal remains available on decimal fields. Honor Reduce Motion.
 
 ## Responsive behavior
+Account groups start collapsed and expose one Expand All / Collapse All action for the current results. Search maintains separate expansion state so clearing it restores the browsing state. Transaction selection uses a subtle full-row tint and checkmark, with no rounded outline against the text edge.
+
 Use the horizontal size class for iPad navigation and existing chart layouts. Lists adapt to the available width. Accessibility text sizes may stack row labels and values. Avoid hardcoded tab-bar clearance; the system owns safe-area insets.
 
 ## Future changes

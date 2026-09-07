@@ -5,9 +5,18 @@ struct AccountsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedCategory = AccountBalanceCategory.all
-    @State private var collapsedSectionIDs: Set<String> = []
+    @State private var expandedSectionIDs: Set<String> = []
+    @State private var searchExpandedSectionIDs: Set<String> = []
     @State private var query = ""
     var isRoot = true
+
+    private var activeExpandedSectionIDs: Set<String> {
+        query.isEmpty ? expandedSectionIDs : searchExpandedSectionIDs
+    }
+
+    private var allVisibleSectionsExpanded: Bool {
+        !sections.isEmpty && sections.allSatisfy { activeExpandedSectionIDs.contains($0.id) }
+    }
 
     private var sections: [AccountBalanceSection] {
         guard let ledger = session.ledger else { return [] }
@@ -40,6 +49,25 @@ struct AccountsView: View {
 
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
+            }
+            if !sections.isEmpty {
+                HStack {
+                    Text("\(sections.count) 个分组")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(allVisibleSectionsExpanded ? "全部折叠" : "全部展开") {
+                        let visibleIDs = Set(sections.map(\.id))
+                        setExpandedSectionIDs(allVisibleSectionsExpanded
+                            ? activeExpandedSectionIDs.subtracting(visibleIDs)
+                            : activeExpandedSectionIDs.union(visibleIDs))
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("account-groups-toggle-all")
+                }
+                .listRowSeparator(.hidden)
             }
             ForEach(sections) { section in
                 Section {
@@ -86,15 +114,25 @@ struct AccountsView: View {
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "账户名称或路径")
+        .onChange(of: query) { _, _ in
+            searchExpandedSectionIDs = Set(sections.map(\.id))
+        }
         .refreshable { await session.refresh() }
+    }
+
+    private func setExpandedSectionIDs(_ ids: Set<String>) {
+        if query.isEmpty { expandedSectionIDs = ids }
+        else { searchExpandedSectionIDs = ids }
     }
 
     private func expandedBinding(for sectionID: String) -> Binding<Bool> {
         Binding(
-            get: { !collapsedSectionIDs.contains(sectionID) || !query.isEmpty },
+            get: { activeExpandedSectionIDs.contains(sectionID) },
             set: { expanded in
-                if expanded { collapsedSectionIDs.remove(sectionID) }
-                else { collapsedSectionIDs.insert(sectionID) }
+                var ids = activeExpandedSectionIDs
+                if expanded { ids.insert(sectionID) }
+                else { ids.remove(sectionID) }
+                setExpandedSectionIDs(ids)
             }
         )
     }
