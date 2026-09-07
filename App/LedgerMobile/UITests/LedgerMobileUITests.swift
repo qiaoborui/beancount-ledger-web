@@ -123,10 +123,10 @@ final class LedgerMobileUITests: XCTestCase {
         app.tabBars.buttons["交易"].tap()
         let search = app.searchFields["收付款对象、说明、账户或标签"]
         XCTAssertTrue(search.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["navigation-time-range"].exists)
         search.tap()
         search.typeText("不存在的交易")
         XCTAssertTrue(app.staticTexts["没有匹配的交易"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
         replaceText(in: search, with: "城市")
         search.typeText("\n")
         let row = app.buttons["transaction-row-88"]
@@ -741,7 +741,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["服务器已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
         let tagCompleteElapsed = Date().timeIntervalSince(tagStartedAt)
         XCTAssertGreaterThanOrEqual(tagCompleteElapsed, 0.9)
-        app.buttons["完成标签选择"].tap()
+        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 3))
         app.buttons["transaction-row-88"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#reviewed")).firstMatch.waitForExistence(timeout: 3))
         let timing = XCTAttachment(
@@ -836,7 +836,9 @@ final class LedgerMobileUITests: XCTestCase {
         let currencyContent = app.scrollViews["currency-analysis-content"]
         XCTAssertTrue(currencyContent.waitForExistence(timeout: 4))
         let currencyChart = app.descendants(matching: .any)["currency-sparkline-USD"]
-        for _ in 0..<4 where !currencyChart.isHittable { currencyContent.swipeUp() }
+        for _ in 0..<8 where !currencyChart.isHittable {
+            scrollUpThroughGutter(currencyContent)
+        }
         waitUntilHittable(currencyChart)
         dragAcrossChart(currencyChart)
         XCTAssertTrue(app.descendants(matching: .any)["currency-chart-selection-USD"].waitForExistence(timeout: 3))
@@ -862,6 +864,7 @@ final class LedgerMobileUITests: XCTestCase {
         let barChart = app.descendants(matching: .any)["bql-bar-chart"]
         for _ in 0..<3 where !barChart.isHittable { workbench.swipeUp() }
         waitUntilHittable(barChart)
+        revealAboveTabBar(barChart, in: workbench)
         dragAcrossChart(barChart)
         XCTAssertTrue(app.descendants(matching: .any)["bql-chart-selection"].waitForExistence(timeout: 3))
         capture("chart-bql-bar-selected")
@@ -1062,7 +1065,13 @@ final class LedgerMobileUITests: XCTestCase {
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
         element.typeText(replacement)
-        XCTAssertEqual(element.value as? String, replacement)
+        // UIKit exposes the placeholder as the accessibility value of an empty search field.
+        let value = element.value as? String
+        if replacement.isEmpty, element.elementType == .searchField {
+            XCTAssertTrue(value == "" || value == element.placeholderValue)
+        } else {
+            XCTAssertEqual(value, replacement)
+        }
     }
 
     private func assertStaysPresent(_ element: XCUIElement, duration: TimeInterval) {
@@ -1077,9 +1086,16 @@ final class LedgerMobileUITests: XCTestCase {
         guard app.tabBars.firstMatch.exists else { return }
         let obscuredEdge = app.tabBars.firstMatch.frame.minY - 12
         for _ in 0..<4 where element.frame.maxY > obscuredEdge {
-            scrollView.swipeUp()
+            scrollUpThroughGutter(scrollView)
         }
         XCTAssertLessThanOrEqual(element.frame.maxY, obscuredEdge)
+    }
+
+    private func scrollUpThroughGutter(_ scrollView: XCUIElement) {
+        // Keep page scrolling outside the charts' point-selection gestures.
+        scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.8))
+            .press(forDuration: 0.05, thenDragTo:
+                scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.25)))
     }
 
     private func dragAcrossChart(_ chart: XCUIElement) {

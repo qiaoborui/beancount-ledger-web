@@ -91,6 +91,12 @@ Run model and session tests in the simulator with `xcodebuild test` and
 but App Group storage tests require an environment with container access; an
 unsigned macOS command-line test process may fail those storage checks.
 
+For UI iteration, build and install on the physical iPhone early for direct
+feedback. After the final device-feedback changes, complete regression before
+merging the PR: model/session tests, the full iPhone UI suite, and focused small
+screen, accessibility, and iPad coverage. Keep automated writes in safe-preview
+fixtures and record any independently reproduced baseline failures separately.
+
 Apple Silicon Mac can run the same iPad build through Designed for iPad. After
 `xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination
 in Xcode. Regenerating the project restores the intended iOS platform settings
