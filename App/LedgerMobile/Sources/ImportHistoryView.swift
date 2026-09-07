@@ -2,12 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ImportHistoryView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
-    var showsAppBar = false
+    var isRoot = false
 
     @State private var documents: [LedgerImportDocument] = []
     @State private var errorMessage: String?
@@ -45,10 +46,6 @@ struct ImportHistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsAppBar {
-                LedgerAppBar { PrivacyToolbarButton() }
-            }
-
             Group {
                 if isLoading && documents.isEmpty {
                     loadingState
@@ -60,16 +57,7 @@ struct ImportHistoryView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(showsAppBar ? "" : "导入记录")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
-            }
-        }
+        .ledgerNavigation("导入记录", isRoot: isRoot)
         .fileImporter(
             isPresented: $fileImporterPresented,
             allowedContentTypes: Self.supportedFileTypes,
@@ -183,7 +171,7 @@ struct ImportHistoryView: View {
                 importSafetyNotice
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }
@@ -192,21 +180,10 @@ struct ImportHistoryView: View {
         .accessibilityIdentifier("import-history-content")
     }
 
-    @ViewBuilder
     private var pageIntro: some View {
-        if showsAppBar {
-            LedgerPageIntro(
-                title: "导入",
-                detail: "导入新账单，查看各个渠道的覆盖日期、更新状态和历史归档。",
-                meta: loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查",
-                style: .inline
-            ) { EmptyView() }
-        } else {
-            LedgerPageContext(
-                detail: "导入新账单，查看各个渠道的覆盖日期、更新状态和历史归档。",
-                meta: loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查"
-            )
-        }
+        Text(loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
     }
 
     private var importSection: some View {
@@ -298,7 +275,6 @@ struct ImportHistoryView: View {
                 }
             }
         }
-        .accessibilityIdentifier("gmail-automation-section")
     }
 
     @ViewBuilder
@@ -412,15 +388,12 @@ struct ImportHistoryView: View {
             .accessibilityValue(gmailAction == .connect ? "处理中" : "未连接")
             .accessibilityIdentifier("gmail-connect")
         } else {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: LedgerSpacing.sm) {
-                    gmailSyncButton
-                    gmailDisconnectButton
-                }
-                VStack(spacing: LedgerSpacing.sm) {
-                    gmailSyncButton
-                    gmailDisconnectButton
-                }
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: LedgerSpacing.sm))
+                : AnyLayout(HStackLayout(spacing: LedgerSpacing.sm))
+            layout {
+                gmailSyncButton
+                gmailDisconnectButton
             }
         }
     }

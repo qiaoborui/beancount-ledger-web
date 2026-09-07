@@ -2,15 +2,15 @@ import SwiftUI
 import UIKit
 
 enum LedgerPalette {
-    static let canvas = Color.dynamic(light: 0xF6F7F9, dark: 0x020407)
-    static let panel = Color.dynamic(light: 0xFFFFFF, dark: 0x070A10)
-    static let raised = Color.dynamic(light: 0xE4EBF4, dark: 0x0E141C)
+    static let canvas = Color(uiColor: .systemBackground)
+    static let panel = Color(uiColor: .systemBackground)
+    static let raised = Color(uiColor: .tertiarySystemGroupedBackground)
     static let tag = Color.dynamic(light: 0xDDE7F5, dark: 0x0C1827)
-    static let ink = Color.dynamic(light: 0x0C1219, dark: 0xE8EBF1)
+    static let ink = Color.primary
     static let warm = Color.dynamic(light: 0x21272F, dark: 0xC4CBD4)
     static let olive = Color.dynamic(light: 0x38404B, dark: 0x9CA6B3)
-    static let secondary = Color.dynamic(light: 0x515962, dark: 0x808A97)
-    static let line = Color.dynamic(light: 0xD1D6DE, dark: 0x232932)
+    static let secondary = Color.secondary
+    static let line = Color(uiColor: .separator)
     static let lineStrong = Color.dynamic(light: 0xB6BFC9, dark: 0x353E49)
     static let cobalt = Color.dynamic(light: 0x004CA4, dark: 0x2B7AD6)
     static let cobaltLight = Color.dynamic(light: 0x3A7BCB, dark: 0x6AA7F4)
@@ -33,16 +33,19 @@ enum LedgerSpacing {
 
 enum LedgerRadius {
     static let xs: CGFloat = 4
-    static let sm: CGFloat = 6
+    static let sm: CGFloat = 16
     static let md: CGFloat = 12
     static let pill: CGFloat = 999
 }
 
 enum LedgerLayout {
+    static let pageTopInset: CGFloat = 8
+    static let rowVerticalInset: CGFloat = 6
+    static let transactionVerticalInset: CGFloat = 10
     static let sidebarWidth: CGFloat = 208
     static let regularContentWidth: CGFloat = 1120
     static let regularPagePadding: CGFloat = 24
-    static let compactTabBarClearance: CGFloat = 104
+    static let compactTabBarClearance: CGFloat = 24
 }
 
 extension Color {
@@ -78,58 +81,42 @@ struct LedgerBrandMark: View {
     }
 }
 
-struct LedgerAppBar<Trailing: View>: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.ledgerSidebarVisibility) private var sidebarVisibility
-    @ViewBuilder let trailing: Trailing
+/// Shared page chrome; the application shell owns the navigation stack.
+private struct LedgerNavigation: ViewModifier {
+    let title: String
+    let isRoot: Bool
+    let showsTimeRange: Bool
 
-    var body: some View {
-        HStack(spacing: LedgerSpacing.md) {
-            if horizontalSizeClass != .regular {
-                LedgerBrandMark()
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Ledger")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text("个人财务工作台")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if showsTimeRange {
+                    ToolbarItem(placement: .topBarLeading) {
+                        LedgerTimeRangeButton()
+                    }
                 }
-            } else if let sidebarVisibility {
-                LedgerToolbarButton(
-                    action: {
-                        sidebarVisibility.wrappedValue = isSidebarHidden ? .all : .detailOnly
-                    },
-                    accessibilityLabel: isSidebarHidden ? "展开侧边栏" : "收起侧边栏"
-                ) {
-                    Image(systemName: "sidebar.left")
+                ToolbarItem(placement: .topBarTrailing) {
+                    PrivacyToolbarButton()
                 }
             }
-            Spacer(minLength: LedgerSpacing.sm)
-            trailing
-        }
-        .padding(.horizontal, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerSpacing.lg)
-        .frame(minHeight: horizontalSizeClass == .regular ? 56 : 60)
-        .background(LedgerPalette.panel)
-        .background(LedgerPalette.panel.ignoresSafeArea(edges: .top))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(LedgerPalette.line).frame(height: 1)
-        }
-    }
-
-    private var isSidebarHidden: Bool {
-        sidebarVisibility?.wrappedValue == .detailOnly
     }
 }
 
-private struct LedgerSidebarVisibilityKey: EnvironmentKey {
-    static let defaultValue: Binding<NavigationSplitViewVisibility>? = nil
-}
+extension View {
+    func ledgerNavigation(_ title: String, isRoot: Bool = true, showsTimeRange: Bool = false) -> some View {
+        modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange))
+    }
 
-extension EnvironmentValues {
-    var ledgerSidebarVisibility: Binding<NavigationSplitViewVisibility>? {
-        get { self[LedgerSidebarVisibilityKey.self] }
-        set { self[LedgerSidebarVisibilityKey.self] = newValue }
+    /// Reading surfaces share one continuous canvas; forms retain system grouping.
+    func ledgerReadingList() -> some View {
+        listStyle(.plain)
+            .listSectionSpacing(8)
+            .environment(\.defaultMinListHeaderHeight, 24)
+            .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(LedgerPalette.canvas)
     }
 }
 
@@ -164,6 +151,8 @@ private struct LedgerPrivacyProtectedSheet: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
             content
+                .accessibilityHidden(session.presentsPrivacyCover(sceneIsActive: scenePhase == .active))
+                .allowsHitTesting(!session.presentsPrivacyCover(sceneIsActive: scenePhase == .active))
             if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
                 PrivacyCover()
                     .zIndex(1)
@@ -180,67 +169,11 @@ struct LedgerToolbarButton<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 40, height: 40)
-                .background(LedgerPalette.canvas)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
-                        .stroke(LedgerPalette.line, lineWidth: 1)
-                }
+                .font(.body.weight(.medium))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
-        .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-enum LedgerPageIntroStyle: Equatable {
-    case surface
-    case inline
-}
-
-struct LedgerPageIntro<Action: View>: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    let title: String
-    var detail: String?
-    var meta: String?
-    var style: LedgerPageIntroStyle = .surface
-    @ViewBuilder let action: Action
-
-    var body: some View {
-        HStack(alignment: .top, spacing: LedgerSpacing.lg) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: LedgerSpacing.md) {
-                    Text(title)
-                        .font(.system(size: 19, weight: .semibold))
-                        .tracking(-0.35)
-                        .foregroundStyle(LedgerPalette.ink)
-                    if let meta {
-                        Text(meta)
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                }
-                if let detail {
-                    Text(detail)
-                        .font(.system(size: 13))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            action
-        }
-        .padding(.horizontal, usesCompactSurface ? LedgerSpacing.lg : 0)
-        .padding(.vertical, usesCompactSurface ? LedgerSpacing.lg : 0)
-        .background(usesCompactSurface ? LedgerPalette.panel : Color.clear)
-    }
-
-    private var usesCompactSurface: Bool {
-        horizontalSizeClass != .regular && style == .surface
     }
 }
 
@@ -251,13 +184,13 @@ struct LedgerPageContext: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(detail)
-                .font(.system(size: 13))
+                .font(.system(.footnote, design: .default))
                 .foregroundStyle(LedgerPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let meta {
                 Text(meta)
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
             }
         }
@@ -273,10 +206,6 @@ struct LedgerPanel<Content: View>: View {
         content
             .background(LedgerPalette.panel)
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                    .stroke(LedgerPalette.line, lineWidth: 1)
-            }
     }
 }
 
@@ -287,48 +216,16 @@ struct SectionHeading: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, design: .default, weight: .semibold))
                 .tracking(-0.15)
                 .foregroundStyle(LedgerPalette.ink)
             Spacer()
             if let detail {
                 Text(detail)
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
             }
         }
-    }
-}
-
-struct LedgerMetric: View {
-    let label: String
-    let minorUnits: Int
-    let currency: String
-    var detail: String
-    var color = LedgerPalette.ink
-    var primary = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            Text(label)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
-            AmountLabel(
-                minorUnits: minorUnits,
-                currency: currency,
-                font: .system(size: primary ? 24 : 18, weight: .semibold),
-                color: color
-            )
-            .tracking(primary ? -0.65 : -0.35)
-            .lineLimit(1)
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(LedgerPalette.secondary)
-                .lineLimit(2)
-        }
-        .padding(LedgerSpacing.lg)
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-        .background(LedgerPalette.panel)
     }
 }
 
@@ -339,7 +236,7 @@ struct AmountLabel: View {
     let minorUnits: Int
     let currency: String
     var prefix = ""
-    var font: Font = .system(size: 15, weight: .semibold)
+    var font: Font = .system(.subheadline, design: .default, weight: .semibold)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
     var showSign = false
@@ -372,7 +269,8 @@ struct AmountLabel: View {
                     Text(prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign))
                         .fixedSize(horizontal: true, vertical: false)
                     Text(prefix + MoneyText.formatCompact(minorUnits: minorUnits, currency: currency, showSign: showSign))
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
                 }
             }
         } else {
@@ -412,15 +310,15 @@ struct StatusBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.sm) {
             Image(systemName: style.systemImage)
-                .font(.system(size: 14))
+                .font(.system(.subheadline, design: .default))
                 .foregroundStyle(style.color)
             Text(message)
-                .font(.system(size: 12))
+                .font(.system(.caption, design: .default))
                 .foregroundStyle(LedgerPalette.warm)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, design: .default, weight: .semibold))
                     .frame(width: 44, height: 44)
             }
             .foregroundStyle(LedgerPalette.secondary)
@@ -488,23 +386,89 @@ struct EmptyLedgerState: View {
     let detail: String
 
     var body: some View {
-        VStack(spacing: LedgerSpacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 44, height: 44)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(LedgerPalette.ink)
-            Text(detail)
-                .font(.system(size: 13))
-                .foregroundStyle(LedgerPalette.secondary)
-                .multilineTextAlignment(.center)
+        ContentUnavailableView(title, systemImage: icon, description: Text(detail))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(LedgerPalette.canvas)
+    }
+}
+
+struct LedgerAccountChoice: Identifiable, Equatable {
+    let account: String
+    let label: String
+    let group: String
+    let active: Bool
+
+    var id: String { account }
+}
+
+struct LedgerAccountPicker: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let accounts: [LedgerAccountChoice]
+    @Binding var selection: String
+
+    @State private var query = ""
+
+    private var filteredAccounts: [LedgerAccountChoice] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return accounts }
+        return accounts.filter {
+            $0.label.localizedCaseInsensitiveContains(trimmed)
+                || $0.account.localizedCaseInsensitiveContains(trimmed)
+                || $0.group.localizedCaseInsensitiveContains(trimmed)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(LedgerSpacing.xxl)
+    }
+
+    var body: some View {
+        List(filteredAccounts) { choice in
+            Button {
+                selection = choice.account
+                dismiss()
+            } label: {
+                HStack(spacing: LedgerSpacing.md) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: LedgerSpacing.sm) {
+                            Text(choice.label)
+                                .font(.system(.subheadline, design: .default, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            if !choice.active {
+                                Text("已停用")
+                                    .font(.system(.caption2, design: .default, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.gold)
+                            }
+                        }
+                        Text(choice.account)
+                            .font(.system(.caption2, design: .default, weight: .medium).monospaced())
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if choice.account == selection {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(.body, design: .default, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .listRowBackground(LedgerPalette.panel)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .background(LedgerPalette.canvas)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索账户名称或路径")
+        .overlay {
+            if filteredAccounts.isEmpty {
+                EmptyLedgerState(
+                    icon: "magnifyingglass",
+                    title: "没有匹配的账户",
+                    detail: "尝试搜索账户中文名称或完整路径。"
+                )
+            }
+        }
     }
 }

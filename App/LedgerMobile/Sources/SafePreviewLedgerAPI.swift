@@ -185,15 +185,15 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     ) async throws -> LedgerImportCommitResult {
         importCommitAttempts += 1
         if ProcessInfo.processInfo.arguments.contains("--safe-import-observe-commit") {
-            try await Task.sleep(nanoseconds: 600_000_000)
+            try await Task.sleep(nanoseconds: 3_000_000_000)
         }
         if ProcessInfo.processInfo.arguments.contains("--safe-import-fail-first-commit"),
            importCommitAttempts == 1 {
             throw LedgerAPIError.incompatibleServer("安全预览模拟保存失败")
         }
         committedImportDocument = LedgerImportDocument(
-            path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
-            name: "2026-08-01_2026-08-30-\(request.provider)-safe-preview.xlsx",
+            path: "transactions/2026/documents/imports/2026-08-01_2026-08-30-\(request.provider)-\(request.importID).xlsx",
+            name: "2026-08-01_2026-08-30-\(request.provider)-\(request.importID).xlsx",
             year: "2026",
             ext: ".xlsx",
             provider: request.provider,
@@ -244,7 +244,8 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
 
     private func delayTransactionWriteIfRequested() async throws {
         guard ProcessInfo.processInfo.arguments.contains("--safe-slow-transaction-write") else { return }
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // Keep pending UI observable across the system toolbar animation in UI tests.
+        try await Task.sleep(nanoseconds: 3_000_000_000)
     }
 
     private func transactionKey(_ source: TransactionSource) -> String {
@@ -384,6 +385,9 @@ private enum SafePreviewLedgerData {
         LedgerAccount(account: "Assets:Investments:IndexFund", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "全球指数基金", label: "全球指数基金", group: "wealth", active: true),
         LedgerAccount(account: "Assets:Cash:USD", openDate: "2024-03-15", closeDate: nil, currency: "USD", alias: "美元备用金", label: "美元备用金", group: "cash", active: true),
         LedgerAccount(account: "Liabilities:CreditCard", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "信用卡", label: "信用卡", group: "credit", active: true),
+        LedgerAccount(account: "Expenses:Education:Books", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "图书", label: "图书", group: "expense", active: true),
+        LedgerAccount(account: "Expenses:Food:Groceries", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "食材", label: "食材", group: "expense", active: true),
+        LedgerAccount(account: "Expenses:Food:Dining", openDate: "2024-01-01", closeDate: nil, currency: "CNY", alias: "餐饮", label: "餐饮", group: "expense", active: true),
     ]
 
     static let balances = [

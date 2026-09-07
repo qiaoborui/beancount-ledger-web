@@ -3,259 +3,138 @@ import SwiftUI
 
 struct AccountsView: View {
     @EnvironmentObject private var session: LedgerSession
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedCategory = AccountBalanceCategory.all
-    @State private var collapsedSectionIDs: Set<String> = []
+    @State private var expandedSectionIDs: Set<String> = []
+    @State private var searchExpandedSectionIDs: Set<String> = []
+    @State private var query = ""
+    var isRoot = true
+
+    private var activeExpandedSectionIDs: Set<String> {
+        query.isEmpty ? expandedSectionIDs : searchExpandedSectionIDs
+    }
+
+    private var allVisibleSectionsExpanded: Bool {
+        !sections.isEmpty && sections.allSatisfy { activeExpandedSectionIDs.contains($0.id) }
+    }
+
+    private var sections: [AccountBalanceSection] {
+        guard let ledger = session.ledger else { return [] }
+        return ledger.accountSections(
+            periodBalancesAvailable: session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
+        ).compactMap { section in
+            let rows = section.rows.filter { row in
+                selectedCategory.includes(row)
+                    && (query.isEmpty || row.label.localizedStandardContains(query) || row.account.localizedStandardContains(query))
+            }
+            return rows.isEmpty ? nil : AccountBalanceSection(id: section.id, title: section.title, rows: rows)
+        }
+    }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                LedgerAppBar {
-                    PrivacyToolbarButton()
-                }
-
-                if let ledger = session.ledger,
-                   !ledger.accountSections(
-                       periodBalancesAvailable: session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
-                   ).isEmpty {
-                    let periodBalancesAvailable = session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
-                    let sections = ledger.accountSections(
-                        periodBalancesAvailable: periodBalancesAvailable
-                    )
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                                LedgerPageIntro(
-                                    title: "账户",
-                                    detail: "按资产类型查看余额，展开分类进入账户趋势与流水。",
-                                    meta: "\(ledger.accountBalances.count) 个账户",
-                                    style: .inline
-                                ) {
-                                    EmptyView()
-                                }
-
-                                LedgerTimeRangeControl()
-                            }
-                            .padding(LedgerSpacing.lg)
-                            .background(LedgerPalette.panel)
-                            .overlay(alignment: .bottom) {
-                                Rectangle().fill(LedgerPalette.line).frame(height: 1)
-                            }
-                            .padding(.bottom, LedgerSpacing.md)
-
-                            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                                AccountCategoryPicker(
-                                    selection: $selectedCategory,
-                                    rows: sections.flatMap(\.rows)
-                                )
-
-                                if let error = session.errorMessage {
-                                    StatusBanner(message: error, onDismiss: session.dismissError)
-                                }
-                            }
-                            .padding(.horizontal, LedgerSpacing.lg)
-                            .padding(.bottom, LedgerSpacing.lg)
-
-                            LazyVStack(spacing: LedgerSpacing.md) {
-                                ForEach(filteredSections(in: sections)) { section in
-                                    AccountGroupPanel(
-                                        section: section,
-                                        valuationCurrency: ledger.valuationCurrency,
-                                        isCollapsed: collapseBinding(for: section.id)
-                                    )
-                                }
-
-                                if filteredSections(in: sections).isEmpty {
-                                    EmptyLedgerState(
-                                        icon: selectedCategory == .liabilities ? "creditcard" : "building.columns",
-                                        title: "这个分类暂无账户",
-                                        detail: "切换到其他分类查看账户余额。"
-                                    )
-                                    .padding(.top, LedgerSpacing.xl)
-                                }
-                            }
-                            .padding(.horizontal, LedgerSpacing.lg)
-                            .padding(
-                                .bottom,
-                                horizontalSizeClass == .regular
-                                    ? LedgerSpacing.xxl
-                                    : LedgerLayout.compactTabBarClearance
-                            )
-                        }
-                        .ledgerAdaptivePageWidth()
-                        .padding(.vertical, horizontalSizeClass == .regular ? LedgerSpacing.xl : 0)
+        List {
+            Section {
+                Picker("账户分类", selection: $selectedCategory) {
+                    ForEach(AccountBalanceCategory.allCases) { category in
+                        Text(category.title)
+                            .tag(category)
+                            .accessibilityIdentifier("account-filter-\(category.rawValue)")
                     }
-                    .refreshable { await session.refresh() }
-                } else {
-                    EmptyLedgerState(
-                        icon: "building.columns",
-                        title: "暂无账户余额",
-                        detail: "服务器返回的账本没有可展示的账户余额。"
-                    )
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("account-category-picker")
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+
+            if let error = session.errorMessage {
+                Section { StatusBanner(message: error, onDismiss: session.dismissError) }
+            }
+            if !sections.isEmpty {
+                HStack {
+                    Text("\(sections.count) 个分组")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(allVisibleSectionsExpanded ? "全部折叠" : "全部展开") {
+                        let visibleIDs = Set(sections.map(\.id))
+                        setExpandedSectionIDs(allVisibleSectionsExpanded
+                            ? activeExpandedSectionIDs.subtracting(visibleIDs)
+                            : activeExpandedSectionIDs.union(visibleIDs))
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("account-groups-toggle-all")
+                }
+                .listRowSeparator(.hidden)
+            }
+            ForEach(sections) { section in
+                Section {
+                    DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
+                        ForEach(section.rows) { row in
+                            NavigationLink {
+                                AccountDetailView(account: row.account, currency: row.nativeCurrency)
+                            } label: {
+                                AccountRowView(row: row)
+                            }
+                        }
+                    } label: {
+                        Label {
+                            let layout = dynamicTypeSize.isAccessibilitySize
+                                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                : AnyLayout(HStackLayout())
+                            layout {
+                                Text(section.title).font(.subheadline.weight(.medium))
+                                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
+                                    Text("\(section.rows.count) 个账户").font(.caption).foregroundStyle(.secondary)
+                                    AmountLabel(
+                                        minorUnits: section.rows.filter {
+                                            $0.periodBalancesAvailable ? !$0.periodValuationMissing : !$0.valuationMissing
+                                        }.reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) },
+                                        currency: session.ledger?.valuationCurrency ?? "CNY",
+                                        font: .subheadline.weight(.medium)
+                                    )
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: AccountGroupSymbol.symbol(for: section.id))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                        }
+                    }
+                    .accessibilityIdentifier("account-group-\(section.id)")
                 }
             }
-            .background(LedgerPalette.canvas)
-            .toolbar(.hidden, for: .navigationBar)
+            if sections.isEmpty {
+                ContentUnavailableView("暂无匹配账户", systemImage: "building.columns", description: Text("切换分类或调整搜索条件。"))
+            }
         }
+        .ledgerReadingList()
+        .accessibilityIdentifier("accounts-list")
+        .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "账户名称或路径")
+        .onChange(of: query) { _, _ in
+            searchExpandedSectionIDs = Set(sections.map(\.id))
+        }
+        .refreshable { await session.refresh() }
     }
 
-    private func filteredSections(in sections: [AccountBalanceSection]) -> [AccountBalanceSection] {
-        sections.compactMap { section in
-            let rows = section.rows.filter(selectedCategory.includes)
-            guard !rows.isEmpty else { return nil }
-            return AccountBalanceSection(id: section.id, title: section.title, rows: rows)
-        }
+    private func setExpandedSectionIDs(_ ids: Set<String>) {
+        if query.isEmpty { expandedSectionIDs = ids }
+        else { searchExpandedSectionIDs = ids }
     }
 
-    private func collapseBinding(for sectionID: String) -> Binding<Bool> {
+    private func expandedBinding(for sectionID: String) -> Binding<Bool> {
         Binding(
-            get: { collapsedSectionIDs.contains(sectionID) },
-            set: { isCollapsed in
-                if isCollapsed {
-                    collapsedSectionIDs.insert(sectionID)
-                } else {
-                    collapsedSectionIDs.remove(sectionID)
-                }
+            get: { activeExpandedSectionIDs.contains(sectionID) },
+            set: { expanded in
+                var ids = activeExpandedSectionIDs
+                if expanded { ids.insert(sectionID) }
+                else { ids.remove(sectionID) }
+                setExpandedSectionIDs(ids)
             }
         )
-    }
-}
-
-private struct AccountCategoryPicker: View {
-    @Binding var selection: AccountBalanceCategory
-    let rows: [AccountBalanceRow]
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(AccountBalanceCategory.allCases) { category in
-                Button {
-                    selection = category
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(category.title)
-                        Text("\(rows.filter(category.includes).count)")
-                            .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                            .opacity(0.72)
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selection == category ? LedgerPalette.onBrand : LedgerPalette.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 38)
-                    .background(selection == category ? LedgerPalette.cobalt : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityAddTraits(selection == category ? .isSelected : [])
-                .accessibilityIdentifier("account-filter-\(category.rawValue)")
-            }
-        }
-        .padding(3)
-        .background(LedgerPalette.raised)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-    }
-}
-
-private struct AccountGroupPanel: View {
-    let section: AccountBalanceSection
-    let valuationCurrency: String
-    @Binding var isCollapsed: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var total: Int {
-        section.rows
-            .filter {
-                $0.periodBalancesAvailable
-                    ? !$0.periodValuationMissing
-                    : !$0.valuationMissing
-            }
-            .reduce(0) {
-                $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation)
-            }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
-                    isCollapsed.toggle()
-                }
-            } label: {
-                HStack(alignment: .center, spacing: LedgerSpacing.md) {
-                    Image(systemName: AccountGroupSymbol.symbol(for: section.id))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .frame(width: 42, height: 42)
-                        .background(LedgerPalette.tag)
-                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(section.title)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.ink)
-                        Text("\(section.rows.count) 个账户")
-                            .font(.system(size: 11))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(section.rows.allSatisfy(\.periodBalancesAvailable) ? "期末总额" : "当前总额")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.secondary)
-                        AmountLabel(
-                            minorUnits: total,
-                            currency: valuationCurrency,
-                            font: .system(size: 14, weight: .semibold),
-                            color: LedgerPalette.gold
-                        )
-                        .lineLimit(1)
-                        Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                }
-                .padding(LedgerSpacing.lg)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressScaleButtonStyle())
-            .accessibilityLabel("\(isCollapsed ? "展开" : "收起") \(section.title)")
-            .accessibilityValue("\(section.rows.count) 个账户")
-            .accessibilityIdentifier("account-group-\(section.id)")
-
-            if !isCollapsed {
-                Divider().overlay(LedgerPalette.line)
-
-                ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
-                    NavigationLink {
-                        AccountDetailView(account: row.account, currency: row.nativeCurrency)
-                    } label: {
-                        HStack(spacing: LedgerSpacing.sm) {
-                            AccountRowView(row: row)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.secondary)
-                        }
-                        .padding(.horizontal, LedgerSpacing.lg)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-
-                    if index < section.rows.count - 1 {
-                        Divider()
-                            .overlay(LedgerPalette.line)
-                            .padding(.leading, 70)
-                    }
-                }
-            }
-        }
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isCollapsed)
     }
 }
 
@@ -324,7 +203,7 @@ struct AccountDetailView: View {
                     Button("重新加载") {
                         reloadToken += 1
                     }
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(.subheadline, design: .default, weight: .semibold))
                     .foregroundStyle(LedgerPalette.onBrand)
                     .padding(.horizontal, LedgerSpacing.xl)
                     .frame(minHeight: 44)
@@ -338,7 +217,7 @@ struct AccountDetailView: View {
                     ProgressView()
                         .tint(LedgerPalette.cobalt)
                     Text("正在加载账户详情")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(.caption, design: .default, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -347,6 +226,9 @@ struct AccountDetailView: View {
         .background(LedgerPalette.canvas)
         .navigationTitle(detail?.label ?? account.split(separator: ":").last.map(String.init) ?? account)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
+        }
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -356,10 +238,10 @@ struct AccountDetailView: View {
     }
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
-        ScrollView {
+        let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+        return ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
                 AccountDetailHero(detail: detail, range: session.selectedRange)
-                LedgerTimeRangeControl()
 
                 if let errorMessage {
                     StatusBanner(message: errorMessage) {
@@ -371,18 +253,18 @@ struct AccountDetailView: View {
 
                 HStack(alignment: .firstTextBaseline) {
                     Text("账户流水")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.body, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                     Spacer()
                     Text("\(detail.rows.count) 笔")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(.top, LedgerSpacing.sm)
 
                 if detail.rows.isEmpty {
                     Text("这个账户暂无关联流水。")
-                        .font(.system(size: 13))
+                        .font(.system(.footnote, design: .default))
                         .foregroundStyle(LedgerPalette.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 48)
@@ -393,7 +275,7 @@ struct AccountDetailView: View {
                                 NavigationLink {
                                     TransactionDetailView(transaction: row.transaction)
                                 } label: {
-                                    AccountHistoryRow(row: row, currency: detail.currency)
+                                    AccountHistoryRow(row: row, currency: detail.currency, accountLabels: accountLabels)
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
 
@@ -459,7 +341,7 @@ private struct AccountDetailHero: View {
         VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
             HStack(alignment: .top, spacing: LedgerSpacing.md) {
                 Image(systemName: AccountGroupSymbol.symbol(for: detail.group))
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(.headline, design: .default, weight: .semibold))
                     .foregroundStyle(LedgerPalette.cobalt)
                     .frame(width: 46, height: 46)
                     .background(LedgerPalette.tag)
@@ -471,14 +353,14 @@ private struct AccountDetailHero: View {
                         Text("·")
                         Text(detail.currency)
                     }
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(.caption2, design: .default, weight: .medium))
                     .foregroundStyle(LedgerPalette.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !detail.active {
                     Text("已关闭")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(.caption2, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.secondary)
                         .padding(.horizontal, 8)
                         .frame(minHeight: 26)
@@ -489,12 +371,12 @@ private struct AccountDetailHero: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(.caption2, design: .default, weight: .semibold))
                     .foregroundStyle(LedgerPalette.secondary)
                 AmountLabel(
                     minorUnits: closingBalance,
                     currency: detail.currency,
-                    font: .system(size: 30, weight: .semibold),
+                    font: .title2.weight(.semibold),
                     color: detail.account.hasPrefix("Liabilities:")
                         ? LedgerPalette.expense
                         : LedgerPalette.gold
@@ -506,12 +388,12 @@ private struct AccountDetailHero: View {
             HStack(spacing: LedgerSpacing.xl) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("期初余额")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(.caption2, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.secondary)
                     AmountLabel(
                         minorUnits: openingBalance,
                         currency: detail.currency,
-                        font: .system(size: 12, weight: .semibold),
+                        font: .system(.caption, design: .default, weight: .semibold),
                         color: LedgerPalette.olive
                     )
                     .lineLimit(1)
@@ -519,13 +401,13 @@ private struct AccountDetailHero: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("期间变化")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(.caption2, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.secondary)
                     AmountLabel(
                         minorUnits: periodChange,
                         currency: detail.currency,
                         prefix: periodChange > 0 ? "+" : "",
-                        font: .system(size: 12, weight: .semibold),
+                        font: .system(.caption, design: .default, weight: .semibold),
                         color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                     )
                     .lineLimit(1)
@@ -537,12 +419,12 @@ private struct AccountDetailHero: View {
             VStack(alignment: .leading, spacing: 3) {
                 if let alias = detail.alias, alias != detail.label {
                     Text(alias)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(.caption2, design: .default, weight: .medium))
                         .foregroundStyle(LedgerPalette.olive)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(detail.account)
-                    .font(.system(size: 10, weight: .medium).monospaced())
+                    .font(.system(.caption2, design: .default, weight: .medium).monospaced())
                     .foregroundStyle(LedgerPalette.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -551,10 +433,6 @@ private struct AccountDetailHero: View {
         .padding(LedgerSpacing.lg)
         .background(LedgerPalette.panel)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 }
 
@@ -585,24 +463,24 @@ private struct AccountBalanceTrendPanel: View {
                 HStack(alignment: .firstTextBaseline, spacing: LedgerSpacing.md) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("余额趋势")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(.body, design: .default, weight: .semibold))
                             .tracking(-0.15)
                             .foregroundStyle(LedgerPalette.ink)
                         Text(rangeLabel)
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
+                            .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                             .foregroundStyle(LedgerPalette.secondary)
                     }
                     Spacer()
                     if let periodChange {
                         VStack(alignment: .trailing, spacing: 3) {
                             Text("期间变化")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(.system(.caption2, design: .default, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.secondary)
                             AmountLabel(
                                 minorUnits: periodChange,
                                 currency: detail.currency,
                                 prefix: periodChange > 0 ? "+" : "",
-                                font: .system(size: 11, weight: .semibold),
+                                font: .system(.caption2, design: .default, weight: .semibold),
                                 color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                             )
                             .lineLimit(1)
@@ -671,7 +549,7 @@ private struct AccountBalanceTrendPanel: View {
                     AxisValueLabel(collisionResolution: .disabled) {
                         if let position = value.as(Double.self) {
                             Text(axis.shortLabel(nearestTo: position))
-                                .font(.system(size: 9, weight: .medium).monospacedDigit())
+                                .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                                 .foregroundStyle(LedgerPalette.secondary)
                         }
                     }
@@ -688,12 +566,12 @@ private struct AccountBalanceTrendPanel: View {
                 let point = points[selectedIndex]
                 VStack(alignment: .leading, spacing: 3) {
                     Text(point.date)
-                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .font(.system(.caption2, design: .default, weight: .semibold).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                     AmountLabel(
                         minorUnits: point.balance,
                         currency: detail.currency,
-                        font: .system(size: 10, weight: .semibold),
+                        font: .system(.caption2, design: .default, weight: .semibold),
                         color: LedgerPalette.ink
                     )
                 }
@@ -715,10 +593,10 @@ private struct AccountBalanceTrendPanel: View {
     private var trendEmptyState: some View {
         HStack(spacing: LedgerSpacing.md) {
             Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(.headline, design: .default, weight: .medium))
                 .foregroundStyle(LedgerPalette.cobalt)
             Text("有账户流水后，这里会显示每日结余趋势。")
-                .font(.system(size: 12))
+                .font(.system(.caption, design: .default))
                 .foregroundStyle(LedgerPalette.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
@@ -727,10 +605,10 @@ private struct AccountBalanceTrendPanel: View {
     private var hiddenTrendState: some View {
         VStack(spacing: LedgerSpacing.sm) {
             Image(systemName: "eye.slash")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(.headline, design: .default, weight: .medium))
                 .foregroundStyle(LedgerPalette.cobalt)
             Text("余额趋势已隐藏")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(.caption, design: .default, weight: .medium))
                 .foregroundStyle(LedgerPalette.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 160, alignment: .center)
@@ -763,6 +641,7 @@ private struct AccountBalanceTrendPanel: View {
 private struct AccountHistoryRow: View {
     let row: LedgerAccountDetailRow
     let currency: String
+    let accountLabels: [String: String]
 
     private var title: String {
         if !row.payee.isEmpty { return row.payee }
@@ -774,18 +653,15 @@ private struct AccountHistoryRow: View {
         HStack(alignment: .center, spacing: LedgerSpacing.md) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(.subheadline, design: .default, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
                     .lineLimit(1)
                 HStack(spacing: LedgerSpacing.sm) {
                     Text(row.date)
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    if !row.narration.isEmpty, row.narration != title {
-                        Text(row.narration)
-                            .lineLimit(1)
-                    }
+                        .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
+                    TransactionContextLine(transaction: row.transaction, accountLabels: accountLabels)
                 }
-                .font(.system(size: 10))
+                .font(.system(.caption2, design: .default))
                 .foregroundStyle(LedgerPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -795,41 +671,49 @@ private struct AccountHistoryRow: View {
                     minorUnits: row.change,
                     currency: currency,
                     prefix: row.change > 0 ? "+" : "",
-                    font: .system(size: 13, weight: .semibold),
+                    font: .system(.footnote, design: .default, weight: .semibold),
                     color: row.change >= 0 ? LedgerPalette.income : LedgerPalette.expense
                 )
                 .lineLimit(1)
                 AmountLabel(
                     minorUnits: row.balance,
                     currency: currency,
-                    font: .system(size: 10, weight: .medium),
+                    font: .system(.caption2, design: .default, weight: .medium),
                     color: LedgerPalette.secondary
                 )
                 .lineLimit(1)
             }
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(.caption2, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(LedgerSpacing.lg)
+        .padding(.horizontal, LedgerSpacing.lg)
+        .padding(.vertical, LedgerLayout.transactionVerticalInset)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 }
 
 private struct AccountRowView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let row: AccountBalanceRow
 
+    private var headingLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: LedgerSpacing.md) {
+        VStack(alignment: .leading, spacing: 4) {
+            headingLayout {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.label)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
                     Text(row.account)
-                        .font(.system(size: 10))
+                        .font(.system(.caption2, design: .default))
                         .foregroundStyle(LedgerPalette.secondary)
                         .lineLimit(1)
                 }
@@ -837,17 +721,17 @@ private struct AccountRowView: View {
 
                 if row.periodBalancesAvailable && row.periodValuationMissing {
                     Text("缺少期间汇率")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(.caption2, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.risk)
                 } else {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(row.periodBalancesAvailable ? "期末" : "当前")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(.caption2, design: .default, weight: .semibold))
                             .foregroundStyle(LedgerPalette.secondary)
                         AmountLabel(
                             minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
                             currency: row.valuationCurrency,
-                            font: .system(size: 13, weight: .semibold)
+                            font: .system(.footnote, design: .default, weight: .semibold)
                         )
                         .lineLimit(1)
                     }
@@ -858,12 +742,12 @@ private struct AccountRowView: View {
                 HStack(spacing: LedgerSpacing.lg) {
                     HStack(spacing: 5) {
                         Text("期初")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(.caption2, design: .default, weight: .medium))
                             .foregroundStyle(LedgerPalette.secondary)
                         AmountLabel(
                             minorUnits: row.openingValuation,
                             currency: row.valuationCurrency,
-                            font: .system(size: 10, weight: .medium),
+                            font: .system(.caption2, design: .default, weight: .medium),
                             color: LedgerPalette.secondary
                         )
                         .lineLimit(1)
@@ -873,13 +757,13 @@ private struct AccountRowView: View {
 
                     HStack(spacing: 5) {
                         Text("变化")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(.caption2, design: .default, weight: .medium))
                             .foregroundStyle(LedgerPalette.secondary)
                         AmountLabel(
                             minorUnits: row.periodValuationChange,
                             currency: row.valuationCurrency,
                             prefix: row.periodValuationChange > 0 ? "+" : "",
-                            font: .system(size: 10, weight: .semibold),
+                            font: .system(.caption2, design: .default, weight: .semibold),
                             color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                         )
                         .lineLimit(1)
@@ -890,19 +774,19 @@ private struct AccountRowView: View {
             if row.nativeCurrency != row.valuationCurrency {
                 HStack(spacing: 5) {
                     Text(row.periodBalancesAvailable ? "原币期末" : "原币余额")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(.caption2, design: .default, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
                     Spacer(minLength: 0)
                     AmountLabel(
                         minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
                         currency: row.nativeCurrency,
-                        font: .system(size: 10, weight: .medium),
+                        font: .system(.caption2, design: .default, weight: .medium),
                         color: LedgerPalette.secondary
                     )
                 }
             }
         }
-        .padding(.vertical, LedgerSpacing.md)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .accessibilityElement(children: .combine)
     }
 }

@@ -2,6 +2,15 @@ import XCTest
 @testable import LedgerMobile
 
 final class LedgerModelsTests: XCTestCase {
+    func testRangeToolbarTitlePreservesCrossYearAndCustomContext() {
+        let now = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+        XCTAssertEqual(LedgerDateRange.month(year: 2026, month: 8).toolbarTitle(relativeTo: now), "8月")
+        XCTAssertEqual(LedgerDateRange.month(year: 2025, month: 12).toolbarTitle(relativeTo: now), "2025/12月")
+        XCTAssertEqual(LedgerDateRange.current(.quarter, now: now).toolbarTitle(relativeTo: now), "Q3")
+        XCTAssertEqual(LedgerDateRange.current(.year, now: now).toolbarTitle(relativeTo: now), "2026年")
+        XCTAssertEqual(LedgerDateRange.custom(start: now, end: now).toolbarTitle(relativeTo: now), "自定义")
+    }
+
     func testCompactTabsPreserveOrderDeduplicateLimitAndFallback() {
         XCTAssertEqual(
             LedgerDestination.normalizedCompactTabs([
@@ -358,6 +367,44 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(expense.title, "海底捞")
         XCTAssertEqual(income.kind, .income)
         XCTAssertEqual(income.minorUnits, 400_000)
+    }
+
+    func testTransactionCategoryUsesLabelsForExpenseIncomeAndRefund() {
+        XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", 8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")
+        XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", -8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")
+        XCTAssertEqual(categoryLabel([("Income:Salary", -400000)], labels: ["Income:Salary": "工资"]), "工资")
+        XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", 8500)]), "Food › Dining")
+    }
+
+    func testTransactionCategoryDeduplicatesAccountsAndIgnoresZeroPostings() {
+        XCTAssertEqual(categoryLabel([
+            ("Expenses:Food", 100), ("Expenses:Food", 200), ("Expenses:Books", 0),
+        ], labels: ["Expenses:Food": "餐饮"]), "餐饮")
+        XCTAssertEqual(categoryLabel([("Expenses:Food", 100), ("Expenses:Books", 200)]), "多分类")
+        XCTAssertEqual(categoryLabel([("Income:Salary", -500), ("Expenses:Tax", 100)]), "多分类")
+    }
+
+    func testTransactionCategoryShowsTransferDirectionAndAdjustmentFallback() {
+        let labels = ["Assets:Bank": "银行卡", "Liabilities:Card": "信用卡"]
+        XCTAssertEqual(categoryLabel([("Liabilities:Card", 500), ("Assets:Bank", -500)], labels: labels), "银行卡 → 信用卡")
+        XCTAssertEqual(categoryLabel([("Assets:Bank", -500), ("Assets:Cash", -200), ("Liabilities:Card", 700)], labels: labels), "多个账户 → 信用卡")
+        XCTAssertEqual(categoryLabel([("Assets:Bank", 500), ("Equity:Opening", -500)]), "权益调整")
+        XCTAssertEqual(categoryLabel([]), "未分类")
+    }
+
+    func testTransactionCategoryAccountLabelsFallBackToAliasAndHandleDuplicates() {
+        let account = LedgerAccount(account: "Expenses:Books", openDate: "2026-01-01", closeDate: nil, currency: "CNY", alias: "图书", label: "Expenses:Books", group: "expense", active: true)
+        let labels = TransactionCategoryPresentation.accountLabels([account, account])
+        XCTAssertEqual(labels[account.account], "图书")
+    }
+
+    private func categoryLabel(_ postings: [(String, Int)], labels: [String: String] = [:]) -> String {
+        let transaction = LedgerTransaction(
+            date: "2026-09-07", payee: "分类测试", narration: "",
+            postings: postings.map { LedgerPosting(account: $0.0, amount: $0.1, currency: "CNY") },
+            source: TransactionSource(file: "example.bean", line: 1, hash: nil, gitSHA: nil)
+        )
+        return TransactionCategoryPresentation(transaction: transaction, accountLabels: labels).label
     }
 
     func testTransactionFilterMatchesWordsKindAccountAndTags() throws {

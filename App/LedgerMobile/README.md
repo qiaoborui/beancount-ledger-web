@@ -6,6 +6,20 @@ validation, confirmation, and rollback boundaries.
 The app connects to an existing HTTPS deployment and reuses the server's cookie
 authentication and privacy lock.
 
+## Native interaction design
+
+The iPhone shell owns one navigation stack per tab, including More. Secondary
+destinations push in that stack and preserve the system back gesture. The iPad
+shell uses a system sidebar and keeps its visibility when changing destinations.
+Overview, transactions, accounts, and More use compact, continuous system lists;
+settings and editing retain grouped forms. All pages use inline navigation titles.
+Range-scoped pages keep the calendar and current period in the navigation bar,
+above search. Period stepping stays in the date picker until confirmation.
+Transactions show categories beside notes, with native search, date sections, and a swipe action for tags;
+accounts have search and expandable groups. Editing and import preparation use
+system forms, searchable account selection, and navigation-bar confirmation.
+See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy rules.
+
 ## Current scope
 
 - Verify a compatible Ledger Web HTTPS origin before accepting a password.
@@ -72,7 +86,16 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
     build-for-testing
 ```
 
-Run the portable model and session tests with `swift test` from this directory.
+Run model and session tests in the simulator with `xcodebuild test` and
+`-only-testing:LedgerMobileTests`. `swift test` also builds the portable target,
+but App Group storage tests require an environment with container access; an
+unsigned macOS command-line test process may fail those storage checks.
+
+For UI iteration, build and install on the physical iPhone early for direct
+feedback. After the final device-feedback changes, complete regression before
+merging the PR: model/session tests, the full iPhone UI suite, and focused small
+screen, accessibility, and iPad coverage. Keep automated writes in safe-preview
+fixtures and record any independently reproduced baseline failures separately.
 
 Apple Silicon Mac can run the same iPad build through Designed for iPad. After
 `xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination

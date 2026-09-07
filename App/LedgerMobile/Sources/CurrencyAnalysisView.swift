@@ -6,16 +6,12 @@ struct CurrencyAnalysisView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var snapshot: CurrencyAnalysisSnapshot?
 
-    var showsAppBar = false
+    var isRoot = false
 
     private var ledger: LedgerBootstrap? { session.ledger }
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsAppBar {
-                LedgerAppBar { PrivacyToolbarButton() }
-            }
-
             if let ledger {
                 content(ledger)
             } else {
@@ -25,16 +21,7 @@ struct CurrencyAnalysisView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(showsAppBar ? "" : "货币与汇率")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) { PrivacyToolbarButton() }
-            }
-        }
+        .ledgerNavigation("货币与汇率", isRoot: isRoot, showsTimeRange: true)
     }
 
     @ViewBuilder
@@ -66,20 +53,9 @@ struct CurrencyAnalysisView: View {
     ) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                if showsAppBar {
-                    LedgerPageIntro(
-                        title: "货币与汇率",
-                        detail: "查看账本货币之间的当前汇率、价格来源与近期变化。",
-                        meta: snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录"
-                    ) { EmptyView() }
-                } else {
-                    LedgerPageContext(
-                        detail: "查看账本货币之间的当前汇率、价格来源与近期变化。",
-                        meta: snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录"
-                    )
-                }
-
-                LedgerTimeRangeControl()
+                Text(snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 valuationPicker(currencies: snapshot.currencies, selected: ledger.valuationCurrency)
 
@@ -106,7 +82,7 @@ struct CurrencyAnalysisView: View {
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xl : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
             .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
             .ledgerAdaptivePageWidth()
         }
@@ -167,10 +143,6 @@ struct CurrencyAnalysisView: View {
         .padding(LedgerSpacing.lg)
         .background(LedgerPalette.panel)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line, lineWidth: 1)
-        }
     }
 
     private func missingRateBanner(count: Int, valuationCurrency: String) -> some View {

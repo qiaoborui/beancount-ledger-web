@@ -1372,6 +1372,10 @@ final class LedgerSession: ObservableObject {
         draftRange = LedgerDateRange.current(preset, now: ledgerNow())
     }
 
+    func moveDraftRange(by delta: Int) {
+        draftRange = draftRange.shifted(by: delta)
+    }
+
     func updateDraftStart(_ date: Date) {
         draftRange = LedgerDateRange.custom(start: date, end: max(date, draftRange.endDate))
     }

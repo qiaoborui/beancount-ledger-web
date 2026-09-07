@@ -4,199 +4,105 @@ struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
-    var showsAppBar = true
+    @State private var changingServerPresented = false
+    var isRoot = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            if showsAppBar {
-                LedgerAppBar {
-                    PrivacyToolbarButton()
-                }
+        Form {
+            if let error = session.errorMessage {
+                Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: LedgerSpacing.xl) {
-                    LedgerPageIntro(
-                        title: showsAppBar ? "设置" : "设备与会话",
-                        detail: "管理这台设备的解锁方式、隐私锁定和服务器连接。",
-                        meta: nil
-                    ) {
-                        EmptyView()
+            Section("导航") {
+                Button {
+                    compactTabConfigurationPresented = true
+                } label: {
+                    LabeledContent {
+                        Text(session.compactTabDestinations.map(\.compactTitle).joined(separator: "、"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    } label: {
+                        Label("底部标签栏", systemImage: "rectangle.bottomthird.inset.filled")
                     }
-
-                    if let error = session.errorMessage {
-                        StatusBanner(message: error, onDismiss: session.dismissError)
-                            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-                    }
-
-                    settingsSection(title: "导航", detail: "仅影响紧凑宽度") {
-                        Button {
-                            compactTabConfigurationPresented = true
-                        } label: {
-                            HStack(spacing: LedgerSpacing.md) {
-                                SettingsIcon(systemName: "rectangle.bottomthird.inset.filled")
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("底部标签栏")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(LedgerPalette.ink)
-                                    Text(session.compactTabDestinations.map(\.compactTitle).joined(separator: "、"))
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(LedgerPalette.secondary)
-                                        .lineLimit(2)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                Text("\(session.compactTabDestinations.count)/\(LedgerDestination.compactTabLimit)")
-                                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                                    .foregroundStyle(LedgerPalette.cobalt)
-                                    .padding(.horizontal, 8)
-                                    .frame(minHeight: 26)
-                                    .background(LedgerPalette.tag)
-                                    .clipShape(Capsule())
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
-                            .padding(LedgerSpacing.lg)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                        .accessibilityIdentifier("settings-compact-tabs")
-                    }
-                    .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-
-                    settingsSection(title: "设备安全", detail: "仅影响这台设备") {
-                        SettingsToggleRow(
-                            icon: session.biometricSystemImage,
-                            title: session.biometricTitle,
-                            detail: biometricDetail,
-                            isOn: Binding(
-                                get: { session.hasBiometricUnlock },
-                                set: { enabled in
-                                    Task { await session.setBiometricUnlockEnabled(enabled) }
-                                }
-                            )
-                        )
-                        .disabled(session.biometricKind == .unavailable || session.isBiometricSettingBusy)
-
-                        SettingsDivider()
-
-                        WidgetRefreshSettingsRow(
-                            detail: widgetRefreshDetail,
-                            status: widgetRefreshStatusTitle,
-                            statusColor: widgetRefreshStatusColor,
-                            isBusy: session.isWidgetRefreshBusy,
-                            isEnabled: session.hasBiometricUnlock && session.phase == .ready
-                        ) {
-                            Task { await session.retryWidgetBackgroundRefresh() }
-                        }
-                        .accessibilityIdentifier("settings-widget-background-refresh")
-
-                        SettingsDivider()
-
-                        HStack(spacing: LedgerSpacing.md) {
-                            SettingsIcon(systemName: "timer")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("自动锁定")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Text("离开 App 后超过设定时间需要重新验证")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Picker("自动锁定", selection: lockIntervalBinding) {
-                                ForEach(LedgerLockInterval.allCases) { interval in
-                                    Text(interval.title).tag(interval)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .tint(LedgerPalette.cobalt)
-                        }
-                        .padding(LedgerSpacing.lg)
-                    }
-                    .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-
-                    settingsSection(title: "连接", detail: "当前 Ledger Web 后端") {
-                        HStack(alignment: .top, spacing: LedgerSpacing.md) {
-                            SettingsIcon(systemName: "server.rack")
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("服务器")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Text(session.serverURL?.absoluteString ?? "未配置")
-                                    .font(.system(size: 12, weight: .medium).monospaced())
-                                    .foregroundStyle(LedgerPalette.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding(LedgerSpacing.lg)
-                    }
-                    .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-
-                    settingsSection(title: "会话", detail: "控制当前设备上的访问状态") {
-                        SettingsActionRow(
-                            icon: "lock.fill",
-                            title: "立即锁定",
-                            detail: "立即隐藏账本，下次进入需在本机验证",
-                            color: LedgerPalette.cobalt
-                        ) {
-                            Task { await session.lock() }
-                        }
-
-                        SettingsDivider()
-
-                        SettingsActionRow(
-                            icon: "rectangle.portrait.and.arrow.right",
-                            title: "退出登录",
-                            detail: "保留这台设备的 Face ID 设置",
-                            color: LedgerPalette.risk
-                        ) {
-                            session.logout()
-                        }
-
-                        SettingsDivider()
-
-                        SettingsActionRow(
-                            icon: "arrow.triangle.2.circlepath",
-                            title: "更换服务器",
-                            detail: "清除当前服务器的本机生物凭据并返回配置页",
-                            color: LedgerPalette.cobalt
-                        ) {
-                            session.changeServer()
-                        }
-                    }
-                    .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
                 }
-                .ledgerAdaptivePageWidth()
-                .padding(.top, horizontalSizeClass == .regular ? LedgerSpacing.xxl : 0)
-                .padding(.horizontal, horizontalSizeClass == .regular ? LedgerSpacing.xxl : 0)
-                .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
+                .accessibilityIdentifier("settings-compact-tabs")
             }
-            .refreshable { await session.refresh() }
-        }
-        .background(LedgerPalette.canvas)
-        .navigationTitle(showsAppBar ? "" : "设置")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsAppBar ? .hidden : .visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !showsAppBar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    PrivacyToolbarButton()
+            Section {
+                Toggle(isOn: Binding(
+                    get: { session.hasBiometricUnlock },
+                    set: { enabled in Task { await session.setBiometricUnlockEnabled(enabled) } }
+                )) {
+                    Label(session.biometricTitle, systemImage: session.biometricSystemImage)
                 }
+                .disabled(session.biometricKind == .unavailable || session.isBiometricSettingBusy)
+
+                Picker(selection: lockIntervalBinding) {
+                    ForEach(LedgerLockInterval.allCases) { interval in
+                        Text(interval.title).tag(interval)
+                    }
+                } label: {
+                    Label("自动锁定", systemImage: "timer")
+                }
+                Button {
+                    Task { await session.lock() }
+                } label: {
+                    Label("立即锁定", systemImage: "lock.fill")
+                }
+            } header: {
+                Text("隐私与安全")
+            } footer: {
+                Text(biometricDetail + "。离开 App 后按设定时间锁定，切换应用时始终隐藏账本。")
+            }
+            Section {
+                Button {
+                    Task { await session.retryWidgetBackgroundRefresh() }
+                } label: {
+                    LabeledContent {
+                        if session.isWidgetRefreshBusy {
+                            ProgressView()
+                        } else {
+                            Text(widgetRefreshStatusTitle).foregroundStyle(widgetRefreshStatusColor)
+                        }
+                    } label: {
+                        Label("后台刷新", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(!session.hasBiometricUnlock || session.phase != .ready || session.isWidgetRefreshBusy)
+                .accessibilityIdentifier("settings-widget-background-refresh")
+            } header: {
+                Text("小组件")
+            } footer: {
+                Text(widgetRefreshDetail)
+            }
+            Section("连接") {
+                LabeledContent("服务器") {
+                    Text(session.serverURL?.host ?? "未配置")
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Button("更换服务器") { changingServerPresented = true }
+            }
+            Section {
+                Button("退出登录", role: .destructive) { session.logout() }
+            } footer: {
+                Text("退出后保留这台设备的生物识别设置。")
             }
         }
-        .task {
-            session.refreshWidgetRefreshStatus()
+        .formStyle(.grouped)
+        .font(.subheadline)
+        .ledgerNavigation("设置", isRoot: isRoot)
+        .task { session.refreshWidgetRefreshStatus() }
+        .confirmationDialog("更换服务器？", isPresented: $changingServerPresented, titleVisibility: .visible) {
+            Button("更换服务器", role: .destructive) { session.changeServer() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将清除当前服务器在这台设备上的生物识别凭据，并返回连接页面。")
         }
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
                 session.setCompactTabDestinations(destinations)
             }
+            .ledgerPrivacyProtectedSheet()
         }
     }
 
@@ -205,8 +111,8 @@ struct SettingsView: View {
             return "请先在系统设置中配置生物识别"
         }
         return session.hasBiometricUnlock
-            ? "使用受 Keychain 保护的设备令牌快速解锁"
-            : "启用时会创建可在服务端撤销的设备令牌"
+            ? "使用生物识别快速解锁账本"
+            : "启用后可在这台设备上快速解锁"
     }
 
     private var widgetRefreshStatusTitle: String {
@@ -243,15 +149,15 @@ struct SettingsView: View {
 
     private var widgetRefreshDetail: String {
         if !session.hasBiometricUnlock {
-            return "启用\(session.biometricTitle)后创建可撤销的后台只读凭据"
+            return "启用\(session.biometricTitle)后可更新小组件"
         }
         switch session.widgetRefreshStatus.phase {
         case .waitingForBiometrics:
             return "启用设备生物识别后自动配置"
         case .provisioning:
-            return "正在创建共享 Keychain 凭据"
+            return "正在启用后台刷新"
         case .ready:
-            return "后台凭据可用；点按可立即验证刷新链路"
+            return "已启用后台更新，点按立即刷新"
         case .refreshing:
             return "正在从 Ledger Web 获取最新小组件快照"
         case .success:
@@ -260,7 +166,7 @@ struct SettingsView: View {
             }
             return "最近一次后台刷新成功"
         case .credentialUnavailable:
-            return "共享凭据缺失；点按重新创建"
+            return "后台刷新尚未启用，点按重试"
         case .authorizationRejected:
             return "完成身份验证后点按轮换凭据"
         case .serverOutdated:
@@ -302,30 +208,6 @@ struct SettingsView: View {
         )
     }
 
-    private func settingsSection<Content: View>(
-        title: String,
-        detail: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                Spacer()
-                Text(detail)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-            }
-            .padding(.horizontal, 2)
-
-            LedgerPanel {
-                VStack(spacing: 0) {
-                    content()
-                }
-            }
-        }
-    }
 }
 
 private struct CompactTabConfigurationView: View {
@@ -352,16 +234,18 @@ private struct CompactTabConfigurationView: View {
                 Section {
                     ForEach(destinations) { destination in
                         HStack(spacing: LedgerSpacing.md) {
-                            SettingsIcon(systemName: destination.systemImage)
+                            Image(systemName: destination.systemImage)
+                                .foregroundStyle(LedgerPalette.cobalt)
+                                .frame(width: 28)
                             Text(destination.title)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(.subheadline, design: .default, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.ink)
                             Spacer(minLength: LedgerSpacing.sm)
                             Button {
                                 remove(destination)
                             } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .font(.system(size: 18, weight: .medium))
+                                    .font(.system(.headline, design: .default, weight: .medium))
                                     .foregroundStyle(destinations.count > 1 ? LedgerPalette.risk : LedgerPalette.secondary)
                                     .frame(width: 44, height: 44)
                                     .contentShape(Rectangle())
@@ -387,13 +271,15 @@ private struct CompactTabConfigurationView: View {
                             add(destination)
                         } label: {
                             HStack(spacing: LedgerSpacing.md) {
-                                SettingsIcon(systemName: destination.systemImage)
+                                Image(systemName: destination.systemImage)
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                                    .frame(width: 28)
                                 Text(destination.title)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.system(.subheadline, design: .default, weight: .medium))
                                     .foregroundStyle(LedgerPalette.ink)
                                 Spacer(minLength: LedgerSpacing.sm)
                                 Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 18, weight: .medium))
+                                    .font(.system(.headline, design: .default, weight: .medium))
                                     .foregroundStyle(LedgerPalette.cobalt)
                             }
                             .contentShape(Rectangle())
@@ -448,127 +334,5 @@ private struct CompactTabConfigurationView: View {
     private func remove(_ destination: LedgerDestination) {
         guard destinations.count > 1 else { return }
         destinations.removeAll { $0 == destination }
-    }
-}
-
-private struct SettingsIcon: View {
-    let systemName: String
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(LedgerPalette.cobalt)
-            .frame(width: 36, height: 36)
-            .background(LedgerPalette.tag)
-            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-    }
-}
-
-private struct SettingsToggleRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            HStack(spacing: LedgerSpacing.md) {
-                SettingsIcon(systemName: icon)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-            }
-        }
-        .tint(LedgerPalette.cobalt)
-        .padding(LedgerSpacing.lg)
-    }
-}
-
-private struct WidgetRefreshSettingsRow: View {
-    let detail: String
-    let status: String
-    let statusColor: Color
-    let isBusy: Bool
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: LedgerSpacing.md) {
-                SettingsIcon(systemName: "arrow.clockwise.icloud")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("小组件后台刷新")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .multilineTextAlignment(.leading)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if isBusy {
-                    ProgressView()
-                        .tint(LedgerPalette.cobalt)
-                } else {
-                    Text(status)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(statusColor)
-                        .padding(.horizontal, 8)
-                        .frame(minHeight: 26)
-                        .background(statusColor.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
-            .padding(LedgerSpacing.lg)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .disabled(!isEnabled || isBusy)
-    }
-}
-
-private struct SettingsActionRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: LedgerSpacing.md) {
-                SettingsIcon(systemName: icon)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(color)
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.secondary)
-            }
-            .padding(LedgerSpacing.lg)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressScaleButtonStyle())
-    }
-}
-
-private struct SettingsDivider: View {
-    var body: some View {
-        Rectangle()
-            .fill(LedgerPalette.line)
-            .frame(height: 1)
-            .padding(.leading, LedgerSpacing.lg + 36 + LedgerSpacing.md)
     }
 }
