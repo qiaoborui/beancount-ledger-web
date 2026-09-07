@@ -660,10 +660,21 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(retryConfirmation.waitForExistence(timeout: 3))
         let retryStartedAt = Date()
         retryConfirmation.buttons["写入 2 条交易"].tap()
-        waitForImportSavingState(savingButton, timeout: 2)
+        let complete = app.scrollViews["native-import-complete"]
+        // A slow accessibility snapshot may span the entire simulated response.
+        // The first attempt checks the pending controls; retry may already be complete.
+        let retryFeedback = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                complete.exists || (savingButton.exists
+                    && savingButton.label == "正在验证并写入账本"
+                    && savingButton.value as? String == "处理中")
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [retryFeedback], timeout: 5), .completed)
         let retryFeedbackElapsed = Date().timeIntervalSince(retryStartedAt)
 
-        XCTAssertTrue(app.scrollViews["native-import-complete"].waitForExistence(timeout: 5))
+        XCTAssertTrue(complete.waitForExistence(timeout: 5))
         let saveElapsed = Date().timeIntervalSince(retryStartedAt)
         let timing = XCTAttachment(
             string: String(
@@ -1064,7 +1075,9 @@ final class LedgerMobileUITests: XCTestCase {
         }
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
         element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
-        element.typeText(replacement)
+        if !replacement.isEmpty {
+            element.typeText(replacement)
+        }
         // UIKit exposes the placeholder as the accessibility value of an empty search field.
         let value = element.value as? String
         if replacement.isEmpty, element.elementType == .searchField {
