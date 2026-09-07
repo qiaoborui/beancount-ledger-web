@@ -125,6 +125,223 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(rewritten.schemaVersion, LedgerWidgetSnapshot.currentSchemaVersion)
     }
 
+    func testStoreRejectsAnOlderSnapshotThatFinishesLater() throws {
+        let suiteName = "ledger-widget-snapshot-order-tests-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let updatedAt = Date(timeIntervalSince1970: 2_000_000_000)
+        let olderAttempt = updatedAt
+        let newerAttempt = updatedAt.addingTimeInterval(1)
+        let newer = Self.snapshot(updatedAt: updatedAt, amount: 200)
+        let older = Self.snapshot(updatedAt: updatedAt, amount: 100)
+
+        XCTAssertTrue(try store.saveIfNewer(newer, attemptedAt: newerAttempt))
+        XCTAssertFalse(try store.saveIfNewer(older, attemptedAt: olderAttempt))
+        store.clear(ifCurrentEquals: older, attemptedAt: olderAttempt)
+        XCTAssertEqual(store.load(), newer)
+    }
+
+    func testRefreshStatusStoresShareAnInstallationScopedNotificationName() {
+        let suiteName = "ledger-widget-notification-name-tests-\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let first = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let second = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+
+        XCTAssertEqual(first.changeNotificationNameValue, second.changeNotificationNameValue)
+        XCTAssertFalse(first.changeNotificationNameValue.contains(suiteName))
+    }
+
+    func testTimelineLoaderPersistsServerVersionFailureAndKeepsCachedSnapshot() async throws {
+        let suiteName = "ledger-widget-refresh-status-tests-\(UUID().uuidString)"
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let previousSuccess = now.addingTimeInterval(-3_600)
+        let cached = Self.snapshot(updatedAt: now.addingTimeInterval(-600), amount: 100)
+        try snapshotStore.save(cached)
+        try statusStore.record(.success, attemptedAt: previousSuccess, succeededAt: previousSuccess)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetRefreshTestClient(outcome: .server(404))
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            client: client
+        )
+
+        let result = await loader.load(now: now)
+        let status = try XCTUnwrap(statusStore.load())
+
+        XCTAssertEqual(result.snapshot, cached)
+        XCTAssertEqual(result.refreshInterval, LedgerWidgetTimelineLoader.failureRefreshInterval)
+        XCTAssertEqual(status.phase, .serverOutdated)
+        XCTAssertEqual(status.httpStatus, 404)
+        XCTAssertEqual(status.lastAttemptAt, now)
+        XCTAssertEqual(status.lastSuccessAt, previousSuccess)
+    }
+
+    func testForcedTimelineRefreshBypassesFreshCacheAndRecordsSuccess() async throws {
+        let suiteName = "ledger-widget-forced-refresh-tests-\(UUID().uuidString)"
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        try snapshotStore.save(Self.snapshot(updatedAt: now, amount: 100))
+        let refreshed = Self.snapshot(updatedAt: now.addingTimeInterval(1), amount: 200)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetRefreshTestClient(outcome: .success(refreshed))
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            client: client
+        )
+
+        let result = await loader.load(now: now, forceRefresh: true)
+        let status = try XCTUnwrap(statusStore.load())
+        let callCount = await client.callCount()
+
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(result.snapshot, refreshed)
+        XCTAssertEqual(snapshotStore.load(), refreshed)
+        XCTAssertEqual(status.phase, .success)
+        XCTAssertEqual(status.lastAttemptAt, now)
+        XCTAssertEqual(status.lastSuccessAt, now)
+    }
+
+    func testAuthorizationFailureSuspendsCredentialAndRecordsRecoveryState() async throws {
+        let suiteName = "ledger-widget-authorization-status-tests-\(UUID().uuidString)"
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetRefreshTestClient(outcome: .server(401))
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            client: client
+        )
+
+        _ = await loader.load(now: now)
+        let status = try XCTUnwrap(statusStore.load())
+
+        XCTAssertNil(try credentialStore.load())
+        XCTAssertNotNil(try credentialStore.pendingRevocation())
+        XCTAssertEqual(status.phase, .authorizationRejected)
+        XCTAssertEqual(status.httpStatus, 401)
+    }
+
+    func testLockedAuthorizationFailureSuspendsCredentialAndRecordsRecoveryState() async throws {
+        let suiteName = "ledger-widget-locked-status-tests-\(UUID().uuidString)"
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetRefreshTestClient(outcome: .server(423))
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            client: client
+        )
+
+        _ = await loader.load(now: now)
+        let status = try XCTUnwrap(statusStore.load())
+
+        XCTAssertNil(try credentialStore.load())
+        XCTAssertNotNil(try credentialStore.pendingRevocation())
+        XCTAssertEqual(status.phase, .authorizationRejected)
+        XCTAssertEqual(status.httpStatus, 423)
+    }
+
+    func testRefreshStatusDoesNotRegressWhenOlderAttemptFinishesLater() throws {
+        let suiteName = "ledger-widget-status-order-tests-\(UUID().uuidString)"
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let olderAttempt = Date(timeIntervalSince1970: 2_000_000_000)
+        let newerAttempt = olderAttempt.addingTimeInterval(1)
+        try statusStore.record(.success, attemptedAt: newerAttempt, succeededAt: newerAttempt)
+        try statusStore.record(.networkUnavailable, attemptedAt: olderAttempt)
+
+        let status = try XCTUnwrap(statusStore.load())
+        XCTAssertEqual(status.phase, .success)
+        XCTAssertEqual(status.lastAttemptAt, newerAttempt)
+        XCTAssertEqual(status.lastSuccessAt, newerAttempt)
+    }
+
+    func testObsoleteCredentialCompletionKeepsReplacementReadyStatus() async throws {
+        let suiteName = "ledger-widget-credential-race-tests-\(UUID().uuidString)"
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetDelayedRefreshTestClient(
+            snapshot: Self.snapshot(updatedAt: now, amount: 200)
+        )
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            client: client
+        )
+
+        let refresh = Task { await loader.load(now: now, forceRefresh: true) }
+        await client.waitUntilStarted()
+        let replacement = LedgerWidgetCredential(
+            serverOrigin: Self.widgetCredential.serverOrigin,
+            deviceID: "replacement-widget",
+            token: "replacement-token",
+            valuationCurrency: "CNY",
+            enabled: true
+        )
+        try credentialStore.save(replacement)
+        try statusStore.record(.ready)
+        await client.complete()
+        _ = await refresh.value
+
+        XCTAssertEqual(try credentialStore.load(), replacement)
+        XCTAssertEqual(statusStore.load()?.phase, .ready)
+    }
+
+    private static let widgetCredential = LedgerWidgetCredential(
+        serverOrigin: "https://ledger.example.com",
+        deviceID: "widget-device",
+        token: "widget-token",
+        valuationCurrency: "CNY",
+        enabled: true
+    )
+
+    private static func snapshot(updatedAt: Date, amount: Int) -> LedgerWidgetSnapshot {
+        LedgerWidgetSnapshot(
+            updatedAt: updatedAt,
+            expense: LedgerWidgetExpenseSnapshot(
+                periodTitle: "2026年5月",
+                start: "2026-05-01",
+                end: "2026-06-01",
+                currency: "CNY",
+                amount: amount,
+                transactionCount: 1,
+                yearOverYearPercentage: nil,
+                categories: [],
+                dailySeries: []
+            ),
+            accounts: []
+        )
+    }
+
     private static let report = LedgerHomeReport(
         start: "2026-08-01",
         end: "2026-09-01",
@@ -181,5 +398,107 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
         let updatedAt: Date
         let expense: LedgerWidgetExpenseSnapshot
         let accounts: [LedgerWidgetAccountSnapshot]
+    }
+}
+
+private final class WidgetRefreshTestCredentialStore: LedgerWidgetCredentialStoring, @unchecked Sendable {
+    let isAvailable = true
+    private var credential: LedgerWidgetCredential?
+    private var suspended = false
+
+    init(credential: LedgerWidgetCredential?) {
+        self.credential = credential
+    }
+
+    func load() throws -> LedgerWidgetCredential? {
+        suspended ? nil : credential
+    }
+
+    func save(_ credential: LedgerWidgetCredential) throws {
+        self.credential = credential
+        suspended = false
+    }
+
+    func suspend() throws {
+        suspended = credential != nil
+    }
+
+    func pendingRevocation() throws -> LedgerWidgetCredential? {
+        suspended ? credential : nil
+    }
+
+    func completeRevocation(deviceID: String) throws {
+        if credential?.deviceID == deviceID { credential = nil }
+        suspended = false
+    }
+}
+
+private actor WidgetRefreshTestClient: LedgerWidgetRefreshing {
+    enum Outcome: Sendable {
+        case success(LedgerWidgetSnapshot)
+        case server(Int)
+    }
+
+    private let outcome: Outcome
+    private var calls = 0
+
+    init(outcome: Outcome) {
+        self.outcome = outcome
+    }
+
+    func fetch(
+        credential: LedgerWidgetCredential,
+        previous: LedgerWidgetSnapshot?,
+        now: Date,
+        calendar: Calendar
+    ) async throws -> LedgerWidgetSnapshot {
+        calls += 1
+        switch outcome {
+        case let .success(snapshot):
+            return snapshot
+        case let .server(status):
+            throw LedgerWidgetRefreshError.server(status)
+        }
+    }
+
+    func callCount() -> Int { calls }
+}
+
+private actor WidgetDelayedRefreshTestClient: LedgerWidgetRefreshing {
+    private let snapshot: LedgerWidgetSnapshot
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var completion: CheckedContinuation<Void, Never>?
+
+    init(snapshot: LedgerWidgetSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func fetch(
+        credential: LedgerWidgetCredential,
+        previous: LedgerWidgetSnapshot?,
+        now: Date,
+        calendar: Calendar
+    ) async throws -> LedgerWidgetSnapshot {
+        started = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            completion = continuation
+        }
+        return snapshot
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func complete() {
+        completion?.resume()
+        completion = nil
     }
 }

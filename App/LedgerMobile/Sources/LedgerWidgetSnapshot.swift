@@ -99,6 +99,7 @@ struct LedgerWidgetImportSnapshot: Codable, Equatable, Identifiable, Sendable {
 struct LedgerWidgetSnapshotStore: Sendable {
     static let appGroupIdentifier = "group.com.qiaoborui.ledger.mobile"
     static let snapshotKey = "ledger.widgets.snapshot.v1"
+    static let snapshotAttemptKey = "ledger.widgets.snapshot-attempt.v1"
     static let shared = LedgerWidgetSnapshotStore()
 
     let suiteName: String
@@ -108,7 +109,67 @@ struct LedgerWidgetSnapshotStore: Sendable {
     }
 
     func load() -> LedgerWidgetSnapshot? {
-        guard let data = defaults?.data(forKey: Self.snapshotKey),
+        try? coordinator.withLock {
+            guard let defaults else { return nil }
+            _ = defaults.synchronize()
+            return load(from: defaults)
+        }
+    }
+
+    func save(_ snapshot: LedgerWidgetSnapshot) throws {
+        try coordinator.withLock {
+            guard let defaults else { throw LedgerWidgetSnapshotStoreError.unavailable }
+            defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
+            defaults.removeObject(forKey: Self.snapshotAttemptKey)
+            _ = defaults.synchronize()
+        }
+    }
+
+    @discardableResult
+    func saveIfNewer(_ snapshot: LedgerWidgetSnapshot, attemptedAt: Date) throws -> Bool {
+        try coordinator.withLock {
+            guard let defaults else { throw LedgerWidgetSnapshotStoreError.unavailable }
+            _ = defaults.synchronize()
+            if let currentAttempt = defaults.object(forKey: Self.snapshotAttemptKey) as? Date,
+               currentAttempt > attemptedAt {
+                return false
+            }
+            if let current = load(from: defaults), current.updatedAt > snapshot.updatedAt {
+                return false
+            }
+            defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
+            defaults.set(attemptedAt, forKey: Self.snapshotAttemptKey)
+            _ = defaults.synchronize()
+            return true
+        }
+    }
+
+    func clear() {
+        try? coordinator.withLock {
+            defaults?.removeObject(forKey: Self.snapshotKey)
+            defaults?.removeObject(forKey: Self.snapshotAttemptKey)
+            _ = defaults?.synchronize()
+        }
+    }
+
+    func clear(ifCurrentEquals snapshot: LedgerWidgetSnapshot, attemptedAt: Date) {
+        try? coordinator.withLock {
+            guard let defaults else { return }
+            _ = defaults.synchronize()
+            guard defaults.object(forKey: Self.snapshotAttemptKey) as? Date == attemptedAt,
+                  load(from: defaults) == snapshot else { return }
+            defaults.removeObject(forKey: Self.snapshotKey)
+            defaults.removeObject(forKey: Self.snapshotAttemptKey)
+            _ = defaults.synchronize()
+        }
+    }
+
+    private var coordinator: LedgerWidgetSharedStoreCoordinator {
+        LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
+    }
+
+    private func load(from defaults: UserDefaults) -> LedgerWidgetSnapshot? {
+        guard let data = defaults.data(forKey: Self.snapshotKey),
               let snapshot = try? JSONDecoder().decode(LedgerWidgetSnapshot.self, from: data),
               (1...LedgerWidgetSnapshot.currentSchemaVersion).contains(snapshot.schemaVersion) else {
             return nil
@@ -125,17 +186,10 @@ struct LedgerWidgetSnapshotStore: Sendable {
             imports: snapshot.imports,
             importsUpdatedAt: snapshot.importsUpdatedAt
         )
-        try? save(migrated)
+        if let data = try? JSONEncoder().encode(migrated) {
+            defaults.set(data, forKey: Self.snapshotKey)
+        }
         return migrated
-    }
-
-    func save(_ snapshot: LedgerWidgetSnapshot) throws {
-        guard let defaults else { throw LedgerWidgetSnapshotStoreError.unavailable }
-        defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
-    }
-
-    func clear() {
-        defaults?.removeObject(forKey: Self.snapshotKey)
     }
 
     private var defaults: UserDefaults? {

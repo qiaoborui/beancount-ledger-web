@@ -1,5 +1,92 @@
 import Foundation
+import CoreFoundation
+import Darwin
 import Security
+
+private final class LedgerWidgetProcessLockRegistry: @unchecked Sendable {
+    static let shared = LedgerWidgetProcessLockRegistry()
+
+    private let registryLock = NSLock()
+    private var locks: [String: NSLock] = [:]
+
+    func lock(for suiteName: String) -> NSLock {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        if let existing = locks[suiteName] { return existing }
+        let lock = NSLock()
+        locks[suiteName] = lock
+        return lock
+    }
+}
+
+struct LedgerWidgetSharedStoreCoordinator: Sendable {
+    let suiteName: String
+
+    func withLock<T>(_ operation: () throws -> T) throws -> T {
+        let processLock = LedgerWidgetProcessLockRegistry.shared.lock(for: suiteName)
+        processLock.lock()
+        defer { processLock.unlock() }
+
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: suiteName
+        ) else {
+            return try operation()
+        }
+        let lockURL = containerURL.appendingPathComponent(".ledger-widget-store.lock")
+        let descriptor = Darwin.open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw LedgerWidgetCredentialStoreError.unavailable }
+        defer { Darwin.close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            throw LedgerWidgetCredentialStoreError.unavailable
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        return try operation()
+    }
+}
+
+final class LedgerWidgetRefreshStatusObserver: @unchecked Sendable {
+    private let handler: @Sendable () -> Void
+    private let notificationName: CFNotificationName
+    private var localObserver: NSObjectProtocol?
+
+    init(store: LedgerWidgetRefreshStatusStore, handler: @escaping @Sendable () -> Void) {
+        self.handler = handler
+        notificationName = store.changeNotificationName
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let statusObserver = Unmanaged<LedgerWidgetRefreshStatusObserver>
+                    .fromOpaque(observer)
+                    .takeUnretainedValue()
+                statusObserver.handler()
+            },
+            notificationName.rawValue,
+            nil,
+            .deliverImmediately
+        )
+        localObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(store.changeNotificationNameValue),
+            object: nil,
+            queue: nil
+        ) { [handler] _ in
+            handler()
+        }
+    }
+
+    deinit {
+        if let localObserver {
+            NotificationCenter.default.removeObserver(localObserver)
+        }
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            notificationName,
+            nil
+        )
+    }
+}
 
 struct LedgerWidgetCredential: Codable, Equatable, Sendable {
     let serverOrigin: String
@@ -34,6 +121,143 @@ struct LedgerWidgetCredential: Codable, Equatable, Sendable {
             enabled: enabled ?? self.enabled,
             expiresAt: expiresAt
         )
+    }
+}
+
+enum LedgerWidgetRefreshPhase: String, Codable, Equatable, Sendable {
+    case waitingForBiometrics
+    case provisioning
+    case ready
+    case refreshing
+    case success
+    case credentialUnavailable
+    case authorizationRejected
+    case serverOutdated
+    case serverUnavailable
+    case invalidConfiguration
+    case invalidResponse
+    case networkUnavailable
+    case storageUnavailable
+}
+
+struct LedgerWidgetRefreshStatus: Codable, Equatable, Sendable {
+    let phase: LedgerWidgetRefreshPhase
+    let lastAttemptAt: Date?
+    let lastSuccessAt: Date?
+    let httpStatus: Int?
+
+    init(
+        phase: LedgerWidgetRefreshPhase,
+        lastAttemptAt: Date? = nil,
+        lastSuccessAt: Date? = nil,
+        httpStatus: Int? = nil
+    ) {
+        self.phase = phase
+        self.lastAttemptAt = lastAttemptAt
+        self.lastSuccessAt = lastSuccessAt
+        self.httpStatus = httpStatus
+    }
+}
+
+struct LedgerWidgetRefreshStatusStore: Sendable {
+    static let statusKey = "ledger.widgets.refresh-status.v1"
+    static let notificationNonceKey = "ledger.widgets.refresh-notification-nonce.v1"
+    static let shared = LedgerWidgetRefreshStatusStore()
+
+    let suiteName: String
+    let changeNotificationNameValue: String
+
+    init(suiteName: String = LedgerWidgetSnapshotStore.appGroupIdentifier) {
+        self.suiteName = suiteName
+        let coordinator = LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
+        let nonce = try? coordinator.withLock {
+            guard let defaults = UserDefaults(suiteName: suiteName) else {
+                throw LedgerWidgetCredentialStoreError.unavailable
+            }
+            _ = defaults.synchronize()
+            if let existing = defaults.string(forKey: Self.notificationNonceKey) {
+                return existing
+            }
+            let generated = UUID().uuidString.lowercased()
+            defaults.set(generated, forKey: Self.notificationNonceKey)
+            _ = defaults.synchronize()
+            return generated
+        }
+        changeNotificationNameValue = "com.qiaoborui.ledger.widget-refresh-status.\(nonce ?? UUID().uuidString.lowercased())"
+    }
+
+    func load() -> LedgerWidgetRefreshStatus? {
+        try? coordinator.withLock {
+            guard let defaults else { return nil }
+            _ = defaults.synchronize()
+            return load(from: defaults)
+        }
+    }
+
+    func record(
+        _ phase: LedgerWidgetRefreshPhase,
+        attemptedAt: Date? = nil,
+        succeededAt: Date? = nil,
+        httpStatus: Int? = nil
+    ) throws {
+        try coordinator.withLock {
+            guard let defaults else { throw LedgerWidgetCredentialStoreError.unavailable }
+            _ = defaults.synchronize()
+            let previous = load(from: defaults)
+            if let attemptedAt,
+               let previousAttempt = previous?.lastAttemptAt,
+               attemptedAt < previousAttempt {
+                return
+            }
+            let status = LedgerWidgetRefreshStatus(
+                phase: phase,
+                lastAttemptAt: attemptedAt ?? previous?.lastAttemptAt,
+                lastSuccessAt: succeededAt ?? previous?.lastSuccessAt,
+                httpStatus: httpStatus
+            )
+            defaults.set(try JSONEncoder().encode(status), forKey: Self.statusKey)
+            _ = defaults.synchronize()
+        }
+        postChange()
+    }
+
+    func clear() {
+        try? coordinator.withLock {
+            defaults?.removeObject(forKey: Self.statusKey)
+            _ = defaults?.synchronize()
+        }
+        postChange()
+    }
+
+    var changeNotificationName: CFNotificationName {
+        CFNotificationName(rawValue: changeNotificationNameValue as CFString)
+    }
+
+    private var coordinator: LedgerWidgetSharedStoreCoordinator {
+        LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
+    }
+
+    private func load(from defaults: UserDefaults) -> LedgerWidgetRefreshStatus? {
+        guard let data = defaults.data(forKey: Self.statusKey) else { return nil }
+        return try? JSONDecoder().decode(LedgerWidgetRefreshStatus.self, from: data)
+    }
+
+    private func postChange() {
+        NotificationCenter.default.post(
+            name: Notification.Name(changeNotificationNameValue),
+            object: nil
+        )
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            changeNotificationName,
+            nil,
+            nil,
+            true
+        )
+    }
+
+    private var defaults: UserDefaults? {
+        UserDefaults(suiteName: suiteName)
     }
 }
 

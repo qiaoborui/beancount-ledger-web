@@ -75,6 +75,19 @@ enum LedgerWidgetRefreshError: LocalizedError {
     }
 }
 
+extension LedgerWidgetRefreshPhase {
+    static func httpFailure(_ status: Int) -> LedgerWidgetRefreshPhase {
+        switch status {
+        case 401, 403, 423:
+            .authorizationRejected
+        case 404:
+            .serverOutdated
+        default:
+            .serverUnavailable
+        }
+    }
+}
+
 protocol LedgerWidgetRefreshing: Sendable {
     func fetch(
         credential: LedgerWidgetCredential,
@@ -162,6 +175,7 @@ actor LedgerWidgetTimelineLoader {
 
     private let credentialStore: any LedgerWidgetCredentialStoring
     private let snapshotStore: LedgerWidgetSnapshotStore
+    private let statusStore: LedgerWidgetRefreshStatusStore
     private let client: any LedgerWidgetRefreshing
     private var inFlight: Task<LedgerWidgetFetchResult, Never>?
     private var lastAttemptAt: Date?
@@ -171,22 +185,37 @@ actor LedgerWidgetTimelineLoader {
     init(
         credentialStore: any LedgerWidgetCredentialStoring = SystemLedgerWidgetCredentialStore(),
         snapshotStore: LedgerWidgetSnapshotStore = .shared,
+        statusStore: LedgerWidgetRefreshStatusStore = .shared,
         client: any LedgerWidgetRefreshing = LedgerWidgetRefreshClient()
     ) {
         self.credentialStore = credentialStore
         self.snapshotStore = snapshotStore
+        self.statusStore = statusStore
         self.client = client
     }
 
-    func load(now: Date = Date()) async -> LedgerWidgetTimelineLoadResult {
+    func load(now: Date = Date(), forceRefresh: Bool = false) async -> LedgerWidgetTimelineLoadResult {
         let cached = snapshotStore.load()
-        guard let credential = try? credentialStore.load(), credential.enabled else {
+        let credential: LedgerWidgetCredential
+        do {
+            guard let storedCredential = try credentialStore.load(), storedCredential.enabled else {
+                if statusStore.load()?.phase != .waitingForBiometrics {
+                    try? statusStore.record(.credentialUnavailable, attemptedAt: now)
+                }
+                return LedgerWidgetTimelineLoadResult(
+                    snapshot: cached,
+                    refreshInterval: Self.failureRefreshInterval
+                )
+            }
+            credential = storedCredential
+        } catch {
+            try? statusStore.record(.storageUnavailable, attemptedAt: now)
             return LedgerWidgetTimelineLoadResult(
                 snapshot: cached,
                 refreshInterval: Self.failureRefreshInterval
             )
         }
-        if let cached {
+        if !forceRefresh, let cached {
             let cacheAge = now.timeIntervalSince(cached.updatedAt)
             if cacheAge >= 0, cacheAge < Self.cacheFreshness {
                 return LedgerWidgetTimelineLoadResult(
@@ -195,7 +224,8 @@ actor LedgerWidgetTimelineLoader {
                 )
             }
         }
-        if let lastAttemptAt,
+        if !forceRefresh,
+           let lastAttemptAt,
            lastAttemptCredential == credential,
            let lastAttemptRefreshInterval,
            now.timeIntervalSince(lastAttemptAt) >= 0,
@@ -210,6 +240,7 @@ actor LedgerWidgetTimelineLoader {
             return finish(result, cached: cached, now: now)
         }
 
+        try? statusStore.record(.refreshing, attemptedAt: now)
         let task = Task { [client] in
             do {
                 let refreshed = try await client.fetch(
@@ -221,19 +252,34 @@ actor LedgerWidgetTimelineLoader {
                 return LedgerWidgetFetchResult(
                     credential: credential,
                     snapshot: refreshed,
-                    authorizationRejected: false
+                    failure: nil
                 )
-            } catch LedgerWidgetRefreshError.server(let status) where status == 401 || status == 403 {
+            } catch LedgerWidgetRefreshError.server(let status) {
                 return LedgerWidgetFetchResult(
                     credential: credential,
                     snapshot: nil,
-                    authorizationRejected: true
+                    failure: LedgerWidgetFetchFailure(
+                        phase: .httpFailure(status),
+                        httpStatus: status
+                    )
+                )
+            } catch LedgerWidgetRefreshError.invalidServer {
+                return LedgerWidgetFetchResult(
+                    credential: credential,
+                    snapshot: nil,
+                    failure: LedgerWidgetFetchFailure(phase: .invalidConfiguration)
+                )
+            } catch LedgerWidgetRefreshError.invalidResponse {
+                return LedgerWidgetFetchResult(
+                    credential: credential,
+                    snapshot: nil,
+                    failure: LedgerWidgetFetchFailure(phase: .invalidResponse)
                 )
             } catch {
                 return LedgerWidgetFetchResult(
                     credential: credential,
                     snapshot: nil,
-                    authorizationRejected: false
+                    failure: LedgerWidgetFetchFailure(phase: .networkUnavailable)
                 )
             }
         }
@@ -249,41 +295,78 @@ actor LedgerWidgetTimelineLoader {
         now: Date
     ) -> LedgerWidgetTimelineLoadResult {
         let credential = fetch.credential
-        guard (try? credentialStore.load()) == credential else {
+        do {
+            guard try credentialStore.load() == credential else {
+                return LedgerWidgetTimelineLoadResult(
+                    snapshot: snapshotStore.load(),
+                    refreshInterval: Self.failureRefreshInterval
+                )
+            }
+        } catch {
+            try? statusStore.record(.storageUnavailable, attemptedAt: now)
             return LedgerWidgetTimelineLoadResult(
                 snapshot: snapshotStore.load(),
                 refreshInterval: Self.failureRefreshInterval
             )
         }
 
-        if fetch.authorizationRejected {
-            try? credentialStore.suspend()
+        if let failure = fetch.failure {
+            if failure.phase == .authorizationRejected {
+                do {
+                    try credentialStore.suspend()
+                } catch {
+                    try? statusStore.record(.storageUnavailable, attemptedAt: now)
+                    return LedgerWidgetTimelineLoadResult(
+                        snapshot: cached,
+                        refreshInterval: Self.failureRefreshInterval
+                    )
+                }
+            }
+            try? statusStore.record(
+                failure.phase,
+                attemptedAt: now,
+                httpStatus: failure.httpStatus
+            )
+            lastAttemptAt = now
+            lastAttemptCredential = credential
+            lastAttemptRefreshInterval = Self.failureRefreshInterval
+            return LedgerWidgetTimelineLoadResult(
+                snapshot: cached,
+                refreshInterval: Self.failureRefreshInterval
+            )
         }
 
-        let refreshInterval: TimeInterval
-        if let refreshed = fetch.snapshot, !fetch.authorizationRejected {
-            try? snapshotStore.save(refreshed)
-            if (try? credentialStore.load()) == credential {
-                refreshInterval = Self.successRefreshInterval
-            } else {
-                if snapshotStore.load() == refreshed {
-                    snapshotStore.clear()
-                }
+        guard let refreshed = fetch.snapshot else {
+            try? statusStore.record(.invalidResponse, attemptedAt: now)
+            return LedgerWidgetTimelineLoadResult(
+                snapshot: cached,
+                refreshInterval: Self.failureRefreshInterval
+            )
+        }
+        do {
+            _ = try snapshotStore.saveIfNewer(refreshed, attemptedAt: now)
+            guard try credentialStore.load() == credential else {
+                snapshotStore.clear(ifCurrentEquals: refreshed, attemptedAt: now)
                 return LedgerWidgetTimelineLoadResult(
                     snapshot: snapshotStore.load(),
                     refreshInterval: Self.failureRefreshInterval
                 )
             }
-        } else {
-            refreshInterval = Self.failureRefreshInterval
+        } catch {
+            try? statusStore.record(.storageUnavailable, attemptedAt: now)
+            return LedgerWidgetTimelineLoadResult(
+                snapshot: refreshed,
+                refreshInterval: Self.failureRefreshInterval
+            )
         }
 
+        try? statusStore.record(.success, attemptedAt: now, succeededAt: now)
         lastAttemptAt = now
         lastAttemptCredential = credential
-        lastAttemptRefreshInterval = refreshInterval
+        lastAttemptRefreshInterval = Self.successRefreshInterval
         return LedgerWidgetTimelineLoadResult(
-            snapshot: fetch.snapshot ?? cached,
-            refreshInterval: refreshInterval
+            snapshot: snapshotStore.load() ?? refreshed,
+            refreshInterval: Self.successRefreshInterval
         )
     }
 }
@@ -296,5 +379,15 @@ struct LedgerWidgetTimelineLoadResult: Sendable {
 private struct LedgerWidgetFetchResult: Sendable {
     let credential: LedgerWidgetCredential
     let snapshot: LedgerWidgetSnapshot?
-    let authorizationRejected: Bool
+    let failure: LedgerWidgetFetchFailure?
+}
+
+private struct LedgerWidgetFetchFailure: Sendable {
+    let phase: LedgerWidgetRefreshPhase
+    let httpStatus: Int?
+
+    init(phase: LedgerWidgetRefreshPhase, httpStatus: Int? = nil) {
+        self.phase = phase
+        self.httpStatus = httpStatus
+    }
 }
