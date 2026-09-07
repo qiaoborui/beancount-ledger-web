@@ -80,6 +80,19 @@ struct SettingsView: View {
 
                         SettingsDivider()
 
+                        WidgetRefreshSettingsRow(
+                            detail: widgetRefreshDetail,
+                            status: widgetRefreshStatusTitle,
+                            statusColor: widgetRefreshStatusColor,
+                            isBusy: session.isWidgetRefreshBusy,
+                            isEnabled: session.hasBiometricUnlock && session.phase == .ready
+                        ) {
+                            Task { await session.retryWidgetBackgroundRefresh() }
+                        }
+                        .accessibilityIdentifier("settings-widget-background-refresh")
+
+                        SettingsDivider()
+
                         HStack(spacing: LedgerSpacing.md) {
                             SettingsIcon(systemName: "timer")
                             VStack(alignment: .leading, spacing: 3) {
@@ -177,6 +190,9 @@ struct SettingsView: View {
                 }
             }
         }
+        .task {
+            session.refreshWidgetRefreshStatus()
+        }
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
                 session.setCompactTabDestinations(destinations)
@@ -191,6 +207,92 @@ struct SettingsView: View {
         return session.hasBiometricUnlock
             ? "使用受 Keychain 保护的设备令牌快速解锁"
             : "启用时会创建可在服务端撤销的设备令牌"
+    }
+
+    private var widgetRefreshStatusTitle: String {
+        if !session.hasBiometricUnlock { return "等待\(session.biometricTitle)" }
+        switch session.widgetRefreshStatus.phase {
+        case .waitingForBiometrics:
+            return "等待启用"
+        case .provisioning:
+            return "正在配置"
+        case .ready:
+            return "已就绪"
+        case .refreshing:
+            return "正在刷新"
+        case .success:
+            return "运行正常"
+        case .credentialUnavailable:
+            return "凭据缺失"
+        case .authorizationRejected:
+            return "凭据已失效"
+        case .serverOutdated:
+            return "服务端待更新"
+        case .serverUnavailable:
+            return "服务端异常"
+        case .invalidConfiguration:
+            return "配置异常"
+        case .invalidResponse:
+            return "响应异常"
+        case .networkUnavailable:
+            return "网络异常"
+        case .storageUnavailable:
+            return "安全存储异常"
+        }
+    }
+
+    private var widgetRefreshDetail: String {
+        if !session.hasBiometricUnlock {
+            return "启用\(session.biometricTitle)后创建可撤销的后台只读凭据"
+        }
+        switch session.widgetRefreshStatus.phase {
+        case .waitingForBiometrics:
+            return "启用设备生物识别后自动配置"
+        case .provisioning:
+            return "正在创建共享 Keychain 凭据"
+        case .ready:
+            return "后台凭据可用；点按可立即验证刷新链路"
+        case .refreshing:
+            return "正在从 Ledger Web 获取最新小组件快照"
+        case .success:
+            if let date = session.widgetRefreshStatus.lastSuccessAt {
+                return "上次成功：\(date.formatted(date: .abbreviated, time: .shortened))"
+            }
+            return "最近一次后台刷新成功"
+        case .credentialUnavailable:
+            return "共享凭据缺失；点按重新创建"
+        case .authorizationRejected:
+            return "完成身份验证后点按轮换凭据"
+        case .serverOutdated:
+            return "Ledger Web 需要部署小组件快照接口"
+        case .serverUnavailable:
+            if let status = session.widgetRefreshStatus.httpStatus {
+                return "服务端返回 HTTP \(status)；点按重试"
+            }
+            return "服务端暂时无法处理小组件刷新"
+        case .invalidConfiguration:
+            return "服务器地址需要使用有效的 HTTPS Origin"
+        case .invalidResponse:
+            return "服务端返回了小组件无法识别的数据"
+        case .networkUnavailable:
+            return "检查网络后点按重试"
+        case .storageUnavailable:
+            return "App 与小组件无法访问共享 Keychain 或 App Group"
+        }
+    }
+
+    private var widgetRefreshStatusColor: Color {
+        switch session.widgetRefreshStatus.phase {
+        case .ready, .success:
+            LedgerPalette.success
+        case .provisioning, .refreshing:
+            LedgerPalette.cobalt
+        case .waitingForBiometrics, .credentialUnavailable:
+            LedgerPalette.secondary
+        case .authorizationRejected, .serverOutdated, .serverUnavailable,
+             .invalidConfiguration, .invalidResponse, .networkUnavailable, .storageUnavailable:
+            LedgerPalette.risk
+        }
     }
 
     private var lockIntervalBinding: Binding<LedgerLockInterval> {
@@ -384,6 +486,50 @@ private struct SettingsToggleRow: View {
         }
         .tint(LedgerPalette.cobalt)
         .padding(LedgerSpacing.lg)
+    }
+}
+
+private struct WidgetRefreshSettingsRow: View {
+    let detail: String
+    let status: String
+    let statusColor: Color
+    let isBusy: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: LedgerSpacing.md) {
+                SettingsIcon(systemName: "arrow.clockwise.icloud")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("小组件后台刷新")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if isBusy {
+                    ProgressView()
+                        .tint(LedgerPalette.cobalt)
+                } else {
+                    Text(status)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 26)
+                        .background(statusColor.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(LedgerSpacing.lg)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .disabled(!isEnabled || isBusy)
     }
 }
 

@@ -842,6 +842,117 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.quickUnlockRevoke, 1)
     }
 
+    func testWidgetCredentialRegistrationFailureRemainsVisibleForRecovery() async throws {
+        let defaultsSuite = "ledger-mobile-widget-registration-failure-tests-\(UUID().uuidString)"
+        let statusSuite = "ledger-mobile-widget-registration-status-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            UserDefaults(suiteName: statusSuite)?.removePersistentDomain(forName: statusSuite)
+        }
+        let session = LedgerSession(
+            api: SessionMockAPI(
+                payload: Self.payload,
+                widgetQuickUnlockRegisterErrorStatus: 404
+            ),
+            defaults: defaults,
+            biometricStore: MockBiometricCredentialStore(
+                credential: QuickUnlockCredential(deviceID: "phone-device", token: "phone-token")
+            ),
+            widgetCredentialStore: MockWidgetCredentialStore(),
+            widgetRefreshStatusStore: statusStore
+        )
+
+        await session.resume()
+
+        XCTAssertEqual(session.widgetRefreshStatus.phase, .serverOutdated)
+        XCTAssertEqual(session.widgetRefreshStatus.httpStatus, 404)
+        XCTAssertEqual(statusStore.load(), session.widgetRefreshStatus)
+    }
+
+    func testReturningToForegroundReloadsWidgetRefreshStatus() async throws {
+        let defaultsSuite = "ledger-mobile-widget-foreground-tests-\(UUID().uuidString)"
+        let statusSuite = "ledger-mobile-widget-foreground-status-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            UserDefaults(suiteName: statusSuite)?.removePersistentDomain(forName: statusSuite)
+        }
+        let widgetStore = MockWidgetCredentialStore()
+        try widgetStore.save(
+            LedgerWidgetCredential(
+                serverOrigin: "https://ledger.example.com",
+                deviceID: "widget-device",
+                token: "widget-token",
+                valuationCurrency: "CNY",
+                enabled: true
+            )
+        )
+        let session = LedgerSession(
+            api: SessionMockAPI(payload: Self.payload),
+            defaults: defaults,
+            biometricStore: MockBiometricCredentialStore(
+                credential: QuickUnlockCredential(deviceID: "phone-device", token: "phone-token")
+            ),
+            widgetCredentialStore: widgetStore,
+            widgetRefreshStatusStore: statusStore
+        )
+
+        await session.resume()
+        await session.updateActivity(isActive: false, isBackground: false)
+        let attempt = Date(timeIntervalSince1970: 2_000_000_000)
+        try statusStore.record(.networkUnavailable, attemptedAt: attempt)
+        await session.updateActivity(isActive: true, isBackground: false)
+
+        XCTAssertEqual(session.widgetRefreshStatus.phase, .networkUnavailable)
+        XCTAssertEqual(session.widgetRefreshStatus.lastAttemptAt, attempt)
+    }
+
+    func testWidgetRefreshStatusNotificationUpdatesActiveSession() async throws {
+        let defaultsSuite = "ledger-mobile-widget-notification-tests-\(UUID().uuidString)"
+        let statusSuite = "ledger-mobile-widget-notification-status-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsSuite)!
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+            UserDefaults(suiteName: statusSuite)?.removePersistentDomain(forName: statusSuite)
+        }
+        let widgetStore = MockWidgetCredentialStore()
+        try widgetStore.save(
+            LedgerWidgetCredential(
+                serverOrigin: "https://ledger.example.com",
+                deviceID: "widget-device",
+                token: "widget-token",
+                valuationCurrency: "CNY",
+                enabled: true
+            )
+        )
+        let session = LedgerSession(
+            api: SessionMockAPI(payload: Self.payload),
+            defaults: defaults,
+            biometricStore: MockBiometricCredentialStore(
+                credential: QuickUnlockCredential(deviceID: "phone-device", token: "phone-token")
+            ),
+            widgetCredentialStore: widgetStore,
+            widgetRefreshStatusStore: statusStore
+        )
+        await session.resume()
+
+        let attempt = Date(timeIntervalSince1970: 2_000_000_000)
+        try statusStore.record(.networkUnavailable, attemptedAt: attempt)
+        for _ in 0..<100 where session.widgetRefreshStatus.phase != .networkUnavailable {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        XCTAssertEqual(session.widgetRefreshStatus.phase, .networkUnavailable)
+        XCTAssertEqual(session.widgetRefreshStatus.lastAttemptAt, attempt)
+    }
+
     func testWidgetCredentialStillRevokesWhenLocalSuspendFails() async throws {
         let suiteName = "ledger-mobile-widget-revoke-fallback-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2241,6 +2352,7 @@ private actor SessionMockAPI: LedgerAPI {
     let quickUnlockVerifyShouldFail: Bool
     let quickUnlockVerifyDelayNanoseconds: UInt64
     let quickUnlockRevokeDelayNanoseconds: UInt64
+    let widgetQuickUnlockRegisterErrorStatus: Int?
     let widgetQuickUnlockRevokeErrorStatus: Int?
     let transactionWriteDelayNanoseconds: UInt64
     let transactionWritesShouldFail: Bool
@@ -2310,6 +2422,7 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockVerifyShouldFail: Bool = false,
         quickUnlockVerifyDelayNanoseconds: UInt64 = 0,
         quickUnlockRevokeDelayNanoseconds: UInt64 = 0,
+        widgetQuickUnlockRegisterErrorStatus: Int? = nil,
         widgetQuickUnlockRevokeErrorStatus: Int? = nil,
         transactionWriteDelayNanoseconds: UInt64 = 0,
         transactionWritesShouldFail: Bool = false
@@ -2343,6 +2456,7 @@ private actor SessionMockAPI: LedgerAPI {
         self.quickUnlockVerifyShouldFail = quickUnlockVerifyShouldFail
         self.quickUnlockVerifyDelayNanoseconds = quickUnlockVerifyDelayNanoseconds
         self.quickUnlockRevokeDelayNanoseconds = quickUnlockRevokeDelayNanoseconds
+        self.widgetQuickUnlockRegisterErrorStatus = widgetQuickUnlockRegisterErrorStatus
         self.widgetQuickUnlockRevokeErrorStatus = widgetQuickUnlockRevokeErrorStatus
         self.transactionWriteDelayNanoseconds = transactionWriteDelayNanoseconds
         self.transactionWritesShouldFail = transactionWritesShouldFail
@@ -2383,6 +2497,12 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockRegisterCalls += 1
         quickUnlockRegistrationModes.append(mode)
         if mode == "widget" {
+            if let widgetQuickUnlockRegisterErrorStatus {
+                throw LedgerAPIError.server(
+                    status: widgetQuickUnlockRegisterErrorStatus,
+                    message: "Widget registration failed"
+                )
+            }
             return QuickUnlockCredential(deviceID: "registered-widget", token: "registered-widget-token")
         }
         return QuickUnlockCredential(deviceID: "registered-device", token: "registered-token")

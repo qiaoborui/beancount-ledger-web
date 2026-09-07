@@ -106,16 +106,20 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var privacyCoverArmed = false
     @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
+    @Published private(set) var isWidgetRefreshBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
     @Published private(set) var importIndexProgress: LedgerImportIndexProgress?
     @Published private(set) var gmailOAuthResult: LedgerGmailOAuthResult?
     @Published private(set) var transactionMutationStates: [String: LedgerTransactionMutationPhase] = [:]
+    @Published private(set) var widgetRefreshStatus: LedgerWidgetRefreshStatus
 
     private let api: any LedgerAPI
     private let biometricStore: any BiometricCredentialStore
     private let passkeyAuthenticator: any PasskeyAuthenticating
     private let widgetSnapshotStore: LedgerWidgetSnapshotStore
     private let widgetCredentialStore: any LedgerWidgetCredentialStoring
+    private let widgetRefreshStatusStore: LedgerWidgetRefreshStatusStore
+    private var widgetRefreshStatusObserver: LedgerWidgetRefreshStatusObserver?
     private let importIndexActivity: ImportIndexActivityCoordinator
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
@@ -149,6 +153,7 @@ final class LedgerSession: ObservableObject {
         passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
         widgetSnapshotStore: LedgerWidgetSnapshotStore = .shared,
         widgetCredentialStore: (any LedgerWidgetCredentialStoring)? = nil,
+        widgetRefreshStatusStore: LedgerWidgetRefreshStatusStore? = nil,
         importIndexActivity: ImportIndexActivityCoordinator = ImportIndexActivityCoordinator(),
         ledgerNow: @escaping () -> Date = Date.init
     ) {
@@ -161,6 +166,11 @@ final class LedgerSession: ObservableObject {
         self.passkeyAuthenticator = passkeyAuthenticator ?? SystemPasskeyAuthenticationService()
         self.widgetSnapshotStore = widgetSnapshotStore
         self.widgetCredentialStore = widgetCredentialStore ?? SystemLedgerWidgetCredentialStore()
+        let resolvedWidgetRefreshStatusStore = widgetRefreshStatusStore
+            ?? LedgerWidgetRefreshStatusStore(suiteName: widgetSnapshotStore.suiteName)
+        self.widgetRefreshStatusStore = resolvedWidgetRefreshStatusStore
+        widgetRefreshStatus = resolvedWidgetRefreshStatusStore.load()
+            ?? LedgerWidgetRefreshStatus(phase: .waitingForBiometrics)
         self.importIndexActivity = importIndexActivity
 
         if let api {
@@ -187,6 +197,14 @@ final class LedgerSession: ObservableObject {
                 setLocallyLocked(true, for: normalized)
                 clearBackgroundDate(for: normalized)
                 phase = .locked(authenticated: true)
+            }
+        }
+        widgetRefreshStatusObserver = LedgerWidgetRefreshStatusObserver(
+            store: resolvedWidgetRefreshStatusStore
+        ) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.applicationActive else { return }
+                self.refreshWidgetRefreshStatus()
             }
         }
     }
@@ -455,9 +473,48 @@ final class LedgerSession: ObservableObject {
                 guard phase == .ready, self.serverURL == serverURL else { return }
             }
             biometricStore.deleteCredential(for: serverURL)
+            recordWidgetRefreshStatus(.waitingForBiometrics)
         } catch {
             errorMessage = "\(biometricTitle) 停用失败：\(error.localizedDescription)"
         }
+    }
+
+    func refreshWidgetRefreshStatus() {
+        if !hasBiometricUnlock {
+            widgetRefreshStatus = LedgerWidgetRefreshStatus(
+                phase: .waitingForBiometrics,
+                lastAttemptAt: widgetRefreshStatus.lastAttemptAt,
+                lastSuccessAt: widgetRefreshStatus.lastSuccessAt
+            )
+            return
+        }
+        if let stored = widgetRefreshStatusStore.load() {
+            widgetRefreshStatus = stored
+        }
+    }
+
+    func retryWidgetBackgroundRefresh() async {
+        guard phase == .ready,
+              let serverURL,
+              let ledger,
+              !isWidgetRefreshBusy else { return }
+        isWidgetRefreshBusy = true
+        defer { isWidgetRefreshBusy = false }
+
+        await ensureWidgetCredential(for: serverURL, valuationCurrency: ledger.valuationCurrency)
+        refreshWidgetRefreshStatus()
+        guard (try? widgetCredentialStore.load()) != nil else { return }
+
+        let loader = LedgerWidgetTimelineLoader(
+            credentialStore: widgetCredentialStore,
+            snapshotStore: widgetSnapshotStore,
+            statusStore: widgetRefreshStatusStore
+        )
+        _ = await loader.load(now: ledgerNow(), forceRefresh: true)
+        refreshWidgetRefreshStatus()
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
     }
 
     func setLockInterval(_ interval: LedgerLockInterval) {
@@ -1009,14 +1066,28 @@ final class LedgerSession: ObservableObject {
     }
 
     private func ensureWidgetCredential(for serverURL: URL, valuationCurrency: String) async {
-        guard widgetCredentialStore.isAvailable,
-              hasBiometricUnlock,
-              phase == .ready,
+        guard phase == .ready,
               self.serverURL == serverURL,
               !widgetCredentialRegistrationInFlight else { return }
+        guard hasBiometricUnlock else {
+            recordWidgetRefreshStatus(.waitingForBiometrics)
+            return
+        }
+        guard widgetCredentialStore.isAvailable else {
+            recordWidgetRefreshStatus(.storageUnavailable)
+            return
+        }
 
         await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
-        if (try? widgetCredentialStore.pendingRevocation()) != nil { return }
+        do {
+            if try widgetCredentialStore.pendingRevocation() != nil {
+                recordWidgetRefreshStatus(.authorizationRejected)
+                return
+            }
+        } catch {
+            recordWidgetRefreshStatus(.storageUnavailable)
+            return
+        }
 
         do {
             if let existing = try widgetCredentialStore.load() {
@@ -1026,18 +1097,34 @@ final class LedgerSession: ObservableObject {
                     if updated != existing {
                         try widgetCredentialStore.save(updated)
                     }
+                    let currentPhase = widgetRefreshStatusStore.load()?.phase
+                    if currentPhase == nil
+                        || currentPhase == .waitingForBiometrics
+                        || currentPhase == .provisioning
+                        || currentPhase == .credentialUnavailable
+                        || currentPhase == .authorizationRejected
+                        || currentPhase == .storageUnavailable {
+                        recordWidgetRefreshStatus(.ready)
+                    } else {
+                        refreshWidgetRefreshStatus()
+                    }
                     return
                 }
                 try widgetCredentialStore.suspend()
                 await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
-                if (try? widgetCredentialStore.pendingRevocation()) != nil { return }
+                if try widgetCredentialStore.pendingRevocation() != nil {
+                    recordWidgetRefreshStatus(.authorizationRejected)
+                    return
+                }
             }
         } catch {
+            recordWidgetRefreshStatus(.storageUnavailable)
             return
         }
 
         widgetCredentialRegistrationInFlight = true
         defer { widgetCredentialRegistrationInFlight = false }
+        recordWidgetRefreshStatus(.provisioning)
         do {
             let credential = try await api.registerQuickUnlock(
                 baseURL: serverURL,
@@ -1059,11 +1146,59 @@ final class LedgerSession: ObservableObject {
                         expiresAt: credential.expiresAt ?? Self.widgetCredentialFallbackExpiration(now: ledgerNow())
                     )
                 )
+                recordWidgetRefreshStatus(.ready)
+                #if canImport(WidgetKit)
+                WidgetCenter.shared.reloadAllTimelines()
+                #endif
             } catch {
                 try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                recordWidgetRefreshStatus(.storageUnavailable)
             }
         } catch {
-            // Existing app/server combinations keep the local snapshot path until the endpoint is deployed.
+            let failure = Self.widgetRefreshFailure(for: error)
+            recordWidgetRefreshStatus(failure.phase, httpStatus: failure.httpStatus)
+        }
+    }
+
+    private func recordWidgetRefreshStatus(
+        _ phase: LedgerWidgetRefreshPhase,
+        attemptedAt: Date? = nil,
+        succeededAt: Date? = nil,
+        httpStatus: Int? = nil
+    ) {
+        do {
+            try widgetRefreshStatusStore.record(
+                phase,
+                attemptedAt: attemptedAt,
+                succeededAt: succeededAt,
+                httpStatus: httpStatus
+            )
+            widgetRefreshStatus = widgetRefreshStatusStore.load()
+                ?? LedgerWidgetRefreshStatus(phase: phase, httpStatus: httpStatus)
+        } catch {
+            widgetRefreshStatus = LedgerWidgetRefreshStatus(
+                phase: .storageUnavailable,
+                lastAttemptAt: attemptedAt ?? widgetRefreshStatus.lastAttemptAt,
+                lastSuccessAt: succeededAt ?? widgetRefreshStatus.lastSuccessAt
+            )
+        }
+    }
+
+    private static func widgetRefreshFailure(
+        for error: Error
+    ) -> (phase: LedgerWidgetRefreshPhase, httpStatus: Int?) {
+        guard let apiError = error as? LedgerAPIError else {
+            return (.networkUnavailable, nil)
+        }
+        switch apiError {
+        case let .server(status, _):
+            return (.httpFailure(status), status)
+        case .incompatibleServer:
+            return (.serverOutdated, nil)
+        case .transport:
+            return (.networkUnavailable, nil)
+        case .invalidResponse, .decoding:
+            return (.invalidResponse, nil)
         }
     }
 
@@ -1358,6 +1493,8 @@ final class LedgerSession: ObservableObject {
             return
         }
 
+        refreshWidgetRefreshStatus()
+
         guard let serverURL else {
             privacyShielded = false
             return
@@ -1641,7 +1778,8 @@ final class LedgerSession: ObservableObject {
         valuationCurrency: String,
         generation: Int
     ) async {
-        let month = LedgerDateRange.current(.month, now: ledgerNow())
+        let widgetRefreshAttemptAt = ledgerNow()
+        let month = LedgerDateRange.current(.month, now: widgetRefreshAttemptAt)
         async let reportRequest: LedgerHomeReport? = try? await api.homeReport(
             baseURL: serverURL,
             start: month.start,
@@ -1677,7 +1815,10 @@ final class LedgerSession: ObservableObject {
         } else {
             snapshot = freshSnapshot
         }
-        guard (try? widgetSnapshotStore.save(snapshot)) != nil else { return }
+        guard (try? widgetSnapshotStore.saveIfNewer(
+            snapshot,
+            attemptedAt: widgetRefreshAttemptAt
+        )) != nil else { return }
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
         #endif
