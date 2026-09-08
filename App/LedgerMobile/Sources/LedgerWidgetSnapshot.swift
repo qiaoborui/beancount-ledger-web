@@ -1,5 +1,37 @@
 import Foundation
 
+/// Shared by the app and extension. Ledger dates are civil dates, independent of time zone.
+enum LedgerWidgetLink {
+    static func expenseDay(_ date: String) -> URL? {
+        guard isValidDay(date) else { return nil }
+        return URL(string: "ledger://transactions?date=\(date)")
+    }
+
+    static func expenseDay(from url: URL) -> String? {
+        guard url.scheme?.lowercased() == "ledger", url.host == "transactions",
+              url.path.isEmpty, url.user == nil, url.password == nil, url.port == nil,
+              url.fragment == nil,
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              items.count == 1, items[0].name == "date",
+              let date = items[0].value, isValidDay(date) else { return nil }
+        return date
+    }
+
+    static func isValidDay(_ value: String) -> Bool {
+        guard value.utf8.count == 10,
+              value.utf8.enumerated().allSatisfy({ index, byte in
+                  index == 4 || index == 7 ? byte == 45 : (48...57).contains(byte)
+              }) else { return false }
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...9999).contains(parts[0]), (1...12).contains(parts[1]) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        guard let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return false }
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return components.year == parts[0] && components.month == parts[1] && components.day == parts[2]
+    }
+}
+
 struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 2
 
@@ -9,6 +41,7 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
     let accounts: [LedgerWidgetAccountSnapshot]
     let imports: [LedgerWidgetImportSnapshot]
     let importsUpdatedAt: Date?
+    var insights: LedgerWidgetExpenseInsights? = nil
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -34,6 +67,7 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
         accounts = try container.decode([LedgerWidgetAccountSnapshot].self, forKey: .accounts)
         imports = try container.decodeIfPresent([LedgerWidgetImportSnapshot].self, forKey: .imports) ?? []
         importsUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .importsUpdatedAt)
+        insights = try container.decodeIfPresent(LedgerWidgetExpenseInsights.self, forKey: .insights)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -43,6 +77,83 @@ struct LedgerWidgetSnapshot: Codable, Equatable, Sendable {
         case accounts
         case imports
         case importsUpdatedAt
+        case insights
+    }
+}
+
+/// Additive payload: old servers keep supporting the monthly overview.
+struct LedgerWidgetExpenseInsights: Codable, Equatable, Sendable {
+    let updatedAt: String
+    let week: LedgerWidgetExpenseSnapshot
+    let year: LedgerWidgetExpenseSnapshot
+    let history: LedgerWidgetExpenseSnapshot
+
+    var date: Date? { ISO8601DateFormatter().date(from: updatedAt) }
+}
+
+enum LedgerWidgetPeriod: String, Codable, CaseIterable, Sendable {
+    case week, month, year
+    var title: String {
+        switch self { case .week: "本周消费"; case .month: "本月消费"; case .year: "本年消费" }
+    }
+
+    func expense(in snapshot: LedgerWidgetSnapshot) -> LedgerWidgetExpenseSnapshot? {
+        switch self {
+        case .week: snapshot.insights?.week
+        case .month: snapshot.expense
+        case .year: snapshot.insights?.year
+        }
+    }
+
+    func currentExpense(in snapshot: LedgerWidgetSnapshot, now: Date) -> LedgerWidgetExpenseSnapshot? {
+        guard let expense = expense(in: snapshot) else { return nil }
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        let today = String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+        guard expense.start <= today, today < expense.end else { return nil }
+        return expense
+    }
+}
+
+enum LedgerWidgetDates {
+    static var calendar: Calendar {
+        var value = Calendar(identifier: .gregorian)
+        value.timeZone = TimeZone(secondsFromGMT: 0)!
+        value.firstWeekday = 2
+        return value
+    }
+
+    static func date(_ day: String) -> Date? {
+        guard LedgerWidgetLink.isValidDay(day) else { return nil }
+        let parts = day.split(separator: "-").compactMap { Int($0) }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    static func day(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+    }
+
+    static func adding(_ days: Int, to day: String) -> String {
+        guard let date = date(day), let result = calendar.date(byAdding: .day, value: days, to: date) else { return day }
+        return self.day(result)
+    }
+
+    static func weekStart(_ day: String) -> String {
+        guard let date = date(day) else { return day }
+        return adding(-((calendar.component(.weekday, from: date) + 5) % 7), to: day)
+    }
+
+    /// Expands only the explicitly covered range, retaining source values.
+    static func series(_ expense: LedgerWidgetExpenseSnapshot, start: String, end: String) -> [LedgerWidgetDailyExpense] {
+        guard start >= expense.start, end <= expense.end, start < end,
+              let first = date(start), let last = date(end),
+              let count = calendar.dateComponents([.day], from: first, to: last).day,
+              count <= 366 else { return [] }
+        let amounts = Dictionary(grouping: expense.dailySeries, by: \.date).mapValues { $0.reduce(0) { $0 + $1.amount } }
+        return (0..<count).map { offset in
+            let value = adding(offset, to: start)
+            return LedgerWidgetDailyExpense(date: value, amount: amounts[value, default: 0])
+        }
     }
 }
 

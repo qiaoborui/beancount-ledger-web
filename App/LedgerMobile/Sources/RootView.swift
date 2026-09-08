@@ -30,6 +30,20 @@ struct RootView: View {
         }
         .tint(LedgerPalette.cobalt)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        .sheet(isPresented: Binding(
+            get: { session.canPresentWidgetDay },
+            set: { presented in
+                if !presented, session.phase == .ready { session.dismissWidgetDay() }
+            }
+        )) {
+            if let day = session.pendingWidgetExpenseDay {
+                NavigationStack {
+                    WidgetDayTransactionsView(day: day)
+                }
+                .id(day)
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
     }
 }
 

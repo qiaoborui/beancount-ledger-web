@@ -322,9 +322,54 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertEqual(layout.amounts[29], 3_000)
         XCTAssertEqual(layout.peakDay, 28)
         XCTAssertEqual(layout.spendingDayCount, 2)
+        XCTAssertEqual(layout.url(for: 29)?.absoluteString, "ledger://transactions?date=2028-02-29")
+        XCTAssertNil(layout.url(for: 30))
         XCTAssertEqual(layout.dateString(for: 29), "2028-02-29")
         XCTAssertNil(layout.dateString(for: 30))
         XCTAssertNil(layout.dateString(for: 0))
+    }
+
+    func testCalendarDeepLinksValidateCivilDates() {
+        for day in ["2026-12-31", "2028-02-29", "2026-09-07"] {
+            let url = LedgerWidgetLink.expenseDay(day)!
+            XCTAssertEqual(LedgerWidgetLink.expenseDay(from: url), day)
+        }
+        for value in [
+            "ledger://transactions?date=2026-02-29",
+            "ledger://transactions?date=2026-08-32",
+            "ledger://transactions?date=2026-09-07&date=2026-09-08",
+            "https://transactions?date=2026-09-07",
+            "ledger://transactions/detail?date=2026-09-07",
+        ] {
+            XCTAssertNil(LedgerWidgetLink.expenseDay(from: URL(string: value)!))
+        }
+    }
+
+    func testRenderExpenseWidgetExpansion() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let historyEntry = ExpenseCalendarEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            try render(ExpenseTrendWidgetView(entry: historyEntry).environment(\.colorScheme, scheme),
+                size: CGSize(width: 338, height: 158), name: "trend-\(suffix)", colorScheme: scheme)
+            try render(ExpenseHeatmapWidgetView(entry: historyEntry).environment(\.colorScheme, scheme),
+                size: CGSize(width: 338, height: 158), name: "heatmap-\(suffix)", colorScheme: scheme)
+            for period in LedgerWidgetPeriod.allCases {
+                let entry = ExpenseOverviewEntry(date: snapshot.updatedAt, snapshot: snapshot, period: period)
+                try render(ExpenseOverviewWidgetView(entry: entry, familyOverride: .systemSmall).environment(\.colorScheme, scheme),
+                    size: CGSize(width: 158, height: 158), name: "overview-\(period.rawValue)-\(suffix)", colorScheme: scheme)
+                try render(ExpenseOverviewWidgetView(entry: entry, familyOverride: .systemMedium),
+                    size: CGSize(width: 338, height: 158), name: "overview-medium-\(period.rawValue)-\(suffix)", colorScheme: scheme)
+            }
+        }
+        let entry = ExpenseOverviewEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        for (family, size, name) in [
+            (WidgetFamily.accessoryCircular, CGSize(width: 64, height: 64), "lock-circular"),
+            (.accessoryRectangular, CGSize(width: 160, height: 72), "lock-rectangular"),
+            (.accessoryInline, CGSize(width: 220, height: 26), "lock-inline"),
+        ] {
+            try render(ExpenseLockScreenWidgetView(entry: entry, familyOverride: family), size: size, name: name, padding: 0)
+        }
     }
 
     func testAccountWidgetDeepLinkRoundTripsReservedCharactersAndHidesRedactedAccount() throws {
@@ -356,13 +401,16 @@ final class LedgerWidgetVisualTests: XCTestCase {
     private func render<V: View>(
         _ view: V,
         size: CGSize,
-        name: String
+        name: String,
+        padding: CGFloat = 16,
+        colorScheme: ColorScheme = .light
     ) throws {
         let content = view
-            .padding(16)
+            .padding(padding)
             .frame(width: size.width, height: size.height)
             .background(LedgerWidgetColors.panel)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .environment(\.colorScheme, colorScheme)
         let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(size)
         renderer.scale = 2

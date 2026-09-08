@@ -5,6 +5,29 @@ import (
 	"time"
 )
 
+func TestWidgetInsightsRanges(t *testing.T) {
+	for _, test := range []struct{ today, weekStart, weekEnd, yearEnd string }{
+		{"2027-01-01", "2026-12-28", "2027-01-04", "2028-01-01"},
+		{"2028-02-29", "2028-02-28", "2028-03-06", "2029-01-01"},
+		{"2026-09-06", "2026-08-31", "2026-09-07", "2027-01-01"},
+	} {
+		t.Run(test.today, func(t *testing.T) {
+			insights := buildWidgetExpenseInsights(&LedgerSnapshot{}, test.today, "CNY", "2026-09-07T04:00:00Z")
+			if insights.Week.Start != test.weekStart || insights.Week.End != test.weekEnd || insights.Year.End != test.yearEnd {
+				t.Fatalf("incorrect ranges: %+v", insights)
+			}
+			today, _ := time.Parse("2006-01-02", test.today)
+			start, _ := time.Parse("2006-01-02", insights.History.Start)
+			if start.Weekday() != time.Monday || today.Sub(start).Hours()/24 < 77 || today.Sub(start).Hours()/24 > 83 {
+				t.Fatalf("incorrect history start: %s", insights.History.Start)
+			}
+			if insights.History.End != today.AddDate(0, 0, 1).Format("2006-01-02") {
+				t.Fatalf("incorrect history end: %s", insights.History.End)
+			}
+		})
+	}
+}
+
 func TestWidgetMonthRangeAllowsNearbyDeviceDates(t *testing.T) {
 	now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.UTC)
 	tests := []struct {

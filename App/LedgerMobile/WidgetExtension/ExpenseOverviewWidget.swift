@@ -1,37 +1,47 @@
 import Charts
+import AppIntents
 import SwiftUI
 import WidgetKit
 
 struct ExpenseOverviewEntry: TimelineEntry {
     let date: Date
     let snapshot: LedgerWidgetSnapshot?
+    var period: LedgerWidgetPeriod = .month
 }
 
-struct ExpenseOverviewProvider: TimelineProvider {
+extension LedgerWidgetPeriod: AppEnum {
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "统计周期"
+    static let caseDisplayRepresentations: [LedgerWidgetPeriod: DisplayRepresentation] = [
+        .week: "周", .month: "月", .year: "年"
+    ]
+}
+
+struct ExpenseWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "消费统计"
+    static let description = IntentDescription("选择周、月或年维度。")
+    @Parameter(title: "统计周期", default: .month) var period: LedgerWidgetPeriod
+}
+
+struct ExpenseOverviewProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> ExpenseOverviewEntry {
         ExpenseOverviewEntry(date: Date(), snapshot: .placeholder)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (ExpenseOverviewEntry) -> Void) {
-        completion(
+    func snapshot(for configuration: ExpenseWidgetIntent, in context: Context) async -> ExpenseOverviewEntry {
             ExpenseOverviewEntry(
                 date: Date(),
-                snapshot: context.isPreview ? .placeholder : LedgerWidgetSnapshotStore.shared.load()
+                snapshot: context.isPreview ? .placeholder : LedgerWidgetSnapshotStore.shared.load(),
+                period: configuration.period
             )
-        )
     }
 
-    func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<ExpenseOverviewEntry>) -> Void) {
+    func timeline(for configuration: ExpenseWidgetIntent, in context: Context) async -> Timeline<ExpenseOverviewEntry> {
         let now = Date()
-        Task {
-            let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
-            completion(
-                Timeline(
-                    entries: [ExpenseOverviewEntry(date: now, snapshot: result.snapshot)],
-                    policy: .after(now.addingTimeInterval(result.refreshInterval))
-                )
-            )
-        }
+        let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
+        return Timeline(
+            entries: [ExpenseOverviewEntry(date: now, snapshot: result.snapshot, period: configuration.period)],
+            policy: .after(now.addingTimeInterval(result.refreshInterval))
+        )
     }
 }
 
@@ -39,11 +49,11 @@ struct ExpenseOverviewWidget: Widget {
     let kind = "LedgerExpenseOverviewWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: ExpenseOverviewProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: ExpenseWidgetIntent.self, provider: ExpenseOverviewProvider()) { entry in
             ExpenseOverviewWidgetView(entry: entry)
         }
         .configurationDisplayName("消费概览")
-        .description("查看本月支出、同比变化与主要消费分类。")
+        .description("按周、月或年查看消费、同比与主要分类。")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -59,15 +69,17 @@ struct ExpenseOverviewWidgetView: View {
     }
 
     var body: some View {
-        if let snapshot = entry.snapshot {
+        if let snapshot = entry.snapshot, let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
+            let updatedAt = entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
             Group {
                 if (familyOverride ?? family) == .systemMedium {
-                    medium(snapshot.expense, updatedAt: snapshot.updatedAt)
+                    medium(expense, updatedAt: updatedAt)
                 } else {
-                    small(snapshot.expense, updatedAt: snapshot.updatedAt)
+                    small(expense, updatedAt: updatedAt)
                 }
             }
             .widgetURL(URL(string: "ledger://overview"))
+            .privacySensitive()
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
         } else {
             LedgerWidgetUnavailableView(
@@ -80,13 +92,14 @@ struct ExpenseOverviewWidgetView: View {
 
     private func small(_ expense: LedgerWidgetExpenseSnapshot, updatedAt: Date) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            LedgerWidgetHeader(title: "本月消费", detail: expense.periodTitle)
+            LedgerWidgetHeader(title: entry.period.title, detail: periodDetail(expense))
             Spacer(minLength: 8)
             Text(MoneyText.formatWidget(minorUnits: expense.amount, currency: expense.currency))
                 .font(.system(size: 27, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(LedgerWidgetColors.ink)
                 .lineLimit(1)
+                .minimumScaleFactor(0.65)
                 .privacySensitive()
             HStack(spacing: 6) {
                 comparisonLabel(expense.yearOverYearPercentage)
@@ -106,7 +119,7 @@ struct ExpenseOverviewWidgetView: View {
     private func medium(_ expense: LedgerWidgetExpenseSnapshot, updatedAt: Date) -> some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 0) {
-                LedgerWidgetHeader(title: "本月消费", detail: expense.periodTitle)
+                LedgerWidgetHeader(title: entry.period.title, detail: periodDetail(expense))
                 Spacer(minLength: 6)
                 Text(MoneyText.formatCompact(minorUnits: expense.amount, currency: expense.currency))
                     .font(.system(size: 25, weight: .semibold, design: .rounded))
@@ -175,6 +188,14 @@ struct ExpenseOverviewWidgetView: View {
         } else {
             Text("同比 --")
                 .foregroundStyle(LedgerWidgetColors.secondary)
+        }
+    }
+
+    private func periodDetail(_ expense: LedgerWidgetExpenseSnapshot) -> String {
+        switch entry.period {
+        case .month: expense.periodTitle
+        case .year: String(expense.start.prefix(4)) + "年"
+        case .week: String(expense.start.suffix(5)).replacingOccurrences(of: "-", with: "/") + " 起"
         }
     }
 

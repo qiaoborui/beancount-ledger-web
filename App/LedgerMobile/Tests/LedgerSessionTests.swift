@@ -4,6 +4,92 @@ import XCTest
 
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testWidgetDayRouteSurvivesColdStart() async {
+        let suiteName = "ledger-widget-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        let originalRange = session.selectedRange
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-09")!)
+        await session.resume()
+        XCTAssertEqual(session.selectedRange, originalRange)
+        XCTAssertEqual(session.primaryDestinationID, "overview")
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-09")
+    }
+
+    func testWidgetDayRoutePreservesGlobalRangeAndNavigation() async throws {
+        let suiteName = "ledger-widget-warm-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let originalRange = session.selectedRange
+        let originalLedger = session.ledger
+        session.primaryDestinationID = "accounts"
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-31")!)
+        XCTAssertTrue(session.canPresentWidgetDay)
+        _ = try await session.widgetDayLedger("2026-08-31")
+        let request = await api.bootstrapRequests().last
+        XCTAssertEqual(request?.start, "2026-08-31")
+        XCTAssertEqual(request?.end, "2026-09-01")
+        XCTAssertEqual(session.selectedRange, originalRange)
+        XCTAssertEqual(session.ledger?.start, originalLedger?.start)
+        XCTAssertEqual(session.ledger?.end, originalLedger?.end)
+        XCTAssertEqual(session.ledger?.transactions, originalLedger?.transactions)
+        XCTAssertEqual(session.primaryDestinationID, "accounts")
+        session.dismissWidgetDay()
+        XCTAssertNil(session.pendingWidgetExpenseDay)
+        XCTAssertEqual(session.selectedRange, originalRange)
+    }
+
+    func testWidgetDayRouteWaitsForUnlockAndRejectsInvalidDates() async {
+        let suiteName = "ledger-widget-lock-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = "https://ledger.example.com"
+        defaults.set(origin, forKey: "ledger.mobile.server-origin")
+        defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        for day in ["2026-02-29", "2026-13-01", "2026-08-00", "2026-8-9"] {
+            session.openWidgetURL(URL(string: "ledger://transactions?date=\(day)")!)
+            XCTAssertNil(session.pendingWidgetExpenseDay)
+        }
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2028-02-29")!)
+        XCTAssertFalse(session.canPresentWidgetDay)
+        do {
+            _ = try await session.widgetDayLedger("2028-02-29")
+            XCTFail("Locked session must reject day data requests")
+        } catch {}
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2028-02-29")
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertFalse(session.amountsVisible)
+        XCTAssertNil(session.ledger)
+    }
+
+    func testWidgetDayRouteSensitiveFailureLocksSessionWithoutChangingRange() async {
+        let suiteName = "ledger-widget-day-expired-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(payload: Self.payload, bootstrapErrorStatusAfterFirstCall: 423)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let originalRange = session.selectedRange
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-31")!)
+        do {
+            _ = try await session.widgetDayLedger("2026-08-31")
+            XCTFail("Expected sensitive lock")
+        } catch {}
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertNil(session.ledger)
+        XCTAssertFalse(session.canPresentWidgetDay)
+        XCTAssertEqual(session.selectedRange, originalRange)
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-31")
+    }
+
     func testRecentSearchesAreBoundedDeduplicatedAndMemoryOnly() {
         let suite = "ledger-search-history-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

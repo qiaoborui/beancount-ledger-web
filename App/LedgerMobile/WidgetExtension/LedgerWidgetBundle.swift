@@ -7,6 +7,11 @@ struct LedgerWidgetBundle: WidgetBundle {
         ExpenseOverviewWidget()
         AccountBalanceWidget()
         ExpenseCalendarWidget()
+        ExpenseTrendWidget()
+        ExpenseHeatmapWidget()
+        #if !targetEnvironment(macCatalyst)
+        ExpenseLockScreenWidget()
+        #endif
         ImportStatusWidget()
 #if !targetEnvironment(macCatalyst)
         ImportIndexLiveActivity()

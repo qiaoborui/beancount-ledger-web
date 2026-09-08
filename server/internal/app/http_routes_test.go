@@ -168,7 +168,8 @@ func TestRouterAuthAndSummary(t *testing.T) {
 		t.Fatalf("widget snapshot Cache-Control=%q", got)
 	}
 	var widgetBody struct {
-		SchemaVersion int `json:"schemaVersion"`
+		Insights      *WidgetExpenseInsights `json:"insights"`
+		SchemaVersion int                    `json:"schemaVersion"`
 		Expense       struct {
 			Currency string `json:"currency"`
 		} `json:"expense"`
@@ -181,6 +182,9 @@ func TestRouterAuthAndSummary(t *testing.T) {
 	}
 	if widgetBody.SchemaVersion != 2 || widgetBody.Expense.Currency != "CNY" || len(widgetBody.Accounts) == 0 {
 		t.Fatalf("unexpected widget snapshot: %#v", widgetBody)
+	}
+	if widgetBody.Insights == nil || widgetBody.Insights.Week.Currency != "CNY" || widgetBody.Insights.Year.Currency != "CNY" || widgetBody.Insights.History.End == "" {
+		t.Fatalf("missing expanded widget snapshot: %#v", widgetBody.Insights)
 	}
 
 	widgetFullUnlock := requestWithCookies(router, http.MethodPost, "/api/quick-unlock/verify", `{"deviceId":"`+widgetCredential.DeviceID+`","token":"`+widgetCredential.Token+`"}`, nil)

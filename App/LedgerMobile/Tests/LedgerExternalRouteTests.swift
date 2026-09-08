@@ -80,6 +80,15 @@ final class LedgerExternalRouteTests: XCTestCase {
             for raw in ["ledger://accounts?account=Assets:Bank&currency=CNY", "ledger://search?q=coffee", "ledger://transactions?date=2028-02-29"] {
                 let url = try XCTUnwrap(URL(string: raw))
                 session.openWidgetURL(url)
+                if let day = LedgerWidgetLink.expenseDay(from: url) {
+                    XCTAssertEqual(session.pendingWidgetExpenseDay, day)
+                    XCTAssertNil(session.pendingExternalRoute)
+                    XCTAssertFalse(session.canPresentWidgetDay)
+                    await session.applyPendingExternalRoute()
+                    XCTAssertNil(session.ledger)
+                    XCTAssertEqual(session.selectedRange, initialRange)
+                    continue
+                }
                 let request = try XCTUnwrap(session.pendingExternalRoute)
                 XCTAssertEqual(request.route, LedgerExternalRoute.parse(url))
                 await session.applyPendingExternalRoute()

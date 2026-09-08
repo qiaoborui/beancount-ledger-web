@@ -11,6 +11,35 @@ final class LedgerMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testWidgetDaySheetOpensDetailsAndReturnsToOriginalMonth() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        let range = app.navigationBars.buttons["navigation-time-range"]
+        XCTAssertTrue(range.label.contains("2026年8月"))
+
+        // XCUIApplication.open relaunches the fixture app. Warm/cross-month state
+        // preservation is covered by the session tests; this exercises the actual URL UI.
+        app.open(URL(string: "ledger://transactions?date=2026-08-28")!)
+        let confirm = app.alerts.buttons["打开"]
+        if confirm.waitForExistence(timeout: 2) { confirm.tap() }
+        XCTAssertTrue(app.navigationBars["2026-08-28 支出"].waitForExistence(timeout: 8))
+        let bookshop = app.buttons["transaction-row-88"].firstMatch
+        XCTAssertTrue(bookshop.waitForExistence(timeout: 5))
+        capture("widget-day-isolated-list")
+        bookshop.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["交易来源已变化"].exists)
+        XCTAssertFalse(app.buttons["transaction-edit"].exists)
+        capture("widget-day-snapshot-detail")
+        app.navigationBars["交易详情"].buttons.firstMatch.tap()
+        app.buttons["完成"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 3))
+        XCTAssertTrue(range.label.contains("2026年8月"))
+        capture("widget-day-original-month-preserved")
+    }
+
     func testLiquidGlassSearchAndConfirmedDeletion() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
