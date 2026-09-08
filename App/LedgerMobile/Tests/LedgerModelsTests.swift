@@ -11,6 +11,16 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(LedgerDateRange.custom(start: now, end: now).toolbarTitle(relativeTo: now), "自定义")
     }
 
+    func testSearchAndMoreNeverBecomeOverflowRoutes() {
+        for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.assets]] {
+            XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: tabs))
+            XCTAssertFalse(LedgerDestination.settings.isCompactOverflow(in: tabs))
+            XCTAssertEqual(LedgerDestination.search.compactSelection(in: tabs), .search)
+            XCTAssertTrue(LedgerDestination.imports.isCompactOverflow(in: tabs))
+            XCTAssertEqual(LedgerDestination.imports.compactSelection(in: tabs), .settings)
+        }
+    }
+
     func testCompactTabsPreserveOrderDeduplicateLimitAndFallback() {
         XCTAssertEqual(
             LedgerDestination.normalizedCompactTabs([

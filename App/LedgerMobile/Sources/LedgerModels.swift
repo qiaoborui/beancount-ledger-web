@@ -78,8 +78,12 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
     }
 
+    func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
+        self != .settings && self != .search && !destinations.contains(self)
+    }
+
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {
-        self == .settings || self == .search || destinations.contains(self) ? self : .settings
+        isCompactOverflow(in: destinations) ? .settings : self
     }
 
     static func stored(_ rawValue: String) -> LedgerDestination {

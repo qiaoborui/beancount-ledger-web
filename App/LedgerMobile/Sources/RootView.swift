@@ -189,7 +189,7 @@ private struct MainTabView: View {
             },
             set: { destination in
                 let overflow = moreDestination.flatMap {
-                    session.compactTabDestinations.contains($0) ? nil : $0
+                    $0.isCompactOverflow(in: session.compactTabDestinations) ? $0 : nil
                 }
                 session.primaryDestinationID = destination == .settings
                     ? (overflow ?? .settings).rawValue

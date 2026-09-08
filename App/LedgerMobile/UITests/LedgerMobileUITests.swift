@@ -56,6 +56,35 @@ final class LedgerMobileUITests: XCTestCase {
         return search
     }
 
+    func testSearchFromMoreReturnsToMoreWithoutNestedSearch() throws {
+        try XCTSkipIf(isPad, "Compact search tab return path")
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 3))
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        let close = app.buttons.matching(NSPredicate(format: "label == 'Close' OR label == '关闭' OR label == '取消'")).firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 3), app.debugDescription)
+        close.tap()
+        XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(app.searchFields["搜索整个账本"].exists)
+        app.tabBars.buttons["概览"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 3))
+        app.tabBars.buttons["更多"].tap()
+        let reopenedSearch = revealSearch("搜索整个账本")
+        reopenedSearch.tap()
+        reopenedSearch.typeText("城市\n")
+        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(app.searchFields["搜索整个账本"].exists)
+        capture("search-more-return")
+    }
+
     func testGlobalSearchTabAlignmentAndResults() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
