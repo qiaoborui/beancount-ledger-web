@@ -36,113 +36,115 @@ struct GlobalSearchView: View {
     }
 
     var body: some View {
-        List {
-            if usesNativeSearchTab {
-                Picker("搜索范围", selection: $session.globalSearchScope) {
-                    ForEach(LedgerGlobalSearchScope.allCases) { scope in Text(scope.title).tag(scope) }
+        VStack(spacing: 0) {
+            searchHeader
+            List {
+                if loading && hasSearch {
+                    ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
                 }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-                .accessibilityIdentifier("global-search-scopes")
-            }
-            filterControls
-            if loading && hasSearch {
-                ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
-            }
-            if let errorMessage {
-                Section {
-                    Text(errorMessage).foregroundStyle(.secondary)
-                    Button("重新加载") { Task { await load() } }
-                }
-            }
-            if !hasSearch {
-                Section {
-                    Label("搜索整个账本", systemImage: "magnifyingglass")
-                        .font(.title2.weight(.semibold))
-                    Text("查找流水、账户、标签、导入文件和功能。支持商户、备注、金额、日期及账户名称，范围覆盖全部日期。")
-                        .foregroundStyle(.secondary)
-                }
-                if !session.recentGlobalSearches.isEmpty {
+                if let errorMessage {
                     Section {
-                        ForEach(session.recentGlobalSearches, id: \.self) { recent in
-                            Button {
-                                query = recent
-                                session.recordGlobalSearch(recent)
-                            } label: { Label(recent, systemImage: "clock.arrow.circlepath") }
-                        }
-                        Button("清除最近搜索", role: .destructive) { session.clearRecentGlobalSearches() }
-                    } header: { Text("最近搜索") }
-                }
-            } else if results.isEmpty && !loading {
-                ContentUnavailableView {
-                    Label("没有符合条件的结果", systemImage: "magnifyingglass")
-                } description: {
-                    Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                         ? "试试其他搜索范围或筛选条件。"
-                         : "未找到“\(query)”的匹配结果，试试其他关键词或调整筛选条件。")
-                }
-            } else {
-                if !results.destinations.isEmpty {
-                    Section("功能") {
-                        ForEach(results.destinations) { destination in
-                            NavigationLink { LedgerDestinationView(destination: destination).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
-                                Label(destination.title, systemImage: destination.systemImage)
-                            }
-                        }
+                        Text(errorMessage).foregroundStyle(.secondary)
+                        Button("重新加载") { Task { await load() } }
                     }
                 }
-                if !results.accounts.isEmpty {
-                    Section("账户 · \(results.accounts.count)") {
-                        ForEach(results.accounts, id: \.account) { account in
-                            NavigationLink { AccountDetailView(account: account.account, currency: account.currency).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
-                                VStack(alignment: .leading) {
-                                    Text(account.label)
-                                    Text(account.account).font(.caption).foregroundStyle(.secondary)
+                if !hasSearch {
+                    if !session.recentGlobalSearches.isEmpty {
+                        Section {
+                            ForEach(session.recentGlobalSearches, id: \.self) { recent in
+                                Button {
+                                    query = recent
+                                    session.recordGlobalSearch(recent)
+                                } label: { Label(recent, systemImage: "clock.arrow.circlepath") }
+                            }
+                        } header: {
+                            HStack {
+                                Text("最近搜索")
+                                Spacer()
+                                Button("清除") { session.clearRecentGlobalSearches() }
+                                    .font(.subheadline)
+                            }
+                            .textCase(nil)
+                        }
+                    } else {
+                        ContentUnavailableView("搜索整个账本", systemImage: "magnifyingglass",
+                                               description: Text("查找流水、账户、标签和文件"))
+                            .listRowSeparator(.hidden)
+                    }
+                } else if results.isEmpty && !loading {
+                    ContentUnavailableView {
+                        Label("没有符合条件的结果", systemImage: "magnifyingglass")
+                    } description: {
+                        Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             ? "试试其他搜索范围或筛选条件。"
+                             : "未找到“\(query)”的匹配结果，试试其他关键词或调整筛选条件。")
+                    }
+                } else {
+                    if !results.destinations.isEmpty {
+                        Section("功能") {
+                            ForEach(results.destinations) { destination in
+                                NavigationLink { LedgerDestinationView(destination: destination).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
+                                    Label(destination.title, systemImage: destination.systemImage)
                                 }
                             }
                         }
                     }
-                }
-                if !results.tags.isEmpty {
-                    Section("标签") {
-                        ForEach(results.tags, id: \.self) { tag in
-                            NavigationLink {
-                                List(session.visibleGlobalTransactions.filter { ($0.tags ?? []).contains(tag) && session.globalSearchFilters.includes($0) }) { transaction in
-                                    transactionLink(transaction)
+                    if !results.accounts.isEmpty {
+                        Section("账户 · \(results.accounts.count)") {
+                            ForEach(results.accounts, id: \.account) { account in
+                                NavigationLink { AccountDetailView(account: account.account, currency: account.currency).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
+                                    VStack(alignment: .leading) {
+                                        Text(account.label)
+                                        Text(account.account).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
-                                .navigationTitle("#" + tag)
-                                .onAppear(perform: recordResultOpen)
-                                .toolbar(.visible, for: .navigationBar)
-                            } label: { Label(tag, systemImage: "number") }
+                            }
                         }
                     }
-                }
-                if !results.transactions.isEmpty {
-                    Section("流水 · \(results.transactions.count)") {
-                        ForEach(results.transactions.prefix(limit)) { transaction in transactionLink(transaction) }
-                        if results.transactions.count > limit {
-                            Button("显示更多流水") { limit += 50 }
-                        }
-                    }
-                }
-                if !results.documents.isEmpty {
-                    Section("导入文件 · \(results.documents.count)") {
-                        ForEach(results.documents) { document in
-                            NavigationLink {
-                                List {
-                                    LabeledContent("文件", value: document.name ?? "账单归档")
-                                    LabeledContent("渠道", value: document.provider ?? "其他")
-                                    LabeledContent("覆盖日期", value: LedgerImportHistory.coverageText(document))
-                                    if let path = document.path { Text(path).font(.caption).textSelection(.enabled) }
-                                    NavigationLink("查看导入记录") { ImportHistoryView() }
-                                }.navigationTitle("导入文件")
+                    if !results.tags.isEmpty {
+                        Section("标签") {
+                            ForEach(results.tags, id: \.self) { tag in
+                                NavigationLink {
+                                    List(session.visibleGlobalTransactions.filter { ($0.tags ?? []).contains(tag) && session.globalSearchFilters.includes($0) }) { transaction in
+                                        transactionLink(transaction)
+                                    }
+                                    .navigationTitle("#" + tag)
                                     .onAppear(perform: recordResultOpen)
                                     .toolbar(.visible, for: .navigationBar)
-                            } label: { Label(document.name ?? "账单归档", systemImage: "doc.text") }
+                                } label: { Label(tag, systemImage: "number") }
+                            }
+                        }
+                    }
+                    if !results.transactions.isEmpty {
+                        Section("流水 · \(results.transactions.count)") {
+                            ForEach(results.transactions.prefix(limit)) { transaction in transactionLink(transaction) }
+                            if results.transactions.count > limit {
+                                Button("显示更多流水") { limit += 50 }
+                            }
+                        }
+                    }
+                    if !results.documents.isEmpty {
+                        Section("导入文件 · \(results.documents.count)") {
+                            ForEach(results.documents) { document in
+                                NavigationLink {
+                                    List {
+                                        LabeledContent("文件", value: document.name ?? "账单归档")
+                                        LabeledContent("渠道", value: document.provider ?? "其他")
+                                        LabeledContent("覆盖日期", value: LedgerImportHistory.coverageText(document))
+                                        if let path = document.path { Text(path).font(.caption).textSelection(.enabled) }
+                                        NavigationLink("查看导入记录") { ImportHistoryView() }
+                                    }.navigationTitle("导入文件")
+                                        .onAppear(perform: recordResultOpen)
+                                        .toolbar(.visible, for: .navigationBar)
+                                } label: { Label(document.name ?? "账单归档", systemImage: "doc.text") }
+                            }
                         }
                     }
                 }
             }
+            .listStyle(.plain)
+            .contentMargins(.top, 0, for: .scrollContent)
+            .scrollContentBackground(.hidden)
         }
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)
@@ -231,17 +233,32 @@ struct GlobalSearchView: View {
 
     private func recordResultOpen() { session.recordGlobalSearch(query) }
 
-    private var filterControls: some View {
-        Section {
-            Button { filtersPresented = true } label: {
-                HStack {
-                    Label("筛选", systemImage: "line.3.horizontal.decrease")
-                    Spacer()
-                    Text(session.globalSearchFilters.isEmpty ? "全部日期" : "\(session.globalSearchFilters.count) 项条件")
-                        .foregroundStyle(.secondary)
+    private var searchHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                if usesNativeSearchTab {
+                    Text("搜索").font(.largeTitle.bold())
                 }
+                Spacer()
+                Button { filtersPresented = true } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(session.globalSearchFilters.isEmpty ? Color.primary : Color.accentColor)
+                .background(.quaternary, in: Circle())
+                .accessibilityLabel("筛选")
+                .accessibilityValue(session.globalSearchFilters.isEmpty ? "全部日期" : "\(session.globalSearchFilters.count) 项条件")
+                .accessibilityIdentifier("global-search-filters")
             }
-            .accessibilityIdentifier("global-search-filters")
+            if usesNativeSearchTab {
+                Picker("搜索范围", selection: $session.globalSearchScope) {
+                    ForEach(LedgerGlobalSearchScope.allCases) { scope in Text(scope.title).tag(scope) }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("global-search-scopes")
+            }
             if !session.globalSearchFilters.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
@@ -263,6 +280,9 @@ struct GlobalSearchView: View {
                 }
             }
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     private func filterChip(_ title: String, remove: @escaping () -> Void) -> some View {
