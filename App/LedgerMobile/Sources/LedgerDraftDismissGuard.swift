@@ -4,6 +4,8 @@ import UIKit
 extension View {
     func ledgerDraftDismissGuard(isDisabled: Bool, onAttempt: @escaping () -> Void) -> some View {
         background(LedgerDraftDismissObserver(isDisabled: isDisabled, onAttempt: onAttempt))
+            // Keep draft protection owned by SwiftUI even when it replaces its presentation delegate.
+            .interactiveDismissDisabled(isDisabled)
     }
 }
 
@@ -24,7 +26,7 @@ private struct LedgerDraftDismissObserver: UIViewControllerRepresentable {
     }
 
     static func dismantleUIViewController(_ controller: ObserverController, coordinator: ()) {
-        controller.restoreDelegate()
+        controller.stopObserving()
     }
 
     final class ObserverController: UIViewController, UIAdaptivePresentationControllerDelegate {
@@ -32,6 +34,8 @@ private struct LedgerDraftDismissObserver: UIViewControllerRepresentable {
         var onAttempt: () -> Void = {}
         private weak var observedPresentation: UIPresentationController?
         private weak var previousDelegate: (any UIAdaptivePresentationControllerDelegate)?
+        private weak var observedTransition: (any UIViewControllerTransitionCoordinator)?
+        private var isObserving = true
 
         override func loadView() {
             view = UIView()
@@ -43,12 +47,23 @@ private struct LedgerDraftDismissObserver: UIViewControllerRepresentable {
             installDelegate()
         }
 
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            installDelegate()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            installDelegate()
+        }
+
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             installDelegate()
         }
 
         func installDelegate() {
+            guard isObserving else { return }
             var candidate: UIViewController? = self
             while let controller = candidate {
                 if controller.presentingViewController != nil, let presentation = controller.presentationController {
@@ -60,10 +75,28 @@ private struct LedgerDraftDismissObserver: UIViewControllerRepresentable {
                         previousDelegate = presentation.delegate
                         presentation.delegate = self
                     }
+                    observeTransition(of: controller)
                     return
                 }
                 candidate = controller.parent
             }
+        }
+
+        private func observeTransition(of sheet: UIViewController) {
+            // Alerts and nested sheets can replace SwiftUI's delegate during their transitions.
+            // Reattach after that transition finishes rather than relying on a draft value change.
+            let transition = sheet.presentedViewController?.transitionCoordinator ?? sheet.transitionCoordinator
+            guard let transition, observedTransition !== transition else { return }
+            observedTransition = transition
+            transition.animate(alongsideTransition: nil) { [weak self] _ in
+                self?.installDelegate()
+            }
+        }
+
+        func stopObserving() {
+            isObserving = false
+            observedTransition = nil
+            restoreDelegate()
         }
 
         func restoreDelegate() {
