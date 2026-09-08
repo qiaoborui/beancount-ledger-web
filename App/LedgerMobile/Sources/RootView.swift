@@ -227,7 +227,7 @@ private struct MainTabView: View {
                     NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 }
                 Tab(value: LedgerDestination.search, role: .search) {
-                    NavigationStack { GlobalSearchView(query: $searchQuery) }
+                    NavigationStack { GlobalSearchView(query: $searchQuery, usesNativeSearchTab: true) }
                         .searchable(text: $searchQuery, prompt: "搜索整个账本")
                 }
             }

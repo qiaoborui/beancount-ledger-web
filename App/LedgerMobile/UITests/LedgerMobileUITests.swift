@@ -65,6 +65,8 @@ final class LedgerMobileUITests: XCTestCase {
         app.tabBars.buttons["更多"].tap()
         XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 3))
         let search = revealSearch("搜索整个账本")
+        XCTAssertFalse(app.navigationBars["搜索"].exists)
+        capture("global-search-entry")
         search.tap()
         search.typeText("城市\n")
         XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))

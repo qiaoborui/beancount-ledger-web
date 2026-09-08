@@ -120,8 +120,7 @@ extension View {
     }
 }
 
-/// Keep compact search above the tab bar's safe area. A bottom toolbar inside
-/// TabView occupies the tab bar's hit region, so the search control owns an inset.
+/// Scoped search for pickers; the app shell owns the global search tab.
 private struct LedgerSearch: ViewModifier {
     @Binding var text: String
     let prompt: String

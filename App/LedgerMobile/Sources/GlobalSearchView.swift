@@ -11,6 +11,8 @@ struct GlobalSearchPage: View {
 struct GlobalSearchView: View {
     @EnvironmentObject private var session: LedgerSession
     @Binding var query: String
+    // Native search owns the bottom field; show the root directly without a transient title bar.
+    var usesNativeSearchTab = false
     @State private var documents: [LedgerImportDocument] = []
     @State private var results = LedgerSearchResults()
     @State private var loading = false
@@ -43,7 +45,7 @@ struct GlobalSearchView: View {
                 if !results.destinations.isEmpty {
                     Section("功能") {
                         ForEach(results.destinations) { destination in
-                            NavigationLink { LedgerDestinationView(destination: destination) } label: {
+                            NavigationLink { LedgerDestinationView(destination: destination).toolbar(.visible, for: .navigationBar) } label: {
                                 Label(destination.title, systemImage: destination.systemImage)
                             }
                         }
@@ -52,7 +54,7 @@ struct GlobalSearchView: View {
                 if !results.accounts.isEmpty {
                     Section("账户 · \(results.accounts.count)") {
                         ForEach(results.accounts, id: \.account) { account in
-                            NavigationLink { AccountDetailView(account: account.account, currency: account.currency) } label: {
+                            NavigationLink { AccountDetailView(account: account.account, currency: account.currency).toolbar(.visible, for: .navigationBar) } label: {
                                 VStack(alignment: .leading) {
                                     Text(account.label)
                                     Text(account.account).font(.caption).foregroundStyle(.secondary)
@@ -69,6 +71,7 @@ struct GlobalSearchView: View {
                                     transactionLink(transaction)
                                 }
                                 .navigationTitle("#" + tag)
+                                .toolbar(.visible, for: .navigationBar)
                             } label: { Label(tag, systemImage: "number") }
                         }
                     }
@@ -92,6 +95,7 @@ struct GlobalSearchView: View {
                                     if let path = document.path { Text(path).font(.caption).textSelection(.enabled) }
                                     NavigationLink("查看导入记录") { ImportHistoryView() }
                                 }.navigationTitle("导入文件")
+                                    .toolbar(.visible, for: .navigationBar)
                             } label: { Label(document.name ?? "账单归档", systemImage: "doc.text") }
                         }
                     }
@@ -99,6 +103,10 @@ struct GlobalSearchView: View {
             }
         }
         .navigationTitle("搜索")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(usesNativeSearchTab ? .hidden : .automatic, for: .navigationBar)
+        .scrollContentBackground(.hidden)
+        .background(LedgerPalette.canvas)
         .scrollDismissesKeyboard(.interactively)
         .task { await load() }
         .refreshable { await load(forceRefresh: true) }
@@ -108,7 +116,7 @@ struct GlobalSearchView: View {
     }
 
     private func transactionLink(_ transaction: LedgerTransaction) -> some View {
-        NavigationLink { TransactionDetailView(transaction: transaction) } label: {
+        NavigationLink { TransactionDetailView(transaction: transaction).toolbar(.visible, for: .navigationBar) } label: {
             TransactionRow(transaction: transaction, accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
         }
         .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
