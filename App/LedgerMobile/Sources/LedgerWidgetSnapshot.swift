@@ -145,10 +145,12 @@ struct LedgerWidgetSnapshotStore: Sendable {
             )
             // Clock correction can put both the cached payload and its write time in the future.
             // Recover only the exact state this request observed, under the shared-store lock.
+            // Server timestamps can be slightly later than the request's start time.
+            let toleratedResponseTime = attemptedAt.addingTimeInterval(60)
             let recoversClockSkew = expected == current
                 && current.snapshot != nil
-                && current.isFuture(relativeTo: attemptedAt)
-                && snapshot.updatedAt <= attemptedAt
+                && current.isFuture(relativeTo: toleratedResponseTime)
+                && snapshot.updatedAt <= toleratedResponseTime
             if !recoversClockSkew {
                 if let currentAttempt = current.attemptedAt, currentAttempt > attemptedAt { return false }
                 if let stored = current.snapshot, stored.updatedAt > snapshot.updatedAt { return false }

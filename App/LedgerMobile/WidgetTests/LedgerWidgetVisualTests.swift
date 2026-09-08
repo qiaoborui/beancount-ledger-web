@@ -182,7 +182,7 @@ final class LedgerWidgetVisualTests: XCTestCase {
         let observed = store.loadState()
         XCTAssertFalse(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now))
         XCTAssertFalse(try store.saveIfNewer(
-            snapshot(updatedAt: now.addingTimeInterval(60)), attemptedAt: now, recoveringFutureState: observed
+            snapshot(updatedAt: now.addingTimeInterval(61)), attemptedAt: now, recoveringFutureState: observed
         ))
         XCTAssertTrue(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: observed))
         // A slow recovery attempt cannot replace a newer normal cache.
@@ -190,6 +190,31 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertTrue(try store.saveIfNewer(newer, attemptedAt: now.addingTimeInterval(10)))
         XCTAssertFalse(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: observed))
         XCTAssertEqual(store.load(), newer)
+    }
+
+    func testClockSkewRecoveryAllowsServerTimestampAfterRequestStart() throws {
+        let suiteName = "ledger-widget-response-time-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let future = snapshot(updatedAt: now.addingTimeInterval(3_600))
+        try store.saveIfNewer(future, attemptedAt: future.updatedAt)
+        let response = snapshot(updatedAt: now.addingTimeInterval(2))
+        XCTAssertTrue(try store.saveIfNewer(response, attemptedAt: now, recoveringFutureState: store.loadState()))
+        XCTAssertEqual(store.load(), response)
+    }
+
+    func testSmallTimestampDifferenceKeepsMonotonicCacheProtection() throws {
+        let suiteName = "ledger-widget-small-clock-difference-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let cached = snapshot(updatedAt: now.addingTimeInterval(30))
+        try store.saveIfNewer(cached, attemptedAt: now.addingTimeInterval(30))
+        XCTAssertFalse(try store.saveIfNewer(
+            snapshot(updatedAt: now.addingTimeInterval(2)), attemptedAt: now, recoveringFutureState: store.loadState()
+        ))
+        XCTAssertEqual(store.load(), cached)
     }
 
     func testFutureAttemptRecoveryDetectsConcurrentRewriteOfIdenticalSnapshot() throws {
