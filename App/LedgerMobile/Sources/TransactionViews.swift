@@ -62,6 +62,7 @@ struct TransactionsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
+    @State private var deletionTarget: LedgerTransaction?
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
     @State private var tagEditorPresented = false
@@ -154,6 +155,13 @@ struct TransactionsView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deletionTarget = transaction
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                                .disabled(transaction.source.hash?.isEmpty != false
+                                    || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
                                 Button {
                                     selectingTags = true
                                     toggleTagSelection(transaction)
@@ -183,7 +191,6 @@ struct TransactionsView: View {
         }
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
-        .searchable(text: $filters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
@@ -217,6 +224,14 @@ struct TransactionsView: View {
                 .accessibilityValue("\(activeStructuredFilterCount) 个筛选条件")
             }
         }
+            .sheet(item: $deletionTarget) { transaction in
+                TransactionDeleteSheet(transaction: transaction) {
+                    actionMessage = "交易已删除，原文已在账本中注释保留。"
+                    actionMessageStyle = .confirmed
+                    confirmationFeedback &+= 1
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
             .sheet(isPresented: $filterPresented) {
                 TransactionFilterSheet(
                     kind: $filters.kind,
@@ -662,8 +677,7 @@ private struct TransactionTagSelectionBar: View {
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)
         .padding(.vertical, LedgerSpacing.sm)
-        .background(LedgerPalette.panel)
-        .overlay(alignment: .top) { Rectangle().fill(LedgerPalette.line).frame(height: 1) }
+        .ledgerFloatingActionSurface()
     }
 }
 
@@ -741,6 +755,7 @@ struct TransactionDetailView: View {
 
     @State private var transaction: LedgerTransaction
     @State private var editorPresented = false
+    @State private var deletionPresented = false
     @State private var savedMessage: String?
     @State private var confirmationFeedback = 0
     @State private var confirmedEntry: LedgerTransactionEntry?
@@ -829,9 +844,16 @@ struct TransactionDetailView: View {
         .navigationTitle("交易详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) { deletionPresented = true } label: {
+                    Label("删除交易", systemImage: "trash")
+                }
+                .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable
+                    || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+                .accessibilityIdentifier("transaction-delete")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("编辑") { editorPresented = true }
                     .fontWeight(.semibold)
@@ -843,6 +865,10 @@ struct TransactionDetailView: View {
                     )
                     .accessibilityIdentifier("transaction-edit")
             }
+        }
+        .sheet(isPresented: $deletionPresented) {
+            TransactionDeleteSheet(transaction: transaction) { dismiss() }
+                .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $editorPresented) {
             TransactionEditorView(
@@ -892,6 +918,73 @@ struct TransactionDetailView: View {
             }
         }
         sourceUnavailable = true
+    }
+}
+
+private struct TransactionDeleteSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    let transaction: LedgerTransaction
+    let onDeleted: () -> Void
+    @State private var reason = ""
+    @State private var isDeleting = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TransactionRow(transaction: transaction)
+                } header: {
+                    Text("确认删除这笔交易")
+                } footer: {
+                    Text("确认后从流水和统计中移除，原交易会作为注释保留在账本文件中。")
+                }
+                Section("删除原因（可选）") {
+                    TextField("例如：重复导入", text: $reason, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+                if let errorMessage {
+                    Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
+                }
+                Section {
+                    Button(role: .destructive) {
+                        isDeleting = true
+                        errorMessage = nil
+                        Task {
+                            do {
+                                try await session.deleteTransaction(
+                                    source: transaction.source,
+                                    reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                                )
+                                dismiss()
+                                onDeleted()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
+                            isDeleting = false
+                        }
+                    } label: {
+                        HStack {
+                            Label("确认删除", systemImage: "trash")
+                            if isDeleting { Spacer(); ProgressView() }
+                        }
+                    }
+                    .accessibilityIdentifier("transaction-delete-confirm")
+                }
+            }
+            .disabled(isDeleting)
+            .navigationTitle("删除交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }.disabled(isDeleting)
+                }
+            }
+        }
+        .interactiveDismissDisabled(isDeleting)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 

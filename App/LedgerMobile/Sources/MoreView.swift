@@ -50,7 +50,7 @@ struct MoreView: View {
         .onChange(of: overflowDestination) { _, destination in
             guard destination == nil else { return }
             let current = LedgerDestination.stored(session.primaryDestinationID)
-            if current != .settings, !session.compactTabDestinations.contains(current) {
+            if current.isCompactOverflow(in: session.compactTabDestinations) {
                 session.primaryDestinationID = LedgerDestination.settings.rawValue
             }
         }
@@ -58,7 +58,7 @@ struct MoreView: View {
 
     private func restoreOverflowRoute() {
         let destination = LedgerDestination.stored(session.primaryDestinationID)
-        guard destination != .settings, !session.compactTabDestinations.contains(destination) else { return }
+        guard destination.isCompactOverflow(in: session.compactTabDestinations) else { return }
         overflowDestination = destination
     }
 

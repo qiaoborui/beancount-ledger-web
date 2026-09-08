@@ -120,6 +120,54 @@ extension View {
     }
 }
 
+/// Scoped search for pickers; the app shell owns the global search tab.
+private struct LedgerSearch: ViewModifier {
+    @Binding var text: String
+    let prompt: String
+
+    func body(content: Content) -> some View {
+        content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: Text(prompt))
+    }
+}
+
+private struct LedgerFloatingActionSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            content
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
+                .padding(.horizontal, LedgerSpacing.md)
+                .padding(.vertical, LedgerSpacing.sm)
+        } else {
+            content
+                .background(LedgerPalette.raised, in: RoundedRectangle(cornerRadius: 24))
+                .padding(.horizontal, LedgerSpacing.md)
+                .padding(.vertical, LedgerSpacing.sm)
+        }
+    }
+}
+
+extension View {
+    func ledgerSearch(text: Binding<String>, prompt: String) -> some View {
+        modifier(LedgerSearch(text: text, prompt: prompt))
+    }
+
+    func ledgerFloatingActionSurface() -> some View {
+        modifier(LedgerFloatingActionSurface())
+    }
+
+    @ViewBuilder
+    func ledgerAdaptiveTabBar() -> some View {
+        if #available(iOS 26.0, *) {
+            tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
+}
+
 private struct LedgerAdaptivePageWidth: ViewModifier {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -460,7 +508,7 @@ struct LedgerAccountPicker: View {
         .background(LedgerPalette.canvas)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索账户名称或路径")
+        .ledgerSearch(text: $query, prompt: "搜索账户名称或路径")
         .overlay {
             if filteredAccounts.isEmpty {
                 EmptyLedgerState(

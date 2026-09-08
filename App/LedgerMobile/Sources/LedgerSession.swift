@@ -59,6 +59,7 @@ private struct LedgerTransactionMutation {
     enum Kind {
         case edit(LedgerTransactionEntry)
         case addTags([String])
+        case delete
     }
 
     let operationID: UUID
@@ -124,6 +125,7 @@ final class LedgerSession: ObservableObject {
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
     private var applicationActive = true
+    private var automaticUnlockAttempted = false
     private var systemAuthenticationInProgress = false
     private var requestGeneration = 0
     private var sessionEpoch = 0
@@ -231,6 +233,14 @@ final class LedgerSession: ObservableObject {
         return hasBiometricUnlock && isLocallyLocked(serverURL)
     }
 
+    func start() async {
+        if phase == .checking, hasBiometricUnlock, let serverURL {
+            lockLocally(for: serverURL)
+        }
+        await resume()
+        await automaticallyUnlockIfNeeded()
+    }
+
     func resume() async {
         guard phase == .checking, let serverURL else { return }
         lockInterval = storedLockInterval(for: serverURL)
@@ -334,11 +344,20 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func automaticallyUnlockIfNeeded() async {
+        guard applicationActive, case .locked = phase, canUseBiometricUnlock,
+              !automaticUnlockAttempted, !isAuthenticationBusy,
+              !systemAuthenticationInProgress else { return }
+        automaticUnlockAttempted = true
+        await unlockWithBiometrics()
+    }
+
     func unlockWithBiometrics() async {
         guard case let .locked(authenticated) = phase,
               let serverURL,
               canUseBiometricUnlock,
               !isAuthenticationBusy else { return }
+        automaticUnlockAttempted = true
         let generation = invalidateSession()
         isAuthenticationBusy = true
         defer { isAuthenticationBusy = false }
@@ -808,7 +827,7 @@ final class LedgerSession: ObservableObject {
         guard phase == .ready, serverURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
-        guard let original = ledger?.transactions.first(where: { $0.source == source }) else {
+        guard let original = knownTransaction(source) else {
             throw LedgerTransactionMutationError.sourceUnavailable
         }
         let operationID = UUID()
@@ -836,6 +855,38 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    func deleteTransaction(source: TransactionSource, reason: String) async throws {
+        guard phase == .ready, serverURL != nil else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        guard source.hash?.isEmpty == false,
+              let original = knownTransaction(source) else {
+            throw LedgerTransactionMutationError.sourceUnavailable
+        }
+        let operationID = UUID()
+        let key = Self.transactionMutationKey(source)
+        try beginTransactionMutation(key: key, mutation: LedgerTransactionMutation(
+            operationID: operationID, original: original, projected: original,
+            kind: .delete, phase: .pending
+        ))
+        do {
+            try await performSensitiveRequest(validatesRequestGeneration: false) { api, baseURL in
+                try await api.deleteTransaction(baseURL: baseURL, source: source, reason: reason)
+            }
+            confirmTransactionMutations(keys: [key], operationID: operationID)
+            scheduleTransactionReconciliation()
+        } catch {
+            failTransactionMutations(keys: [key], operationID: operationID, error: error)
+            throw error
+        }
+    }
+
+    private func isConfirmedDeletion(_ source: TransactionSource) -> Bool {
+        guard let mutation = transactionMutations[Self.transactionMutationKey(source)],
+              case .delete = mutation.kind, mutation.phase == .confirmed else { return false }
+        return true
+    }
+
     func addTransactionTags(
         sources: [TransactionSource],
         tags: [String]
@@ -844,7 +895,7 @@ final class LedgerSession: ObservableObject {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
         let originals = sources.compactMap { source in
-            ledger?.transactions.first(where: { $0.source == source })
+            knownTransaction(source)
         }
         guard originals.count == sources.count else {
             throw LedgerTransactionMutationError.sourceUnavailable
@@ -889,8 +940,43 @@ final class LedgerSession: ObservableObject {
         return transactionMutationStates[mutationKey]
     }
 
+    @Published private(set) var globalTransactions: [LedgerTransaction] = []
+    private var globalTransactionsLoadedAt: Date?
+    var hasCachedGlobalTransactions: Bool { globalTransactionsLoadedAt != nil }
+
+    func loadGlobalTransactions(forceRefresh: Bool = false) async throws {
+        if !forceRefresh, phase == .ready,
+           let loadedAt = globalTransactionsLoadedAt,
+           Date().timeIntervalSince(loadedAt) < 60 { return }
+        let payload = try await performSensitiveRequest { api, url in
+            let payload = try await api.globalTransactions(baseURL: url)
+            guard payload.sensitiveUnlocked else {
+                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+            }
+            return payload
+        }
+        try Task.checkCancellation()
+        reconcileTransactionMutations(in: payload.transactions)
+        globalTransactions = payload.transactions
+        globalTransactionsLoadedAt = Date()
+        if let ledger {
+            self.ledger = ledger.replacingTransactions(with: payload.transactions.filter {
+                $0.date >= selectedRange.start && $0.date < selectedRange.queryEndExclusive
+            })
+        }
+    }
+
+    var visibleGlobalTransactions: [LedgerTransaction] {
+        globalTransactions.filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+    }
+
+    private func knownTransaction(_ source: TransactionSource) -> LedgerTransaction? {
+        ledger?.transactions.first(where: { $0.source == source })
+            ?? globalTransactions.first(where: { $0.source == source })
+    }
+
     var visibleTransactions: [LedgerTransaction] {
-        (ledger?.transactions ?? []).map(projectedTransaction)
+        (ledger?.transactions ?? []).filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
     }
 
     func visibleTransaction(matching source: TransactionSource) -> LedgerTransaction? {
@@ -899,7 +985,8 @@ final class LedgerSession: ObservableObject {
     }
 
     func transactionResolution(for source: TransactionSource) -> LedgerTransactionResolution {
-        if let transaction = ledger?.transactions.first(where: { $0.source == source }) {
+        if isConfirmedDeletion(source) { return .unavailable }
+        if let transaction = knownTransaction(source) {
             return .visible(projectedTransaction(transaction))
         }
         let key = Self.transactionMutationKey(source)
@@ -954,10 +1041,12 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    private func reconcileTransactionMutations(in serverTransactions: [LedgerTransaction]) {
+    private func reconcileTransactionMutations(in serverTransactions: [LedgerTransaction], start: String = "0001-01-01", end: String = "9999-12-31") {
         var reconciledKeys: [String] = []
 
         for (key, mutation) in transactionMutations {
+            guard mutation.original.date >= start, mutation.original.date < end,
+                  mutation.projected.date >= start, mutation.projected.date < end else { continue }
             switch mutation.phase {
             case .failed:
                 if !serverTransactions.contains(where: { $0.source == mutation.original.source }) {
@@ -1490,6 +1579,7 @@ final class LedgerSession: ObservableObject {
                 amountsVisible = false
             }
             guard isBackground, let serverURL else { return }
+            automaticUnlockAttempted = false
             recordBackgroundDate(for: serverURL)
             if lockInterval == .immediately {
                 lockLocally(for: serverURL)
@@ -1642,7 +1732,22 @@ final class LedgerSession: ObservableObject {
             phase = .locked(authenticated: true)
             return
         }
-        reconcileTransactionMutations(in: payload.transactions)
+        if !globalTransactions.isEmpty {
+            globalTransactions.removeAll { transaction in
+                if payload.transactions.contains(where: { $0.source == transaction.source }) { return true }
+                let key = Self.transactionMutationKey(transaction.source)
+                if let mutation = transactionMutations[transactionMutationAliases[key] ?? key],
+                   mutation.phase.blocksFurtherWrites {
+                    if case .delete = mutation.kind, mutation.phase == .confirmed {
+                        return transaction.date >= targetRange.start && transaction.date < targetRange.queryEndExclusive
+                    }
+                    return mutation.uniqueSatisfiedTransaction(in: payload.transactions) != nil
+                }
+                return transaction.date >= targetRange.start && transaction.date < targetRange.queryEndExclusive
+            }
+            globalTransactions.append(contentsOf: payload.transactions)
+        }
+        reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
         ledger = payload
         storeValuationCurrency(payload.valuationCurrency, for: serverURL)
         selectedRange = targetRange
@@ -1964,6 +2069,8 @@ final class LedgerSession: ObservableObject {
 
     @discardableResult
     private func invalidateSession() -> Int {
+        globalTransactions = []
+        globalTransactionsLoadedAt = nil
         sessionEpoch &+= 1
         return invalidateRequests()
     }
@@ -2069,6 +2176,8 @@ private extension LedgerTransactionMutation {
             return transaction.represents(entry)
         case .addTags:
             return transaction.hasSameVisibleContent(as: projected)
+        case .delete:
+            return false
         }
     }
 }

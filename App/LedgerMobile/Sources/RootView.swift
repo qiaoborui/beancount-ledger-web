@@ -171,6 +171,7 @@ private struct LoginView: View {
 private struct MainTabView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var searchQuery = ""
     @State private var moreDestination: LedgerDestination?
 
     private var selection: Binding<LedgerDestination> {
@@ -188,7 +189,7 @@ private struct MainTabView: View {
             },
             set: { destination in
                 let overflow = moreDestination.flatMap {
-                    session.compactTabDestinations.contains($0) ? nil : $0
+                    $0.isCompactOverflow(in: session.compactTabDestinations) ? $0 : nil
                 }
                 session.primaryDestinationID = destination == .settings
                     ? (overflow ?? .settings).rawValue
@@ -202,7 +203,7 @@ private struct MainTabView: View {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
             } else {
-                compactTabs
+                compactTabs.ledgerAdaptiveTabBar()
             }
         }
         .ledgerTimeRangeSheet()
@@ -213,7 +214,30 @@ private struct MainTabView: View {
         }
     }
 
+    @ViewBuilder
     private var compactTabs: some View {
+        if #available(iOS 26.0, *) {
+            TabView(selection: compactSelection) {
+                ForEach(session.compactTabDestinations) { destination in
+                    Tab(destination.compactTitle, systemImage: destination.systemImage, value: destination) {
+                        NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
+                    }
+                }
+                Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
+                    NavigationStack { MoreView(overflowDestination: $moreDestination) }
+                }
+                Tab(value: LedgerDestination.search, role: .search) {
+                    NavigationStack { GlobalSearchView(query: $searchQuery, usesNativeSearchTab: true) }
+                        .searchable(text: $searchQuery, prompt: "搜索整个账本")
+                }
+            }
+            .tabViewSearchActivation(.searchTabSelection)
+        } else {
+            legacyCompactTabs
+        }
+    }
+
+    private var legacyCompactTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(session.compactTabDestinations) { destination in
                 NavigationStack {
@@ -225,6 +249,9 @@ private struct MainTabView: View {
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
+            NavigationStack { GlobalSearchPage() }
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tag(LedgerDestination.search)
         }
     }
 }
@@ -245,6 +272,7 @@ struct LedgerDestinationView: View {
         case .transactions: TransactionsView(isRoot: isRoot)
         case .accounts: AccountsView(isRoot: isRoot)
         case .settings: SettingsView(isRoot: isRoot)
+        case .search: GlobalSearchPage()
         }
     }
 }
@@ -267,6 +295,7 @@ private struct LedgerRegularShell: View {
                     sidebarRow(.investments)
                 }
                 Section("工具") {
+                    sidebarRow(.search)
                     sidebarRow(.imports)
                     sidebarRow(.currencies)
                     sidebarRow(.query)

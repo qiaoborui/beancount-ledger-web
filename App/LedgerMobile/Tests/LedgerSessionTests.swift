@@ -137,14 +137,14 @@ final class LedgerSessionTests: XCTestCase {
 
         let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
 
-        XCTAssertEqual(session.compactTabDestinations, [.imports, .assets, .query, .accounts])
+        XCTAssertEqual(session.compactTabDestinations, [.imports, .assets, .query])
 
         session.setCompactTabDestinations([.accounts, .overview, .incomeExpense, .currencies, .imports])
 
-        XCTAssertEqual(session.compactTabDestinations, [.accounts, .overview, .incomeExpense, .currencies])
+        XCTAssertEqual(session.compactTabDestinations, [.accounts, .overview, .incomeExpense])
         XCTAssertEqual(
             defaults.stringArray(forKey: "ledger.mobile.compact-tabs"),
-            ["accounts", "overview", "incomeExpense", "currencies"]
+            ["accounts", "overview", "incomeExpense"]
         )
 
         let restored = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
@@ -446,6 +446,31 @@ final class LedgerSessionTests: XCTestCase {
         let otherOriginSession = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
         await otherOriginSession.resume()
         XCTAssertEqual(otherOriginSession.phase, .ready)
+    }
+
+    func testAutomaticFaceIDOnColdLaunchAndOncePerForeground() async {
+        let suite = "ledger-auto-unlock-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        let store = MockBiometricCredentialStore(credential: QuickUnlockCredential(deviceID: "device-12345678", token: "protected-token"))
+        store.readShouldFail = true
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults, biometricStore: store)
+        await session.start()
+        XCTAssertEqual(store.readCount, 1)
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        await session.updateActivity(isActive: false, isBackground: false)
+        await session.updateActivity(isActive: true, isBackground: false)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(store.readCount, 1, "Cancellation or the system prompt must not immediately prompt again")
+        await session.updateActivity(isActive: false, isBackground: true)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(store.readCount, 1, "Background never presents authentication")
+        store.readShouldFail = false
+        await session.updateActivity(isActive: true, isBackground: false)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(store.readCount, 2)
+        XCTAssertEqual(session.phase, .ready)
     }
 
     func testFaceIDUnlockVerifiesProtectedCredentialAndLoadsLedger() async {
@@ -1572,6 +1597,86 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(result, Self.importCommitResult)
     }
 
+    func testGlobalSearchReusesCacheAndAllowsExplicitRefresh() async throws {
+        let suite = "global-search-cache-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        try await session.loadGlobalTransactions()
+        try await session.loadGlobalTransactions()
+        let cachedRequests = await api.globalSearchRequests()
+        XCTAssertEqual(cachedRequests, 1)
+        XCTAssertTrue(session.hasCachedGlobalTransactions)
+        try await session.loadGlobalTransactions(forceRefresh: true)
+        let refreshedRequests = await api.globalSearchRequests()
+        XCTAssertEqual(refreshedRequests, 2)
+        await session.lock()
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+    }
+
+    func testGlobalSearchPreservesRangeAndResolvesHistoricalTransactions() async throws {
+        let suite = "global-search-session-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.transactionPayload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let range = session.selectedRange
+        try await session.loadGlobalTransactions()
+        XCTAssertEqual(session.selectedRange, range)
+        XCTAssertEqual(session.visibleGlobalTransactions.count, Self.transactionPayload.transactions.count)
+        XCTAssertNotNil(session.visibleTransaction(matching: Self.editableTransaction.source))
+        await session.lock()
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+    }
+
+    func testGlobalSearchDeletionStaysAbsentAfterRefresh() async throws {
+        let suite = "global-search-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.transactionPayload)
+        await api.filterBootstrapToRequestedRange()
+        let now = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+        let session = LedgerSession(api: api, defaults: defaults, ledgerNow: { now })
+        await session.resume()
+        try await session.loadGlobalTransactions()
+        try await session.deleteTransaction(source: Self.editableTransaction.source, reason: "重复")
+        await api.convergeDeletedTransaction(Self.editableTransaction.source)
+        await session.refresh()
+        XCTAssertFalse(session.visibleGlobalTransactions.contains { $0.source == Self.editableTransaction.source })
+    }
+
+    func testGlobalSearchKeepsCrossRangeEditsWithoutDuplicates() async throws {
+        for nowString in ["2026-08-31T12:00:00Z", "2026-07-31T12:00:00Z"] {
+            let targetDate = "2026-07-20"
+            let suite = "global-search-move-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let api = SessionMockAPI(payload: Self.transactionPayload)
+            await api.filterBootstrapToRequestedRange()
+            let now = ISO8601DateFormatter().date(from: nowString)!
+            let session = LedgerSession(api: api, defaults: defaults, ledgerNow: { now })
+            await session.resume()
+            try await session.loadGlobalTransactions()
+            let range = session.selectedRange
+            let entry = LedgerTransactionEntry(date: targetDate, payee: "跨月搜索测试", narration: "调整日期", metadata: [:], tags: [], postings: [
+                LedgerTransactionEntryPosting(account: "Expenses:Food:Dining", amount: "85.00", currency: "CNY"),
+                LedgerTransactionEntryPosting(account: "Assets:Bank:Daily", amount: "-85.00", currency: "CNY")
+            ])
+            try await session.updateTransaction(source: Self.editableTransaction.source, entry: entry)
+            await session.refresh()
+            XCTAssertEqual(session.selectedRange, range)
+            XCTAssertEqual(session.visibleGlobalTransactions.filter { $0.payee == "跨月搜索测试" }.count, 1)
+            XCTAssertEqual(session.visibleGlobalTransactions.first(where: { $0.payee == "跨月搜索测试" })?.date, targetDate)
+        }
+    }
+
     func testTransactionWritesUseReadySessionAndRefreshLedger() async throws {
         let suiteName = "ledger-mobile-transaction-write-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1599,6 +1704,76 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(writes.update?.source, source)
         XCTAssertEqual(writes.update?.entry.tags, ["dining"])
         XCTAssertEqual(session.visibleTransactions.first?.payee, "海底捞")
+    }
+
+    func testAutomaticUnlockWithoutEnrollmentAndBackgroundLaunchStayQuiet() async {
+        let suite = "ledger-auto-quiet-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        let store = MockBiometricCredentialStore()
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await session.start()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(store.readCount, 0)
+
+        store.credential = QuickUnlockCredential(deviceID: "device-12345678", token: "protected-token")
+        let backgroundSession = LedgerSession(api: api, defaults: defaults, biometricStore: store)
+        await backgroundSession.updateActivity(isActive: false, isBackground: true)
+        await backgroundSession.start()
+        XCTAssertEqual(store.readCount, 0)
+        XCTAssertEqual(backgroundSession.phase, .locked(authenticated: true))
+        await backgroundSession.updateActivity(isActive: true, isBackground: false)
+        await backgroundSession.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(store.readCount, 1)
+        XCTAssertEqual(backgroundSession.phase, .ready)
+    }
+
+    func testDeletionWaitsForConfirmationAndRejectsDuplicateWrites() async throws {
+        let suite = "ledger-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        let api = SessionMockAPI(payload: Self.transactionPayload, transactionWriteDelayNanoseconds: 100_000_000)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let source = Self.editableTransaction.source
+        let write = Task { try await session.deleteTransaction(source: source, reason: "重复") }
+        for _ in 0..<100 {
+            if await api.transactionWriteCounts().started == 1 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertNotNil(session.visibleTransaction(matching: source))
+        do {
+            try await session.deleteTransaction(source: source, reason: "再次点击")
+            XCTFail("A pending write must block deletion")
+        } catch {
+            XCTAssertEqual(error as? LedgerTransactionMutationError, .alreadyInProgress)
+        }
+        try await write.value
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        await session.refresh()
+        XCTAssertFalse(session.visibleTransactions.contains { $0.source == source }, "Stale server reads must not resurrect a confirmed deletion")
+    }
+
+    func testFailedDeletionRetainsTransactionAndAllowsRetry() async throws {
+        let suite = "ledger-delete-failure-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        let api = SessionMockAPI(payload: Self.transactionPayload, transactionWritesShouldFail: true)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        let transaction = Self.editableTransaction
+        do {
+            try await session.deleteTransaction(source: transaction.source, reason: "重复")
+            XCTFail("Expected server conflict")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("账本来源已变化"))
+        }
+        XCTAssertNotNil(session.visibleTransaction(matching: transaction.source))
+        XCTAssertEqual(session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites, false)
     }
 
     func testTransactionEditProjectsBeforeDelayedWriteCompletesAndSurvivesStaleRefresh() async throws {
@@ -2404,6 +2579,11 @@ private actor SessionMockAPI: LedgerAPI {
     private var requestedImportCommit: ImportCommitCall?
     private var requestedTransactionUpdate: LedgerTransactionUpdateRequest?
     private var requestedTransactionTags: LedgerTransactionTagsRequest?
+    private var filtersBootstrapRange = false
+    func filterBootstrapToRequestedRange() { filtersBootstrapRange = true }
+    func convergeDeletedTransaction(_ source: TransactionSource) {
+        serverTransactions.removeAll { $0.source == source }
+    }
     private var serverTransactions: [LedgerTransaction]
     private var transactionWriteStartedCount = 0
     private var transactionWriteCompletedCount = 0
@@ -2558,6 +2738,13 @@ private actor SessionMockAPI: LedgerAPI {
         }
     }
 
+    private var globalSearchRequestCount = 0
+    func globalSearchRequests() -> Int { globalSearchRequestCount }
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        globalSearchRequestCount += 1
+        return LedgerGlobalTransactions(transactions: serverTransactions, sensitiveUnlocked: payload.sensitiveUnlocked)
+    }
+
     func bootstrap(
         baseURL: URL,
         start: String,
@@ -2583,6 +2770,9 @@ private actor SessionMockAPI: LedgerAPI {
         }
         if bootstrapCalls > 1, let status = bootstrapErrorStatusAfterFirstCall {
             throw LedgerAPIError.server(status: status, message: "Sensitive data locked")
+        }
+        if filtersBootstrapRange {
+            return payload.replacingTransactions(with: serverTransactions.filter { $0.date >= start && $0.date < end })
         }
         if valuationCurrency == payload.valuationCurrency {
             return payload.replacingTransactions(with: serverTransactions)
@@ -2717,6 +2907,12 @@ private actor SessionMockAPI: LedgerAPI {
         serverTransactions[index] = serverTransactions[index]
             .projecting(entry: entry)
             .confirmingServerSource(sequence: transactionWriteCompletedCount)
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        transactionWriteStartedCount += 1
+        try await finishTransactionWrite()
+        // Preserve the old snapshot to exercise eventual server read-model consistency.
     }
 
     func addTransactionTags(

@@ -92,6 +92,7 @@ protocol LedgerAPI: Sendable {
         end: String,
         valuationCurrency: String
     ) async throws -> LedgerHomeReport
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo]
     func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus
@@ -118,6 +119,7 @@ protocol LedgerAPI: Sendable {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws
     func addTransactionTags(
         baseURL: URL,
         sources: [TransactionSource],
@@ -146,6 +148,10 @@ extension LedgerAPI {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持首页消费报告")
+    }
+
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持全局搜索")
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
@@ -213,6 +219,10 @@ extension LedgerAPI {
         entry: LedgerTransactionEntry
     ) async throws {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持编辑交易")
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持删除交易")
     }
 
     func addTransactionTags(
@@ -389,6 +399,13 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             end: end,
             valuationCurrency: valuationCurrency
         )
+    }
+
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        var components = URLComponents(url: baseURL.appending(path: "/api/ledger/transactions"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "start", value: "0001-01-01"), URLQueryItem(name: "end", value: "9999-12-31")]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        return try await request(URLRequest(url: url))
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
@@ -580,6 +597,15 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/transactions",
             method: "PUT",
             body: LedgerTransactionUpdateRequest(source: source, entry: entry)
+        )
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/transactions",
+            method: "DELETE",
+            body: LedgerTransactionDeleteRequest(source: source, reason: reason)
         )
     }
 
