@@ -1709,6 +1709,7 @@ final class LedgerSession: ObservableObject {
         guard url.scheme?.lowercased() == "ledger" else { return }
         if url.host?.lowercased() == "transactions",
            let day = LedgerWidgetLink.expenseDay(from: url) {
+            pendingExternalRoute = nil
             pendingWidgetExpenseDay = day
             return
         }

@@ -8,7 +8,7 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(LedgerDateRange.month(year: 2025, month: 12).toolbarTitle(relativeTo: now), "2025/12月")
         XCTAssertEqual(LedgerDateRange.current(.quarter, now: now).toolbarTitle(relativeTo: now), "Q3")
         XCTAssertEqual(LedgerDateRange.current(.year, now: now).toolbarTitle(relativeTo: now), "2026年")
-        XCTAssertEqual(LedgerDateRange.custom(start: now, end: now).toolbarTitle(relativeTo: now), "自定义")
+        XCTAssertEqual(LedgerDateRange.custom(start: now, end: now).toolbarTitle(relativeTo: now), "8/31")
     }
 
     func testSearchAndMoreNeverBecomeOverflowRoutes() {
