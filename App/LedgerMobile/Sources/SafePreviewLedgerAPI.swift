@@ -78,6 +78,11 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         return payload.replacingTransactions(with: transactions)
     }
 
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        let payload = try await bootstrap(baseURL: baseURL, start: "0001-01-01", end: "9999-12-31", today: "2026-08-31", valuationCurrency: "CNY")
+        return LedgerGlobalTransactions(transactions: payload.transactions, sensitiveUnlocked: true)
+    }
+
     func accountDetail(baseURL: URL, account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail {
         SafePreviewLedgerData.accountDetail(account: account, currency: currency, start: start, end: end)
     }

@@ -123,75 +123,11 @@ extension View {
 /// Keep compact search above the tab bar's safe area. A bottom toolbar inside
 /// TabView occupies the tab bar's hit region, so the search control owns an inset.
 private struct LedgerSearch: ViewModifier {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Binding var text: String
     let prompt: String
-    @State private var isSearching = false
-    @FocusState private var searchFocused: Bool
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), horizontalSizeClass == .compact {
-            content
-                .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-                    HStack(spacing: LedgerSpacing.sm) {
-                        if isSearching {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField(prompt, text: $text)
-                                .focused($searchFocused)
-                                .submitLabel(.search)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .onSubmit { searchFocused = false }
-                            if !text.isEmpty {
-                                Button {
-                                    text = ""
-                                    searchFocused = true
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                }
-                                .accessibilityLabel("清除搜索")
-                                .frame(minWidth: 44, minHeight: 44)
-                            }
-                            Button {
-                                searchFocused = false
-                                isSearching = false
-                            } label: { Image(systemName: "xmark") }
-                                .accessibilityLabel("收起搜索")
-                                .frame(minWidth: 44, minHeight: 44)
-                        } else {
-                            Button {
-                                isSearching = true
-                                searchFocused = true
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 22, weight: .medium))
-                                    .frame(width: 52, height: 52)
-                            }
-                            .accessibilityLabel("搜索")
-                            .accessibilityValue(text)
-                            .accessibilityIdentifier("ledger-search-button")
-                            .tint(text.isEmpty ? .primary : LedgerPalette.cobalt)
-                        }
-                    }
-                    .padding(.leading, isSearching ? LedgerSpacing.lg : 0)
-                    .padding(.trailing, isSearching ? LedgerSpacing.xs : 0)
-                    .frame(minHeight: 52)
-                    .background(reduceTransparency ? LedgerPalette.raised : .clear, in: Capsule())
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                    .padding(.horizontal, LedgerSpacing.lg)
-                    .padding(.vertical, LedgerSpacing.sm)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSearching)
-                }
-                .onDisappear { searchFocused = false }
-        } else if #available(iOS 26.0, *) {
-            content.searchable(text: $text, prompt: Text(prompt))
-                .searchToolbarBehavior(.minimize)
-        } else {
-            content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: Text(prompt))
-        }
+        content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: Text(prompt))
     }
 }
 

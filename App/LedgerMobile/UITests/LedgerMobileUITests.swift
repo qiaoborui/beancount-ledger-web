@@ -38,21 +38,45 @@ final class LedgerMobileUITests: XCTestCase {
         let search = revealSearch("收付款对象、说明、账户或标签")
         search.tap()
         search.typeText("不存在的交易")
-        XCTAssertTrue(app.staticTexts["没有匹配的交易"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '不存在的交易'")).firstMatch.waitForExistence(timeout: 3))
         capture("glass-search-expanded")
     }
 
     @discardableResult
     private func revealSearch(_ prompt: String) -> XCUIElement {
-        if app.textFields[prompt].exists { return app.textFields[prompt] }
-        let nativeSearch = app.searchFields[prompt]
-        if nativeSearch.exists && nativeSearch.isHittable { return nativeSearch }
-        let button = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 3), app.debugDescription)
-        button.tap()
-        let search = isPad ? nativeSearch : app.textFields[prompt]
+        let search = app.searchFields["搜索整个账本"]
+        if search.exists && search.isHittable { return search }
+        if isPad { app.buttons["sidebar-search"].tap() }
+        else {
+            let button = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 3), app.debugDescription)
+            button.tap()
+        }
         XCTAssertTrue(search.waitForExistence(timeout: 3), app.debugDescription)
         return search
+    }
+
+    func testGlobalSearchTabAlignmentAndResults() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        if !isPad {
+            let search = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
+            let more = app.tabBars.buttons["更多"]
+            XCTAssertTrue(search.waitForExistence(timeout: 3))
+            XCTAssertEqual(search.frame.midY, more.frame.midY, accuracy: 5)
+            XCTAssertGreaterThan(search.frame.minX, more.frame.maxX)
+        }
+        capture("global-search-aligned-tab")
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5), app.debugDescription)
+        capture("global-search-results")
+        app.buttons["transaction-row-88"].tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 3))
+        capture("global-search-detail")
     }
 
     func testGlassImportActionSurface() throws {
@@ -106,11 +130,7 @@ final class LedgerMobileUITests: XCTestCase {
         search.tap()
         search.typeText("日常\n")
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
-        toggle.tap()
-        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
-        toggle.tap()
-        XCTAssertTrue(daily.waitForExistence(timeout: 3))
-        replaceText(in: search, with: "")
+        openDestination(compact: "账户", regular: "账户")
         XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
         XCTAssertEqual(toggle.label, "全部展开")
     }
@@ -123,8 +143,6 @@ final class LedgerMobileUITests: XCTestCase {
         openDestination(compact: "交易", regular: "交易账本")
         let dateButton = app.navigationBars.buttons["navigation-time-range"]
         XCTAssertTrue(dateButton.waitForExistence(timeout: 3))
-        let search = revealSearch("收付款对象、说明、账户或标签")
-        XCTAssertTrue(search.isHittable)
         XCTAssertFalse(app.otherElements["page-time-range"].exists)
         XCTAssertTrue(dateButton.label.contains("2026年8月"))
         capture("navigation-date-and-search")
@@ -191,10 +209,9 @@ final class LedgerMobileUITests: XCTestCase {
         app.tabBars.buttons["交易"].tap()
         let search = revealSearch("收付款对象、说明、账户或标签")
         XCTAssertTrue(search.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["navigation-time-range"].exists)
         search.tap()
         search.typeText("不存在的交易")
-        XCTAssertTrue(app.staticTexts["没有匹配的交易"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '不存在的交易'")).firstMatch.waitForExistence(timeout: 3))
         replaceText(in: search, with: "城市")
         search.typeText("\n")
         let row = app.buttons["transaction-row-88"]
@@ -203,7 +220,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 3))
         app.tabBars.buttons["账户"].tap()
         XCTAssertTrue(app.navigationBars["账户"].waitForExistence(timeout: 3))
-        app.tabBars.buttons["交易"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch.tap()
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 3))
         app.navigationBars["交易详情"].buttons.firstMatch.tap()
         XCTAssertEqual(search.value as? String, "城市")
@@ -300,7 +317,6 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["环比"].firstMatch.waitForExistence(timeout: 3))
 
         openDestination(compact: "交易", regular: "交易账本")
-        revealSearch("收付款对象、说明、账户或标签")
         capture("03-transactions")
 
         app.buttons["筛选交易"].tap()
@@ -542,14 +558,14 @@ final class LedgerMobileUITests: XCTestCase {
         configurationEntry.tap()
 
         XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["已显示 3/4"].exists)
+        XCTAssertTrue(app.staticTexts["已显示 3/3"].exists)
         capture("compact-tabs-02-configuration")
 
         let configurationList = app.collectionViews["compact-tab-list"]
         XCTAssertTrue(configurationList.waitForExistence(timeout: 3))
 
         app.buttons["compact-tab-remove-overview"].tap()
-        XCTAssertTrue(app.staticTexts["已显示 2/4"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["已显示 2/3"].waitForExistence(timeout: 3))
 
         let reorderButtons = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reorder"))
         XCTAssertEqual(reorderButtons.count, 2)
@@ -567,27 +583,22 @@ final class LedgerMobileUITests: XCTestCase {
         waitUntilHittable(addAssets)
         addAssets.tap()
 
-        let addImports = app.buttons["compact-tab-add-imports"]
-        for _ in 0..<4 where !addImports.isHittable { configurationList.swipeUp() }
-        waitUntilHittable(addImports)
-        addImports.tap()
-        XCTAssertTrue(app.staticTexts["已显示 4/4"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["已显示 3/3"].waitForExistence(timeout: 3))
 
         app.buttons["compact-tab-save"].tap()
         let settingsBack = app.navigationBars.firstMatch.buttons.firstMatch
         waitUntilHittable(settingsBack)
         settingsBack.tap()
         XCTAssertTrue(app.buttons["more-overview"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.tabBars.buttons["导入"].waitForExistence(timeout: 3))
-        XCTAssertEqual(app.tabBars.buttons.count, 5)
+        XCTAssertTrue(app.tabBars.buttons["资产"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch.exists)
         XCTAssertFalse(app.tabBars.buttons["概览"].exists)
         XCTAssertLessThan(app.tabBars.buttons["账户"].frame.minX, app.tabBars.buttons["交易"].frame.minX)
         capture("compact-tabs-04-tab-bar")
 
-        app.tabBars.buttons["导入"].tap()
-        XCTAssertTrue(app.scrollViews["import-history-content"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.staticTexts["渠道状态"].exists)
-        capture("compact-tabs-05-imports")
+        app.tabBars.buttons["资产"].tap()
+        XCTAssertTrue(app.navigationBars["资产"].waitForExistence(timeout: 4))
+        capture("compact-tabs-05-assets")
 
         app.tabBars.buttons["更多"].tap()
         let overviewEntry = app.buttons["more-overview"]

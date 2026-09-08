@@ -21,6 +21,20 @@ final class APIClientTests: XCTestCase {
         XCTAssertGreaterThan(LedgerAPIClient.gmailEventResourceTimeout, 40)
     }
 
+    func testGlobalSearchRequestsAllDatesWithoutCurrentRange() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/transactions")
+            XCTAssertEqual(request.httpMethod, "GET")
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(items.first(where: { $0.name == "start" })?.value, "0001-01-01")
+            XCTAssertEqual(items.first(where: { $0.name == "end" })?.value, "9999-12-31")
+            return Self.response(for: request, body: #"{"transactions":[],"sensitiveUnlocked":true}"#)
+        }
+        let result = try await makeClient().globalTransactions(baseURL: URL(string: "https://ledger.example.com")!)
+        XCTAssertTrue(result.sensitiveUnlocked)
+        XCTAssertTrue(result.transactions.isEmpty)
+    }
+
     func testHealthUsesExpectedEndpointAndDecodesCapabilities() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://ledger.example.com/api/health")

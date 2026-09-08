@@ -92,6 +92,7 @@ protocol LedgerAPI: Sendable {
         end: String,
         valuationCurrency: String
     ) async throws -> LedgerHomeReport
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument]
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo]
     func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus
@@ -147,6 +148,10 @@ extension LedgerAPI {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持首页消费报告")
+    }
+
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持全局搜索")
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
@@ -394,6 +399,13 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             end: end,
             valuationCurrency: valuationCurrency
         )
+    }
+
+    func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        var components = URLComponents(url: baseURL.appending(path: "/api/ledger/transactions"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "start", value: "0001-01-01"), URLQueryItem(name: "end", value: "9999-12-31")]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        return try await request(URLRequest(url: url))
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {

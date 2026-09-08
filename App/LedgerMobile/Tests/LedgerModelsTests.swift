@@ -21,10 +21,10 @@ final class LedgerModelsTests: XCTestCase {
                 .query,
                 .accounts,
             ]),
-            [.transactions, .imports, .assets, .query]
+            [.transactions, .imports, .assets]
         )
         XCTAssertEqual(
-            LedgerDestination.normalizedCompactTabs([.settings]),
+            LedgerDestination.normalizedCompactTabs([.settings, .search]),
             LedgerDestination.defaultCompactTabs
         )
         XCTAssertEqual(

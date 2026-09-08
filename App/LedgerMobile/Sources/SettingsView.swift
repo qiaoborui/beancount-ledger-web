@@ -262,7 +262,7 @@ private struct CompactTabConfigurationView: View {
                 } header: {
                     Text("已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)")
                 } footer: {
-                    Text("拖动右侧排序控件调整显示顺序，底栏会固定保留“更多”。")
+                    Text("拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和“搜索”。")
                 }
 
                 Section("可添加") {

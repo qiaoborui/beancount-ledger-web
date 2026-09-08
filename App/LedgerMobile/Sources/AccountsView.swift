@@ -6,12 +6,10 @@ struct AccountsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedCategory = AccountBalanceCategory.all
     @State private var expandedSectionIDs: Set<String> = []
-    @State private var searchExpandedSectionIDs: Set<String> = []
-    @State private var query = ""
     var isRoot = true
 
     private var activeExpandedSectionIDs: Set<String> {
-        query.isEmpty ? expandedSectionIDs : searchExpandedSectionIDs
+        expandedSectionIDs
     }
 
     private var allVisibleSectionsExpanded: Bool {
@@ -25,7 +23,6 @@ struct AccountsView: View {
         ).compactMap { section in
             let rows = section.rows.filter { row in
                 selectedCategory.includes(row)
-                    && (query.isEmpty || row.label.localizedStandardContains(query) || row.account.localizedStandardContains(query))
             }
             return rows.isEmpty ? nil : AccountBalanceSection(id: section.id, title: section.title, rows: rows)
         }
@@ -113,16 +110,11 @@ struct AccountsView: View {
         .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
-        .ledgerSearch(text: $query, prompt: "账户名称或路径")
-        .onChange(of: query) { _, _ in
-            searchExpandedSectionIDs = Set(sections.map(\.id))
-        }
         .refreshable { await session.refresh() }
     }
 
     private func setExpandedSectionIDs(_ ids: Set<String>) {
-        if query.isEmpty { expandedSectionIDs = ids }
-        else { searchExpandedSectionIDs = ids }
+        expandedSectionIDs = ids
     }
 
     private func expandedBinding(for sectionID: String) -> Binding<Bool> {
