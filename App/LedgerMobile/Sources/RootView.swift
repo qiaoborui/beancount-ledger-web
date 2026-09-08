@@ -233,6 +233,7 @@ private struct MainTabView: View {
                 Tab(value: LedgerDestination.search, role: .search) {
                     NavigationStack { GlobalSearchView(query: $session.globalSearchQuery, usesNativeSearchTab: true) }
                         .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
+                        .onSubmit(of: .search) { session.recordGlobalSearch(session.globalSearchQuery) }
                 }
             }
             .tabViewSearchActivation(.searchTabSelection)

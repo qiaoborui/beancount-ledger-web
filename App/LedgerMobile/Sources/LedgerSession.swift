@@ -259,6 +259,7 @@ final class LedgerSession: ObservableObject {
         guard case .configuration = phase else { return }
         do {
             let normalized = try ServerConfiguration.normalize(serverInput)
+            if serverURL != normalized { resetGlobalSearch() }
             serverURL = normalized
             serverInput = normalized.absoluteString
             errorMessage = nil
@@ -948,7 +949,7 @@ final class LedgerSession: ObservableObject {
         if !forceRefresh, phase == .ready,
            let loadedAt = globalTransactionsLoadedAt,
            Date().timeIntervalSince(loadedAt) < 60 { return }
-        let payload = try await performSensitiveRequest { api, url in
+        let payload = try await performSensitiveRequest(validatesRequestGeneration: false) { api, url in
             let payload = try await api.globalTransactions(baseURL: url)
             guard payload.sensitiveUnlocked else {
                 throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
@@ -1516,7 +1517,7 @@ final class LedgerSession: ObservableObject {
         guard let serverURL else { return }
         pendingExternalRoute = nil
         externalAccount = nil
-        globalSearchQuery = ""
+        resetGlobalSearch()
         _ = invalidateSession()
         stopImportIndexTracking()
         suspendWidgetCredential()
@@ -1538,6 +1539,9 @@ final class LedgerSession: ObservableObject {
     }
 
     func changeServer() {
+        resetGlobalSearch()
+        pendingExternalRoute = nil
+        externalAccount = nil
         let previousServerURL = serverURL
         _ = invalidateSession()
         stopImportIndexTracking()
@@ -1646,6 +1650,36 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var pendingExternalRoute: LedgerExternalRouteRequest?
     @Published var externalAccount: LedgerExternalAccount?
     @Published var globalSearchQuery = ""
+    @Published var globalSearchScope: LedgerGlobalSearchScope = .all
+    @Published var globalSearchFilters = LedgerGlobalSearchFilters()
+    @Published private(set) var recentGlobalSearches: [String] = []
+
+    func recordGlobalSearch(_ query: String) {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.count <= 500 else { return }
+        let locale = Locale(identifier: "en_US_POSIX")
+        let key = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: locale)
+        recentGlobalSearches.removeAll {
+            $0.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: locale) == key
+        }
+        recentGlobalSearches.insert(value, at: 0)
+        recentGlobalSearches = Array(recentGlobalSearches.prefix(10))
+    }
+
+    func clearRecentGlobalSearches() { recentGlobalSearches = [] }
+
+    private func resetGlobalSearch() {
+        globalSearchQuery = ""
+        globalSearchScope = .all
+        globalSearchFilters = LedgerGlobalSearchFilters()
+        clearRecentGlobalSearches()
+    }
+
+    private func prepareExternalSearch(_ query: String) {
+        globalSearchScope = .all
+        globalSearchFilters = LedgerGlobalSearchFilters()
+        if globalSearchQuery != query { globalSearchQuery = query }
+    }
 
     func applyPendingExternalRoute() async {
         guard phase == .ready, !isRangeLoading, !isValuationCurrencyLoading,
@@ -1663,7 +1697,7 @@ final class LedgerSession: ObservableObject {
                 await applyRange(.custom(start: date, end: date))
             }
         case let .search(query):
-            if globalSearchQuery != query { globalSearchQuery = query }
+            prepareExternalSearch(query)
         }
         if pendingExternalRoute?.id == request.id { pendingExternalRoute = nil }
     }
@@ -1672,7 +1706,7 @@ final class LedgerSession: ObservableObject {
         guard url.scheme?.lowercased() == "ledger" else { return }
         if url.host?.lowercased() != "gmail-import" {
             guard let route = LedgerExternalRoute.parse(url) else { return }
-            if case let .search(query) = route, phase == .ready { globalSearchQuery = query }
+            if case let .search(query) = route, phase == .ready { prepareExternalSearch(query) }
             primaryDestinationID = route.destination.rawValue
             pendingExternalRoute = LedgerExternalRouteRequest(route: route)
             return
@@ -1799,7 +1833,7 @@ final class LedgerSession: ObservableObject {
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
         if let route = pendingExternalRoute?.route, case let .search(query) = route {
-            globalSearchQuery = query
+            prepareExternalSearch(query)
         }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }

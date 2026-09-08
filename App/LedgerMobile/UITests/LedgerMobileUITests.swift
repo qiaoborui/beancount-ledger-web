@@ -76,6 +76,68 @@ final class LedgerMobileUITests: XCTestCase {
         capture("system-search-link")
     }
 
+    func testTransactionContextMenuOpensNativeActions() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        openDestination(compact: "交易", regular: "交易账本")
+        let row = app.buttons["transaction-row-88"]
+        XCTAssertTrue(row.waitForExistence(timeout: 4))
+        row.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["transaction-context-copy"].firstMatch.waitForExistence(timeout: 3))
+        capture("native-transaction-context-menu")
+        app.buttons["transaction-context-edit"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["transaction-edit-cancel"].waitForExistence(timeout: 3))
+        app.buttons["transaction-edit-cancel"].tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 3))
+        row.press(forDuration: 1)
+        app.buttons["transaction-context-tags"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["transaction-bulk-tag-input"].waitForExistence(timeout: 3))
+        capture("native-single-transaction-tags")
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["transaction-bulk-tag-input"].waitForNonExistence(timeout: 3))
+        row.press(forDuration: 1)
+        app.buttons["transaction-context-delete"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["transaction-delete-confirm"].waitForExistence(timeout: 3))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+    }
+
+    func testGlobalSearchScopesFiltersAndRecentQueries() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        let scopes = app.segmentedControls.firstMatch
+        XCTAssertTrue(scopes.buttons["流水"].waitForExistence(timeout: 3), app.debugDescription)
+        scopes.buttons["账户"].tap()
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForNonExistence(timeout: 3))
+        scopes.buttons["流水"].tap()
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 3))
+        app.buttons["global-search-filters"].tap()
+        app.buttons["global-search-tag-filter"].tap()
+        app.buttons["#learning"].firstMatch.tap()
+        if !app.buttons["global-search-apply-filters"].exists {
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        app.buttons["global-search-apply-filters"].tap()
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 3))
+        capture("global-search-scopes-and-filters")
+        app.buttons["global-search-filters"].tap()
+        app.buttons["清除全部筛选"].tap()
+        app.buttons["global-search-apply-filters"].tap()
+        scopes.buttons["全部"].tap()
+        replaceText(in: search, with: "")
+        XCTAssertTrue(app.staticTexts["最近搜索"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["城市"].firstMatch.exists)
+        capture("global-search-recent-queries")
+    }
+
     func testSharedImportInboxReviewCancellationKeepsFile() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "--safe-shared-import"]

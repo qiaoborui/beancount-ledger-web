@@ -272,6 +272,7 @@ struct AccountDetailView: View {
                                     AccountHistoryRow(row: row, currency: detail.currency, accountLabels: accountLabels)
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
+                                .ledgerTransactionActions(row.transaction)
 
                                 if index < detail.rows.count - 1 {
                                     Divider()
