@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -28,7 +29,7 @@ struct RootView: View {
             }
         }
         .tint(LedgerPalette.cobalt)
-        .animation(.easeOut(duration: 0.18), value: session.phase)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
     }
 }
 

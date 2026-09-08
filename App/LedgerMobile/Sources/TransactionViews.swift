@@ -69,6 +69,7 @@ struct TransactionsView: View {
     @State private var actionMessage: String?
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
+    @State private var selectionFeedback = 0
 
     private var transactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -253,7 +254,7 @@ struct TransactionsView: View {
                     }
                 )
                 .ledgerPrivacyProtectedSheet()
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -275,6 +276,7 @@ struct TransactionsView: View {
                 selectedTransactionIDs.formIntersection(ids)
             }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     private var allVisibleEligibleSelected: Bool {
@@ -295,8 +297,10 @@ struct TransactionsView: View {
         }
         if selectedTransactionIDs.contains(transaction.id) {
             selectedTransactionIDs.remove(transaction.id)
+            selectionFeedback &+= 1
         } else if selectedTransactionIDs.count < TransactionTagSelectionRules.maximumCount {
             selectedTransactionIDs.insert(transaction.id)
+            selectionFeedback &+= 1
         } else {
             actionMessageStyle = .failure
             actionMessage = "一次最多选择 200 条交易。"
@@ -304,6 +308,8 @@ struct TransactionsView: View {
     }
 
     private func toggleAllVisibleForTags() {
+        let previousSelection = selectedTransactionIDs
+        defer { if previousSelection != selectedTransactionIDs { selectionFeedback &+= 1 } }
         let eligible = filteredTransactions.filter(isTagEligible)
         if allVisibleEligibleSelected {
             selectedTransactionIDs.subtract(eligible.map(\.id))
@@ -690,6 +696,7 @@ private struct TransactionTagEditorSheet: View {
     @State private var input = ""
     @State private var errorMessage: String?
     @State private var applying = false
+    @State private var failureFeedback = 0
 
     var body: some View {
         NavigationStack {
@@ -729,10 +736,12 @@ private struct TransactionTagEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { dismiss() }.disabled(applying)
                 }
             }
         }
+        .interactiveDismissDisabled(applying)
+        .sensoryFeedback(.error, trigger: failureFeedback)
     }
 
     private func apply() async {
@@ -744,6 +753,7 @@ private struct TransactionTagEditorSheet: View {
             dismiss()
         } catch {
             errorMessage = "添加失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            failureFeedback &+= 1
         }
         applying = false
     }
@@ -928,6 +938,7 @@ private struct TransactionDeleteSheet: View {
     let onDeleted: () -> Void
     @State private var reason = ""
     @State private var isDeleting = false
+    @State private var failureFeedback = 0
     @State private var errorMessage: String?
 
     var body: some View {
@@ -961,6 +972,7 @@ private struct TransactionDeleteSheet: View {
                                 onDeleted()
                             } catch {
                                 errorMessage = error.localizedDescription
+                                failureFeedback &+= 1
                             }
                             isDeleting = false
                         }
@@ -983,6 +995,7 @@ private struct TransactionDeleteSheet: View {
             }
         }
         .interactiveDismissDisabled(isDeleting)
+        .sensoryFeedback(.error, trigger: failureFeedback)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -1069,6 +1082,9 @@ private struct TransactionEditorView: View {
     @State private var postings: [EditableTransactionPosting]
     @State private var errorMessage: String?
     @State private var saving = false
+    @State private var failureFeedback = 0
+    @State private var initialDraft: Draft?
+    @State private var discardPresented = false
     @FocusState private var keyboardFocused: Bool
 
     init(
@@ -1108,6 +1124,30 @@ private struct TransactionEditorView: View {
                 currency: $0.currency ?? "CNY"
             )
         })
+    }
+
+    private struct Draft: Equatable {
+        let date: Date
+        let payee: String
+        let narration: String
+        let tags: String
+        let metadata: String
+        let postings: [EditableTransactionPosting]
+    }
+
+    private var currentDraft: Draft {
+        Draft(date: date, payee: payee, narration: narration, tags: tagsText,
+              metadata: metadataText, postings: postings)
+    }
+
+    private var hasChanges: Bool {
+        initialDraft.map { $0 != currentDraft } ?? false
+    }
+
+    private func requestDismiss() {
+        guard !saving else { return }
+        keyboardFocused = false
+        if hasChanges { discardPresented = true } else { dismiss() }
     }
 
     private var accountChoices: [LedgerAccount] {
@@ -1206,7 +1246,8 @@ private struct TransactionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }.disabled(saving)
+                    Button("取消", action: requestDismiss).disabled(saving)
+                        .accessibilityIdentifier("transaction-edit-cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -1224,7 +1265,17 @@ private struct TransactionEditorView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(saving)
+        .onAppear { if initialDraft == nil { initialDraft = currentDraft } }
+        .ledgerDraftDismissGuard(isDisabled: saving || hasChanges, onAttempt: requestDismiss)
+        .alert("放弃未保存的修改？", isPresented: $discardPresented) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+                .accessibilityIdentifier("transaction-edit-discard")
+            Button("继续编辑", role: .cancel) { }
+                .accessibilityIdentifier("transaction-edit-continue")
+        } message: {
+            Text("已修改的内容会保留，直到保存或确认放弃。")
+        }
+        .sensoryFeedback(.error, trigger: failureFeedback)
         .privacySensitive()
     }
 
@@ -1238,6 +1289,7 @@ private struct TransactionEditorView: View {
             dismiss()
         } catch {
             errorMessage = "保存失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            failureFeedback &+= 1
         }
         saving = false
     }

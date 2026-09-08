@@ -848,6 +848,68 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(newArchive.waitForExistence(timeout: 4))
     }
 
+    func testImportReviewDraftRequiresExplicitDiscard() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        if isPad { app.buttons["sidebar-imports"].tap() }
+        else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            entry.tap()
+        }
+        XCTAssertTrue(app.buttons["import-generate-preview"].waitForExistence(timeout: 4))
+        app.buttons["import-generate-preview"].tap()
+        let toggle = app.buttons["import-entry-toggle-safe-import-1"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 4))
+        let review = app.scrollViews["native-import-preview"]
+        for _ in 0..<4 where !toggle.isHittable || toggle.frame.midY > app.frame.height * 0.6 { review.swipeUp() }
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].waitForExistence(timeout: 3))
+        app.navigationBars["核对交易"].buttons["返回"].tap()
+        XCTAssertTrue(app.buttons["继续编辑"].waitForExistence(timeout: 3))
+        app.buttons["继续编辑"].tap()
+        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].exists)
+        app.navigationBars["核对交易"].buttons["返回"].tap()
+        app.buttons["放弃修改"].tap()
+        XCTAssertTrue(app.buttons["import-generate-preview"].waitForExistence(timeout: 3))
+    }
+
+    func testTransactionDraftDismissalKeepsChangesUntilDiscarded() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        openDestination(compact: "交易", regular: "交易账本")
+        app.buttons["transaction-row-88"].tap()
+        app.buttons["transaction-edit"].tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
+        app.buttons["transaction-edit-cancel"].tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 3))
+        app.buttons["transaction-edit"].tap()
+        let payee = app.textFields["transaction-edit-payee"]
+        replaceText(in: payee, with: "待保存的书店")
+        app.buttons["transaction-edit-cancel"].tap()
+        XCTAssertTrue(app.buttons["transaction-edit-continue"].firstMatch.waitForExistence(timeout: 3))
+        app.buttons["transaction-edit-continue"].firstMatch.tap()
+        XCTAssertEqual(payee.value as? String, "待保存的书店")
+        if !isPad {
+            let bar = app.navigationBars["编辑交易"]
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
+        } else {
+            app.buttons["transaction-edit-cancel"].tap()
+        }
+        XCTAssertTrue(app.buttons["transaction-edit-discard"].firstMatch.waitForExistence(timeout: 3), app.debugDescription)
+        capture("transaction-draft-discard-confirmation")
+        app.buttons["transaction-edit-discard"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 3))
+        app.buttons["transaction-edit"].tap()
+        XCTAssertNotEqual(payee.value as? String, "待保存的书店")
+    }
+
     func testTransactionEditingAndBulkTaggingFlow() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()

@@ -4,6 +4,7 @@ import SwiftUI
 struct CurrencyAnalysisView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var snapshot: CurrencyAnalysisSnapshot?
 
     var isRoot = false
@@ -134,7 +135,7 @@ struct CurrencyAnalysisView: View {
                 }
                 .onAppear { proxy.scrollTo(selected, anchor: .leading) }
                 .onChange(of: selected) { _, currency in
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                         proxy.scrollTo(currency, anchor: .leading)
                     }
                 }
