@@ -75,6 +75,7 @@ type importMeta struct {
 }
 
 type preparedImportInput struct {
+	Generation       *importGenerationSummary
 	InputFile        string
 	Warnings         []string
 	RawRowCount      int
@@ -224,8 +225,9 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 	generatedBean := transactionOnlyBeanText(string(rawGeneratedBean))
 	generatedSummary := parseBeanSummary(generatedBean)
 	dedupReport := ""
-	if generatedSummary.CandidateCount == 0 && prepared.RawRowCount > 0 && prepared.FilteredRowCount == 0 {
-		dedupReport = "前置过滤后没有候选交易，已跳过去重。"
+	_, filteredForDedup := importer.RowCounts(prepared, sourceAnalysis, generatedSummary)
+	if generatedSummary.CandidateCount == 0 && prepared.RawRowCount > 0 && filteredForDedup == 0 {
+		dedupReport = "过滤后没有候选交易，已跳过去重。"
 		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
 			return nil, err
 		}

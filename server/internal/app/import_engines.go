@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	deganalyser "github.com/deb-sig/double-entry-generator/v2/pkg/analyser"
 	degcompiler "github.com/deb-sig/double-entry-generator/v2/pkg/compiler"
 	degconfig "github.com/deb-sig/double-entry-generator/v2/pkg/config"
 	"github.com/deb-sig/double-entry-generator/v2/pkg/consts"
@@ -22,7 +23,13 @@ type importEngine interface {
 	Generate(context.Context, *Server, importEngineInput) error
 }
 
+type importGenerationSummary struct {
+	ParsedCount int
+	Ignored     []string
+}
+
 type importEngineInput struct {
+	Generation *importGenerationSummary
 	ProviderID string
 	Config     importProviderConfig
 	InputFile  string
@@ -57,11 +64,33 @@ func (degModuleImportEngine) Generate(ctx context.Context, s *Server, input impo
 	if err != nil {
 		return err
 	}
+	// Use the same IR, configuration snapshot and analyser as the compiler.
+	// This accounts for intentional ignores without concealing parser losses.
+	var summary importGenerationSummary
+	if input.Generation != nil {
+		analyser, err := deganalyser.New(degProviderID)
+		if err != nil {
+			return err
+		}
+		summary.ParsedCount = len(ir.Orders)
+		for _, order := range ir.Orders {
+			ignore, _, _, _, _ := analyser.GetAccountsAndTags(&order, config, degProviderID, consts.CompilerBeanCount)
+			if ignore {
+				summary.Ignored = append(summary.Ignored, fmt.Sprintf("配置忽略：%s %s %.2f %s（%s）", order.PayTime.Format("2006-01-02"), order.Peer, order.Money, order.Currency, order.Item))
+			}
+		}
+	}
 	compiler, err := degcompiler.New(degProviderID, consts.CompilerBeanCount, input.OutputFile, false, config, ir)
 	if err != nil {
 		return err
 	}
-	return compiler.Compile()
+	if err := compiler.Compile(); err != nil {
+		return err
+	}
+	if input.Generation != nil {
+		*input.Generation = summary
+	}
+	return nil
 }
 
 func loadDEGModuleConfig(ctx context.Context, s *Server, providerConfig importProviderConfig) (*degconfig.Config, error) {

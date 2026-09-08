@@ -97,7 +97,7 @@ func (i staticBillImporter) Prepare(s *Server, input importFileInput) (preparedI
 
 func (i staticBillImporter) Generate(ctx context.Context, s *Server, prepared preparedImportInput, outputFile string) error {
 	engine := i.ImportEngine()
-	return engine.Generate(ctx, s, importEngineInput{ProviderID: i.ProviderID(), Config: i.ProviderConfig(), InputFile: prepared.InputFile, OutputFile: outputFile})
+	return engine.Generate(ctx, s, importEngineInput{ProviderID: i.ProviderID(), Config: i.ProviderConfig(), InputFile: prepared.InputFile, OutputFile: outputFile, Generation: prepared.Generation})
 }
 
 func (i staticBillImporter) AnalyzeSource(s *Server, prepared preparedImportInput, generatedBean string) (providerSourceAnalysis, []string) {
@@ -335,20 +335,34 @@ var billImporters = []billImporter{
 			return providerDetection{}, false
 		},
 		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
-			return s.prepareHsbcHKCreditInput(input.InputFile, input.ImportID)
+			prepared, err := s.prepareHsbcHKCreditInput(input.InputFile, input.ImportID)
+			prepared.Generation = &importGenerationSummary{}
+			return prepared, err
 		},
 		dedupArgs: func(options importDedupOptions) []string {
 			return []string{"--credit-card"}
 		},
 		decorateEntries: decorateStatementHashEntries,
 		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
-			if generated.CandidateCount != prepared.FilteredRowCount {
-				return nil, fmt.Errorf("汇丰香港信用卡行数核对失败：CSV 明细 %d 条，但 DEG 生成 %d 条。已停止导入，请检查账单格式或配置", prepared.RawRowCount, generated.CandidateCount)
+			ignored := []string(nil)
+			if prepared.Generation != nil {
+				if prepared.Generation.ParsedCount != prepared.FilteredRowCount {
+					return nil, fmt.Errorf("汇丰香港信用卡解析行数核对失败：CSV 明细 %d 条，DEG 解析 %d 条。已停止导入。", prepared.RawRowCount, prepared.Generation.ParsedCount)
+				}
+				ignored = prepared.Generation.Ignored
 			}
-			return []string{fmt.Sprintf("汇丰香港信用卡行数核对通过：CSV 明细 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, generated.CandidateCount, deduped.CandidateCount)}, nil
+			if generated.CandidateCount+len(ignored) != prepared.FilteredRowCount {
+				return nil, fmt.Errorf("汇丰香港信用卡行数核对失败：CSV 明细 %d 条，配置忽略 %d 条，但 DEG 生成 %d 条。已停止导入，请检查账单格式或配置", prepared.RawRowCount, len(ignored), generated.CandidateCount)
+			}
+			warnings := []string{fmt.Sprintf("汇丰香港信用卡行数核对通过：CSV 明细 %d 条，配置忽略 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, len(ignored), generated.CandidateCount, deduped.CandidateCount)}
+			return append(warnings, ignored...), nil
 		},
 		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
-			return prepared.RawRowCount, prepared.FilteredRowCount
+			filtered := prepared.FilteredRowCount
+			if prepared.Generation != nil {
+				filtered -= len(prepared.Generation.Ignored)
+			}
+			return prepared.RawRowCount, filtered
 		},
 	},
 	staticBillImporter{
