@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct GlobalSearchPage: View {
-    @State private var query = ""
+    @EnvironmentObject private var session: LedgerSession
     var body: some View {
-        GlobalSearchView(query: $query)
-            .searchable(text: $query, prompt: "搜索整个账本")
+        GlobalSearchView(query: $session.globalSearchQuery)
+            .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
     }
 }
 

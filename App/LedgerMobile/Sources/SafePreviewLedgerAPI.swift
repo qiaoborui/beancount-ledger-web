@@ -8,6 +8,14 @@ extension LedgerSession {
             let defaults = UserDefaults(suiteName: suiteName) ?? .standard
             defaults.removePersistentDomain(forName: suiteName)
             defaults.set("https://preview.ledger.invalid", forKey: "ledger.mobile.server-origin")
+            if processInfo.arguments.contains("--safe-shared-import") {
+                let inbox = try? LedgerSharedImportInbox.appInbox()
+                for item in (try? inbox?.items()) ?? [] { try? inbox?.remove(item) }
+                let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("shared-preview.csv")
+                try? Data("date,payee,amount\n2026-08-28,Safe preview,12.00".utf8).write(to: fixture)
+                _ = try? inbox?.enqueue(fileURL: fixture)
+                try? FileManager.default.removeItem(at: fixture)
+            }
             let previewNow = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
             return LedgerSession(api: SafePreviewLedgerAPI(), defaults: defaults, ledgerNow: { previewNow })
         }

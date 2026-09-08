@@ -15,7 +15,7 @@ final class LedgerWidgetVisualTests: XCTestCase {
             XCTAssertEqual(request.url?.absoluteString, "https://ledger.example.com/api/widget/snapshot")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
-            let data = try XCTUnwrap(request.httpBody)
+            let data = try WidgetMockURLProtocol.bodyData(from: request)
             let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
             XCTAssertEqual(body["deviceId"], "widget-device")
             XCTAssertEqual(body["token"], "widget-token")
@@ -227,6 +227,35 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertEqual(layout.amounts[29], 3_000)
         XCTAssertEqual(layout.peakDay, 28)
         XCTAssertEqual(layout.spendingDayCount, 2)
+        XCTAssertEqual(layout.dateString(for: 29), "2028-02-29")
+        XCTAssertNil(layout.dateString(for: 30))
+        XCTAssertNil(layout.dateString(for: 0))
+    }
+
+    func testAccountWidgetDeepLinkRoundTripsReservedCharactersAndHidesRedactedAccount() throws {
+        let account = LedgerWidgetAccountSnapshot(
+            account: "Assets:银行:日常 & 储蓄?#",
+            label: "储蓄", group: "银行", currency: "CNY", balance: 100,
+            valuationCurrency: "CNY", valuation: nil
+        )
+        let url = try XCTUnwrap(LedgerWidgetNavigation.account(account))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "ledger")
+        XCTAssertEqual(components.host, "accounts")
+        XCTAssertEqual(components.queryItems?.first { $0.name == "account" }?.value, account.account)
+        XCTAssertEqual(components.queryItems?.first { $0.name == "currency" }?.value, "CNY")
+        XCTAssertEqual(LedgerWidgetNavigation.account(account, isRedacted: true)?.absoluteString, "ledger://accounts")
+    }
+
+    func testCalendarWidgetDeepLinkKeepsDayAndHidesRedactedDate() {
+        XCTAssertEqual(
+            LedgerWidgetNavigation.transactions(date: "2028-02-29")?.absoluteString,
+            "ledger://transactions?date=2028-02-29"
+        )
+        XCTAssertEqual(
+            LedgerWidgetNavigation.transactions(date: "2028-02-29", isRedacted: true)?.absoluteString,
+            "ledger://transactions"
+        )
     }
 
     private func render<V: View>(
@@ -391,6 +420,21 @@ private actor WidgetRecordingRefreshClient: LedgerWidgetRefreshing {
 
 private final class WidgetMockURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    static func bodyData(from request: URLRequest) throws -> Data {
+        if let data = request.httpBody { return data }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw stream.streamError ?? URLError(.cannotDecodeRawData) }
+            if count == 0 { return data }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

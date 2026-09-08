@@ -12,10 +12,10 @@ struct RootView: View {
             case .configuration:
                 ServerConfigurationView()
             case .checking:
-                MainTabView()
-                    .redacted(reason: .placeholder)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                // A search deep link can arrive before authentication finishes. Keep native
+                // search controllers unmounted until the ready shell has a stable lifetime.
+                ProgressView("正在连接账本")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)
             case .ready:
@@ -171,7 +171,6 @@ private struct LoginView: View {
 private struct MainTabView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var searchQuery = ""
     @State private var moreDestination: LedgerDestination?
 
     private var selection: Binding<LedgerDestination> {
@@ -207,6 +206,10 @@ private struct MainTabView: View {
             }
         }
         .ledgerTimeRangeSheet()
+        .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
+        .onChange(of: session.isRangeLoading) { _, loading in
+            if !loading { Task { await session.applyPendingExternalRoute() } }
+        }
         .onChange(of: session.compactTabDestinations) { _, destinations in
             if let moreDestination, destinations.contains(moreDestination) {
                 self.moreDestination = nil
@@ -227,8 +230,8 @@ private struct MainTabView: View {
                     NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 }
                 Tab(value: LedgerDestination.search, role: .search) {
-                    NavigationStack { GlobalSearchView(query: $searchQuery, usesNativeSearchTab: true) }
-                        .searchable(text: $searchQuery, prompt: "搜索整个账本")
+                    NavigationStack { GlobalSearchView(query: $session.globalSearchQuery, usesNativeSearchTab: true) }
+                        .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
                 }
             }
             .tabViewSearchActivation(.searchTabSelection)

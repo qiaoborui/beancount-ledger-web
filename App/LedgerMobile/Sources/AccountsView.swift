@@ -110,6 +110,9 @@ struct AccountsView: View {
         .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
+        .navigationDestination(item: $session.externalAccount) { account in
+            AccountDetailView(account: account.account, currency: account.currency)
+        }
         .refreshable { await session.refresh() }
     }
 

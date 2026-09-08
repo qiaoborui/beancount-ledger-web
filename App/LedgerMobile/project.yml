@@ -22,6 +22,8 @@ targets:
     dependencies:
       - target: LedgerWidgets
         embed: true
+      - target: LedgerShare
+        embed: true
     info:
       path: Supporting/Info.plist
       properties:
@@ -32,6 +34,19 @@ targets:
           - CFBundleURLName: com.qiaoborui.ledger.mobile
             CFBundleURLSchemes:
               - ledger
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: 账单文件
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.comma-separated-values-text
+              - org.openxmlformats.spreadsheetml.sheet
+              - com.microsoft.excel.xls
+              - com.adobe.pdf
+              - public.email-message
+              - public.html
+              - public.zip-archive
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
@@ -102,6 +117,34 @@ targets:
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator macosx"
         SUPPORTS_MACCATALYST: YES
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+
+  LedgerShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+      - path: Sources/LedgerSharedImportInbox.swift
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: 存入 Ledger
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 5
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.share
+        PRODUCT_MODULE_NAME: LedgerShare
+        DEVELOPMENT_TEAM: H92F889YBH
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/LedgerShare.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
 
   LedgerMobileTests:
     type: bundle.unit-test
