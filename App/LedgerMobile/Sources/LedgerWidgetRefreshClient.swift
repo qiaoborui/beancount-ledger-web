@@ -195,7 +195,8 @@ actor LedgerWidgetTimelineLoader {
     }
 
     func load(now: Date = Date(), forceRefresh: Bool = false) async -> LedgerWidgetTimelineLoadResult {
-        let cached = snapshotStore.load()
+        let cachedState = snapshotStore.loadState()
+        let cached = cachedState.snapshot
         let credential: LedgerWidgetCredential
         do {
             guard let storedCredential = try credentialStore.load(), storedCredential.enabled else {
@@ -217,7 +218,7 @@ actor LedgerWidgetTimelineLoader {
         }
         if !forceRefresh, let cached {
             let cacheAge = now.timeIntervalSince(cached.updatedAt)
-            if cacheAge >= 0, cacheAge < Self.cacheFreshness {
+            if cacheAge >= 0, cacheAge < Self.cacheFreshness, !cachedState.isFuture(relativeTo: now) {
                 return LedgerWidgetTimelineLoadResult(
                     snapshot: cached,
                     refreshInterval: Self.successRefreshInterval
@@ -252,7 +253,8 @@ actor LedgerWidgetTimelineLoader {
                 return LedgerWidgetFetchResult(
                     credential: credential,
                     snapshot: refreshed,
-                    failure: nil
+                    failure: nil,
+                    observedState: cachedState
                 )
             } catch LedgerWidgetRefreshError.server(let status) {
                 return LedgerWidgetFetchResult(
@@ -344,7 +346,7 @@ actor LedgerWidgetTimelineLoader {
             )
         }
         do {
-            _ = try snapshotStore.saveIfNewer(refreshed, attemptedAt: now)
+            _ = try snapshotStore.saveIfNewer(refreshed, attemptedAt: now, recoveringFutureState: fetch.observedState)
             guard try credentialStore.load() == credential else {
                 snapshotStore.clear(ifCurrentEquals: refreshed, attemptedAt: now)
                 return LedgerWidgetTimelineLoadResult(
@@ -380,6 +382,7 @@ private struct LedgerWidgetFetchResult: Sendable {
     let credential: LedgerWidgetCredential
     let snapshot: LedgerWidgetSnapshot?
     let failure: LedgerWidgetFetchFailure?
+    var observedState: LedgerWidgetSnapshotState? = nil
 }
 
 private struct LedgerWidgetFetchFailure: Sendable {

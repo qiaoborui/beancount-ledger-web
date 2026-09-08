@@ -29,6 +29,10 @@ struct NativeImportFlowView: View {
     @State private var commitWasReconciled = false
     @State private var editedEntryStatus: String?
     @State private var editSaveFeedback = 0
+    @State private var failureFeedback = 0
+    @State private var pendingExit: ImportExitAction?
+
+    private enum ImportExitAction { case close, preparation }
 
     init(
         file: LedgerImportSelectedFile,
@@ -65,6 +69,32 @@ struct NativeImportFlowView: View {
         return "导入账单"
     }
 
+    private var hasReviewChanges: Bool {
+        guard let preview, commitResult == nil else { return false }
+        return reviewedEntries != preview.entries
+            || includedEntryIDs != Set(preview.entries.map(\.id))
+            || !bulkTagInput.isEmpty
+            || commitOutcomeNeedsReconciliation
+    }
+
+    private var hasDraftChanges: Bool {
+        guard commitResult == nil else { return false }
+        return hasReviewChanges || providerOverride != nil || alipayFundRounding || !archivePassword.isEmpty
+    }
+
+    private var exitConfirmationTitle: String {
+        commitOutcomeNeedsReconciliation ? "离开保存结果核对？" : "放弃本次修改？"
+    }
+
+    private var exitConfirmationDetail: String {
+        if commitOutcomeNeedsReconciliation {
+            return "服务器可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。"
+        }
+        return pendingExit == .preparation
+            ? "返回后会清除本次核对修改，你可以重新生成预览。"
+            : "本次尚未提交的设置和核对修改将被清除，原始账单文件保留。"
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -77,6 +107,18 @@ struct NativeImportFlowView: View {
                 }
             }
             .background(LedgerPalette.canvas)
+            .alert(exitConfirmationTitle, isPresented: Binding(
+                get: { pendingExit != nil },
+                set: { if !$0 { pendingExit = nil } }
+            ), presenting: pendingExit) { action in
+                Button(commitOutcomeNeedsReconciliation ? "离开核对" : "放弃修改", role: .destructive) {
+                    pendingExit = nil
+                    performExit(action)
+                }
+                Button("继续编辑", role: .cancel) { pendingExit = nil }
+            } message: { _ in
+                Text(exitConfirmationDetail)
+            }
             .navigationTitle(currentTitle)
             .navigationBarTitleDisplayMode(.inline)
 
@@ -84,30 +126,17 @@ struct NativeImportFlowView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if preview != nil, commitResult == nil {
                         Button(startsWithPreview ? "关闭" : "返回") {
-                            if startsWithPreview {
-                                dismiss()
-                            } else {
-                                self.preview = nil
-                                reviewedEntries = []
-                                includedEntryIDs = []
-                                selectedTagEntryIDs = []
-                                bulkTagInput = ""
-                                errorMessage = nil
-                                commitErrorMessage = nil
-                                commitOutcomeNeedsReconciliation = false
-                                commitWasReconciled = false
-                                editedEntryStatus = nil
-                            }
+                            requestExit(startsWithPreview ? .close : .preparation)
                         }
                         .disabled(isCommitting)
                     } else if commitResult == nil {
-                        Button("取消") { dismiss() }
+                        Button("取消") { requestExit(.close) }
                             .disabled(isPreparing)
                     }
                 }
             }
         }
-        .interactiveDismissDisabled(isPreparing || isCommitting)
+        .interactiveDismissDisabled(isPreparing || isCommitting || hasDraftChanges)
         .privacySensitive()
         .alert("确认写入账本？", isPresented: $confirmationPresented) {
             Button(commitActionTitle) {
@@ -128,7 +157,33 @@ struct NativeImportFlowView: View {
             .ledgerPrivacyProtectedSheet()
         }
         .sensoryFeedback(.success, trigger: editSaveFeedback)
+        .sensoryFeedback(.error, trigger: failureFeedback)
         .ledgerPrivacyProtectedSheet()
+    }
+
+    private func requestExit(_ action: ImportExitAction) {
+        guard !isPreparing, !isCommitting else { return }
+        let needsConfirmation = action == .preparation ? hasReviewChanges : hasDraftChanges
+        if needsConfirmation { pendingExit = action }
+        else { performExit(action) }
+    }
+
+    private func performExit(_ action: ImportExitAction) {
+        guard !isPreparing, !isCommitting else { return }
+        if action == .close {
+            dismiss()
+        } else {
+            preview = nil
+            reviewedEntries = []
+            includedEntryIDs = []
+            selectedTagEntryIDs = []
+            bulkTagInput = ""
+            errorMessage = nil
+            commitErrorMessage = nil
+            commitOutcomeNeedsReconciliation = false
+            commitWasReconciled = false
+            editedEntryStatus = nil
+        }
     }
 
     private var preparationView: some View {
@@ -657,6 +712,7 @@ struct NativeImportFlowView: View {
     private func applyBulkTags(mode: BulkTagMode) {
         guard !selectedTagEntryIDs.isEmpty else {
             errorMessage = "请先选择需要修改标签的交易。"
+            failureFeedback &+= 1
             return
         }
         do {
@@ -678,6 +734,7 @@ struct NativeImportFlowView: View {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            failureFeedback &+= 1
         }
     }
 
@@ -709,6 +766,7 @@ struct NativeImportFlowView: View {
         } catch {
             archivePassword = ""
             errorMessage = error.localizedDescription
+            failureFeedback &+= 1
         }
     }
 
@@ -740,6 +798,7 @@ struct NativeImportFlowView: View {
                 await reconcileCommit(preview: preview, entries: entries)
             } else {
                 commitErrorMessage = "保存失败：\(error.localizedDescription) 你的核对修改仍在，可重试。"
+                failureFeedback &+= 1
             }
         }
     }
@@ -781,6 +840,7 @@ struct NativeImportFlowView: View {
         }
         commitOutcomeNeedsReconciliation = true
         commitErrorMessage = "保存结果待确认：连接中断，服务器可能已完成写入。请勿重复提交；可重新检查导入归档。"
+        failureFeedback &+= 1
     }
 }
 
@@ -843,6 +903,7 @@ private struct ImportEntryEditor: View {
     @State private var amountText: String
     @State private var fundingAccount: String
     @State private var categoryAccount: String
+    @State private var discardConfirmationPresented = false
     @FocusState private var focusedField: ImportEditorField?
 
     init(
@@ -891,6 +952,17 @@ private struct ImportEntryEditor: View {
     private var parsedTags: [String]? {
         if tagsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
         return try? LedgerTagRules.parse(tagsText)
+    }
+
+    private var hasChanges: Bool {
+        Self.formatDate(date) != entry.date
+            || flag != (entry.flag == "!" ? "!" : "*")
+            || payee != entry.payee
+            || narration != entry.narration
+            || tagsText != (entry.tags ?? []).joined(separator: " ")
+            || amountText != Self.amountText(entry.amount, fixedToMinorUnits: entry.supportsMainAmountEditing)
+            || fundingAccount != entry.fundingAccount
+            || categoryAccount != entry.categoryAccount
     }
 
     var body: some View {
@@ -972,7 +1044,7 @@ private struct ImportEntryEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消", action: requestDismiss)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存修改", action: save)
@@ -987,6 +1059,19 @@ private struct ImportEntryEditor: View {
             }
         }
         .privacySensitive()
+        .interactiveDismissDisabled(hasChanges)
+        .alert("放弃交易修改？", isPresented: $discardConfirmationPresented) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+            Button("继续编辑", role: .cancel) {}
+        } message: {
+            Text("这条交易将保留打开编辑页时的内容。")
+        }
+    }
+
+    private func requestDismiss() {
+        focusedField = nil
+        if hasChanges { discardConfirmationPresented = true }
+        else { dismiss() }
     }
 
     private func save() {
@@ -1036,6 +1121,7 @@ private struct ImportEntryEditor: View {
 }
 
 private struct ImportEntryReviewRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let entry: LedgerImportEntry
     let included: Bool
     let tagSelected: Bool
@@ -1148,8 +1234,8 @@ private struct ImportEntryReviewRow: View {
             }
         }
         .opacity(included ? 1 : 0.58)
-        .animation(.easeOut(duration: 0.16), value: expanded)
-        .animation(.easeOut(duration: 0.16), value: included)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: expanded)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: included)
     }
 
     private func importAmountText(_ entry: LedgerImportEntry) -> String {
