@@ -4,6 +4,48 @@ import XCTest
 
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testRecentSearchesAreBoundedDeduplicatedAndMemoryOnly() {
+        let suite = "ledger-search-history-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        session.recordGlobalSearch("  Café  ")
+        session.recordGlobalSearch("ＣＡＦＥ")
+        session.recordGlobalSearch("\n ")
+        XCTAssertEqual(session.recentGlobalSearches, ["ＣＡＦＥ"])
+        for index in 0..<12 { session.recordGlobalSearch("商户\(index)") }
+        XCTAssertEqual(session.recentGlobalSearches.count, 10)
+        XCTAssertEqual(session.recentGlobalSearches.first, "商户11")
+        let restored = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        XCTAssertTrue(restored.recentGlobalSearches.isEmpty)
+        session.clearRecentGlobalSearches()
+        XCTAssertTrue(session.recentGlobalSearches.isEmpty)
+    }
+
+    func testLogoutAndServerChangeClearSearchContext() {
+        for changeServer in [false, true] {
+            let suite = "ledger-search-reset-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+            let session = LedgerSession(
+                api: SessionMockAPI(payload: Self.payload), defaults: defaults,
+                biometricStore: MockBiometricCredentialStore(),
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite),
+                widgetCredentialStore: MockWidgetCredentialStore()
+            )
+            session.globalSearchQuery = "旅行"
+            session.globalSearchScope = .transactions
+            session.globalSearchFilters.tag = "旅行"
+            session.recordGlobalSearch("旅行")
+            if changeServer { session.changeServer() } else { session.logout() }
+            XCTAssertEqual(session.globalSearchQuery, "")
+            XCTAssertEqual(session.globalSearchScope, .all)
+            XCTAssertEqual(session.globalSearchFilters, LedgerGlobalSearchFilters())
+            XCTAssertTrue(session.recentGlobalSearches.isEmpty)
+        }
+    }
+
     func testConfiguredSessionStartsWithPrivacySafeApplicationShell() {
         let suiteName = "ledger-mobile-startup-shell-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1617,6 +1659,41 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.hasCachedGlobalTransactions)
     }
 
+    func testGlobalSearchLoadingSurvivesDateRangeChange() async throws {
+        let suite = "global-search-range-race-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.transactionPayload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await api.delayGlobalSearch(nanoseconds: 100_000_000)
+        let search = Task { try await session.loadGlobalTransactions() }
+        while await api.globalSearchRequests() == 0 { await Task.yield() }
+        await session.applyRange(.month(year: 2026, month: 7))
+        try await search.value
+        XCTAssertTrue(session.hasCachedGlobalTransactions)
+        XCTAssertEqual(session.visibleGlobalTransactions.count, Self.transactionPayload.transactions.count)
+    }
+
+    func testLockRejectsInFlightGlobalSearchData() async throws {
+        let suite = "global-search-lock-race-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.transactionPayload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        await api.delayGlobalSearch(nanoseconds: 100_000_000)
+        let search = Task { try await session.loadGlobalTransactions() }
+        while await api.globalSearchRequests() == 0 { await Task.yield() }
+        await session.lock()
+        do { try await search.value; XCTFail("Locked session accepted search data") }
+        catch is CancellationError { }
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+    }
+
     func testGlobalSearchPreservesRangeAndResolvesHistoricalTransactions() async throws {
         let suite = "global-search-session-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -2739,9 +2816,12 @@ private actor SessionMockAPI: LedgerAPI {
     }
 
     private var globalSearchRequestCount = 0
+    private var globalSearchDelay: UInt64 = 0
+    func delayGlobalSearch(nanoseconds: UInt64) { globalSearchDelay = nanoseconds }
     func globalSearchRequests() -> Int { globalSearchRequestCount }
     func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
         globalSearchRequestCount += 1
+        if globalSearchDelay > 0 { try await Task.sleep(nanoseconds: globalSearchDelay) }
         return LedgerGlobalTransactions(transactions: serverTransactions, sensitiveUnlocked: payload.sensitiveUnlocked)
     }
 

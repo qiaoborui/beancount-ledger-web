@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum TransactionAmountParser {
     static func minorUnits(_ raw: String) -> Int? {
@@ -54,6 +55,120 @@ struct TransactionRow: View {
         }
         .padding(.vertical, LedgerLayout.transactionVerticalInset)
         .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    func ledgerTransactionActions(_ transaction: LedgerTransaction) -> some View {
+        modifier(LedgerTransactionActions(transaction: transaction))
+    }
+}
+
+/// Copies the same human-readable fields shown in the ledger, without source or metadata.
+enum LedgerTransactionCopySummary {
+    static func text(for transaction: LedgerTransaction, accounts: [LedgerAccount], amountsVisible: Bool) -> String {
+        let presentation = TransactionPresentation(transaction: transaction)
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        let amount = amountsVisible
+            ? amountPrefix(presentation.kind) + MoneyText.format(minorUnits: presentation.minorUnits, currency: presentation.currency)
+            : "金额已隐藏"
+        var lines = [transaction.date, presentation.title]
+        if !presentation.subtitle.isEmpty { lines.append(presentation.subtitle) }
+        lines.append(amount)
+        let accountNames = transaction.postings.map { labels[$0.account] ?? $0.account }
+        lines.append(accountNames.joined(separator: " · "))
+        if let tags = transaction.tags, !tags.isEmpty { lines.append(tags.map { "#" + $0 }.joined(separator: " ")) }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private struct LedgerTransactionActions: ViewModifier {
+    @EnvironmentObject private var session: LedgerSession
+    let transaction: LedgerTransaction
+    @State private var action: Action?
+    @State private var confirmationFeedback = 0
+
+    private enum Kind { case edit, tags, delete }
+    private struct Action: Identifiable {
+        let id = UUID()
+        let kind: Kind
+        let transaction: LedgerTransaction
+    }
+
+    private var resolved: LedgerTransaction? {
+        guard session.phase == .ready, !session.privacyShielded,
+              case let .visible(current) = session.transactionResolution(for: transaction.source) else { return nil }
+        return current
+    }
+
+    private func canWrite(_ transaction: LedgerTransaction) -> Bool {
+        transaction.source.hash?.isEmpty == false
+            && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                Button("编辑", systemImage: "pencil") { present(.edit) }
+                    .disabled(resolved.map { !canWrite($0) || $0.editableEntry == nil } ?? true)
+                    .accessibilityIdentifier("transaction-context-edit")
+                Button("复制摘要", systemImage: "doc.on.doc", action: copySummary)
+                    .disabled(resolved == nil)
+                    .accessibilityIdentifier("transaction-context-copy")
+                Button("添加标签", systemImage: "tag") { present(.tags) }
+                    .disabled(resolved.map { !canWrite($0) } ?? true)
+                    .accessibilityIdentifier("transaction-context-tags")
+                Divider()
+                Button("删除", systemImage: "trash", role: .destructive) { present(.delete) }
+                    .disabled(resolved.map { !canWrite($0) } ?? true)
+                    .accessibilityIdentifier("transaction-context-delete")
+            }
+            .sheet(item: $action) { action in
+                actionSheet(action).ledgerPrivacyProtectedSheet()
+            }
+            .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    @ViewBuilder
+    private func actionSheet(_ action: Action) -> some View {
+        switch action.kind {
+        case .edit:
+            TransactionEditorView(
+                transaction: action.transaction,
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? []
+            ) { entry in
+                try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                confirmationFeedback &+= 1
+            }
+        case .tags:
+            TransactionTagEditorSheet(selectedCount: 1) { tags in
+                try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                confirmationFeedback &+= 1
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        case .delete:
+            TransactionDeleteSheet(transaction: action.transaction) { confirmationFeedback &+= 1 }
+        }
+    }
+
+    private func present(_ kind: Kind) {
+        guard let current = resolved, canWrite(current) else { return }
+        if case .edit = kind, current.editableEntry == nil { return }
+        action = Action(kind: kind, transaction: current)
+    }
+
+    private func copySummary() {
+        guard let current = resolved else { return }
+        let text = LedgerTransactionCopySummary.text(
+            for: current, accounts: session.ledger?.accounts ?? [], amountsVisible: session.amountsVisible
+        )
+        UIPasteboard.general.setItems([["public.utf8-plain-text": text]], options: [
+            .localOnly: true,
+            .expirationDate: Date().addingTimeInterval(120)
+        ])
+        confirmationFeedback &+= 1
     }
 }
 
@@ -155,6 +270,7 @@ struct TransactionsView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+                            .ledgerTransactionActions(transaction)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     deletionTarget = transaction
@@ -732,7 +848,7 @@ private struct TransactionTagEditorSheet: View {
             }
             .padding(LedgerSpacing.lg)
             .background(LedgerPalette.canvas)
-            .navigationTitle("批量添加标签")
+            .navigationTitle(selectedCount == 1 ? "添加标签" : "批量添加标签")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -805,7 +921,10 @@ struct TransactionDetailView: View {
                         AccountDetailView(account: posting.account, currency: posting.currency ?? presentation.currency)
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(posting.account).font(.subheadline).foregroundStyle(.primary)
+                            Text(accountLabel(posting.account)).font(.subheadline).foregroundStyle(.primary)
+                            if accountLabel(posting.account) != posting.account {
+                                Text(posting.account).font(.caption).foregroundStyle(.secondary)
+                            }
                             AmountLabel(
                                 minorUnits: posting.amount,
                                 currency: posting.currency ?? presentation.currency,
@@ -906,6 +1025,10 @@ struct TransactionDetailView: View {
             synchronizeTransaction(with: session.ledger)
         }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    private func accountLabel(_ path: String) -> String {
+        session.ledger?.accounts.first(where: { $0.account == path })?.displayLabel ?? path
     }
 
     private func synchronizeTransaction(with ledger: LedgerBootstrap?) {
