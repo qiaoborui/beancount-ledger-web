@@ -1597,6 +1597,26 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(result, Self.importCommitResult)
     }
 
+    func testGlobalSearchReusesCacheAndAllowsExplicitRefresh() async throws {
+        let suite = "global-search-cache-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let api = SessionMockAPI(payload: Self.payload)
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+        try await session.loadGlobalTransactions()
+        try await session.loadGlobalTransactions()
+        let cachedRequests = await api.globalSearchRequests()
+        XCTAssertEqual(cachedRequests, 1)
+        XCTAssertTrue(session.hasCachedGlobalTransactions)
+        try await session.loadGlobalTransactions(forceRefresh: true)
+        let refreshedRequests = await api.globalSearchRequests()
+        XCTAssertEqual(refreshedRequests, 2)
+        await session.lock()
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+    }
+
     func testGlobalSearchPreservesRangeAndResolvesHistoricalTransactions() async throws {
         let suite = "global-search-session-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -2718,8 +2738,11 @@ private actor SessionMockAPI: LedgerAPI {
         }
     }
 
+    private var globalSearchRequestCount = 0
+    func globalSearchRequests() -> Int { globalSearchRequestCount }
     func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
-        LedgerGlobalTransactions(transactions: serverTransactions, sensitiveUnlocked: payload.sensitiveUnlocked)
+        globalSearchRequestCount += 1
+        return LedgerGlobalTransactions(transactions: serverTransactions, sensitiveUnlocked: payload.sensitiveUnlocked)
     }
 
     func bootstrap(

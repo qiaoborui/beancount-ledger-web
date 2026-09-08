@@ -14,13 +14,16 @@ struct GlobalSearchView: View {
     @State private var documents: [LedgerImportDocument] = []
     @State private var results = LedgerSearchResults()
     @State private var loading = false
+    @State private var refreshing = false
     @State private var errorMessage: String?
     @State private var revision = 0
     @State private var limit = 50
 
     var body: some View {
         List {
-            if loading { ProgressView("正在搜索全部日期的账本…") }
+            if loading && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
+            }
             if let errorMessage {
                 Section {
                     Text(errorMessage).foregroundStyle(.secondary)
@@ -98,6 +101,7 @@ struct GlobalSearchView: View {
         .navigationTitle("搜索")
         .scrollDismissesKeyboard(.interactively)
         .task { await load() }
+        .refreshable { await load(forceRefresh: true) }
         .task(id: SearchRequest(query: query, revision: revision)) { await search() }
         .onChange(of: session.globalTransactions) { _, _ in revision += 1 }
         .onChange(of: session.transactionMutationStates) { _, _ in revision += 1 }
@@ -110,12 +114,13 @@ struct GlobalSearchView: View {
         .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
     }
 
-    private func load() async {
-        guard !loading else { return }
-        loading = true
+    private func load(forceRefresh: Bool = false) async {
+        guard !refreshing else { return }
+        refreshing = true
+        loading = !session.hasCachedGlobalTransactions
         errorMessage = nil
-        defer { loading = false; revision += 1 }
-        do { try await session.loadGlobalTransactions() }
+        defer { loading = false; refreshing = false; revision += 1 }
+        do { try await session.loadGlobalTransactions(forceRefresh: forceRefresh) }
         catch is CancellationError { return }
         catch { errorMessage = "流水加载失败：" + error.localizedDescription }
         do { documents = try await session.importDocuments() }

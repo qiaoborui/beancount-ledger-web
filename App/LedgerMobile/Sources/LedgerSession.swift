@@ -941,8 +941,13 @@ final class LedgerSession: ObservableObject {
     }
 
     @Published private(set) var globalTransactions: [LedgerTransaction] = []
+    private var globalTransactionsLoadedAt: Date?
+    var hasCachedGlobalTransactions: Bool { globalTransactionsLoadedAt != nil }
 
-    func loadGlobalTransactions() async throws {
+    func loadGlobalTransactions(forceRefresh: Bool = false) async throws {
+        if !forceRefresh, phase == .ready,
+           let loadedAt = globalTransactionsLoadedAt,
+           Date().timeIntervalSince(loadedAt) < 60 { return }
         let payload = try await performSensitiveRequest { api, url in
             let payload = try await api.globalTransactions(baseURL: url)
             guard payload.sensitiveUnlocked else {
@@ -953,6 +958,7 @@ final class LedgerSession: ObservableObject {
         try Task.checkCancellation()
         reconcileTransactionMutations(in: payload.transactions)
         globalTransactions = payload.transactions
+        globalTransactionsLoadedAt = Date()
         if let ledger {
             self.ledger = ledger.replacingTransactions(with: payload.transactions.filter {
                 $0.date >= selectedRange.start && $0.date < selectedRange.queryEndExclusive
@@ -2064,6 +2070,7 @@ final class LedgerSession: ObservableObject {
     @discardableResult
     private func invalidateSession() -> Int {
         globalTransactions = []
+        globalTransactionsLoadedAt = nil
         sessionEpoch &+= 1
         return invalidateRequests()
     }
