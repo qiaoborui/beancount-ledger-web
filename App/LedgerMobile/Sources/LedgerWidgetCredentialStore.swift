@@ -301,12 +301,16 @@ final class SystemLedgerWidgetCredentialStore: LedgerWidgetCredentialStoring, @u
     private let decoder = JSONDecoder()
     private static let activeCredentialKeyKey = "ledger.widgets.active-credential-key.v1"
 
-    init(
+    convenience init(
         accessGroup: String? = SystemLedgerWidgetCredentialStore.configuredAccessGroup(),
         suiteName: String = LedgerWidgetSnapshotStore.appGroupIdentifier
     ) {
+        self.init(accessGroup: accessGroup, sharedDefaults: UserDefaults(suiteName: suiteName))
+    }
+
+    init(accessGroup: String?, sharedDefaults: UserDefaults?) {
         self.accessGroup = accessGroup
-        sharedDefaults = UserDefaults(suiteName: suiteName)
+        self.sharedDefaults = sharedDefaults
     }
 
     var isAvailable: Bool { accessGroup != nil && sharedDefaults != nil }
@@ -405,7 +409,8 @@ final class SystemLedgerWidgetCredentialStore: LedgerWidgetCredentialStoring, @u
         } else {
             sharedDefaults.removeObject(forKey: Self.activeCredentialKeyKey)
         }
-        guard sharedDefaults.synchronize() else { throw LedgerWidgetCredentialStoreError.unavailable }
+        // UserDefaults persists changes automatically. Its legacy synchronize()
+        // result must not interrupt credential suspension or registration.
     }
 
     private static func configuredAccessGroup(bundle: Bundle = .main) -> String? {
