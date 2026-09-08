@@ -283,3 +283,65 @@ func hsbchkCreditCSVFixture(withBOM bool) []byte {
 	}
 	return append([]byte{0xEF, 0xBB, 0xBF}, raw...)
 }
+
+func TestHsbcHKCreditIgnoredRulesRowValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, peer string
+		ignored    int
+	}{
+		{"matching", "ALIPAY,Alipay,alipay", 3},
+		{"case-sensitive", "ALIPAY", 0},
+		{"all-ignored", "Alipay,Other", 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testLedger(t)
+			mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "hsbchk-credit-card-config.yaml"), "defaultMinusAccount: Expenses:Unknown\ndefaultPlusAccount: Expenses:Unknown\ndefaultCashAccount: Liabilities:HK:HSBC:CreditCard\ndefaultCurrency: CNY\nhsbchk:\n  rules:\n    - peer: "+tc.peer+"\n      ignore: true\n")
+			var csvText strings.Builder
+			csvText.WriteString(strings.Join(hsbchkCreditCSVHeaders, ",") + "\n")
+			for i := 0; i < 20; i++ {
+				peer := "Other"
+				if i < 3 {
+					peer = "Alipay"
+				}
+				csvText.WriteString("07/09/2026,08/09/2026,Purchase,-2.00,CNY,POSTED," + peer + ",CHINA,CHN,DEBIT\n")
+			}
+			input := filepath.Join(t.TempDir(), "statement.csv")
+			mustWrite(t, input, csvText.String())
+			s := &Server{cfg: cfg}
+			importer, _ := importProvider("hsbchk-credit")
+			prepared, err := importer.Prepare(s, importFileInput{InputFile: input, ImportID: "ignored-test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(t.TempDir(), "output.bean")
+			if err := importer.Generate(context.Background(), s, prepared, output); err != nil {
+				t.Fatal(err)
+			}
+			generated := string(mustRead(t, output))
+			summary := parseBeanSummary(generated)
+			if summary.CandidateCount != 20-tc.ignored {
+				t.Fatalf("generated %d, want %d", summary.CandidateCount, 20-tc.ignored)
+			}
+			warnings, err := importer.PreviewWarnings(prepared, providerSourceAnalysis{}, summary, summary, generated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.ignored > 0 && (len(warnings) != tc.ignored+1 || !strings.Contains(warnings[1], "Alipay") || !strings.Contains(warnings[1], "2.00 CNY")) {
+				t.Fatalf("missing ignored details: %v", warnings)
+			}
+			raw, filtered := importer.RowCounts(prepared, providerSourceAnalysis{}, summary)
+			if raw != 20 || filtered != 20-tc.ignored {
+				t.Fatalf("row counts: %d/%d", raw, filtered)
+			}
+			prepared.Generation.ParsedCount--
+			if _, err := importer.PreviewWarnings(prepared, providerSourceAnalysis{}, summary, summary, generated); err == nil {
+				t.Fatal("parser loss must fail")
+			}
+			prepared.Generation.ParsedCount++
+			summary.CandidateCount--
+			if _, err := importer.PreviewWarnings(prepared, providerSourceAnalysis{}, summary, summary, generated); err == nil {
+				t.Fatal("unexplained missing record must fail")
+			}
+		})
+	}
+}
