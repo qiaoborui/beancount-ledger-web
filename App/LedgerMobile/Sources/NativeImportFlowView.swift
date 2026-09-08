@@ -79,8 +79,7 @@ struct NativeImportFlowView: View {
             .background(LedgerPalette.canvas)
             .navigationTitle(currentTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if preview != nil, commitResult == nil {
@@ -419,10 +418,7 @@ struct NativeImportFlowView: View {
         .padding(.horizontal, LedgerSpacing.lg)
         .padding(.top, LedgerSpacing.md)
         .padding(.bottom, LedgerSpacing.sm)
-        .background(LedgerPalette.panel)
-        .overlay(alignment: .top) {
-            Rectangle().fill(LedgerPalette.line).frame(height: 1)
-        }
+        .ledgerFloatingActionSurface()
     }
 
     private func completionView(_ result: LedgerImportCommitResult) -> some View {

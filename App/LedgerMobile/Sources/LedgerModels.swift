@@ -860,6 +860,11 @@ struct LedgerTransactionUpdateRequest: Encodable, Equatable, Sendable {
     let entry: LedgerTransactionEntry
 }
 
+struct LedgerTransactionDeleteRequest: Encodable, Equatable, Sendable {
+    let source: TransactionSource
+    let reason: String
+}
+
 struct LedgerTransactionTagsRequest: Encodable, Equatable, Sendable {
     let sources: [TransactionSource]
     let tags: [String]

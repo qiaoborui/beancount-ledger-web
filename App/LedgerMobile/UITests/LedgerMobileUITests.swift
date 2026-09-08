@@ -11,6 +11,74 @@ final class LedgerMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testLiquidGlassSearchAndConfirmedDeletion() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        openDestination(compact: "交易", regular: "交易账本")
+        if !isPad {
+            let searchButton = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
+            XCTAssertTrue(searchButton.waitForExistence(timeout: 3))
+            XCTAssertGreaterThan(searchButton.frame.midY, app.frame.height * 0.65)
+        }
+        capture("glass-transactions-search-collapsed")
+        let row = app.buttons["transaction-row-88"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+        app.buttons["transaction-delete"].tap()
+        XCTAssertTrue(app.buttons["transaction-delete-confirm"].waitForExistence(timeout: 3))
+        capture("glass-delete-confirmation")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["transaction-delete"].waitForExistence(timeout: 3))
+        app.buttons["transaction-delete"].tap()
+        app.buttons["transaction-delete-confirm"].tap()
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        let search = revealSearch("收付款对象、说明、账户或标签")
+        search.tap()
+        search.typeText("不存在的交易")
+        XCTAssertTrue(app.staticTexts["没有匹配的交易"].waitForExistence(timeout: 3))
+        capture("glass-search-expanded")
+    }
+
+    @discardableResult
+    private func revealSearch(_ prompt: String) -> XCUIElement {
+        if app.textFields[prompt].exists { return app.textFields[prompt] }
+        let nativeSearch = app.searchFields[prompt]
+        if nativeSearch.exists && nativeSearch.isHittable { return nativeSearch }
+        let button = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 3), app.debugDescription)
+        button.tap()
+        let search = isPad ? nativeSearch : app.textFields[prompt]
+        XCTAssertTrue(search.waitForExistence(timeout: 3), app.debugDescription)
+        return search
+    }
+
+    func testGlassImportActionSurface() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        if isPad {
+            app.buttons["sidebar-imports"].tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            waitUntilHittable(entry)
+            entry.tap()
+        }
+        XCTAssertTrue(app.navigationBars["导入账单"].waitForExistence(timeout: 4))
+        app.buttons["import-generate-preview"].tap()
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
+        let commit = app.buttons["import-commit"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 3))
+        XCTAssertTrue(commit.isHittable)
+        XCTAssertLessThanOrEqual(commit.frame.maxX, app.frame.maxX)
+        capture("glass-import-action-surface")
+    }
+
     func testAccountGroupsStartCollapsedAndSupportBulkToggleAndSearch() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
@@ -34,7 +102,7 @@ final class LedgerMobileUITests: XCTestCase {
         toggle.tap()
         XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
 
-        let search = app.searchFields["账户名称或路径"]
+        let search = revealSearch("账户名称或路径")
         search.tap()
         search.typeText("日常\n")
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
@@ -55,8 +123,8 @@ final class LedgerMobileUITests: XCTestCase {
         openDestination(compact: "交易", regular: "交易账本")
         let dateButton = app.navigationBars.buttons["navigation-time-range"]
         XCTAssertTrue(dateButton.waitForExistence(timeout: 3))
-        let search = app.searchFields["收付款对象、说明、账户或标签"]
-        XCTAssertLessThanOrEqual(dateButton.frame.maxY, search.frame.minY)
+        let search = revealSearch("收付款对象、说明、账户或标签")
+        XCTAssertTrue(search.isHittable)
         XCTAssertFalse(app.otherElements["page-time-range"].exists)
         XCTAssertTrue(dateButton.label.contains("2026年8月"))
         capture("navigation-date-and-search")
@@ -121,7 +189,7 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
         app.tabBars.buttons["交易"].tap()
-        let search = app.searchFields["收付款对象、说明、账户或标签"]
+        let search = revealSearch("收付款对象、说明、账户或标签")
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["navigation-time-range"].exists)
         search.tap()
@@ -232,7 +300,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["环比"].firstMatch.waitForExistence(timeout: 3))
 
         openDestination(compact: "交易", regular: "交易账本")
-        XCTAssertTrue(app.searchFields["收付款对象、说明、账户或标签"].waitForExistence(timeout: 3))
+        revealSearch("收付款对象、说明、账户或标签")
         capture("03-transactions")
 
         app.buttons["筛选交易"].tap()
@@ -1086,7 +1154,7 @@ final class LedgerMobileUITests: XCTestCase {
         }
         // UIKit exposes the placeholder as the accessibility value of an empty search field.
         let value = element.value as? String
-        if replacement.isEmpty, element.elementType == .searchField {
+        if replacement.isEmpty {
             XCTAssertTrue(value == "" || value == element.placeholderValue)
         } else {
             XCTAssertEqual(value, replacement)

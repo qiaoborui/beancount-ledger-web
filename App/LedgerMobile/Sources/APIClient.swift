@@ -118,6 +118,7 @@ protocol LedgerAPI: Sendable {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws
     func addTransactionTags(
         baseURL: URL,
         sources: [TransactionSource],
@@ -213,6 +214,10 @@ extension LedgerAPI {
         entry: LedgerTransactionEntry
     ) async throws {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持编辑交易")
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持删除交易")
     }
 
     func addTransactionTags(
@@ -580,6 +585,15 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/transactions",
             method: "PUT",
             body: LedgerTransactionUpdateRequest(source: source, entry: entry)
+        )
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/transactions",
+            method: "DELETE",
+            body: LedgerTransactionDeleteRequest(source: source, reason: reason)
         )
     }
 

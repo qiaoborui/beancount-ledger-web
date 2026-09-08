@@ -304,8 +304,7 @@ private struct CompactTabConfigurationView: View {
             .background(LedgerPalette.canvas)
             .navigationTitle("底部标签栏")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }

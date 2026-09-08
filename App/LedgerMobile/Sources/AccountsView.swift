@@ -113,7 +113,7 @@ struct AccountsView: View {
         .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "账户名称或路径")
+        .ledgerSearch(text: $query, prompt: "账户名称或路径")
         .onChange(of: query) { _, _ in
             searchExpandedSectionIDs = Set(sections.map(\.id))
         }
@@ -230,8 +230,7 @@ struct AccountDetailView: View {
             ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
         }
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+
         .task(id: requestKey) {
             await load(replacingContent: detail == nil)
         }

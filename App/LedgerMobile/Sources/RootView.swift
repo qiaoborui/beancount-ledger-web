@@ -202,7 +202,7 @@ private struct MainTabView: View {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
             } else {
-                compactTabs
+                compactTabs.ledgerAdaptiveTabBar()
             }
         }
         .ledgerTimeRangeSheet()

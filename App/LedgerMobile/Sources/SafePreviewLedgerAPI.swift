@@ -23,6 +23,7 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     private var importCommitAttempts = 0
     private var gmailConnected = true
     private var gmailPending = SafePreviewLedgerData.gmailPendingImports
+    private var deletedTransactions: Set<String> = []
     private var transactionEntries: [String: LedgerTransactionEntry] = [:]
     private var transactionTags: [String: [String]] = [:]
 
@@ -69,7 +70,7 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
             today: today,
             valuationCurrency: valuationCurrency
         )
-        let transactions = payload.transactions.map { transaction in
+        let transactions = payload.transactions.filter { !deletedTransactions.contains(transactionKey($0.source)) }.map { transaction in
             let key = transactionKey(transaction.source)
             let edited = transactionEntries[key].map { transaction.projecting(entry: $0) } ?? transaction
             return edited.projecting(addingTags: transactionTags[key] ?? [])
@@ -226,6 +227,11 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     ) async throws {
         try await delayTransactionWriteIfRequested()
         transactionEntries[transactionKey(source)] = entry
+    }
+
+    func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
+        try await delayTransactionWriteIfRequested()
+        deletedTransactions.insert(transactionKey(source))
     }
 
     func addTransactionTags(
