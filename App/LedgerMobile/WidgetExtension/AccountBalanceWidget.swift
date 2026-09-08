@@ -119,6 +119,7 @@ struct AccountBalanceWidget: Widget {
 
 struct AccountBalanceWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.redactionReasons) private var redactionReasons
     let entry: AccountBalanceEntry
     var familyOverride: WidgetFamily?
 
@@ -136,7 +137,7 @@ struct AccountBalanceWidgetView: View {
                     small(account, updatedAt: snapshot.updatedAt)
                 }
             }
-            .widgetURL(URL(string: "ledger://accounts"))
+            .widgetURL(LedgerWidgetNavigation.account(account, isRedacted: !redactionReasons.isEmpty))
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
         } else if entry.snapshot == nil {
             LedgerWidgetUnavailableView(
@@ -250,5 +251,31 @@ struct AccountBalanceWidgetView: View {
         return narrow
             ? MoneyText.formatWidget(minorUnits: amount, currency: account.valuationCurrency)
             : MoneyText.formatCompact(minorUnits: amount, currency: account.valuationCurrency)
+    }
+}
+
+/// Encodes navigation data without placing account names in URL path segments.
+enum LedgerWidgetNavigation {
+    static func account(_ account: LedgerWidgetAccountSnapshot, isRedacted: Bool = false) -> URL? {
+        var components = URLComponents()
+        components.scheme = "ledger"
+        components.host = "accounts"
+        if !isRedacted {
+            components.queryItems = [
+                URLQueryItem(name: "account", value: account.account),
+                URLQueryItem(name: "currency", value: account.currency)
+            ]
+        }
+        return components.url
+    }
+
+    static func transactions(date: String? = nil, isRedacted: Bool = false) -> URL? {
+        var components = URLComponents()
+        components.scheme = "ledger"
+        components.host = "transactions"
+        if !isRedacted, let date {
+            components.queryItems = [URLQueryItem(name: "date", value: date)]
+        }
+        return components.url
     }
 }

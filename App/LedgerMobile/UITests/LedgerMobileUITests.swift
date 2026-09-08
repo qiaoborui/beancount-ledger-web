@@ -56,6 +56,42 @@ final class LedgerMobileUITests: XCTestCase {
         return search
     }
 
+    func testSystemDeepLinksReachAccountDateAndSearch() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        app.open(URL(string: "ledger://accounts?account=Assets%3ABank%3ADaily&currency=CNY")!)
+        XCTAssertTrue(app.navigationBars["日常账户"].waitForExistence(timeout: 5), app.debugDescription)
+        capture("system-account-link")
+        app.open(URL(string: "ledger://transactions?date=2026-08-28")!)
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["transaction-row-82"].exists)
+        capture("system-date-link")
+        app.open(URL(string: "ledger://search?q=%E5%9F%8E%E5%B8%82")!)
+        let search = app.searchFields["搜索整个账本"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(search.value as? String, "城市")
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        capture("system-search-link")
+    }
+
+    func testSharedImportInboxReviewCancellationKeepsFile() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-shared-import"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        app.open(URL(string: "ledger://imports")!)
+        let item = app.buttons["shared-import-review-shared-preview.csv"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
+        item.tap()
+        XCTAssertTrue(app.navigationBars["导入账单"].waitForExistence(timeout: 5))
+        capture("system-shared-import-review")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        capture("system-shared-import-retained")
+    }
+
     func testSearchFromMoreReturnsToMoreWithoutNestedSearch() throws {
         try XCTSkipIf(isPad, "Compact search tab return path")
         app = XCUIApplication()

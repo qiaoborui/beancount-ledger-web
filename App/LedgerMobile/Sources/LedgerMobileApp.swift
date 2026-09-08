@@ -28,7 +28,11 @@ struct LedgerMobileApp: App {
                     }
                 }
                 .onOpenURL { url in
-                    session.openWidgetURL(url)
+                    if url.isFileURL {
+                        Task { await session.receiveSharedFile(url) }
+                    } else {
+                        session.openWidgetURL(url)
+                    }
                 }
         }
     }

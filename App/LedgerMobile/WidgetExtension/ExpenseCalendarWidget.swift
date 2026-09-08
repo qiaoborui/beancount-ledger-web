@@ -67,7 +67,7 @@ struct ExpenseCalendarWidgetView: View {
                     medium(snapshot.expense, layout: layout, updatedAt: snapshot.updatedAt)
                 }
             }
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://transactions"))
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
         } else {
             LedgerWidgetUnavailableView(
@@ -75,7 +75,7 @@ struct ExpenseCalendarWidgetView: View {
                 detail: "打开 Ledger 并刷新一次",
                 symbol: "calendar"
             )
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://transactions"))
         }
     }
 
@@ -171,6 +171,7 @@ struct ExpenseCalendarWidgetView: View {
 }
 
 private struct ExpenseMonthGrid: View {
+    @Environment(\.redactionReasons) private var redactionReasons
     let layout: ExpenseCalendarLayout
     let compact: Bool
 
@@ -198,7 +199,22 @@ private struct ExpenseMonthGrid: View {
     private func dayCell(_ day: Int?) -> some View {
         if let day {
             let amount = layout.amounts[day] ?? 0
-            Text("\(day)")
+            if let destination = LedgerWidgetNavigation.transactions(
+                date: layout.dateString(for: day), isRedacted: !redactionReasons.isEmpty
+            ) {
+                Link(destination: destination) {
+                    dayLabel(day, amount: amount)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(layout.dateString(for: day) ?? String(day)) 流水")
+            }
+        } else {
+            Color.clear.frame(height: compact ? 10 : 24)
+        }
+    }
+
+    private func dayLabel(_ day: Int, amount: Int) -> some View {
+        Text("\(day)")
                 .font(.system(size: compact ? 6.5 : 9, weight: amount > 0 ? .semibold : .medium))
                 .monospacedDigit()
                 .foregroundStyle(amount > layout.maxAmount / 2 ? LedgerWidgetColors.onBrand : LedgerWidgetColors.secondary)
@@ -206,10 +222,6 @@ private struct ExpenseMonthGrid: View {
                 .frame(height: compact ? 10 : 24)
                 .background(heatColor(amount))
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 2.5 : 5, style: .continuous))
-        } else {
-            Color.clear
-                .frame(height: compact ? 10 : 24)
-        }
     }
 
     private func heatColor(_ amount: Int) -> Color {
@@ -220,6 +232,7 @@ private struct ExpenseMonthGrid: View {
 }
 
 struct ExpenseCalendarLayout {
+    private let monthPrefix: String
     let cells: [Int?]
     let amounts: [Int: Int]
     let maxAmount: Int
@@ -227,10 +240,16 @@ struct ExpenseCalendarLayout {
     let peakAmount: Int
     let spendingDayCount: Int
 
+    func dateString(for day: Int) -> String? {
+        guard cells.contains(day) else { return nil }
+        return "\(monthPrefix)-" + String(format: "%02d", day)
+    }
+
     init(expense: LedgerWidgetExpenseSnapshot) {
         let startParts = expense.start.split(separator: "-").compactMap { Int($0) }
         let year = startParts.count == 3 ? startParts[0] : 2001
         let month = startParts.count == 3 ? startParts[1] : 1
+        monthPrefix = String(format: "%04d-%02d", year, month)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         let startDate = calendar.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()

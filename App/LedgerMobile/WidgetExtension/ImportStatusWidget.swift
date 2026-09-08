@@ -66,7 +66,7 @@ struct ImportStatusWidgetView: View {
                     medium(snapshot.imports, updatedAt: snapshot.importsUpdatedAt)
                 }
             }
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://imports"))
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
         } else {
             LedgerWidgetUnavailableView(
@@ -74,7 +74,7 @@ struct ImportStatusWidgetView: View {
                 detail: "打开 Ledger 并刷新一次",
                 symbol: "tray.and.arrow.down"
             )
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://imports"))
         }
     }
 

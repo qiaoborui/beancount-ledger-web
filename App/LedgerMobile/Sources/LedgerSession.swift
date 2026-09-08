@@ -1514,6 +1514,9 @@ final class LedgerSession: ObservableObject {
 
     func logout() {
         guard let serverURL else { return }
+        pendingExternalRoute = nil
+        externalAccount = nil
+        globalSearchQuery = ""
         _ = invalidateSession()
         stopImportIndexTracking()
         suspendWidgetCredential()
@@ -1626,13 +1629,55 @@ final class LedgerSession: ObservableObject {
         return LedgerDestination.normalizedCompactTabs(rawValues.compactMap(LedgerDestination.init(rawValue:)))
     }
 
+    @Published private(set) var sharedImportRevision = 0
+
+    func receiveSharedFile(_ url: URL) async {
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                _ = try LedgerSharedImportInbox.appInbox().enqueue(fileURL: url)
+            }.value
+            sharedImportRevision += 1
+            primaryDestinationID = LedgerDestination.imports.rawValue
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @Published private(set) var pendingExternalRoute: LedgerExternalRouteRequest?
+    @Published var externalAccount: LedgerExternalAccount?
+    @Published var globalSearchQuery = ""
+
+    func applyPendingExternalRoute() async {
+        guard phase == .ready, !isRangeLoading, !isValuationCurrencyLoading,
+              let request = pendingExternalRoute else { return }
+        switch request.route {
+        case .page: break
+        case let .account(path, currency):
+            if let account = ledger?.accounts.first(where: { $0.account == path }) {
+                externalAccount = LedgerExternalAccount(account: path, currency: currency.isEmpty ? account.currency : currency)
+            } else {
+                errorMessage = "当前账本中找不到这个账户"
+            }
+        case let .transactions(day):
+            if let date = LedgerExternalRoute.date(day) {
+                await applyRange(.custom(start: date, end: date))
+            }
+        case let .search(query):
+            if globalSearchQuery != query { globalSearchQuery = query }
+        }
+        if pendingExternalRoute?.id == request.id { pendingExternalRoute = nil }
+    }
+
     func openWidgetURL(_ url: URL) {
         guard url.scheme?.lowercased() == "ledger" else { return }
+        if url.host?.lowercased() != "gmail-import" {
+            guard let route = LedgerExternalRoute.parse(url) else { return }
+            if case let .search(query) = route, phase == .ready { globalSearchQuery = query }
+            primaryDestinationID = route.destination.rawValue
+            pendingExternalRoute = LedgerExternalRouteRequest(route: route)
+            return
+        }
         switch url.host?.lowercased() {
-        case "accounts":
-            primaryDestinationID = "accounts"
-        case "imports":
-            primaryDestinationID = "imports"
         case "gmail-import":
             primaryDestinationID = "imports"
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -1753,6 +1798,9 @@ final class LedgerSession: ObservableObject {
         selectedRange = targetRange
         amountsVisible = applicationActive
         privacyShielded = !applicationActive
+        if let route = pendingExternalRoute?.route, case let .search(query) = route {
+            globalSearchQuery = query
+        }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }
         await publishWidgetSnapshot(
