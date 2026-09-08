@@ -1266,7 +1266,7 @@ private struct TransactionEditorView: View {
             }
         }
         .onAppear { if initialDraft == nil { initialDraft = currentDraft } }
-        .ledgerDraftDismissGuard(isDisabled: saving || hasChanges, onAttempt: requestDismiss)
+        .interactiveDismissDisabled(saving || hasChanges)
         .alert("放弃未保存的修改？", isPresented: $discardPresented) {
             Button("放弃修改", role: .destructive) { dismiss() }
                 .accessibilityIdentifier("transaction-edit-discard")

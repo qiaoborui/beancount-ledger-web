@@ -899,9 +899,10 @@ final class LedgerMobileUITests: XCTestCase {
             let bar = app.navigationBars["编辑交易"]
             bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
                 .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
-        } else {
-            app.buttons["transaction-edit-cancel"].tap()
         }
+        XCTAssertTrue(app.navigationBars["编辑交易"].exists)
+        XCTAssertEqual(payee.value as? String, "待保存的书店")
+        app.buttons["transaction-edit-cancel"].tap()
         XCTAssertTrue(app.buttons["transaction-edit-discard"].firstMatch.waitForExistence(timeout: 3), app.debugDescription)
         capture("transaction-draft-discard-confirmation")
         app.buttons["transaction-edit-discard"].firstMatch.tap()

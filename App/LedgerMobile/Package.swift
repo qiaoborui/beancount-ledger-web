@@ -19,7 +19,6 @@ let package = Package(
                 "AccountsView.swift",
                 "GlobalSearchView.swift",
                 "LedgerAppIntents.swift",
-                "LedgerDraftDismissGuard.swift",
                 "AnalysisViews.swift",
                 "BQLQueryView.swift",
                 "CurrencyAnalysisView.swift",

@@ -136,9 +136,7 @@ struct NativeImportFlowView: View {
                 }
             }
         }
-        .ledgerDraftDismissGuard(isDisabled: isPreparing || isCommitting || hasDraftChanges) {
-            requestExit(.close)
-        }
+        .interactiveDismissDisabled(isPreparing || isCommitting || hasDraftChanges)
         .privacySensitive()
         .alert("确认写入账本？", isPresented: $confirmationPresented) {
             Button(commitActionTitle) {
@@ -1061,7 +1059,7 @@ private struct ImportEntryEditor: View {
             }
         }
         .privacySensitive()
-        .ledgerDraftDismissGuard(isDisabled: hasChanges, onAttempt: requestDismiss)
+        .interactiveDismissDisabled(hasChanges)
         .alert("放弃交易修改？", isPresented: $discardConfirmationPresented) {
             Button("放弃修改", role: .destructive) { dismiss() }
             Button("继续编辑", role: .cancel) {}
